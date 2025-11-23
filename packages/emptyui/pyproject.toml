@@ -1,0 +1,29 @@
+[project]
+name = "emptyui"
+version = "0.1.0"
+description = "Node-based visual workflow core for magnetotelluric processing"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.6",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.4"]
+
+[project.entry-points."emptyui.nodes"]
+# core framework registers nothing itself; see emptyui-core-nodes
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/emptyui"]
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]

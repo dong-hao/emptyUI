@@ -1,0 +1,241 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #8884;
+  background: #fff;
+}
+
+.muted {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  flex: 1;
+  min-height: 0;
+}
+
+.palette,
+.properties {
+  padding: 0.75rem;
+  overflow-y: auto;
+  border-right: 1px solid #8884;
+  background: #fff;
+}
+
+.properties {
+  border-right: none;
+  border-left: 1px solid #8884;
+}
+
+.palette input {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.palette-category h3 {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.palette button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+}
+
+button.danger {
+  color: #c0392b;
+  border-color: #c0392b66;
+  cursor: pointer;
+}
+button.danger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.properties label {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-size: 0.85em;
+}
+
+.properties label span {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.properties label input,
+.properties label select {
+  width: 100%;
+  padding: 0.3rem;
+}
+
+.ports {
+  list-style: none;
+  padding: 0;
+  font-size: 0.8em;
+}
+
+.ports .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* ---- custom MT node ---- */
+
+.mt-node {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  border: 1px solid #999;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+
+.mt-node.selected {
+  outline: 2px solid #2980b9;
+}
+
+.mt-node-header {
+  background: #2980b9;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mt-node-body {
+  flex: 1;
+  font-size: 0.7rem;
+  opacity: 0.55;
+  padding: 0.25rem 0.5rem;
+}
+
+/* port rows: dots just inside the node edges, aligned with their labels */
+.mt-node-ports {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  padding: 0.15rem 0;
+}
+
+.mt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 20px;
+}
+
+.mt-port-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.mt-port-label.in {
+  margin-left: 6px;
+}
+
+.mt-port-label.out {
+  margin-right: 6px;
+}
+
+.muted-small {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  justify-content: center;
+}
+
+/* Handles flow inside their label row instead of hugging the node edge */
+.mt-node .react-flow__handle {
+  position: static;
+  transform: none;
+}
+
+/* typed ports (handles) */
+.mt-port {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+/* resize affordance */
+.mt-resize-line {
+  border-color: #2980b9;
+}
+.mt-resize-handle {
+  width: 8px;
+  height: 8px;
+  background: #2980b9;
+  border: none;
+  border-radius: 2px;
+}
+
+/* React Flow controls: force dark icons on light buttons so they are
+   visible regardless of OS color scheme */
+.react-flow__controls {
+  color: #333;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.react-flow__controls-button {
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  padding: 5px;
+}
+
+.react-flow__controls-button svg {
+  fill: #333;
+  max-width: 14px;
+  max-height: 14px;
+}
+
+.react-flow__minimap {
+  background: #f5f5f5;
+}
