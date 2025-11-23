@@ -43,11 +43,16 @@ class ExportTF(Node):
 
     def execute(self, ctx, tf, path: str = "", file_type: str = "edi") -> dict[str, Any]:
         out = Path(path) if path else Path.cwd()
-        fn = tf.write(
-            fn=str(out.parent / out.stem) if out.suffix else str(out),
+        if out.suffix:  # user gave a full filename with extension
+            base, ext = out.with_suffix(""), out.suffix.lstrip(".")
+            file_type = ext or file_type
+            out = base
+        saved = tf.write(
+            save_dir=str(out.parent),
+            fn_basename=out.name,
             file_type=file_type,
         )
-        ctx.progress(1.0, f"exported TF -> {fn}")
+        ctx.progress(1.0, f"exported TF -> {saved}")
         return {}
 
 

@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from emptyui import Input, Node, Output, Param
 
-from .types import TimeSeries
+from .types import TimeSeries, coerce_run
 
 
 def _select_channels(data: TimeSeries, spec: str) -> list[str]:
@@ -42,8 +42,9 @@ class PlotTimeSeriesNode(Node):
               optional=True),
     )
 
-    def execute(self, ctx, data: TimeSeries, channels: str = "",
+    def execute(self, ctx, data, channels: str = "",
                 seconds=None) -> dict[str, Any]:
+        data = coerce_run(data)
         names = _select_channels(data, channels)
         n = data.n_samples if seconds is None else min(
             data.n_samples, int(seconds * data.sample_rate))
@@ -77,8 +78,9 @@ class PlotSpectrogramNode(Node):
         Param("window_s", "number", label="Window length (s)", default=10.0),
     )
 
-    def execute(self, ctx, data: TimeSeries, channel: str = "Ex",
+    def execute(self, ctx, data, channel: str = "Ex",
                 window_s: float = 10.0) -> dict[str, Any]:
+        data = coerce_run(data)
         from scipy.signal import spectrogram
 
         if channel not in data.channels:

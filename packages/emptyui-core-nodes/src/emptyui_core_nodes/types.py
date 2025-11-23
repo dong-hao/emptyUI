@@ -36,3 +36,27 @@ class TimeSeries:
             start=self.start,
             meta=dict(self.meta),
         )
+
+
+def coerce_run(value):
+    """Normalize any ts.run payload to a core :class:`TimeSeries`.
+
+    Accepts an mth5 RunTS (xarray-backed) or an already-normalized TimeSeries,
+    so core signal-processing/plot nodes work regardless of which plugin
+    produced the time series.
+    """
+    if isinstance(value, TimeSeries):
+        return value
+    if hasattr(value, "dataset") and not isinstance(value, dict):  # mth5 RunTS
+        ds = value.dataset
+        sample_rate = float(value.sample_rate)
+        channels = {
+            str(k): np.ascontiguousarray(ds[k].values, dtype=np.float64)
+            for k in ds.data_vars
+        }
+        return TimeSeries(channels=channels, sample_rate=sample_rate)
+    if hasattr(value, "channels") and hasattr(value, "sample_rate"):
+        return value
+    raise TypeError(
+        f"cannot interpret ts.run value of type {type(value).__name__} as time series"
+    )

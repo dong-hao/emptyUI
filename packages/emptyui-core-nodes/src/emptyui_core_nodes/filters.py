@@ -6,7 +6,7 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
-from .types import TimeSeries
+from .types import TimeSeries, coerce_run
 
 
 class Bandpass(Node):
@@ -24,8 +24,9 @@ class Bandpass(Node):
         Param("order", "integer", label="Order", default=4, min=1, max=10),
     )
 
-    def execute(self, ctx, data: TimeSeries, low_freq=None, high_freq=None,
+    def execute(self, ctx, data, low_freq=None, high_freq=None,
                 order: int = 4) -> dict[str, Any]:
+        data = coerce_run(data)
         from scipy.signal import butter, filtfilt
 
         fs = data.sample_rate
@@ -66,16 +67,35 @@ class Bandpass(Node):
 class Detrend(Node):
     type = "core.filter.detrend"
     title = "Detrend"
-    description = "Remove linear trend from each channel."
+    description = (
+        "Remove the DC baseline / trend from each channel. 'mean' subtracts "
+        "the channel mean (removes the absolute-field DC offset of fluxgate "
+        "magnetometers); 'linear' fits and removes a linear trend; 'none' is "
+        "a passthrough."
+    )
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("data", "ts.run", label="time series"),)
-    params = ()
+    params = (
+        Param("method", "select", label="Method", default="linear",
+              options=("mean", "linear", "none"),
+              description="mean = subtract DC; linear = remove linear trend; none = passthrough"),
+    )
 
-    def execute(self, ctx, data: TimeSeries) -> dict[str, Any]:
-        from scipy.signal import detrend
+    def execute(self, ctx, data, method: str = "linear") -> dict[str, Any]:
+        data = coerce_run(data)
 
-        out = {k: detrend(v) for k, v in data.channels.items()}
+        out = {}
+        for k, v in data.channels.items():
+            if method == "none":
+                out[k] = v
+            elif method == "mean":
+                out[k] = v - v.mean()
+            else:  # linear
+                from scipy.signal import detrend
+
+                out[k] = detrend(v)
+            ctx.progress(len(out) / max(len(data.channels), 1), f"detrended {k}")
         return {"data": TimeSeries(channels=out, sample_rate=data.sample_rate,
                                    start=data.start, meta=dict(data.meta))}
 

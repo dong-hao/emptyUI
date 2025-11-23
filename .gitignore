@@ -27,3 +27,8 @@ packages/web/tsconfig.tsbuildinfo
 examples/output/
 Screenshot-emptyUI.png
 Screenshot-comfyUI.png
+
+# Large raw instrument data (LEMI etc.)
+examples/data/lemi-424-test/
+examples/data/lemi_test_data/
+examples/data/bgs-lemi-424/

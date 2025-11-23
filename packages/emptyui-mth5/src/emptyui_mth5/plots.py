@@ -51,8 +51,11 @@ class PlotAppResPhase(Node):
             z = Z.sel(output=out, input=inp).values.astype(complex)
             rho = (np.abs(z) ** 2) / (MU0 * omega)
             phase = np.angle(z, deg=True)
-            axes[0].loglog(period, rho, ".-", label=label)
-            axes[1].semilogx(period, phase, ".-", label=label)
+            ok = np.isfinite(rho) & (rho > 0) & np.isfinite(phase)
+            if ok.sum() == 0:
+                continue  # skip empty bands instead of a log-scale warning
+            axes[0].loglog(period[ok], rho[ok], ".-", label=label)
+            axes[1].semilogx(period[ok], phase[ok], ".-", label=label)
 
         axes[0].set_ylabel("Apparent resistivity ($\\Omega\\cdot$m)")
         axes[0].legend()

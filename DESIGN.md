@@ -7,11 +7,23 @@ Status: v0.2 — design frozen for M0/M1 (2026-08-25).
 Changes after v0.1: aurora-informed port type system, node categories,
 TS→FC→TF stage split, MTH5-backed file storage, backend-decided port colors
 and ComfyUI-style port rendering conventions (§3).
-Implementation status: **M0 complete; M1 complete** — real pipeline nodes
-(`load_csv → bandpass → plot.timeseries/spectrogram`) verified end-to-end on
-a 4-channel 150 Hz synthetic CSV; async runs with WebSocket event streaming,
-artifact store + preview endpoint, workflow save/load (format v1).
-Next milestone: M2 (mth5/aurora plugins, ComputeFC/EstimateTF, EDI export).
+Implementation status: **M0 complete; M1 complete; M2 in progress** — mth5/
+aurora plugins scaffolded; ComputeFC (TS→FC windowed STFT) and EstimateTF
+(FC→TF cross-power LSQ) implemented and verified end-to-end through the
+executor on real 1 Hz LEMI-424 and BGS long-period data (Load LEMI → Detrend
+→ ComputeFC → EstimateTF → Export EDI / Plot AppRes&Phase).
+Processing correctness milestones:
+- **Unit normalization**: magnetic channels converted nT→T→H (B→H) and
+  electric mV/km→V/m; missing nT→T factor was the root cause of non-physical
+  apparent resistivity (now ~10–10³ Ω·m).
+- **Impedance phase convention**: verified against aurora on the official
+  synthetic halfspace (`test12rr`); our LSQ is aligned with aurora/EDI
+  (Zxy≈+45°, Zyx≈−135° for a halfspace) via a ×j rotation.
+- Detrending moved to the dedicated `core.filter.detrend` node (mean/linear/
+  none); `e_dipole_length_m` optional (off by default — LEMI output is mV/km).
+Estimator is first-pass LSQ (robust RME/RME_RR and multi-level
+decimation/FC persistence are follow-ups).
+Next milestone: finish M2 (robust estimator, table viewer, Calibrate).
 
 ---
 

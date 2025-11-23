@@ -25,13 +25,19 @@ class ExtractRun(Node):
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
                 run: str = "", start: str = "", end: str = "") -> dict[str, Any]:
-        survey_obj = mth5.get_survey(survey) if survey else mth5.survey_group
+        survey_obj = mth5.surveys_group.get_survey(survey) if survey else None
+        if survey_obj is None:
+            survey_obj = mth5.surveys_group.surveys_list[0] if survey_obj is None else None
         station_obj = survey_obj.stations_group.get_station(station)
-        run_obj = station_obj.runs_group.get_run(run)
+        if run:
+            run_obj = station_obj.get_run(run)
+        else:
+            run_id = station_obj.run_summary.iloc[0]["id"]
+            run_obj = station_obj.get_run(run_id)
         start_dt = pd.to_datetime(start) if start else None
         end_dt = pd.to_datetime(end) if end else None
         runts = run_obj.to_runts(start=start_dt, end=end_dt)
-        ctx.progress(1.0, f"extracted {survey}/{station}/{run}")
+        ctx.progress(1.0, f"extracted {survey}/{station}/{run_obj.metadata.id}")
         return {"data": runts}
 
 

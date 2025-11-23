@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from .fc import FCGroupToSpectra, SpectraToFCGroup
 from .io import LoadMth5, SaveMth5
+from .lemi import LoadLemi
 from .merge import MergeRuns
 from .plots import PlotAppResPhase
 from .runs import ExtractRun, MergeChannels, SplitChannels
@@ -20,6 +21,7 @@ from .tf import ExportTF, ImportTF
 def register(registry) -> None:
     registry.add(LoadMth5)
     registry.add(SaveMth5)
+    registry.add(LoadLemi)
     registry.add(ExtractRun)
     registry.add(SplitChannels)
     registry.add(MergeChannels)

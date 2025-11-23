@@ -48,8 +48,22 @@ cd packages/web && npm install && npm run dev
     docked result panel in the UI shows the latest plot + thumbnails.
   - Workflow save/load as `emptyui/workflow` v1 JSON (port names and
     positions preserved; edge colors re-derived from port types on load).
-- **Next: M2** — MT ecosystem integration (`emptyui-mth5`, `emptyui-aurora`
-  plugins, ComputeFC/EstimateTF, EDI export, table viewer).
+- **M2 — in progress**: mth5/aurora plugins scaffolded; port-type naming
+  overhaul; LEMI-424 loader (`mth5.io.lemi`), Extract Run, Detrend
+  (mean/linear/none), ComputeFC (TS→FC windowed STFT), EstimateTF (FC→TF
+  cross-power LSQ), TF export to EDI, Plot AppRes & Phase (diagonal/
+  off-diagonal). Verified end-to-end through the executor on real 1 Hz
+  LEMI-424 and BGS long-period data, plus the official synthetic halfspace.
+  Processing-correctness fixes:
+  - **Unit normalization**: B→H (nT→T→H) and mV/km→V/m; the missing nT→T
+    factor was the root cause of non-physical apparent resistivity (now
+    ~10–10³ Ω·m).
+  - **Impedance phase convention** verified against aurora on the synthetic
+    halfspace (`test12rr`): aligned with aurora/EDI (Zxy≈+45°, Zyx≈−135°).
+  - `scripts/convert_bgs_lemi.py` converts BGS `.xyz` long-period files to
+    LEMI-424 `.TXT`.
+  Remaining: robust RME/RME_RR estimator, multi-level decimation/FC
+  persistence, table viewer, `Calibrate` node.
 
 ### UI conventions (stable)
 

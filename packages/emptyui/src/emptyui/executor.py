@@ -8,6 +8,7 @@ structure below is already cache-ready.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -55,6 +56,8 @@ class Executor:
         self._cancelled = False
         store = DataStore()
         started = time.monotonic()
+        if workspace is not None:
+            Path(workspace).mkdir(parents=True, exist_ok=True)
 
         emit({"event": "run_started"})
         outputs_by_node: dict[str, dict[str, str]] = {}
