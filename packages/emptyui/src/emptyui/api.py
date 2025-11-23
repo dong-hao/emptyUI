@@ -21,6 +21,7 @@ class Input:
     required: bool = True
     accepts: tuple[str, ...] = ()
     description: str = ""
+    label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +30,7 @@ class Input:
             "required": self.required,
             "accepts": list(self.accepts),
             "description": self.description,
+            "label": self.label or self.name,
         }
 
 
@@ -39,9 +41,15 @@ class Output:
     name: str
     type: str = "any"
     description: str = ""
+    label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "type": self.type, "description": self.description}
+        return {
+            "name": self.name,
+            "type": self.type,
+            "description": self.description,
+            "label": self.label or self.name,
+        }
 
 
 @dataclass(frozen=True)

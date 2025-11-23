@@ -44,25 +44,51 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   onEdgesChange: (changes) =>
     set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
   onConnect: (connection) => {
-    // Edge color/thickness follow the source port's type (DESIGN.md §3)
     const { catalog } = useCatalog.getState();
     const source = get().nodes.find((n) => n.id === connection.source);
-    const manifest = catalog?.nodes.find(
+    const target = get().nodes.find((n) => n.id === connection.target);
+    const srcManifest = catalog?.nodes.find(
       (m) => m.type === (source?.data as MTNodeData | undefined)?.nodeType,
     );
-    const port = manifest?.outputs.find((o) => o.name === connection.sourceHandle);
-    const color = portColor(port?.type ?? "any", catalog);
-    set((s) => ({
-      edges: addEdge(
-        {
-          ...connection,
-          id: `e${crypto.randomUUID()}`,
-          style: { stroke: color, strokeWidth: 2.5 },
-          data: { portType: port?.type ?? "any" },
-        },
-        s.edges,
-      ),
-    }));
+    const tgtManifest = catalog?.nodes.find(
+      (m) => m.type === (target?.data as MTNodeData | undefined)?.nodeType,
+    );
+    const outPort = srcManifest?.outputs.find((o) => o.name === connection.sourceHandle);
+    const inPort = tgtManifest?.inputs.find((i) => i.name === connection.targetHandle);
+    if (!outPort || !inPort) return; // unknown ports — silent reject
+
+    // Silent reject mismatched types (equal, declared accepts, or any)
+    const srcType = outPort.type;
+    const tgtType = inPort.type;
+    const compatible =
+      srcType === tgtType ||
+      srcType === "any" ||
+      tgtType === "any" ||
+      (inPort.accepts ?? []).includes(srcType);
+    if (!compatible) return; // silent reject (DESIGN.md §3)
+
+    const color = portColor(srcType, catalog);
+    set((s) => {
+      // one-to-one inputs: a new edge to an occupied input replaces the old one
+      const without = s.edges.filter(
+        (e) =>
+          !(
+            e.target === connection.target &&
+            e.targetHandle === connection.targetHandle
+          ),
+      );
+      return {
+        edges: addEdge(
+          {
+            ...connection,
+            id: `e${crypto.randomUUID()}`,
+            style: { stroke: color, strokeWidth: 2.5 },
+            data: { portType: srcType },
+          },
+          without,
+        ),
+      };
+    });
   },
   addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
   selectNode: (id) =>

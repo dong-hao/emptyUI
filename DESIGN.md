@@ -108,23 +108,55 @@ Like ComfyUI's colored sockets (`MODEL`, `VAE`, `CLIP`…), every node port has 
 are chosen to mirror the real containers of the mth5/aurora ecosystem, so a
 node boundary ≈ an aurora pipeline stage:
 
-| Tag | Backed by | Stage / notes |
-|-----|-----------|---------------|
-| `file` | path string | Generic file reference (importer/exporter params) |
-| `mt.archive` | open `mth5.MTH5` | HDF5 archive; stateful source of runs/FCs/TFs |
-| `ts.run` | `mth5.RunTS` (xr.Dataset) | Multi-channel time series — the main signal-processing currency |
-| `ts.channel` | `mth5.ChannelTS` (xr.DataArray) | Single channel (ex/ey/hx/hy/hz); split/merge nodes convert ⇄ `ts.run` |
-| `mt.response` | `mt_metadata.filters.*` | Instrument/calibration response; `Calibrate` takes `ts.run` + `mt.response` → calibrated `ts.run` |
-| `mt.selection` | RunSummary/KernelDataset (DataFrame) | Which stations/runs/intervals process; local+remote role assignment |
-| `mt.decimation` | aurora `DecimationLevel` spec | *Plugin-tier*: per-level recipe for advanced multi-config assembly |
-| `mt.config` | aurora `Processing` config | *Plugin-tier*: full-config passthrough for advanced workflows; core splits stage params across the two pipeline nodes instead |
-| `mt.bands` | FrequencyBands | Band definitions feeding TF estimation |
-| `spectra` | xr.Dataset `(time, frequency)` complex | Fourier coefficients / spectrogram. TS→FC is the natural direction; FC→TS is not offered in core (a lossy inverse can be added later as a plugin coercion node, e.g. for demonstrating frequency-domain denoising) |
-| `tf.level` | aurora `TTFZ` | Per-decimation-level TF estimate |
-| `mt.tf` | `mt_metadata.transfer_functions.TF` (xr.Dataset) | Final merged transfer function; exporters & analysis plots consume this |
-| `table` | pandas DataFrame | Generic tabular output |
-| `plot` | rendered-figure reference (PNG/SVG/PDF path + metadata) | Produced by Display nodes; consumed by `Preview Plot` (inline, resizable) and `Save Plot` (export). Distinct from a future generic `image` type for non-plot bitmaps |
-| `any` | — | Wildcard; connects to anything, executor trusts the node |
+| Tag | Display name | Real library class | Stage / notes |
+|-----|--------------|--------------------|---------------|
+| `mth5` | MTH5 Archive | `mth5.MTH5` | HDF5 archive; stateful source of runs/FCs/TFs. *(was `mt.archive`)* |
+| `ts.run` | Run Time Series | `mth5.timeseries.RunTS` (= `mt_timeseries.RunTS`) | Multi-channel time series — the main signal-processing currency; wrap the `RunTS` object directly (emptyUI is mth5-native) |
+| `ts.channel` | Channel Time Series | `mth5.timeseries.ChannelTS` | Single channel (ex/ey/hx/hy/hz); split/merge nodes convert ⇄ `ts.run` |
+| `calibration` | Calibration / Instrument Response | `mt_metadata.filters.*` (Coefficient/PoleZero/FIR/TimeDelay/FAP) | `Calibrate` takes `ts.run` + `calibration` → calibrated `ts.run`. Named for end-user familiarity *(was `mt.response`)* |
+| `selection` | Run Selection | `mth5.processing.KernelDataset` (DataFrame) | Which stations/runs/intervals process; local+remote roles; supports multiple run rows → FC-level merge. Schema = mth5 `KernelDataset` *(was `mt.selection`)* |
+| `config` | Processing Config | `mt_metadata.processing.aurora.Processing` | The aurora "recipe"; feeds `ComputeFC`/`EstimateTF` *(was `mt.config`)* |
+| `bands` | Frequency Bands | `aurora.time_series.frequency_band.FrequencyBands` | Band edges feeding config/ComputeFC *(was `mt.bands`)* |
+| `decimation` | Decimation Level | aurora `DecimationLevel` | *Plugin-tier*: per-level recipe for advanced multi-config assembly *(was `mt.decimation`)* |
+| `fc` | Fourier Coefficients | mth5 `FCGroup`/`FCDecimationGroup`; aurora STFT | The frequency-domain currency. TS→FC natural; FC→TS plugin-tier (lossy inverse). *(was `spectra` — no formal "spectra" type exists; libraries call this FC)* |
+| `tf.level` | TF (decimation level) | aurora `TTFZ` | Per-decimation-level TF estimate |
+| `tf` | Transfer Function | `mt_metadata.transfer_functions.TF` (also mth5 `TransferFunctionGroup`) | Final merged TF; exporters & analysis plots consume this *(was `mt.tf`)* |
+| `table` | Table | pandas DataFrame | Generic tabular output (run summaries, coherency, etc.) |
+| `plot` | Plot | rendered-figure ref (PNG/SVG/PDF + metadata) | Produced by Display nodes; consumed by `Preview Plot`/`Save Plot` |
+| `any` | Any | — | Wildcard; connects to anything, executor trusts the node |
+
+> `file` was dropped as a port type (paths are parameter widgets, not data
+> flows). `table` covers generic tabular data. `decimation` is reserved for
+> plugin-tier advanced config assembly and is not used by core nodes.
+>
+> The right-hand panel always shows both the **display name** and the real
+> **type tag** for every port (e.g. `data: ts.run`), so users can trace the
+> underlying library container.
+
+### Port-type audit notes (kept in sync with real MT processing)
+
+- **Missing / considered**: derived quantities (apparent resistivity, phase,
+  impedance) are *computed* from `tf` by Display nodes, not separate ports —
+  keeping them as plot outputs avoids type sprawl. Remote-reference selection
+  lives in `selection` (remote column), not its own type. Calibrated vs.
+  uncalibrated `ts.run` is currently one type distinguished by metadata; a
+  `ts.run.calibrated` subtype is a possible future refinement.
+- **Consistency rule**: every port tag maps 1:1 to a real library container
+  (class name above); we avoid inventing new names where the ecosystem already
+  has one (`fc` not `spectra`, `mth5` not `archive`).
+
+### M2 ecosystem pins (stable releases, audited 2026-08)
+- `mth5==0.6.8`, `aurora==0.6.2`, `mt_metadata==1.0.10`, `mt_timeseries==0.0.2`
+  (the `mt_timeseries` package now hosts `RunTS`/`ChannelTS`; mth5 re-exports them
+  from `mth5.timeseries`).
+- `KernelDataset`/`RunSummary` live in **`mth5.processing`** (legacy aurora
+  `read_run_summaries`/`get_selected_runs`/`make_kernel_dataset` are removed).
+- Decimation levels are **independent by default** (fresh `Window`/`Estimator` per
+  level, no shared reference) → `BuildConfig` must explicitly copy settings to
+  each level.
+- `channel_nomenclature` lives on `Processing` config, not `RunTS`.
+- These pins are plugin-level extras (`emptyui-mth5`, `emptyui-aurora`), never
+  core dependencies; workflows record plugin versions for reproducibility.
 
 Rules:
 - Tags are **open strings**, namespaced (`<domain>.<name>`). Plugins may define
@@ -136,11 +168,11 @@ Rules:
   port's color (ComfyUI-style), making data domains readable at a glance.
 - Suggested color families (frontend fallback follows this guide):
   - **blue** — time series: `ts.run` medium blue, `ts.channel` light blue
-  - **dark green** — frequency domain: `spectra` / Fourier coefficients
-  - **red** — transfer functions: `mt.tf`, `tf.level`
-  - **purple** — metadata/config: `mt.selection`, `mt.config`,
-    `mt.response`, `mt.bands`, `mt.decimation`
-  - gray/yellow — generic (`any`, `file`, `table`, `image`)
+  - **dark green** — frequency domain: `fc` / Fourier coefficients
+  - **red** — transfer functions: `tf`, `tf.level`
+  - **purple** — metadata/config: `selection`, `config`,
+    `calibration`, `bands`, `decimation`
+  - gray/yellow — generic (`any`, `table`, `plot`)
 - Connection rule: source and target tags must be equal, or the target port
   declares `accepts: [ ... ]` listing extra admissible tags. `any` matches all.
 - Each tag carries UI metadata (color, label, description) served by
@@ -160,20 +192,20 @@ for ports so dot and label always align.
 ### Reference MT workflow (type flow)
 
 ```
-LoadMTH5 ─mt.archive─▶ SelectRuns ──┬─mt.selection────────────────────────┐
-                                    │                                     ▼
-LoadMTH5 ─mt.archive─▶ ExtractRun ─ts.run─▶ ComputeFC ─spectra─▶ EstimateTF ─mt.tf─┬▶ SaveEDI
-                                              │                                     └▶ PlotAppResPhase
-                                              └─spectra─▶ Denoise ─spectra─▶ EstimateTF
+LoadMTH5 ─mth5─▶ SelectRuns ──┬─selection──────────────────────────────┐
+                               │                                       ▼
+LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ SaveEDI
+                                         │                           └▶ PlotAppResPhase
+                                         └─fc─▶ Denoise ─fc─▶ EstimateTF
 
-LoadMTH5 ─mt.archive─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ STFT ─spectra─▶ PlotSpectrogram
+LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ STFT ─fc─▶ PlotSpectrogram
 ```
 
 Coercion points that require dedicated nodes (mirroring aurora internals):
-1. `mt.selection` + roles → kernel dataset ("configure" node).
+1. `selection` + roles → kernel dataset ("configure" node).
 2. `ts.run` ⇄ `ts.channel` via explicit SplitChannels / MergeChannels nodes.
-3. uncalibrated `ts.run` + `mt.response` → calibrated `ts.run` (units change).
-4. `tf.level[]` → `mt.tf` (merge; resolves duplicate periods across sampling
+3. uncalibrated `ts.run` + `calibration` → calibrated `ts.run` (units change).
+4. `tf.level[]` → `tf` (merge; resolves duplicate periods across sampling
    rates / decimation levels — the multi-level merge case).
 5. Format coercions for popular types ship in core (`SaveEDI`, `LoadEDI`,
    …); exotic import/export converters are plugins.
@@ -186,17 +218,17 @@ Fourier-coefficient boundary, mirroring both the conceptual MT pipeline
 estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
 
 - **`ComputeFC` node (TS → FC)** — input `ts.run`; params: number of levels,
-  per-level decimation factor, window type/length/overlap. Output `spectra`.
+  per-level decimation factor, window type/length/overlap. Output `fc`.
   Internally expands uniform decimation levels sequentially (level sample
   rates derived from factor × initial rate). Persists computed FCs into the
   workspace MTH5's Fourier-CoEfficients layer.
-- **`EstimateTF` node (FC → TF)** — inputs `spectra` + `mt.selection`;
+- **`EstimateTF` node (FC → TF)** — inputs `fc` + `selection`;
   params: estimator engine (`OLS`/`RME`/`RME_RR`), remote-reference on/off,
-  input/output/reference channels; optional `mt.bands` input for custom band
-  edges. Output `mt.tf`.
+  input/output/reference channels; optional `bands` input for custom band
+  edges. Output `tf`.
 
 Why this boundary:
-1. **Frequency-domain work**: a first-class `spectra` port lets users branch
+1. **Frequency-domain work**: a first-class `fc` port lets users branch
    into denoising, spectral analysis, or custom estimators before TF
    estimation.
 2. **Cheap re-runs**: STFT/decimation is the expensive stage. Estimator
@@ -207,9 +239,31 @@ Why this boundary:
    aurora's monolithic `Processing` object is assembled internally by the two
    nodes sharing context, never shown to the user as one form.
 
-The full-config passthrough (`mt.config` port) remains available at plugin
-tier for advanced cases (e.g. per-level customization via an `mt.decimation`
+The full-config passthrough (`config` port) remains available at plugin
+tier for advanced cases (e.g. per-level customization via a `decimation`
 fan-in assembler).
+
+### Merging multiple runs into one TF estimate
+
+A single TF estimate is often built from **several acquisition runs** (e.g. a
+Phoenix MTU-5 writes many segments). aurora supports this natively by allowing
+multiple rows in the `KernelDataset` and **concatenating their STFTs at the FC
+level** (`merge_stfts` → `xr.concat` over time); it does *not* merge in the
+time domain (source TODO: `ANY MERGING OF RUNS IN TIME DOMAIN WOULD GO HERE`).
+
+emptyUI therefore offers a **`Merge Runs` node** with two output modes:
+1. **`selection` (FC-level, default)** — keeps multiple run rows in a
+   `KernelDataset`; aurora concatenates the FCs. No fabricated samples; gaps
+   handled at the STFT/band level. This is the idiomatic path.
+2. **`ts.run` (physical)** — combines raw series via `mt_timeseries.RunTS.merge()`
+   and persists into a new mth5 run group (`RunGroup.from_runts`). Explicitly
+   user-opt-in because it **interpolates across gaps** (gap policy is a param:
+   interpolate vs. leave NaN).
+
+Constraints enforced by the node: all runs must share the same native sample
+rate (aurora hard-errors on mixed rates), and channel components must be
+consistent across runs. Remote-reference multi-row intersection is an open
+aurora TODO — the node should warn when a local run spans multiple remote runs.
 
 ### Data passing between nodes
 Nodes exchange typed *handles* (tagged above), not raw payloads, in the API layer:
@@ -297,8 +351,8 @@ and sidebar are generated entirely from it.
 ```
 
 Widget vocabulary (`number`, `integer`, `string`, `text`, `boolean`, `select`,
-`file`, `directory`, `code`, `list`) is fixed in core; plugins choose from it so
-the UI stays consistent without frontend changes.
+`radio`, `file`, `directory`, `code`, `list`) is fixed in core; plugins choose
+from it so the UI stays consistent without frontend changes.
 
 ### Server-side definition
 
@@ -547,10 +601,12 @@ Note: §7's caching/partial-execution/cancellation are *designed in* from M0
 progress.
 
 **M2 — MT ecosystem integration**
-- `emptyui-mth5` plugin: Load/SaveMTH5, ExtractRun/SplitChannels/MergeChannels,
-  transfer-function I/O.
-- `emptyui-aurora` plugin: `SelectRuns` / `ComputeFC` / `EstimateTF` /
-  `FrequencyBands` nodes; per-level `tf.level` merge node;
+- `emptyui-mth5` plugin (`mth5==0.6.8`): Load/SaveMTH5, ExtractRun /
+  SplitChannels / MergeChannels, transfer-function I/O, `Merge Runs`
+  (FC-level + physical modes), FC read/write.
+- `emptyui-aurora` plugin (`aurora==0.6.2`): `SelectRuns` / `ComputeFC` /
+  `EstimateTF` / `FrequencyBands` nodes (KernelDataset-native, mth5
+  `RunSummary` schema); per-level `tf.level` merge node;
   TF plots (apparent resistivity/phase, phase tensor).
 - Table viewer component; export coercion nodes for popular formats
   (EDI/ZMM via mt_metadata).
@@ -558,6 +614,13 @@ progress.
 **M3 — Power features**
 - Caching + partial execution; sub-workflows; remote-server mode docs
   (same API, deployed elsewhere); plugin packaging guide + example template.
+- **Dynamic "select from" options** (deferred from M2): selection-style nodes
+  (`Select Runs`, `Extract Run`, `Split Channels`) auto-populate dropdowns by
+  inspecting the connected upstream source (e.g. open the mth5 read-only and
+  list surveys/stations/runs). Design: manifest params gain an
+  `options_from: { input, attr }` field; new `POST /api/options` resolves the
+  upstream source and returns candidates; frontend renders a populated
+  `<select>` refreshed on connection changes. Nice-to-have UX, not critical.
 
 **M4 — Community**
 - Plugin index/publish flow, docs site, more visualization nodes,

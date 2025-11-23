@@ -198,6 +198,21 @@ button.danger:disabled {
   min-width: 0;
 }
 
+.radio-group {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
 .path-field input {
   flex: 1;
   min-width: 0;

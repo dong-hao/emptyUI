@@ -14,8 +14,8 @@ class Bandpass(Node):
     title = "Bandpass Filter"
     description = "Zero-phase Butterworth bandpass (filtfilt) on all channels."
     category = "Processing"
-    inputs = (Input("data", "ts.run"),)
-    outputs = (Output("filtered", "ts.run"),)
+    inputs = (Input("data", "ts.run", label="time series"),)
+    outputs = (Output("filtered", "ts.run", label="filtered time series"),)
     params = (
         Param("low_freq", "number", label="Low cutoff (Hz)", default=None,
               optional=True),
@@ -68,8 +68,8 @@ class Detrend(Node):
     title = "Detrend"
     description = "Remove linear trend from each channel."
     category = "Processing"
-    inputs = (Input("data", "ts.run"),)
-    outputs = (Output("data", "ts.run"),)
+    inputs = (Input("data", "ts.run", label="time series"),)
+    outputs = (Output("data", "ts.run", label="time series"),)
     params = ()
 
     def execute(self, ctx, data: TimeSeries) -> dict[str, Any]:

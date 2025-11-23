@@ -36,6 +36,24 @@ export function ParamField({ param, value, onChange, compact }: Props) {
         </select>
       );
       break;
+    case "radio":
+      field = (
+        <span className="radio-group">
+          {(param.options ?? []).map((o) => (
+            <label key={String(o)} className="radio-option">
+              <input
+                type="radio"
+                name={`radio-${param.name}`}
+                value={String(o)}
+                checked={String(o) === str}
+                onChange={(e) => set(e.target.value)}
+              />
+              {String(o)}
+            </label>
+          ))}
+        </span>
+      );
+      break;
     case "integer":
     case "number":
       field = (
@@ -84,7 +102,10 @@ export function ParamField({ param, value, onChange, compact }: Props) {
   }
 
   return (
-    <div className={`param-field${compact ? " compact" : ""}`} title={param.description || param.label}>
+    <div
+      className={`param-field${compact ? " compact" : ""} nodrag nopan`}
+      title={param.description || param.label}
+    >
       <span className="param-label">{param.label}</span>
       {field}
     </div>

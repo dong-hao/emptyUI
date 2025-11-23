@@ -4,6 +4,7 @@ export interface PortSpec {
   required?: boolean;
   accepts?: string[];
   description?: string;
+  label?: string;
 }
 
 export interface ParamSpec {

@@ -93,17 +93,22 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         position={Position.Left}
                         className="mt-port"
                         style={{ background: portColor(input.type, catalog) }}
-                        title={`${input.name}: ${input.type}`}
+                        title={`${input.label ?? input.name}: ${input.type}`}
                       />
-                      <span title={`${input.name}: ${input.type}`}>{input.name}</span>
+                      <span title={`${input.label ?? input.name}: ${input.type}`}>
+                        {input.label ?? input.name}
+                      </span>
                     </>
                   )}
                 </span>
                 <span className="mt-port-label out">
                   {output && (
                     <>
-                      <span className="mt-out-name" title={`${output.name}: ${output.type}`}>
-                        {output.name}
+                      <span
+                        className="mt-out-name"
+                        title={`${output.label ?? output.name}: ${output.type}`}
+                      >
+                        {output.label ?? output.name}
                       </span>
                       <Handle
                         id={output.name}
@@ -111,7 +116,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         position={Position.Right}
                         className="mt-port"
                         style={{ background: portColor(output.type, catalog) }}
-                        title={`${output.name}: ${output.type}`}
+                        title={`${output.label ?? output.name}: ${output.type}`}
                       />
                     </>
                   )}

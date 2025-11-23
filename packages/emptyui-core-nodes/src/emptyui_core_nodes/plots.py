@@ -33,7 +33,7 @@ class PlotTimeSeriesNode(Node):
     title = "Plot Time Series"
     description = "Stacked channel time-domain plot."
     category = "Display"
-    inputs = (Input("data", "ts.run"),)
+    inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)
     params = (
         Param("channels", "string", label="Channels (comma-sep, empty=all)",
@@ -70,7 +70,7 @@ class PlotSpectrogramNode(Node):
     title = "Plot Spectrogram"
     description = "STFT spectrogram of one channel."
     category = "Display"
-    inputs = (Input("data", "ts.run"),)
+    inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)
     params = (
         Param("channel", "string", label="Channel", default="Ex"),

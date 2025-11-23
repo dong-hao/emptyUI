@@ -22,7 +22,7 @@ class LoadCsv(Node):
     )
     category = "Data I/O"
     inputs = ()
-    outputs = (Output("data", "ts.run", description="Loaded time series"),)
+    outputs = (Output("data", "ts.run", label="time series", description="Loaded time series"),)
     params = (
         Param("path", "file", label="CSV file path"),
         Param("sample_rate", "number", label="Sample rate (Hz)", default=150.0,
