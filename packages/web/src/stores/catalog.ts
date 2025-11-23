@@ -31,6 +31,7 @@ export const PORT_COLORS: Record<string, string> = {
   spectra: "#186a3b",
   "tf.level": "#e74c3c",
   "mt.tf": "#c0392b",
+  plot: "#d81b8c",
 };
 
 export function portColor(type: string, catalog: Catalog | null): string {

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from uuid import uuid4
 
 from emptyui.context import RunContext
 from emptyui.schema import Workflow
@@ -111,11 +112,27 @@ class Executor:
                 raise ExecutionError(node_id, exc) from exc
 
             handles: dict[str, str] = {}
+            value_to_handle: dict[int, str] = {}
             for port in manifest.outputs:
                 value = (result or {}).get(port.name)
                 handle = store.put(port.type, value)
                 handles[port.name] = handle.id
+                value_to_handle[id(value)] = handle.id
             outputs_by_node[node_id] = handles
+
+            for artifact in ctx.published:
+                artifact_id = f"a{uuid4().hex[:8]}"
+                emit(
+                    {
+                        "event": "artifact",
+                        "node": node_id,
+                        "id": artifact_id,
+                        "kind": artifact["kind"],
+                        "path": artifact["path"],
+                        "handle": value_to_handle.get(id(artifact)),
+                        "url": f"/api/artifacts/{artifact_id}/preview",
+                    }
+                )
             emit({"event": "node_status", "node": node_id, "status": "done"})
 
         emit(

@@ -34,19 +34,29 @@ cd packages/web && npm install && npm run dev
 
 ## Status
 
-- **M0 — complete**:
-  - Python core (`packages/emptyui`): Node declaration API (typed ports +
-    params), entry-point plugin registry, workflow JSON validation
-    (type checking, cycle detection, actionable errors), sequential DAG
-    executor with handle-based data store, FastAPI server
-    (`/api/health`, `/api/nodes`, `/api/runs`, `/api/runs/{id}`).
-  - Bundled plugin (`packages/emptyui-core-nodes`): `core.util.echo` node,
-    discovered via entry points.
-  - Web shell (`packages/web`): React + @xyflow/react canvas with custom
-    typed nodes (ComfyUI-style port dots aligned to labels inside node edges),
-    type-colored thick connection wires, resizable/deletable nodes,
-    category-grouped palette and schema-driven properties panel fed by the
-    backend catalog; property edits persist in the workflow store.
-  - Repo-root uv venv; backend tests green, ruff clean, frontend builds.
-- **Next: M1** — real pipeline nodes (`load_csv → bandpass → plot`),
-  WebSocket run events, artifact streaming, workflow save/load.
+- **M0 — complete**: monorepo scaffold; core Node API/registry/validator;
+  sequential executor; FastAPI server; React Flow web shell with custom typed
+  nodes, palette, schema-driven properties panel.
+- **M1 — complete**:
+  - Real pipeline nodes: `core.io.load_csv` (auto channel/time-column
+    detection) → `core.filter.bandpass` / `core.filter.detrend` (scipy
+    filtfilt) → `core.plot.timeseries` / `core.plot.spectrogram` (matplotlib
+    PNG artifacts). Verified end-to-end on a 4-channel 150 Hz synthetic CSV.
+  - Async run execution on worker threads; events streamed to the browser
+    over WebSocket (`/api/ws`); per-node status/progress overlaid on nodes.
+  - Artifact store: `GET /api/artifacts/{id}/preview` serves plot PNGs;
+    docked result panel in the UI shows the latest plot + thumbnails.
+  - Workflow save/load as `emptyui/workflow` v1 JSON (port names and
+    positions preserved; edge colors re-derived from port types on load).
+- **Next: M2** — MT ecosystem integration (`emptyui-mth5`, `emptyui-aurora`
+  plugins, ComputeFC/EstimateTF, EDI export, table viewer).
+
+### UI conventions (stable)
+
+- **ComfyUI paradigm**: node parameters render inline on the node body; the
+  right-hand panel is metadata-only (node id, version, ports). Path widgets
+  include a server-side file browser ("…" button).
+- **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
+  nodes render figures inline (drag-resizable) and `Save Plot` exports them —
+  ComfyUI's Preview/Save Image pattern. The Results panel is a run-level
+  gallery, not the primary viewer.

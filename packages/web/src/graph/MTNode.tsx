@@ -1,23 +1,48 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useCatalog, portColor } from "../stores/catalog";
-import type { MTNodeData } from "../stores/workflow";
+import { useRun } from "../stores/run";
+import { useWorkflow, type MTNodeData } from "../stores/workflow";
+import { ParamField } from "../panels/ParamField";
+
+/** Resolve the artifact flowing into a Preview node's `plot` input:
+ *  input edge → source node + source handle → matching artifact. */
+function useInputPlotArtifact(nodeId: string) {
+  const edges = useWorkflow((s) => s.edges);
+  const artifacts = useRun((s) => s.artifacts);
+  const edge = edges.find((e) => e.target === nodeId);
+  if (!edge) return null;
+  const candidates = artifacts.filter((a) => a.nodeId === edge.source);
+  if (candidates.length === 0) return null;
+  return (
+    candidates.find((a) => a.handle && a.handle === edge.sourceHandle) ??
+    candidates[candidates.length - 1]
+  );
+}
 
 /**
  * Custom node renderer (DESIGN.md §9 + Port rendering conventions):
- * typed ports sit just inside the node edges, vertically aligned with
- * their name text (ComfyUI-style). Nodes are resizable via corner handles.
+ * typed ports inside the edges aligned with labels, and — following the
+ * ComfyUI paradigm — the node's parameters rendered inline on the node
+ * body. The right-hand panel keeps only metadata (id, version, ports).
  */
-export function MTNode({ data, selected }: NodeProps) {
+export function MTNode({ id, data, selected }: NodeProps) {
   const catalog = useCatalog((s) => s.catalog);
   const manifest = catalog?.nodes.find((m) => m.type === data.nodeType);
   const d = data as MTNodeData;
+  const runState = useRun((s) => s.nodeStates[id]);
 
   const inputs = manifest?.inputs ?? [];
   const outputs = manifest?.outputs ?? [];
   const rows = Math.max(inputs.length, outputs.length);
+  const params = manifest?.params ?? [];
+
+  const setParam = (name: string, value: unknown) =>
+    useWorkflow
+      .getState()
+      .updateNodeData(id, (prev) => ({ params: { ...prev.params, [name]: value } }));
 
   return (
-    <div className={`mt-node${selected ? " selected" : ""}`}>
+    <div className={`mt-node${selected ? " selected" : ""} status-${runState?.status ?? "idle"}`}>
       <NodeResizer
         isVisible={selected}
         minWidth={180}
@@ -26,7 +51,33 @@ export function MTNode({ data, selected }: NodeProps) {
         handleClassName="mt-resize-handle"
       />
       <div className="mt-node-header">{manifest?.title ?? d.label}</div>
-      <div className="mt-node-ports">
+      {runState?.status === "running" && (
+        <div className="mt-progress" style={{ width: `${(runState.progress ?? 0) * 100}%` }} />
+      )}
+      {runState?.status === "error" && (
+        <div className="mt-error" title={runState.error}>
+          error: {runState.error}
+        </div>
+      )}
+
+      {params.length > 0 && (
+        <div className="mt-node-params">
+          {params.map((p) => (
+            <ParamField
+              key={p.name}
+              param={p}
+              value={d.params[p.name] ?? p.default ?? ""}
+              onChange={(v) => setParam(p.name, v)}
+              compact
+            />
+          ))}
+        </div>
+      )}
+
+      {d.nodeType === "core.display.preview_plot" ? (
+        <PreviewBody nodeId={id} />
+      ) : (
+        <div className="mt-node-ports">
         {rows > 0 ? (
           Array.from({ length: rows }, (_, i) => {
             const input = inputs[i];
@@ -51,10 +102,7 @@ export function MTNode({ data, selected }: NodeProps) {
                 <span className="mt-port-label out">
                   {output && (
                     <>
-                      <span
-                        className="mt-out-name"
-                        title={`${output.name}: ${output.type}`}
-                      >
+                      <span className="mt-out-name" title={`${output.name}: ${output.type}`}>
                         {output.name}
                       </span>
                       <Handle
@@ -75,7 +123,67 @@ export function MTNode({ data, selected }: NodeProps) {
           <div className="mt-row muted-small">no ports</div>
         )}
       </div>
+      )}
     </div>
+  );
+}
+
+/** Inline figure viewer: fills the node body; node drag-resize scales it. */
+function PreviewBody({ nodeId }: { nodeId: string }) {
+  const artifact = useInputPlotArtifact(nodeId);
+  const ports = (
+    <div className="mt-node-ports mt-preview-ports">
+      <div className="mt-row">
+        <span className="mt-port-label in">
+          <HandleInPlot />
+          <span>plot</span>
+        </span>
+        <span className="mt-port-label out">
+          <span>plot</span>
+          <HandleOutPlot />
+        </span>
+      </div>
+    </div>
+  );
+  return (
+    <>
+      <div className="mt-preview">
+        {artifact ? (
+          <img src={artifact.url} alt={`preview ${artifact.id}`} />
+        ) : (
+          <span className="muted-small">connect a plot · run to render</span>
+        )}
+      </div>
+      {ports}
+    </>
+  );
+}
+
+function HandleInPlot() {
+  const catalog = useCatalog((s) => s.catalog);
+  return (
+    <Handle
+      id="plot"
+      type="target"
+      position={Position.Left}
+      className="mt-port"
+      style={{ background: portColor("plot", catalog) }}
+      title="plot: plot"
+    />
+  );
+}
+
+function HandleOutPlot() {
+  const catalog = useCatalog((s) => s.catalog);
+  return (
+    <Handle
+      id="plot"
+      type="source"
+      position={Position.Right}
+      className="mt-port"
+      style={{ background: portColor("plot", catalog) }}
+      title="plot: plot"
+    />
   );
 }
 

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 class RunContext:
-    """Per-node execution context: workspace, logging, progress, data store."""
+    """Per-node execution context: workspace, logging, progress, artifacts."""
 
     def __init__(
         self,
@@ -24,6 +24,7 @@ class RunContext:
         self.store = store
         self._progress_cb = progress_cb
         self.logger = logger or logging.getLogger("emptyui")
+        self.published: list[dict[str, Any]] = []
 
     def progress(self, frac: float, message: str = "") -> None:
         frac = max(0.0, min(1.0, frac))
@@ -35,4 +36,6 @@ class RunContext:
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(p)
-        return {"path": str(p), "kind": kind}
+        artifact = {"path": str(p), "kind": kind}
+        self.published.append(artifact)
+        return artifact

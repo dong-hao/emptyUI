@@ -47,4 +47,30 @@ async function getJson<T>(path: string): Promise<T> {
 export const api = {
   health: () => getJson<{ status: string }>("/health"),
   nodes: () => getJson<Catalog>("/nodes"),
+  runWorkflow: async (workflow: unknown): Promise<{ run_id: string }> => {
+    const res = await fetch(`${BASE}/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflow }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(
+        Array.isArray(body?.detail)
+          ? body.detail.map((e: { msg?: string }) => e.msg ?? JSON.stringify(e)).join("; ")
+          : (body?.detail ?? `POST /runs: ${res.status}`),
+      );
+    }
+    return res.json();
+  },
+  getRun: (runId: string) => getJson<Record<string, unknown>>(`/runs/${runId}`),
 };
+
+export function wsUrl(): string {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/api/ws`;
+}
+
+export function artifactSrc(url: string): string {
+  return url; // same-origin via vite proxy
+}

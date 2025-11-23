@@ -7,11 +7,11 @@ Status: v0.2 — design frozen for M0/M1 (2026-08-25).
 Changes after v0.1: aurora-informed port type system, node categories,
 TS→FC→TF stage split, MTH5-backed file storage, backend-decided port colors
 and ComfyUI-style port rendering conventions (§3).
-Implementation status: **M0 complete** — core Node API/registry/validator,
-sequential executor, FastAPI server, React Flow web shell with custom typed
-nodes (resizable, deletable, schema-driven properties panel), colored edges.
-Next milestone: M1 (real pipeline nodes, WebSocket run events, artifacts,
-workflow save/load).
+Implementation status: **M0 complete; M1 complete** — real pipeline nodes
+(`load_csv → bandpass → plot.timeseries/spectrogram`) verified end-to-end on
+a 4-channel 150 Hz synthetic CSV; async runs with WebSocket event streaming,
+artifact store + preview endpoint, workflow save/load (format v1).
+Next milestone: M2 (mth5/aurora plugins, ComputeFC/EstimateTF, EDI export).
 
 ---
 
@@ -91,10 +91,15 @@ categories are open-ended strings so plugins can add their own):
 |----------|------|----------|
 | **Data I/O** | Bring data in/out of the graph; convert formats | LoadMTH5, LoadNIMS, LoadCSV, SaveMTH5, SaveEDI, ExportXML, MetadataEditor |
 | **Processing** | Transform data; produce new typed outputs | Decimate, Detrend, BandpassFilter, NotchFilter, Calibrate(RemoveResponse), STFT, RobustEstimate, MergeTFLevels |
-| **Display** | Consume any input, produce `image` artifacts only | PlotTimeSeries, PlotSpectrogram, PlotAppResPhase, PlotCoherency, PlotPhaseTensor |
+| **Display** | Render data to `plot` outputs (no data deps downstream) | PlotTimeSeries, PlotSpectrogram, PlotAppResPhase, PlotCoherency, PlotPhaseTensor |
 
-Display nodes are leaf nodes: they emit no typed data ports (only side-effect
-artifacts), which keeps them freely attachable anywhere without polluting the DAG.
+Display nodes emit a **`plot` output port** (rendered-figure reference), not
+typed data — so they can't feed processing nodes, but their figures can branch
+to `Preview Plot` / `Save Plot` nodes. This mirrors ComfyUI's IMAGE port +
+Preview/Save Image pattern: multiple results are each handled by their own
+viewer node (drag-resizable, positioned anywhere on the canvas) instead of a
+single fixed results pane. The run-level Results panel remains as a
+convenience gallery.
 
 ### Port types (the ComfyUI-equivalent)
 
@@ -118,7 +123,7 @@ node boundary ≈ an aurora pipeline stage:
 | `tf.level` | aurora `TTFZ` | Per-decimation-level TF estimate |
 | `mt.tf` | `mt_metadata.transfer_functions.TF` (xr.Dataset) | Final merged transfer function; exporters & analysis plots consume this |
 | `table` | pandas DataFrame | Generic tabular output |
-| `image` | PNG/SVG artifact | Display-node side output |
+| `plot` | rendered-figure reference (PNG/SVG/PDF path + metadata) | Produced by Display nodes; consumed by `Preview Plot` (inline, resizable) and `Save Plot` (export). Distinct from a future generic `image` type for non-plot bitmaps |
 | `any` | — | Wildcard; connects to anything, executor trusts the node |
 
 Rules:
@@ -426,10 +431,15 @@ Design notes:
 { "event": "node_progress", "node": "n2", "frac": 0.42, "msg": "filtering…" }
 { "event": "node_log",      "node": "n2", "level": "info", "line": "…" }
 { "event": "artifact",      "node": "n3", "id": "a7", "kind": "image",
+  "handle": "h12",
   "preview_url": "/api/artifacts/a7/preview" }
 { "event": "node_status",   "node": "n3", "status": "done" }
 { "event": "run_finished",  "run_id": "r1", "status": "completed" }
 ```
+
+The `artifact` event carries the output `handle` id so viewer nodes
+(e.g. Preview Plot) can resolve exactly which figure arrives on which input
+edge, even when one node publishes several figures.
 
 ---
 
@@ -457,10 +467,16 @@ Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Que
 Components:
 - **GraphCanvas** — React Flow; maps workflow JSON ⇄ RF nodes/edges bidirectionally.
 - **NodePalette** — grouped by `category`, populated from `GET /api/nodes`.
-- **PropertiesPanel** — auto-generated from the selected node's manifest
-  `params` (one widget component per widget vocabulary entry).
-- **ResultPanel** — tabbed viewer docked right/bottom: images, tables, text
-  logs; subscribes to artifact events.
+- **Inline node params (default behavior, ComfyUI paradigm)** — a node's
+  parameters render as widgets directly on the node body; the right-hand
+  PropertiesPanel keeps only metadata (node id, type, version, ports,
+  description) and node-level actions. Path-like widgets get a browse button
+  backed by the server-side file browser (`GET /api/files`).
+- **Preview Plot node** — renders an incoming `plot` inside the node body;
+  sized by the standard node drag-resize. Multiple viewers can attach to the
+  same figure.
+- **ResultPanel** — run-level gallery of all artifacts (convenience; the
+  Preview Plot nodes are the primary per-figure viewers).
 - **Toolbar** — new/open/save workflow, run, cancel, export.
 
 State split:

@@ -1,27 +1,26 @@
-"""Bundled minimal nodes: M0 ships an echo passthrough; M1 adds real I/O,
-filter and plot nodes."""
+"""Bundled minimal nodes for emptyui.
+
+M1: CSV import, bandpass/detrend filters, time-series and spectrogram
+plots. M2 will add the mth5/aurora plugins; the ts.run payload here is a
+lightweight numpy container that will migrate to mth5 RunTS.
+"""
 
 from __future__ import annotations
 
-from typing import Any
-
-from emptyui import Input, Node, Output, Param
-
-
-class Echo(Node):
-    type = "core.util.echo"
-    title = "Echo"
-    description = "Passes its input through unchanged. Framework smoke test."
-    category = "Processing"
-    inputs = (Input("data", "any", required=False),)
-    outputs = (Output("data", "any"),)
-    params = (Param("label", "string", default="", optional=True),)
-
-    def execute(self, ctx, data: Any, label: str = "") -> dict[str, Any]:
-        if label:
-            ctx.logger.info("echo: %s", label)
-        return {"data": data}
+from .filters import Bandpass, Detrend
+from .io import LoadCsv
+from .plots import PlotSpectrogramNode, PlotTimeSeriesNode
+from .plugin_core import Echo
+from .preview import PreviewPlotNode
+from .save_plot import SavePlotNode
 
 
 def register(registry) -> None:
     registry.add(Echo)
+    registry.add(LoadCsv)
+    registry.add(Bandpass)
+    registry.add(Detrend)
+    registry.add(PlotTimeSeriesNode)
+    registry.add(PlotSpectrogramNode)
+    registry.add(PreviewPlotNode)
+    registry.add(SavePlotNode)

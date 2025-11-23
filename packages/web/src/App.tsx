@@ -1,18 +1,31 @@
+import { useEffect, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
+import { ensureSocket } from "./api/ws";
 import { useCatalog } from "./stores/catalog";
 import { nodeTypes } from "./graph/MTNode";
 import { NodePalette } from "./panels/NodePalette";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
-import { useWorkflow, type MTNodeData } from "./stores/workflow";
+import {
+  deserializeWorkflow,
+  serializeWorkflow,
+  useWorkflow,
+  type MTNodeData,
+} from "./stores/workflow";
+import type { NodeManifest } from "./api/client";
+import { useRun } from "./stores/run";
 
 export default function App() {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, selectedNodeId } =
     useWorkflow();
   const setCatalog = useCatalog((s) => s.setCatalog);
   const catalog = useCatalog((s) => s.catalog);
+  const runStatus = useRun((s) => s.runStatus);
+  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useQuery({
     queryKey: ["nodes"],
@@ -23,7 +36,11 @@ export default function App() {
     },
   });
 
-  const handleAdd = (manifest: { title: string; type: string }) => {
+  useEffect(() => {
+    ensureSocket();
+  }, []);
+
+  const handleAdd = (manifest: NodeManifest) => {
     addNode({
       id: `n${crypto.randomUUID().slice(0, 6)}`,
       type: "mt",
@@ -31,17 +48,112 @@ export default function App() {
       data: {
         label: manifest.title,
         nodeType: manifest.type,
-        params: {},
+        params: Object.fromEntries(
+          manifest.params
+            .filter((p) => p.default !== null && p.default !== undefined)
+            .map((p) => [p.name, p.default]),
+        ),
       } satisfies MTNodeData,
-      style: { width: 200, height: 72 },
+      style:
+        manifest.type === "core.display.preview_plot"
+          ? { width: 340, height: 260 }
+          : { width: 250, height: "auto" },
     });
+  };
+
+  const handleRun = async () => {
+    try {
+      setMessage(null);
+      // Reminder: without a Display/output node the run produces nothing visible
+      const hasOutputNode = nodes.some((n) => {
+        const m = catalog?.nodes.find(
+          (m) => m.type === (n.data as MTNodeData).nodeType,
+        );
+        return !!m && (m.outputs.length === 0 || m.category === "Display");
+      });
+      if (!hasOutputNode) {
+        setNotice(
+          "No Display or output node (Plot / Preview / Save) — add one to see results.",
+        );
+      } else {
+        setNotice(null);
+      }
+      useRun.getState().reset();
+      const doc = serializeWorkflow(nodes, edges);
+      const { run_id } = await api.runWorkflow(doc);
+      useRun.getState().setRunId(run_id);
+
+      // Polling fallback: works even if the WebSocket is unavailable.
+      // WS events and polls are both deduped by the run store.
+      const seen = new Set<string>();
+      const poll = window.setInterval(async () => {
+        try {
+          const run = (await api.getRun(run_id)) as {
+            status: string;
+            events: Record<string, unknown>[];
+          };
+          for (const e of run.events) {
+            const key = `${e.event}:${e.node ?? e.id ?? ""}:${e.status ?? e.frac ?? ""}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              useRun.getState().handleEvent(e);
+            }
+          }
+          if (["completed", "failed", "cancelled"].includes(run.status)) {
+            window.clearInterval(poll);
+          }
+        } catch {
+          // transient poll errors are non-fatal
+        }
+      }, 700);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleSave = () => {
+    const doc = serializeWorkflow(nodes, edges);
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${doc.meta.name || "workflow"}.emptyui.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const handleLoad = async (file: File) => {
+    try {
+      const doc = JSON.parse(await file.text());
+      const { nodes: loaded, edges: loadedEdges } = deserializeWorkflow(doc);
+      useWorkflow.getState().loadDocument(loaded, loadedEdges);
+      setMessage(null);
+    } catch (e) {
+      setMessage(`Load failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   return (
     <div className="app">
       <header className="toolbar">
         <strong>emptyUI</strong>
-        <span className="muted">MT workflow builder — M0 shell</span>
+        <button onClick={handleRun} disabled={runStatus === "running" || nodes.length === 0}>
+          ▶ Run
+        </button>
+        <button onClick={handleSave} disabled={nodes.length === 0}>
+          Save
+        </button>
+        <button onClick={() => fileInput.current?.click()}>Load</button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => e.target.files?.[0] && handleLoad(e.target.files[0])}
+        />
+        <span className={`run-status ${runStatus}`}>{runStatus}</span>
+        {notice && <span className="notice-msg">{notice}</span>}
+        {message && <span className="error-msg">{message}</span>}
+        <span className="spacer" />
         <button
           className="danger"
           disabled={!selectedNodeId}

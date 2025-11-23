@@ -31,6 +31,7 @@ interface WorkflowState {
     patch: Partial<MTNodeData> | ((d: MTNodeData) => Partial<MTNodeData>),
   ) => void;
   deleteSelected: () => void;
+  loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[]) => void;
 }
 
 /** The workflow document is the single source of truth (DESIGN.md §9). */
@@ -88,4 +89,72 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       ),
       selectedNodeId: null,
     })),
+  loadDocument: (nodes, edges) =>
+    set({ nodes, edges, selectedNodeId: null }),
 }));
+
+/** Serialize the workflow document (DESIGN.md §6 format). */
+export function serializeWorkflow(nodes: Node<MTNodeData>[], edges: Edge[]) {
+  return {
+    format: "emptyui/workflow",
+    version: 1,
+    meta: { name: "untitled", created: new Date().toISOString() },
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: n.data.nodeType,
+      params: n.data.params,
+      position: n.position,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      source_port: e.sourceHandle ?? "data",
+      target: e.target,
+      target_port: e.targetHandle ?? "data",
+    })),
+  };
+}
+
+/** Rebuild editor state from a workflow document (inverse of serialize). */
+export function deserializeWorkflow(
+  doc: {
+    nodes: { id: string; type: string; params?: Record<string, unknown>; position?: { x: number; y: number } }[];
+    edges: { id: string; source: string; source_port: string; target: string; target_port: string }[];
+  },
+): { nodes: Node<MTNodeData>[]; edges: Edge[] } {
+  const { catalog } = useCatalog.getState();
+  const nodes: Node<MTNodeData>[] = doc.nodes.map((n) => {
+    const manifest = catalog?.nodes.find((m) => m.type === n.type);
+    return {
+      id: n.id,
+      type: "mt",
+      position: n.position ?? { x: 80, y: 80 },
+      data: {
+        label: manifest?.title ?? n.type,
+        nodeType: n.type,
+        params: n.params ?? {},
+      },
+      style:
+        n.type === "core.display.preview_plot"
+          ? { width: 340, height: 260 }
+          : { width: 250, height: "auto" },
+    };
+  });
+  const edges: Edge[] = doc.edges.map((e) => {
+    // re-derive edge color from the source port type
+    const src = doc.nodes.find((n) => n.id === e.source);
+    const manifest = catalog?.nodes.find((m) => m.type === src?.type);
+    const portType =
+      manifest?.outputs.find((o) => o.name === e.source_port)?.type ?? "any";
+    return {
+      id: e.id,
+      source: e.source,
+      sourceHandle: e.source_port,
+      target: e.target,
+      targetHandle: e.target_port,
+      style: { stroke: portColor(portType, catalog), strokeWidth: 2.5 },
+      data: { portType },
+    };
+  });
+  return { nodes, edges };
+}
