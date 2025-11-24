@@ -186,8 +186,26 @@ button.danger:disabled {
   border-radius: 3px;
 }
 
+.param-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: auto;
+  padding: 0;
+  border: none;
+}
+
+.param-field.disabled {
+  opacity: 0.45;
+}
+.param-field.disabled input,
+.param-field.disabled select {
+  cursor: not-allowed;
+}
+
 .param-field.compact input[type="checkbox"] {
-  flex: 0;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: auto;
   margin-right: auto;
 }
 
@@ -484,6 +502,45 @@ button.primary {
 .mt-preview .muted-small {
   padding: 0.6rem;
   color: #aaa;
+}
+
+/* inline table viewer (View Table node) */
+.mt-table {
+  flex: 1;
+  min-height: 90px;
+  overflow: auto;
+  background: #161616;
+  padding: 0.3rem;
+}
+
+.mt-table .muted-small {
+  padding: 0.6rem;
+  color: #aaa;
+  display: block;
+}
+
+.data-table {
+  border-collapse: collapse;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.data-table th,
+.data-table td {
+  border: 1px solid #333;
+  padding: 2px 6px;
+  text-align: left;
+}
+
+.data-table th {
+  background: #242424;
+  color: #ddd;
+  position: sticky;
+  top: 0;
+}
+
+.data-table tr:nth-child(even) td {
+  background: #1c1c1c;
 }
 
 /* Preview node: keep the port row a slim fixed-height strip at the bottom,

@@ -60,10 +60,17 @@ cd packages/web && npm install && npm run dev
     ~10–10³ Ω·m).
   - **Impedance phase convention** verified against aurora on the synthetic
     halfspace (`test12rr`): aligned with aurora/EDI (Zxy≈+45°, Zyx≈−135°).
+  - **Robust estimator**: `EstimateTF` offers `Least Squares` or `Robust`
+    (aurora-backed) with a separate remote-reference checkbox (Robust → RME/RME_RR).
+    No least-squares+remote-reference path by design. Verified on the halfspace.
+  - **Table viewer**: `mth5.table.selection` emits a JSON table artifact and
+    `core.display.view_table` renders it inline in the browser.
   - `scripts/convert_bgs_lemi.py` converts BGS `.xyz` long-period files to
     LEMI-424 `.TXT`.
-  Remaining: robust RME/RME_RR estimator, multi-level decimation/FC
-  persistence, table viewer, `Calibrate` node.
+  - **Calibrate**: `mth5.calibrate` removes the instrument response from a
+    `ts.run` — using the run's own mth5 channel responses, or an explicit
+    `calibration` filter via frequency-domain response removal.
+  M2 is now complete (all §11 M2 deliverables delivered).
 
 ### UI conventions (stable)
 

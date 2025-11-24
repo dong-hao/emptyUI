@@ -55,7 +55,8 @@ export default function App() {
         ),
       } satisfies MTNodeData,
       style:
-        manifest.type === "core.display.preview_plot"
+        manifest.type === "core.display.preview_plot" ||
+        manifest.type === "core.display.view_table"
           ? { width: 340, height: 260 }
           : { width: 250, height: "auto" },
     });

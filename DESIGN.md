@@ -17,13 +17,14 @@ Processing correctness milestones:
   electric mV/km→V/m; missing nT→T factor was the root cause of non-physical
   apparent resistivity (now ~10–10³ Ω·m).
 - **Impedance phase convention**: verified against aurora on the official
-  synthetic halfspace (`test12rr`); our LSQ is aligned with aurora/EDI
-  (Zxy≈+45°, Zyx≈−135° for a halfspace) via a ×j rotation.
+  synthetic halfspace (`test12rr`); all three estimators (OLS/RME/RME_RR) are
+  aurora-backed and share aurora's convention (Zxy≈+45°, Zyx≈−135°).
 - Detrending moved to the dedicated `core.filter.detrend` node (mean/linear/
   none); `e_dipole_length_m` optional (off by default — LEMI output is mV/km).
-Estimator is first-pass LSQ (robust RME/RME_RR and multi-level
-decimation/FC persistence are follow-ups).
-Next milestone: finish M2 (robust estimator, table viewer, Calibrate).
+Estimator: **robust RME/RME_RR implemented** (aurora-backed) with remote
+reference support; multi-level decimation/FC persistence and Calibrate are
+follow-ups. See §13 for the current plan, priorities and divide-and-conquer
+tracks.
 
 ---
 
@@ -637,6 +638,20 @@ progress.
 **M4 — Community**
 - Plugin index/publish flow, docs site, more visualization nodes,
   batch/queue runner.
+- **Band config files**: load an aurora-style band config (exact centre
+  frequencies + bandwidths) or auto-default when none given, replacing/augmenting
+  the auto-derived Fs/4→window/4 period table (§14 deferred task).
+- **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
+  (§14.5). At long periods the deepest decimation levels have few STFT windows,
+  so per-level TF estimates are statistically weak. Instead of estimating a TF
+  per level and then merging overlapping periods (current Paradigm A), pool the
+  **raw Fourier coefficients across all decimation levels** whose frequencies
+  fall inside a fixed band, and run one robust regression per band. Deep levels
+  have finer raw frequency resolution (more harmonics per Hz), so pooling
+  recovers more samples per band where they're scarce (long periods) while
+  remaining cheap at high frequencies where samples already abound. Existing
+  codes (EMTF, BIRRP, aurora) define bands this way but process each level's
+  bands *separately* — cross-level pooling is a novel extension.
 
 ---
 
@@ -648,3 +663,312 @@ progress.
 - Sub-workflow semantics (nested DAGs) — defer until after M1.
 - Authentication model for remote deployments (defer; design API so middleware
   can be inserted).
+
+---
+
+## 13. Upcoming Plan — Remaining M2 (2026-08-29)
+
+Status: M2 is in progress; ComputeFC/EstimateTF and the EDI/XML export coercion
+are verified end-to-end. This section records the agreed priority order and the
+divide-and-conquer tracks for finishing M2. It supersedes the one-line "next
+milestone" note above.
+
+### Remaining M2 deliverables
+
+Inventory against §11. ~~Struck~~ items are delivered; the gaps:
+
+| # | Deliverable | Where | Status |
+|---|-------------|-------|--------|
+| 1 | Robust **RME/RME_RR** estimator | `_processing.estimate_tf` + `process.py` | ✅ **done** — OLS/RME/RME_RR all aurora-backed; `remote_reference` supported (ref `fc` or self-reference/dummy) |
+| 2 | **Multi-level decimation + FC persistence** | `compute_fc_levels` + `persist.py` | ✅ **done** — cascading decimation, per-level FC persisted to workspace MTH5 (§14) |
+| 3 | **MergeTFLevels** (`tf.level` → `tf`) | `merge_tf_levels` + `process.py` | ✅ **done** — per-level estimate + deepest-wins merge of overlapping octave periods (§14) |
+| 4 | **Table viewer** | `mth5.table.selection`/`mth5.table.tf` + `core.display.view_table` + frontend | ✅ **done** — JSON table artifacts rendered inline |
+| 5 | **Calibrate** node | `mth5.calibrate` + `calibrate.py` | ✅ **done** — `ts.run` (+ optional `calibration`) → calibrated `ts.run`; uses mth5 `RunTS.calibrate()` channel responses, or frequency-domain response removal for an explicit filter |
+
+(Export coercion EDI/ZMM/XML/AVG/J is already delivered via `ImportTF`/`ExportTF`.)
+
+### Priority
+
+- **P1 — Robust RME/RME_RR estimator.** ✅ delivered (2026-08-29). Highest
+  scientific value: real MT data is outlier-contaminated and LSQ is unreliable.
+  **Wraps aurora estimators**: `OLS` via `RegressionEstimator.estimate_ols`,
+  robust `RME`/`RME_RR` via their aurora classes (note the regression module does
+  *not* re-export at package level, import the submodules directly). `remote_reference` is supported: a second station's
+  `fc` on the new `ref_fc` input supplies the reference magnetic channels; when
+  no `ref_fc` is connected the local channels are reused as a self-reference
+  (what a duplicated/dummy remote station reduces to). All three estimators
+  verified to match aurora's phase convention on `test12rr` (Zxy≈+45°, Zyx≈−135°).
+
+  **Estimator UI (2026-08-29)**: the `EstimateTF` node exposes **two** estimator
+  options — **`Least Squares`** and **`Robust`** — plus the separate
+  `Remote Reference` checkbox. `Remote Reference` only applies to `Robust`
+  (Robust+off → `RME`; Robust+on → `RME_RR`); it is disabled in the UI when
+  `Least Squares` is selected. Legacy saved-workflow values (`OLS`/`RME`/`RME_RR`)
+  are still accepted on load.
+
+  **No LS+RR, by design**: there is intentionally **no least-squares +
+  remote-reference** estimator. aurora offers remote reference only through the
+  robust `RME_RR` (a plain-LS RR variant would add little statistical value —
+  remote reference exists to suppress incoherent noise, where robust weighting
+  matters — and would multiply estimator variants). Requesting `Least Squares`
+  with `Remote Reference` raises a clear error rather than silently degrading.
+  Should LS+RR ever be wanted, the `_solve_band` dispatch makes it a small,
+  local addition — but we keep the two-option surface to match aurora's design.
+- **P1 — Multi-level decimation + FC persistence + MergeTFLevels.** Second value:
+  without it we process a single sampling rate and cannot produce broadband
+  apparent-resistivity/phase curves spanning decades. **Largest, riskiest** chunk
+  (data model + mth5 persistence + per-level estimator + merge node). Sequenced
+  *after* the estimator; it reuses the per-level robust estimator.
+- **P2 — Table viewer.** ✅ delivered (2026-08-29). Low effort, low risk, high UX:
+  selections (`KernelDataset`) and run summaries are now visible. `mth5.table.selection`
+  emits a JSON table artifact; `core.display.view_table` renders it inline.
+- **P2 — Calibrate node.** Medium value (coil-sensor / instrument response),
+  medium effort (mth5/mt_metadata filter parsing, response removal). Independent.
+
+### Divide-and-conquer tracks
+
+```
+Track A (backend, sci)   Robust RME/RME_RR  →  EstimateTF honors estimator_engine (+ remote_reference)   ✅
+Track B (backend, arch)  Multi-level ComputeFC + FC persistence + MergeTFLevels   (largest)
+Track C (frontend)       Table viewer + "View Selection" Display node            ✅
+Track D (backend, I/O)   Calibrate node + calibration port wiring
+```
+
+- **A and C are fully independent** → run concurrently immediately.
+- **A lands before B**: B's per-level `tf.level` estimation reuses A's robust
+  estimator; B can be specced in parallel while A is underway.
+- **D is independent** of A/B/C.
+- **Cross-cutting enabler:** make the MT integration tests runnable in CI by
+  *generating* the synthetic `test12rr` fixture (as `test_phase_convention.py`
+  already scripts) instead of relying on gitignored raw LEMI/BGS data — so every
+  track has a real green test target regardless of fixtures on disk.
+
+### Sequencing & landing
+
+1. **A → C** (fast, low-risk wins, verifiable immediately).
+2. **B** (biggest, builds on A's per-level estimator).
+3. **D** (independent; slot in when A/C land).
+4. Land each track as its own PR/branch so the work can be divided in parallel.
+
+---
+
+## 14. Current Plan — M2: Multi-level Decimation + FC Persistence (2026-08-29)
+
+Status: the biggest remaining M2 chunk (Track B). This is the plan for
+broadband MT — processing more than one decimation level so the apparent
+resistivity/phase curves span decades. It is grounded in reading the pinned
+aurora 0.6.2 / mth5 0.6.8 source (§14.1).
+
+### 14.1 What aurora actually does (grounding)
+
+- **Cascading decimation** (`aurora/pipelines/time_series_helpers.py::prototype_decimate`):
+  each decimation level *i* takes the *previous* level's time series and decimates it by
+  that level's integer `factor` with `scipy.signal.decimate`. Level 0 is the native
+  sample rate; level *i*'s rate = native / ∏(factors 1..i).
+- **Per-level STFT** (`aurora/time_series/windowing_scheme.py`, `spectrogram_helpers.py::run_ts_to_stft`):
+  from the level's `Window` (`num_samples`, `overlap` in samples, taper family) and `sample_rate`,
+  aurora does: prewhiten → truncate to clock-zero → sliding window → linear detrend →
+  taper → FFT → recolor. Window `num_samples` is conventionally kept **constant across levels**
+  (so window *duration* in seconds grows at deeper levels → better long-period resolution).
+- **FC generation vs. use** (`spectrogram_helpers.py::get_spectrograms`, `make_stft_objects`,
+  `save_fourier_coefficients`): per (run, decimation-level) pair aurora either *loads* an
+  already-persisted FC from mth5 (`load_stft_obj_from_mth5`, when the row has `fc`) or *computes*
+  it, then optionally persists it (`save_fourier_coefficients`) into the archive FC layer.
+- **Merging runs at the FC level** (`merge_stfts`): concatenates per-run STFTs along time
+  (`xr.concat(stfts, "time")`) — this is the *across-runs* FC merge, not the across-levels one.
+- **Per-level TF + level merge** (`process_mth5.py`, `transfer_function_kernel.py`):
+  each decimation level is estimated independently to a per-level `TTFZ`; a
+  `TransferFunctionCollection` + `export_tf_collection` merges the per-level TFs into one
+  mt_metadata TF, resolving duplicate periods across levels. This is what emptyUI calls
+  `MergeTFLevels`.
+- **FC persistence format** (`mth5/groups/fourier_coefficients.py`): per station,
+  `fourier_coefficients_group → add_fc_group(run_id) → add_decimation_level(f"{i}") →
+  from_xarray(fc, sample_rate_decimation_level)`. **Verified: `from_xarray` requires a
+  `datetime64` time coordinate** (float seconds fails) — so persisted FCs must carry the run's
+  absolute start time.
+
+### 14.2 Design decisions (with recommendations)
+
+**D1 — FC time axis.** To persist to mth5, the fc `time` coordinate must be `datetime64`.
+The `ts.run` payload must therefore carry an absolute start time (mth5 `RunTS.starttime`;
+core `TimeSeries` currently has a float `start` seconds — needs a start timestamp too).
+Recommendation: normalize a `start_datetime` onto `ts.run`/fc so persistence round-trips.
+
+**D2 — Window-length semantics.** Follow aurora: express the window as **`num_samples`
+constant across levels** (window duration in seconds grows at deeper levels), rather than
+the current seconds-based `window_length_s` (which would *shrink* spectral resolution at deep
+levels). Recommendation: switch ComputeFC's window param to samples (or support both), matching
+aurora for correct broadband behaviour.
+
+**D3 — Multi-level FC container.** ComputeFC must carry *N* per-level FCs on one `fc` handle.
+Recommendation: a lightweight container (e.g. `dict[int, xr.Dataset]` or an xr.Dataset with a
+`decimation_level` dim) so EstimateTF can iterate levels. Port type stays `fc`.
+
+**D4 — FC persistence trigger.** The DESIGN §3 goal is "ComputeFC persists FCs into the workspace
+MTH5 FC layer" so the expensive STFT/decimation stage is reusable. Recommendation: ComputeFC
+auto-persists each level to a workspace mth5 when given the archive/run context (mirroring
+aurora `save_fcs`), and returns the in-memory multi-level `fc` handle regardless. The existing
+`mth5.fc.write` node remains for explicit single-level control.
+
+**D5 — Per-level TF + merge (node-graph shape).** The main flow per DESIGN is
+`ComputeFC → EstimateTF → tf`. Recommendation: EstimateTF estimates each decimation level and
+returns a **single merged `tf`**, with the merge logic factored into a reusable
+`merge_tf_levels(per_level_tfs)` helper. The `MergeTFLevels` node exposes the same helper for
+advanced use (per-level / separately-loaded `tf.level` inputs). This keeps the common graph a
+single straight line while keeping the lower-level building block available.
+
+### 14.3 Phased implementation (FC persistence first, per the decision)
+
+**Phase 1 — FC persistence groundwork** (foundation; enables merge of multi-level results)
+- Carry an absolute `start_datetime` through `ts.run` (mth5 `RunTS`) and into the fc `time`
+  coordinate (`datetime64`).
+- Wire a workspace mth5 that ComputeFC/EstimateTF can write to (DESIGN §3 storage).
+- Extend the FC write path to persist per decimation level (reuse/refactor `fc.py`).
+- Tests: fc → mth5 → fc round-trip (datetime), synthetic + real run.
+
+**Phase 2 — Multi-level FC generation (ComputeFC)**
+- Expand ComputeFC to N levels: cascade-decimate (`scipy.signal.decimate` by factor) then STFT
+  each level per D2/D3.
+- Params: `num_levels`, `factor`, window (`num_samples`, overlap, type), channels, magnetic
+  unit, dipole length; per-level sample rates = native / factor^level.
+- Persist each level (Phase 1).
+- Tests: multi-level fc on synthetic + real LEMI/BGS; per-level sample rate + frequency range;
+  EstimateTF consumes it.
+
+**Phase 3 — Per-level TF estimation + MergeTFLevels**
+- EstimateTF loops levels, reuses `_solve_band` at each level's sample rate → per-level TFs.
+- `merge_tf_levels()` resolves duplicate periods (aurora-style: prefer the highest-rate level
+  covering a period) → merged `tf`. EstimateTF returns merged `tf`; `MergeTFLevels` node exposes
+  the helper for `tf.level` inputs.
+- Tests: multi-level → merged TF on LEMI/BGS; broadband coverage; per-level phase convention.
+
+**Phase 4 — Integration & verification**
+- End-to-end reference workflow (Load → ExtractRun → ComputeFC(multi) → EstimateTF → Export EDI /
+  Plot AppRes&Phase) on real data; compare vs single-level; update DESIGN/README.
+- Cross-cutting: keep the `test12rr`-generated fixture in CI so these tests run without gitignored
+  raw data.
+
+### 14.4 Sequencing / parallelization
+
+- **Phase 1** is the critical path (unblocks D4 persistence + the datetime requirement) — start here.
+- **Phases 2 and 3** build sequentially on Phase 1; within Phase 2 the decimation core and the
+  persistence are separable.
+- **Phase 4** is integration across all of the above.
+- Landing order: P1 → P2 → P3 → P4, each its own PR/branch.
+
+**Decisions confirmed (2026-08-29):** D2 → constant `num_samples` window across
+levels (aurora-style); D4 → ComputeFC auto-persists to the workspace mth5 (and
+also returns the in-memory multi-level fc); D5 → EstimateTF estimates all levels
+and returns a single merged `tf`, with `merge_tf_levels()` shared by the
+`MergeTFLevels` node for advanced per-level use.
+
+**Phase 1 delivered (2026-08-29):** absolute `start_datetime` flows through
+`ts.run` (mth5 `RunTS` and core `TimeSeries`), fc `time` is `datetime64` when a
+start is known; a specially named `workspace.mth5` in `ctx.workspace` holds
+persisted FCs per (survey, station, run, decimation level) via `persist_fc_level`
+/ `load_fc_level` (in `emptyui-mth5/persist.py`); `ComputeFC` auto-persists
+level 0 when an absolute start is available and skips with a warning otherwise.
+Round-trip fc→mth5→fc verified (datetime required).
+
+**Phase 2 delivered (2026-08-29):** `ComputeFC` now generates N cascading
+decimation levels via `compute_fc_levels` (`_processing.py`): level 0 is the
+native-rate STFT, each deeper level decimates the previous (already-normalized)
+series by `factor` (`scipy.signal.decimate`) and re-STFTs it with the **same
+constant `num_samples_window`** (D2). Returns a multi-level `fc` container
+(`{level: xr.Dataset}`); each level's sample rate = native/factor^level. It
+persists every level into the workspace mth5 (D4). Window param renamed from
+seconds (`window_length`) to `window_samples` (D2). EstimateTF unwraps a
+single-level container for backward compatibility; multi-level TF estimation
++ merge remains Phase 3 (raises a clear NotImplementedError).
+
+**Phase 3 delivered (2026-08-29):** per-level TF estimation + merge.
+`estimate_tf_levels` (`_processing.py`) estimates a per-level TF for every
+decimation level (reusing the aurora-backed `_solve_band`); `merge_tf_levels`
+concatenates levels, sorts by period, drops degenerate bands, and resolves
+near-duplicate periods by keeping the highest-sample-rate level → one broadband
+`tf`. `EstimateTF` now loops levels and returns the merged `tf` (D5) plus a
+`tf_levels` (`tf.level`) output; `MergeTFLevels` is functional (merges a
+`tf.level` container). Verified: multi-level merged TF keeps aurora's phase
+convention on the halfspace (Zxy≈+45°, Zyx≈−135°); end-to-end on LEMI
+(4 levels → 64 merged periods → EDI).
+
+**Period banding rework (2026-08-29, feedback-driven).**
+- **Periods per octave** (`periods_per_octave`, default 4) replaces `periods_per_decade`;
+  bands are placed on a log2 (power-of-2) grid, matching FFT/decimation windows (128/256).
+- **Octave-aligned, shared boundaries (`_period_bands`)**: each decimation level spans from
+  its Nyquist period (2/fs) to the next level's Nyquist period (2·factor/fs); band centers sit
+  on a global log2 grid including both end points, so level *i*'s last period **exactly equals**
+  level *i+1*'s first period. Levels therefore tile continuously (no gaps), and the merge simply
+  de-duplicates the single shared boundary period — keeping the higher-sample-rate level (whose
+  boundary estimate is well within its window, vs the deeper level's noisier Nyquist edge). This
+  achieves aurora's "consistent frequency points between levels" without external band files.
+- **Realistic period range**: the longest period is clamped to the window reliability cap
+  (N/(2·fs), ≥2 cycles) and the octave boundary — no more "longest period = window length"
+  (DC-contaminated). Shortest period is the true Nyquist (2/fs).
+- **TF table node** (`mth5.table.tf` "View TF"): renders a transfer function as a table
+  (period, rho_xy/yx, phase_xy/yx), giving the table viewer a producer in the TF workflow
+  (previously only `mth5.table.selection` existed, which needed a KernelDataset).
+
+**Period banding — final spec (2026-08-29, feedback #4):**
+- Shortest period = **Fs/4** per level (highest trusted frequency Fs/4, avoiding
+  noisy Nyquist-edge bins).
+- Longest period = **window_length/4** (N/(4·Fs)).
+- Band centers sit on a global log2 grid (``periods_per_octave``/octave) anchored
+  at 4/Fs; because decimation factors are powers of 2, consecutive levels land on
+  the **same absolute periods** wherever they overlap → consistent frequency
+  points across levels.
+- Levels therefore **overlap** (each covers Fs/4→window/4); the merge keeps the
+  **deepest** level that covers each period (a deeper level has a longer window →
+  more cycles → better long-period resolution), dropping degenerate bands.
+
+**Deferred task → M4 (band config files):** load an aurora-style band config file
+(exact centre frequencies + bandwidths) or auto-generate a sensible default when
+none is given, rather than always deriving the period table from Fs/4 → window/4.
+This gives power users exact control over the frequency table and matches aurora's
+preset band files. (Not required for the current auto-derived table.)
+
+**Decimation convention (2026-08-29):** decimation level *i* = the series has
+been decimated *i* times. `ComputeFC`'s `decimation_levels` param = number of
+cascading decimations (default **0** = none, native rate only); it produces
+levels `0..decimation_levels`, each level's sample rate = native/factor^level.
+
+### 14.5 Worth exploring — Paradigm B (cross-decimation-level FC pooling)
+
+**Motivation.** At long periods the deepest decimation levels have few STFT
+windows, so a per-level TF estimate is noisy. Deeper levels also have **finer raw
+frequency resolution** (bin spacing Fsᵢ/N, i.e. more harmonics per Hz), so for a
+fixed band (central frequency + bandwidth) the deeper levels supply more raw FC
+samples. Pooling all levels' FCs that fall in a band into **one** robust
+regression therefore recovers more samples precisely where they are scarce.
+
+**Band design — how "central frequency + bandwidth" is modelled in existing code
+(researched 2026-08-29).**
+- **aurora `Band`** (mt_metadata): `frequency_min`, `frequency_max`,
+  `center_averaging_type="geometric"` (center = geometric mean of the edges),
+  `fractional_bandwidth` (= width/center) and `Q` (= center/width), plus the
+  STFT `harmonic_indices`/`index_min`/`index_max` that fall in the band. Bands are
+  log-spaced (≈ constant fractional bandwidth / constant Q). `extract_band()`
+  pulls every harmonic in the band → exactly the per-band pooling primitive.
+- **EMTF band setup file** (`aurora/config/emtf_band_setup/*.cfg`, e.g. `bs_test.cfg`):
+  line 1 = band count; each subsequent line = `decimation_level index_min index_max`
+  (a band = one level + a contiguous STFT harmonic-index range). Center
+  frequency/bandwidth are derived from the index range and the level's
+  fs/N geometry. aurora loads these via `ConfigCreator` (`band_specification_style="EMTF"`).
+- **Key finding:** EMTF, BIRRP and aurora define bands this way but process each
+  decimation level's bands **separately** (Paradigm A), and their band tables are
+  **non-overlapping across levels**. **No existing open-source code pools FCs
+  across decimation levels into one band** — Paradigm B is a novel extension
+  enabled by our FC layer (mth5 stores each level's raw FCs; emptyUI already
+  computes per-level raw-frequency fc).
+
+**Implementation sketch (if pursued).** Build a global band table (center +
+bandwidth; reuse our log-octave `periods_per_octave` grid or a fixed-Hz scheme);
+for each band, gather FC samples from *every* level whose raw bins fall inside
+the band (weighted by level sample count); run the existing aurora-backed
+`_solve_band` once per band. Value is highest at long periods; at high
+frequencies the shallow levels already provide abundant samples.
+
+**References.** Egbert (1997), *Robust multiple-station magnetotelluric data
+processing* (EMTF); Chave & Thomson (2004), *Bounded influence magnetotelluric
+response function estimation* (BIRRP); aurora (simpeg, Kappler et al.) — `Band`
+metadata + EMTF band setup files; mth5 FC layer.

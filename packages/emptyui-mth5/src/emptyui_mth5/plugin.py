@@ -9,12 +9,14 @@ mt.selection payload.
 
 from __future__ import annotations
 
+from .calibrate import Calibrate
 from .fc import FCGroupToSpectra, SpectraToFCGroup
 from .io import LoadMth5, SaveMth5
 from .lemi import LoadLemi
 from .merge import MergeRuns
 from .plots import PlotAppResPhase
 from .runs import ExtractRun, MergeChannels, SplitChannels
+from .tables import ViewSelection, ViewTF
 from .tf import ExportTF, ImportTF
 
 
@@ -31,3 +33,6 @@ def register(registry) -> None:
     registry.add(FCGroupToSpectra)
     registry.add(SpectraToFCGroup)
     registry.add(PlotAppResPhase)
+    registry.add(ViewSelection)
+    registry.add(ViewTF)
+    registry.add(Calibrate)

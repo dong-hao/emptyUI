@@ -154,7 +154,12 @@ def create_app(registry: Registry | None = None) -> FastAPI:
         info = artifacts.get(artifact_id)
         if info is None:
             raise HTTPException(status_code=404, detail="unknown artifact")
-        media = "image/png" if info["kind"] == "image" else "application/octet-stream"
+        if info["kind"] == "image":
+            media = "image/png"
+        elif info["kind"] == "table":
+            media = "application/json"
+        else:
+            media = "application/octet-stream"
         return FileResponse(info["path"], media_type=media)
 
     @app.websocket("/api/ws")

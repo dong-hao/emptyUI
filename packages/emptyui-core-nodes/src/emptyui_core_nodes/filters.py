@@ -60,6 +60,8 @@ class Bandpass(Node):
             ctx.progress(len(filtered) / max(len(data.channels), 1), f"filtered {k}")
         return {"filtered": TimeSeries(
             channels=filtered, sample_rate=fs, start=data.start,
+            start_datetime=data.start_datetime,
+            survey=data.survey, station=data.station, run=data.run,
             meta={**data.meta, "filter": "bandpass"},
         )}
 
@@ -97,7 +99,11 @@ class Detrend(Node):
                 out[k] = detrend(v)
             ctx.progress(len(out) / max(len(data.channels), 1), f"detrended {k}")
         return {"data": TimeSeries(channels=out, sample_rate=data.sample_rate,
-                                   start=data.start, meta=dict(data.meta))}
+                                   start=data.start,
+                                   start_datetime=data.start_datetime,
+                                   survey=data.survey, station=data.station,
+                                   run=data.run,
+                                   meta=dict(data.meta))}
 
 
 def register(registry) -> None:

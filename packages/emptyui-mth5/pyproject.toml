@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "emptyui",
+    "emptyui-core-nodes",
     "mth5==0.6.8",
     "mt_metadata==1.0.10",
     "mt_timeseries==0.0.2",

@@ -15,11 +15,20 @@ import numpy as np
 
 @dataclass
 class TimeSeries:
-    """Multi-channel time series (``ts.run`` port payload)."""
+    """Multi-channel time series (``ts.run`` port payload).
+
+    ``start`` is a relative start offset in seconds; ``start_datetime`` is the
+    absolute start (ISO string) when known (e.g. from an mth5 RunTS), used for
+    FC persistence.
+    """
 
     channels: dict[str, np.ndarray]
     sample_rate: float
     start: float = 0.0  # seconds relative to record start
+    start_datetime: str = ""
+    survey: str = ""
+    station: str = ""
+    run: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -34,8 +43,41 @@ class TimeSeries:
             channels={k: v.copy() for k, v in self.channels.items()},
             sample_rate=self.sample_rate,
             start=self.start,
+            start_datetime=self.start_datetime,
+            survey=self.survey,
+            station=self.station,
+            run=self.run,
             meta=dict(self.meta),
         )
+
+
+def _meta_id(value) -> str:
+    """Best-effort id string from an mth5 metadata object (has ``.id``)."""
+    try:
+        return str(value.id) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _iso_start(value) -> str:
+    """Best-effort ISO string from a RunTS/ChannelTS absolute start (datetime,
+    pandas Timestamp, or mt_metadata MTime). Empty string if not available."""
+    if value is None or isinstance(value, (int, float, np.number)):
+        return ""
+    for attr in ("isoformat", "iso_str"):
+        fn = getattr(value, attr, None)
+        if callable(fn):
+            try:
+                s = str(fn())
+                if s:
+                    return s
+            except Exception:  # noqa: BLE001, S112
+                continue
+    import datetime as _dt
+
+    if isinstance(value, _dt.datetime):
+        return value.isoformat()
+    return ""
 
 
 def coerce_run(value):
@@ -54,7 +96,14 @@ def coerce_run(value):
             str(k): np.ascontiguousarray(ds[k].values, dtype=np.float64)
             for k in ds.data_vars
         }
-        return TimeSeries(channels=channels, sample_rate=sample_rate)
+        return TimeSeries(
+            channels=channels,
+            sample_rate=sample_rate,
+            start_datetime=_iso_start(getattr(value, "start", None)),
+            survey=_meta_id(getattr(value, "survey_metadata", None)),
+            station=_meta_id(getattr(value, "station_metadata", None)),
+            run=_meta_id(getattr(value, "run_metadata", None)),
+        )
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
         return value
     raise TypeError(

@@ -1,4 +1,5 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
+import { useEffect, useState } from "react";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
@@ -41,6 +42,11 @@ export function MTNode({ id, data, selected }: NodeProps) {
       .getState()
       .updateNodeData(id, (prev) => ({ params: { ...prev.params, [name]: value } }));
 
+  // The remote-reference checkbox only applies to the robust estimator;
+  // disable it when a least-squares estimator is selected.
+  const engineVal = String(d.params["estimator_engine"] ?? "Robust").toLowerCase();
+  const isLeastSquares = engineVal.includes("least") || engineVal === "ols" || engineVal === "ls";
+
   return (
     <div className={`mt-node${selected ? " selected" : ""} status-${runState?.status ?? "idle"}`}>
       <NodeResizer
@@ -69,6 +75,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
               value={d.params[p.name] ?? p.default ?? ""}
               onChange={(v) => setParam(p.name, v)}
               compact
+              disabled={p.name === "remote_reference" && isLeastSquares}
             />
           ))}
         </div>
@@ -76,6 +83,8 @@ export function MTNode({ id, data, selected }: NodeProps) {
 
       {d.nodeType === "core.display.preview_plot" ? (
         <PreviewBody nodeId={id} />
+      ) : d.nodeType === "core.display.view_table" ? (
+        <TableBody nodeId={id} />
       ) : (
         <div className="mt-node-ports">
         {rows > 0 ? (
@@ -188,6 +197,114 @@ function HandleOutPlot() {
       className="mt-port"
       style={{ background: portColor("plot", catalog) }}
       title="plot: plot"
+    />
+  );
+}
+
+/** Inline table viewer: fills the node body; fetches the JSON artifact. */
+function TableBody({ nodeId }: { nodeId: string }) {
+  const artifact = useInputPlotArtifact(nodeId);
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setRows(null);
+    setErr(null);
+    if (!artifact) return;
+    fetch(artifact.url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`fetch ${artifact.url}: ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (active) setRows(Array.isArray(data) ? data : [data]);
+      })
+      .catch((e) => {
+        if (active) setErr(String(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [artifact]);
+
+  const cols = rows?.length
+    ? Array.from(new Set(rows.flatMap((r) => Object.keys(r))))
+    : [];
+  const ports = (
+    <div className="mt-node-ports mt-preview-ports">
+      <div className="mt-row">
+        <span className="mt-port-label in">
+          <HandleInTable />
+          <span>table</span>
+        </span>
+        <span className="mt-port-label out">
+          <span>table</span>
+          <HandleOutTable />
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="mt-table">
+        {err ? (
+          <span className="muted-small">{err}</span>
+        ) : !artifact ? (
+          <span className="muted-small">connect a table · run to render</span>
+        ) : !rows ? (
+          <span className="muted-small">loading…</span>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                {cols.map((c) => (
+                  <th key={c}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  {cols.map((c) => (
+                    <td key={c}>{String(r[c] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {ports}
+    </>
+  );
+}
+
+function HandleInTable() {
+  const catalog = useCatalog((s) => s.catalog);
+  return (
+    <Handle
+      id="table"
+      type="target"
+      position={Position.Left}
+      className="mt-port"
+      style={{ background: portColor("table", catalog) }}
+      title="table: table"
+    />
+  );
+}
+
+function HandleOutTable() {
+  const catalog = useCatalog((s) => s.catalog);
+  return (
+    <Handle
+      id="table"
+      type="source"
+      position={Position.Right}
+      className="mt-port"
+      style={{ background: portColor("table", catalog) }}
+      title="table: table"
     />
   );
 }

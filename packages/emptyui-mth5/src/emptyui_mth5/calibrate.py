@@ -1,0 +1,113 @@
+"""Calibration node: remove instrument response from a time series (DESIGN §3)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+from emptyui import Input, Node, Output, Param
+
+
+def _channels_and_rate(data):
+    """Return (channels: dict[str, np.ndarray], sample_rate) from a ts.run."""
+    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
+        ds = data.dataset
+        sr = float(data.sample_rate)
+        ch = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
+        return ch, sr
+    if hasattr(data, "channels") and hasattr(data, "sample_rate"):  # core TimeSeries
+        sr = float(data.sample_rate)
+        ch = {str(k): np.asarray(v, dtype=float) for k, v in data.channels.items()}
+        return ch, sr
+    raise TypeError(f"cannot interpret ts.run of type {type(data).__name__}")
+
+
+def _response_fn(calibration):
+    """Return a callable frequency->complex response for a calibration payload.
+
+    Accepts a single mt_metadata filter / ChannelResponse, or a list of filters
+    (combined via ChannelResponse).
+    """
+    from mt_metadata.timeseries.filters import ChannelResponse
+
+    if isinstance(calibration, (list, tuple)):
+        cr = ChannelResponse()
+        return lambda f: np.asarray(cr.complex_response(f, filters_list=list(calibration)))
+    if hasattr(calibration, "complex_response"):
+        return lambda f: np.asarray(calibration.complex_response(f))
+    raise TypeError(
+        f"cannot interpret calibration of type {type(calibration).__name__} "
+        "(expected an mt_metadata filter / ChannelResponse)"
+    )
+
+
+def _remove_response(x, sample_rate, response_fn):
+    """Apply frequency-domain response removal: divide FFT by the response."""
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1.0 / sample_rate)
+    resp = response_fn(f)
+    resp = np.where(np.abs(resp) < 1e-12, 1.0, resp)  # guard DC/zero response
+    return np.fft.irfft(X / resp, n=len(x))
+
+
+def _as_core_ts(channels, sample_rate, source):
+    """Wrap calibrated numpy channels as a core TimeSeries (ts.run duck-type)."""
+    from emptyui_core_nodes.types import TimeSeries
+
+    return TimeSeries(
+        channels=channels,
+        sample_rate=sample_rate,
+        start=getattr(source, "start", 0.0),
+        start_datetime=getattr(source, "start_datetime", ""),
+        survey=getattr(source, "survey", ""),
+        station=getattr(source, "station", ""),
+        run=getattr(source, "run", ""),
+    )
+
+
+class Calibrate(Node):
+    type = "mth5.calibrate"
+    title = "Calibrate"
+    description = (
+        "Remove the instrument response from a time series (calibration). With "
+        "no 'calibration' input, uses the run's own mth5 channel responses "
+        "(mth5 RunTS.calibrate). With an explicit 'calibration' filter(s), "
+        "applies frequency-domain response removal."
+    )
+    category = "Processing"
+    inputs = (
+        Input("data", "ts.run"),
+        Input("calibration", "calibration", required=False),
+    )
+    outputs = (Output("data", "ts.run", label="calibrated"),)
+    params = (
+        Param("include_decimation", "boolean", label="Include decimation", default=False),
+        Param("include_delay", "boolean", label="Include delay", default=False),
+    )
+
+    def execute(self, ctx, data, calibration=None,
+                include_decimation: bool = False,
+                include_delay: bool = False) -> dict[str, Any]:
+        # Idiomatic mth5 path: the run carries its own channel responses.
+        if calibration is None and hasattr(data, "calibrate") and not isinstance(data, dict):
+            out = data.calibrate(include_decimation=include_decimation,
+                                 include_delay=include_delay)
+            ctx.progress(1.0, "calibrated via mth5 channel responses")
+            return {"data": out}
+
+        # Explicit calibration path: frequency-domain response removal.
+        channels, sample_rate = _channels_and_rate(data)
+        calibrated = {}
+        for ch, x in channels.items():
+            if isinstance(calibration, dict):
+                fn = _response_fn(calibration[ch]) if ch in calibration else None
+            else:
+                fn = _response_fn(calibration)
+            calibrated[ch] = x if fn is None else _remove_response(x, sample_rate, fn)
+        out = _as_core_ts(calibrated, sample_rate, data)
+        ctx.progress(1.0, f"calibrated {len(calibrated)} channels")
+        return {"data": out}
+
+
+def register(registry) -> None:
+    registry.add(Calibrate)

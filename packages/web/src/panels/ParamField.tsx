@@ -7,11 +7,12 @@ interface Props {
   value: unknown;
   onChange: (v: unknown) => void;
   compact?: boolean;
+  disabled?: boolean;
 }
 
 /** One schema-driven widget (widget vocabulary from the manifest).
  *  Used both inline on nodes (ComfyUI-style) and in the properties panel. */
-export function ParamField({ param, value, onChange, compact }: Props) {
+export function ParamField({ param, value, onChange, compact, disabled }: Props) {
   const [browsing, setBrowsing] = useState(false);
   const set = (v: unknown) => onChange(v);
   const str = value === null || value === undefined ? "" : String(value);
@@ -23,13 +24,14 @@ export function ParamField({ param, value, onChange, compact }: Props) {
         <input
           type="checkbox"
           checked={Boolean(value)}
+          disabled={disabled}
           onChange={(e) => set(e.target.checked)}
         />
       );
       break;
     case "select":
       field = (
-        <select value={str} onChange={(e) => set(e.target.value)}>
+        <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
           {(param.options ?? []).map((o) => (
             <option key={String(o)}>{String(o)}</option>
           ))}
@@ -103,7 +105,7 @@ export function ParamField({ param, value, onChange, compact }: Props) {
 
   return (
     <div
-      className={`param-field${compact ? " compact" : ""} nodrag nopan`}
+      className={`param-field${compact ? " compact" : ""}${disabled ? " disabled" : ""} nodrag nopan`}
       title={param.description || param.label}
     >
       <span className="param-label">{param.label}</span>

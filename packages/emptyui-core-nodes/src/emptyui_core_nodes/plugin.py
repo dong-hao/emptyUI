@@ -13,6 +13,7 @@ from .plots import PlotSpectrogramNode, PlotTimeSeriesNode
 from .plugin_core import Echo
 from .preview import PreviewPlotNode
 from .save_plot import SavePlotNode
+from .table_view import ViewTableNode
 
 
 def register(registry) -> None:
@@ -24,3 +25,4 @@ def register(registry) -> None:
     registry.add(PlotSpectrogramNode)
     registry.add(PreviewPlotNode)
     registry.add(SavePlotNode)
+    registry.add(ViewTableNode)
