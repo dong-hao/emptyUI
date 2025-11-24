@@ -82,16 +82,28 @@ cd packages/web && npm install && npm run dev
     frontend-only, recursive **chain-walking** resolver with per-node name
     mapping (see DESIGN.md §4 "Chain-walking inheritance"), so identities flow
     through intermediate nodes and future processing nodes without losing info.
+    Inherited fields are **editable comboboxes** (datalist): they stay typeable,
+    and only become dropdowns when an upstream node actually provides a value
+    (a declared param connected to a source that yields nothing stays editable).
   - **Bug fix**: `Load LEMI-424` now overwrites a stale/corrupt MTH5 left by a
     force-stopped run instead of failing on it.
+  - **Bug fix**: `Extract Run` with empty survey/station/run now falls back to
+    the first available (instead of erroring on the removed `surveys_list`
+    attribute) and supports both modern (`surveys_group`) and legacy
+    single-survey (`survey_group`) archive layouts.
   - **CI fixture**: `test12rr` (synthetic halfspace) is generated on the fly by
     test fixtures, so the MT tests run in CI without gitignored LEMI/BGS data.
+  - **Cleanup**: removed superseded legacy aurora config/selection nodes
+    (`BuildConfig`/`FrequencyBands`/`SelectRuns`) and the unused `bands`/
+    `selection` input ports on `Compute FC`/`Estimate TF`; the default pipeline
+    is `ExtractRun → ComputeFC → EstimateTF (+ MergeTFLevels)`.
 
 ### UI conventions (stable)
 
 - **ComfyUI paradigm**: node parameters render inline on the node body; the
-  right-hand panel is metadata-only (node id, version, ports). Path widgets
-  include a server-side file browser ("…" button).
+  right-hand panel shows metadata (node id, version, ports, description, deps)
+  and a Delete action. Path widgets include a server-side file browser ("…"
+  button).
 - **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
   nodes render figures inline (drag-resizable) and `Save Plot` exports them —
   ComfyUI's Preview/Save Image pattern. The Results panel is a run-level

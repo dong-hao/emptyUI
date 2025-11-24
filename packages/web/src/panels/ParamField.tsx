@@ -22,6 +22,10 @@ export function ParamField({ param, value, onChange, compact, disabled, selectOp
 
   let field: JSX.Element;
   if (selectOptions && selectOptions.length > 0) {
+    // Editable combobox (datalist): shows the upstream-provided options as
+    // suggestions while remaining fully typeable, so an inherited value is a
+    // convenience rather than a lock-in.
+    const listId = `dl-${param.name}`;
     const opts = Array.from(
       new Set([
         ...selectOptions.map(String),
@@ -29,13 +33,19 @@ export function ParamField({ param, value, onChange, compact, disabled, selectOp
       ]),
     );
     field = (
-      <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
-        {opts.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+      <>
+        <input
+          list={listId}
+          value={str}
+          disabled={disabled}
+          onChange={(e) => set(e.target.value)}
+        />
+        <datalist id={listId}>
+          {opts.map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+      </>
     );
   } else {
     switch (param.widget) {

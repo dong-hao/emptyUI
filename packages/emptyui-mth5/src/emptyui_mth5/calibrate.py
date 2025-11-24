@@ -51,17 +51,29 @@ def _remove_response(x, sample_rate, response_fn):
 
 
 def _as_core_ts(channels, sample_rate, source):
-    """Wrap calibrated numpy channels as a core TimeSeries (ts.run duck-type)."""
-    from emptyui_core_nodes.types import TimeSeries
+    """Wrap calibrated numpy channels as a core TimeSeries (ts.run duck-type).
+
+    Preserves the absolute start and survey/station/run identity, handling both
+    an mth5 RunTS (``.start`` is a datetime; identity on *_metadata.id) and a
+    core TimeSeries (``.start`` float seconds + ``.start_datetime`` ISO).
+    """
+    from emptyui_core_nodes.types import TimeSeries, _iso_start, _meta_id
+
+    start = getattr(source, "start", 0.0)
+    if isinstance(start, (int, float, np.number)):
+        start_datetime = _iso_start(getattr(source, "start_datetime", ""))
+    else:  # datetime-like absolute start -> move to start_datetime
+        start_datetime = _iso_start(start)
+        start = 0.0
 
     return TimeSeries(
         channels=channels,
         sample_rate=sample_rate,
-        start=getattr(source, "start", 0.0),
-        start_datetime=getattr(source, "start_datetime", ""),
-        survey=getattr(source, "survey", ""),
-        station=getattr(source, "station", ""),
-        run=getattr(source, "run", ""),
+        start=start,
+        start_datetime=start_datetime,
+        survey=_meta_id(getattr(source, "survey_metadata", None)) or getattr(source, "survey", ""),
+        station=_meta_id(getattr(source, "station_metadata", None)) or getattr(source, "station", ""),
+        run=_meta_id(getattr(source, "run_metadata", None)) or getattr(source, "run", ""),
     )
 
 

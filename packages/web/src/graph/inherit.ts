@@ -46,12 +46,18 @@ export function inheritableParams(manifest: NodeManifest | undefined): Set<strin
   return set;
 }
 
-/** Candidate values for `paramName` on `nodeId`, walking the upstream chain. */
+/** Candidate *inherited* values for `paramName` on `nodeId`, walking the
+ *  upstream chain. Does NOT include `nodeId`'s own value, so a param only
+ *  renders as a dropdown / auto-fills when an upstream node actually provides
+ *  a value — otherwise it stays a normal, editable field. The recursion
+ *  (`includeOwn=true`) does consider each upstream node's own value.
+ */
 export function resolveInherited(
   ctx: InheritContext,
   nodeId: string,
   paramName: string,
   visited: Set<string> = new Set(),
+  includeOwn = false,
 ): string[] {
   const key = `${nodeId}::${paramName}`;
   if (visited.has(key)) return [];
@@ -64,11 +70,13 @@ export function resolveInherited(
 
   const out = new Set<string>();
 
-  // 1. this node already carries a value for the param
-  const own = paramOf(node, paramName);
-  if (nonEmpty(own)) {
-    out.add(String(own));
-    return [...out];
+  // intermediate hop: a value actually set on this node is a candidate
+  if (includeOwn) {
+    const own = paramOf(node, paramName);
+    if (nonEmpty(own)) {
+      out.add(String(own));
+      return [...out];
+    }
   }
 
   const portNames = (manifest?.inputs ?? []).map((i) => i.name);
@@ -77,7 +85,7 @@ export function resolveInherited(
   const seek = (portName: string, seekName: string) => {
     for (const edge of ctx.edges) {
       if (edge.target !== nodeId || edge.targetHandle !== portName) continue;
-      for (const v of resolveInherited(ctx, edge.source, seekName, visited)) {
+      for (const v of resolveInherited(ctx, edge.source, seekName, visited, true)) {
         out.add(v);
       }
     }

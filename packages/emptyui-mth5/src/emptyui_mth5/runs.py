@@ -8,6 +8,57 @@ import pandas as pd
 from emptyui import Input, Node, Output, Param
 
 
+def _resolve_survey(mth5, survey: str):
+    """Return a SurveyGroup object for ``survey`` (or the first available).
+
+    Supports both the modern container (``mth5.surveys_group``,
+    ``MasterSurveyGroup.groups_list`` = survey ids) and legacy single-survey
+    v0.1.0 synthetic files (``mth5.survey_group`` is the survey itself).
+    """
+    master = getattr(mth5, "surveys_group", None)
+    if master is not None:
+        ids = master.groups_list or []
+        if survey:
+            if survey in ids:
+                return master.get_survey(survey)
+            raise ValueError(f"survey '{survey}' not in archive {ids}")
+        if not ids:
+            raise ValueError("archive has no surveys — set 'survey'")
+        return master.get_survey(ids[0])
+    legacy = getattr(mth5, "survey_group", None)
+    if legacy is None:
+        raise ValueError("archive has no survey group — set 'survey'")
+    if survey and getattr(getattr(legacy, "metadata", None), "id", "") != survey:
+        raise ValueError(f"survey '{survey}' not in archive")
+    return legacy
+
+
+def _resolve_station(survey_obj, station: str):
+    """Return a StationGroup object for ``station`` (or the first available)."""
+    stg = survey_obj.stations_group
+    ids = stg.groups_list or []
+    if station:
+        if station in ids:
+            return stg.get_station(station)
+        raise ValueError(f"station '{station}' not in survey {ids}")
+    if not ids:
+        raise ValueError("survey has no stations — set 'station'")
+    return stg.get_station(ids[0])
+
+
+def _resolve_run(station_obj, run: str):
+    """Return a Run object for ``run`` (or the first in the run summary)."""
+    summary = station_obj.run_summary
+    ids = [str(x) for x in summary["id"]] if summary is not None and len(summary) else []
+    if run:
+        if run in ids:
+            return station_obj.get_run(run)
+        raise ValueError(f"run '{run}' not in station {ids}")
+    if not ids:
+        raise ValueError("station has no runs — set 'run'")
+    return station_obj.get_run(ids[0])
+
+
 class ExtractRun(Node):
     type = "mth5.io.extract_run"
     title = "Extract Run"
@@ -28,19 +79,13 @@ class ExtractRun(Node):
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
                 run: str = "", start: str = "", end: str = "") -> dict[str, Any]:
-        survey_obj = mth5.surveys_group.get_survey(survey) if survey else None
-        if survey_obj is None:
-            survey_obj = mth5.surveys_group.surveys_list[0] if survey_obj is None else None
-        station_obj = survey_obj.stations_group.get_station(station)
-        if run:
-            run_obj = station_obj.get_run(run)
-        else:
-            run_id = station_obj.run_summary.iloc[0]["id"]
-            run_obj = station_obj.get_run(run_id)
+        survey_obj = _resolve_survey(mth5, survey)
+        station_obj = _resolve_station(survey_obj, station)
+        run_obj = _resolve_run(station_obj, run)
         start_dt = pd.to_datetime(start) if start else None
         end_dt = pd.to_datetime(end) if end else None
         runts = run_obj.to_runts(start=start_dt, end=end_dt)
-        ctx.progress(1.0, f"extracted {survey}/{station}/{run_obj.metadata.id}")
+        ctx.progress(1.0, f"extracted {survey_obj.metadata.id}/{station_obj.metadata.id}/{run_obj.metadata.id}")
         return {"data": runts}
 
 

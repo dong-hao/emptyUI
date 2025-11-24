@@ -423,27 +423,35 @@ Rules:
 1. **Per-node declaration.** Each node declares only its own
    `inherit: {input_port: {target_param: upstream_param}}`. There is no global
    registry of identities.
-2. **Only declared params auto-fill.** A param is auto-filled / rendered as a
-   dropdown **only if** it appears as a target in the node's own `inherit`
-   mapping. Everything else — root-node defaults, radio/select config (e.g.
-   `Detrend` method, `Compute FC` magnetic unit, `Estimate TF` estimator) —
-   stays fully manual. This keeps the "set once at the source, inherit
-   downstream" intent: a user types the identity at the first node, and every
-   declared downstream param is then filled from it.
-3. **Recursive chain-walk.** `resolve` returns a node's param value if it is
-   non-empty; otherwise it follows the node's own `inherit` mapping for that
-   port, follows the edges into the port, and recurses on each source. The walk
-   is transitive across arbitrary processing nodes even when an intermediate
-   node declares nothing for the param (pass-through fallback) — e.g.
-   `Compute FC → Detrend → Extract Run → Load LEMI-424` still resolves
-   `survey`, so inserting a future time-domain node (de-noising, filtering)
-   between the source and `Compute FC` never loses the identity.
-4. **Name mapping.** Each hop uses the *current* node's mapping to decide which
+2. **Only declared params auto-fill.** A param is auto-filled **only if** it
+   appears as a target in the node's own `inherit` mapping. Everything else —
+   root-node defaults, radio/select config (e.g. `Detrend` method, `Compute FC`
+   magnetic unit, `Estimate TF` estimator) — stays fully manual. This keeps the
+   "set once at the source, inherit downstream" intent: a user types the
+   identity at the first node, and every declared downstream param is then
+   filled from it.
+3. **Editable until a source provides a value.** `resolve` does **not** return a
+   node's *own* value as an inherited option (that value is just the current
+   field contents). So a declared param connected to a source that provides
+   nothing (e.g. `Extract Run` → `Load MTH5`, which has no `survey_id`) stays a
+   plain editable text field — even after the user types into it. It only
+   becomes a dropdown once an upstream node actually yields a value. The
+   inherited dropdown is an **editable combobox** (datalist), so a suggested
+   value can always be overridden by typing.
+4. **Recursive chain-walk.** For the entry node the resolver walks its declared
+   mapping (or pass-through) upstream; at each intermediate hop it *does*
+   consider that hop's own value as a candidate. The walk is transitive across
+   arbitrary processing nodes even when an intermediate node declares nothing
+   for the param (pass-through fallback) — e.g. `Compute FC → Detrend → Extract
+   Run → Load LEMI-424` still resolves `survey`, so inserting a future
+   time-domain node (de-noising, filtering) between the source and `Compute FC`
+   never loses the identity.
+5. **Name mapping.** Each hop uses the *current* node's mapping to decide which
    upstream param to look for, so heterogeneous sources (e.g. `survey_id`) are
    bridged without changing the downstream node.
-5. **Cycles & fan-in.** Use a visited set (the graph is a DAG but be defensive)
+6. **Cycles & fan-in.** Use a visited set (the graph is a DAG but be defensive)
    and union candidates across parallel sources feeding a port.
-6. **Same-name default.** Prefer the identity mapping; only declare a mapping
+7. **Same-name default.** Prefer the identity mapping; only declare a mapping
    when names actually differ.
 
 Adding a new node type therefore needs **zero changes to the resolver** — just a
