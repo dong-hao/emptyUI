@@ -18,7 +18,12 @@ export interface ParamSpec {
   max?: number;
   step?: number;
   description?: string;
+  /** Auto-change rules: value key -> [targetParam, targetValue][] */
+  cascade?: Record<string, [string, unknown][]>;
 }
+
+/** inherit: input port -> { targetParam: upstreamParam } */
+export type InheritMap = Record<string, Record<string, string>>;
 
 export interface NodeManifest {
   type: string;
@@ -30,6 +35,8 @@ export interface NodeManifest {
   outputs: PortSpec[];
   params: ParamSpec[];
   deps: string[];
+  /** input port -> {targetParam, upstreamParam} for chain-walking auto-fill */
+  inherit?: InheritMap;
 }
 
 export interface Catalog {

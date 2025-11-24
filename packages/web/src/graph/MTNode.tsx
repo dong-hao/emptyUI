@@ -1,9 +1,10 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
 import { ParamField } from "../panels/ParamField";
+import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
 /** Resolve the artifact flowing into a Preview node's `plot` input:
  *  input edge → source node + source handle → matching artifact. */
@@ -31,16 +32,61 @@ export function MTNode({ id, data, selected }: NodeProps) {
   const manifest = catalog?.nodes.find((m) => m.type === data.nodeType);
   const d = data as MTNodeData;
   const runState = useRun((s) => s.nodeStates[id]);
+  const nodes = useWorkflow((s) => s.nodes);
+  const edges = useWorkflow((s) => s.edges);
 
   const inputs = manifest?.inputs ?? [];
   const outputs = manifest?.outputs ?? [];
   const rows = Math.max(inputs.length, outputs.length);
   const params = manifest?.params ?? [];
 
-  const setParam = (name: string, value: unknown) =>
-    useWorkflow
-      .getState()
-      .updateNodeData(id, (prev) => ({ params: { ...prev.params, [name]: value } }));
+  // Chain-walking inheritance context (DESIGN.md §4): survey/station/run (and
+  // any other declared params) auto-fill from the upstream chain, flowing
+  // through intermediate nodes.
+  const inheritCtx = useMemo(
+    () => makeInheritContext(catalog?.nodes, nodes, edges),
+    [catalog, nodes, edges],
+  );
+  const inheritedOptions = (paramName: string): string[] =>
+    resolveInherited(inheritCtx, id, paramName);
+
+  // Only params the node declares as inheritable may auto-fill / become a
+  // dropdown; everything else (root defaults, radio/select config) stays manual.
+  const inheritable = useMemo(() => inheritableParams(manifest), [manifest]);
+
+  const setParam = (name: string, value: unknown) => {
+    const state = useWorkflow.getState();
+    const updates: Record<string, unknown> = { [name]: value };
+    // apply manifest cascade rules (e.g. magnetic h<->b swaps channel names;
+    // remote reference forces the robust estimator)
+    const spec = manifest?.params.find((p) => p.name === name);
+    const actions = spec?.cascade?.[String(value)];
+    if (actions) {
+      for (const [target, tv] of actions) updates[target] = tv;
+    }
+    state.updateNodeData(id, (prev) => ({ params: { ...prev.params, ...updates } }));
+  };
+
+  // Auto-fill inheritable params that are still empty once a source is connected.
+  useEffect(() => {
+    const state = useWorkflow.getState();
+    const ctx = makeInheritContext(catalog?.nodes, state.nodes, state.edges);
+    const cur =
+      (state.nodes.find((n) => n.id === id)?.data as MTNodeData | undefined)?.params ?? {};
+    const updates: Record<string, unknown> = {};
+    for (const p of params) {
+      if (!inheritable.has(p.name)) continue;
+      const opts = resolveInherited(ctx, id, p.name);
+      if (opts.length === 0) continue;
+      const empty =
+        cur[p.name] === undefined || cur[p.name] === null || String(cur[p.name]).trim() === "";
+      if (empty) updates[p.name] = opts[0];
+    }
+    if (Object.keys(updates).length) {
+      state.updateNodeData(id, (prev) => ({ params: { ...prev.params, ...updates } }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, catalog, manifest, edges, nodes]);
 
   // The remote-reference checkbox only applies to the robust estimator;
   // disable it when a least-squares estimator is selected.
@@ -68,16 +114,21 @@ export function MTNode({ id, data, selected }: NodeProps) {
 
       {params.length > 0 && (
         <div className="mt-node-params">
-          {params.map((p) => (
-            <ParamField
-              key={p.name}
-              param={p}
-              value={d.params[p.name] ?? p.default ?? ""}
-              onChange={(v) => setParam(p.name, v)}
-              compact
-              disabled={p.name === "remote_reference" && isLeastSquares}
-            />
-          ))}
+          {params.map((p) => {
+            const opts = inheritable.has(p.name) ? inheritedOptions(p.name) : [];
+            const sel = opts.length > 0 ? opts : undefined;
+            return (
+              <ParamField
+                key={p.name}
+                param={p}
+                value={d.params[p.name] ?? p.default ?? ""}
+                onChange={(v) => setParam(p.name, v)}
+                compact
+                disabled={p.name === "remote_reference" && isLeastSquares}
+                selectOptions={sel}
+              />
+            );
+          })}
         </div>
       )}
 

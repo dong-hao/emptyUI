@@ -6,7 +6,7 @@ These nodes convert between a spectra handle and the FC storage layer.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
 
@@ -26,6 +26,9 @@ class FCGroupToSpectra(Node):
         Param("channels", "string", label="Channels (comma-sep, empty=all)",
               default="", optional=True),
     )
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "mth5": {"survey": "survey_id", "station": "station_id"},
+    }
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
                 run: str = "", decimation_level: int = 0,
@@ -55,6 +58,9 @@ class SpectraToFCGroup(Node):
         Param("run", "string", default=""),
         Param("sample_rate", "number", label="Decimation-level sample rate", default=1.0),
     )
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "fc": {"survey": "survey", "station": "station", "run": "run"},
+    }
 
     def execute(self, ctx, fc, mth5=None, survey: str = "",
                 station: str = "", run: str = "", sample_rate: float = 1.0) -> dict[str, Any]:

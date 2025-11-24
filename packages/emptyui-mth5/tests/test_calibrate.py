@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pathlib
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +10,6 @@ from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_core_nodes.types import TimeSeries
 from emptyui_mth5.calibrate import Calibrate
-
-SYNTH = pathlib.Path("/tmp/opencode/synth/test12rr.h5")
 
 
 def test_calibrate_explicit_coefficient_filter(tmp_path: Path):
@@ -42,8 +39,7 @@ def test_calibrate_requires_something(tmp_path: Path):
         Calibrate().execute(ctx, ts, calibration=None)
 
 
-@pytest.mark.skipif(not SYNTH.exists(), reason="test12rr not on disk")
-def test_calibrate_mth5_runts_path(tmp_path: Path):
+def test_calibrate_mth5_runts_path(test12rr_path: Path, tmp_path: Path):
     """RunTS.calibrate() path runs without error on an mth5 RunTS."""
     import warnings
 
@@ -51,7 +47,7 @@ def test_calibrate_mth5_runts_path(tmp_path: Path):
     from mth5.mth5 import MTH5
 
     m = MTH5()
-    m.open_mth5(str(SYNTH), "r")
+    m.open_mth5(str(test12rr_path), "r")
     st = m.survey_group.stations_group.get_station("test1")
     runts = st.get_run(st.run_summary.iloc[0]["id"]).to_runts()
     m.close_mth5()

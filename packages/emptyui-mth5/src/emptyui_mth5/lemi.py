@@ -45,6 +45,13 @@ class LoadLemi(Node):
             save_path=save,
             mth5_filename=mth5_filename,
         )
+        # A previous run that was force-stopped mid-write can leave a corrupt /
+        # locked MTH5 at the target path; open_mth5(mode="a") then fails on the
+        # leftover file. Overwrite any existing file so we always start fresh.
+        target = Path(client.save_path)
+        if target.exists():
+            ctx.logger.warning("overwriting existing MTH5 at %s", target)
+            target.unlink()
         created = client.make_mth5_from_lemi424(survey_id, station_id)
 
         archive = MTH5()

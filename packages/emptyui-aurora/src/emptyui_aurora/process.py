@@ -8,7 +8,7 @@ Estimators are OLS / robust RME / remote-reference RME_RR (aurora-backed).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
 
@@ -41,7 +41,11 @@ class ComputeFC(Node):
         Param("output_channels", "string", label="Output channels", default="ex,ey"),
         Param("magnetic_unit", "radio", label="Magnetic input", default="h",
               options=("h", "b"),
-              description="h = coil sensor (already H); b = fluxgate (B converted to H)"),
+              description="h = coil sensor (already H); b = fluxgate (B converted to H)",
+              cascade={
+                  "h": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
+                  "b": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
+              }),
         Param("e_dipole_length_m", "number", label="E dipole length (m)", default=None,
               optional=True,
               description="LEMI stores E as mV potential; divide by dipole length to get V/m"),
@@ -55,10 +59,13 @@ class ComputeFC(Node):
         Param("window_type", "select", options=("hamming", "hanning"), default="hamming"),
         Param("persist", "boolean", label="Persist to workspace", default=True,
               description="Write each level's FC into the workspace MTH5 FC layer"),
-        Param("survey", "string", default="", optional=True),
-        Param("station", "string", default="", optional=True),
-        Param("run", "string", default="", optional=True),
+        Param("survey", "string", label="Survey id", default="", optional=True),
+        Param("station", "string", label="Station id", default="", optional=True),
+        Param("run", "string", label="Run id", default="", optional=True),
     )
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "data": {"survey": "survey", "station": "station", "run": "run"},
+    }
 
     def execute(self, ctx, data, bands=None, input_channels: str = "hx,hy",
                 output_channels: str = "ex,ey", magnetic_unit: str = "h",
@@ -127,7 +134,8 @@ class EstimateTF(Node):
         Param("remote_reference", "boolean", label="Remote Reference",
               default=False,
               description="Robust remote reference (RME_RR). Only applies to "
-                          "the 'Robust' estimator."),
+                          "the 'Robust' estimator.",
+              cascade={True: (("estimator_engine", "Robust"),)}),
         Param("periods_per_octave", "integer", label="Periods per octave",
               default=4, min=1,
               description="Log2 period bands per power-of-2 octave."),

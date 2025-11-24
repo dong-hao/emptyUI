@@ -71,6 +71,21 @@ cd packages/web && npm install && npm run dev
     `ts.run` — using the run's own mth5 channel responses, or an explicit
     `calibration` filter via frequency-domain response removal.
   M2 is now complete (all §11 M2 deliverables delivered).
+- **M2 — Phase 4 polish**:
+  - **Auto field change**: switching `Compute FC` magnetic input `h ⇄ b`
+    auto-updates the channel names (`hx,hy/ex,ey` ⇄ `bx,by/e1,e2`); ticking
+    `Remote Reference` on `Estimate TF` auto-switches the estimator to Robust.
+    Driven by manifest `Param.cascade` rules (see §4).
+  - **Auto field fill**: `Compute FC`'s survey/station/run become dropdowns
+    populated from the connected upstream time-series node, via manifest
+    `Node.inherit` (survey/station/run auto-filled once connected). Designed as a
+    frontend-only, recursive **chain-walking** resolver with per-node name
+    mapping (see DESIGN.md §4 "Chain-walking inheritance"), so identities flow
+    through intermediate nodes and future processing nodes without losing info.
+  - **Bug fix**: `Load LEMI-424` now overwrites a stale/corrupt MTH5 left by a
+    force-stopped run instead of failing on it.
+  - **CI fixture**: `test12rr` (synthetic halfspace) is generated on the fly by
+    test fixtures, so the MT tests run in CI without gitignored LEMI/BGS data.
 
 ### UI conventions (stable)
 

@@ -367,6 +367,86 @@ Widget vocabulary (`number`, `integer`, `string`, `text`, `boolean`, `select`,
 `radio`, `file`, `directory`, `code`, `list`) is fixed in core; plugins choose
 from it so the UI stays consistent without frontend changes.
 
+### Param auto-change (`cascade`) & upstream auto-fill (`inherit`)
+
+Two manifest-driven UI conveniences keep the frontend schema-agnostic:
+
+- **`cascade`** (per param): when the user changes this param to a given value
+  (key), the UI sets the listed `(other_param, value)` pairs. Keys serialize as
+  strings for JSON (`bool` → `"true"`/`"false"`). Used, e.g., for `Compute FC`'s
+  magnetic input `h ⇄ b` to swap channel names, and for `Estimate TF`'s
+  remote-reference to force the Robust estimator:
+
+  ```python
+  Param("magnetic_unit", "radio", default="h", options=("h", "b"),
+        cascade={
+            "h": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
+            "b": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
+        }),
+  Param("remote_reference", "boolean", default=False,
+        cascade={True: (("estimator_engine", "Robust"),)}),
+  ```
+
+- **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
+  an upstream node is connected to that port, those params render as dropdowns
+  populated from the upstream node's params and are auto-filled if empty.
+  Same-name inheritance is just an identity mapping. Used for `Compute FC` to
+  pull `survey`/`station`/`run` from an `Extract Run`, and for mth5-sourced
+  nodes to map e.g. `survey ← survey_id` from `Load LEMI-424`:
+
+  ```python
+  inherit: ClassVar[dict[str, dict[str, str]]] = {
+      "data": {"survey": "survey", "station": "station", "run": "run"},
+  }
+  # Extract Run pulling from Load LEMI-424 (name mapping):
+  inherit: ClassVar[dict[str, dict[str, str]]] = {
+      "mth5": {"survey": "survey_id", "station": "station_id"},
+  }
+  ```
+
+Both serialize into the node manifest; the frontend applies them generically.
+
+#### Chain-walking inheritance (guideline)
+
+Inheritance is resolved by a **single recursive, frontend-only resolver**
+(`resolve(nodeId, paramName) -> candidate values`), walking the workflow
+document (nodes + edges + params) — never the backend. The backend derives the
+same identity at run time from the actual payload metadata
+(`runts_context`/`coerce_run`), so this is purely a **pre-execution UI** feature
+(dropdown population + auto-fill) and correctness never depends on it.
+
+Rules:
+
+1. **Per-node declaration.** Each node declares only its own
+   `inherit: {input_port: {target_param: upstream_param}}`. There is no global
+   registry of identities.
+2. **Only declared params auto-fill.** A param is auto-filled / rendered as a
+   dropdown **only if** it appears as a target in the node's own `inherit`
+   mapping. Everything else — root-node defaults, radio/select config (e.g.
+   `Detrend` method, `Compute FC` magnetic unit, `Estimate TF` estimator) —
+   stays fully manual. This keeps the "set once at the source, inherit
+   downstream" intent: a user types the identity at the first node, and every
+   declared downstream param is then filled from it.
+3. **Recursive chain-walk.** `resolve` returns a node's param value if it is
+   non-empty; otherwise it follows the node's own `inherit` mapping for that
+   port, follows the edges into the port, and recurses on each source. The walk
+   is transitive across arbitrary processing nodes even when an intermediate
+   node declares nothing for the param (pass-through fallback) — e.g.
+   `Compute FC → Detrend → Extract Run → Load LEMI-424` still resolves
+   `survey`, so inserting a future time-domain node (de-noising, filtering)
+   between the source and `Compute FC` never loses the identity.
+4. **Name mapping.** Each hop uses the *current* node's mapping to decide which
+   upstream param to look for, so heterogeneous sources (e.g. `survey_id`) are
+   bridged without changing the downstream node.
+5. **Cycles & fan-in.** Use a visited set (the graph is a DAG but be defensive)
+   and union candidates across parallel sources feeding a port.
+6. **Same-name default.** Prefer the identity mapping; only declare a mapping
+   when names actually differ.
+
+Adding a new node type therefore needs **zero changes to the resolver** — just a
+one-line `inherit` declaration on the node itself, mirroring how `cascade`
+auto-change and the widget vocabulary keep the UI schema-agnostic.
+
 ### Server-side definition
 
 ```python

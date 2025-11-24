@@ -8,99 +8,120 @@ interface Props {
   onChange: (v: unknown) => void;
   compact?: boolean;
   disabled?: boolean;
+  /** Render as a select with these options (e.g. values inherited from a
+   *  connected upstream node). Falls back to the default widget when empty. */
+  selectOptions?: unknown[];
 }
 
 /** One schema-driven widget (widget vocabulary from the manifest).
  *  Used both inline on nodes (ComfyUI-style) and in the properties panel. */
-export function ParamField({ param, value, onChange, compact, disabled }: Props) {
+export function ParamField({ param, value, onChange, compact, disabled, selectOptions }: Props) {
   const [browsing, setBrowsing] = useState(false);
   const set = (v: unknown) => onChange(v);
   const str = value === null || value === undefined ? "" : String(value);
 
   let field: JSX.Element;
-  switch (param.widget) {
-    case "boolean":
-      field = (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          disabled={disabled}
-          onChange={(e) => set(e.target.checked)}
-        />
-      );
-      break;
-    case "select":
-      field = (
-        <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
-          {(param.options ?? []).map((o) => (
-            <option key={String(o)}>{String(o)}</option>
-          ))}
-        </select>
-      );
-      break;
-    case "radio":
-      field = (
-        <span className="radio-group">
-          {(param.options ?? []).map((o) => (
-            <label key={String(o)} className="radio-option">
-              <input
-                type="radio"
-                name={`radio-${param.name}`}
-                value={String(o)}
-                checked={String(o) === str}
-                onChange={(e) => set(e.target.value)}
-              />
-              {String(o)}
-            </label>
-          ))}
-        </span>
-      );
-      break;
-    case "integer":
-    case "number":
-      field = (
-        <input
-          type="number"
-          value={str}
-          min={param.min}
-          max={param.max}
-          step={param.step}
-          onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))}
-        />
-      );
-      break;
-    case "file":
-    case "directory":
-      field = (
-        <span className="path-field">
+  if (selectOptions && selectOptions.length > 0) {
+    const opts = Array.from(
+      new Set([
+        ...selectOptions.map(String),
+        ...(value === null || value === undefined ? [] : [String(value)]),
+      ]),
+    );
+    field = (
+      <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
+        {opts.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
+  } else {
+    switch (param.widget) {
+      case "boolean":
+        field = (
           <input
-            value={str}
-            placeholder={`path to ${param.widget}…`}
-            onChange={(e) => set(e.target.value)}
+            type="checkbox"
+            checked={Boolean(value)}
+            disabled={disabled}
+            onChange={(e) => set(e.target.checked)}
           />
-          <button
-            className="browse-btn"
-            title={`Browse server filesystem for a ${param.widget}`}
-            onClick={() => setBrowsing(true)}
-          >
-            …
-          </button>
-          {browsing && (
-            <FileBrowser
-              kind={param.widget as "file" | "directory"}
-              initialPath={str}
-              onSelect={(p) => {
-                set(p);
-                setBrowsing(false);
-              }}
-              onClose={() => setBrowsing(false)}
+        );
+        break;
+      case "select":
+        field = (
+          <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
+            {(param.options ?? []).map((o) => (
+              <option key={String(o)}>{String(o)}</option>
+            ))}
+          </select>
+        );
+        break;
+      case "radio":
+        field = (
+          <span className="radio-group">
+            {(param.options ?? []).map((o) => (
+              <label key={String(o)} className="radio-option">
+                <input
+                  type="radio"
+                  name={`radio-${param.name}`}
+                  value={String(o)}
+                  checked={String(o) === str}
+                  onChange={(e) => set(e.target.value)}
+                />
+                {String(o)}
+              </label>
+            ))}
+          </span>
+        );
+        break;
+      case "integer":
+      case "number":
+        field = (
+          <input
+            type="number"
+            value={str}
+            min={param.min}
+            max={param.max}
+            step={param.step}
+            onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))}
+          />
+        );
+        break;
+      case "file":
+      case "directory":
+        field = (
+          <span className="path-field">
+            <input
+              value={str}
+              placeholder={`path to ${param.widget}…`}
+              onChange={(e) => set(e.target.value)}
             />
-          )}
-        </span>
-      );
-      break;
-    default:
-      field = <input value={str} onChange={(e) => set(e.target.value)} />;
+            <button
+              className="browse-btn"
+              title={`Browse server filesystem for a ${param.widget}`}
+              onClick={() => setBrowsing(true)}
+            >
+              …
+            </button>
+            {browsing && (
+              <FileBrowser
+                kind={param.widget as "file" | "directory"}
+                initialPath={str}
+                onSelect={(p) => {
+                  set(p);
+                  setBrowsing(false);
+                }}
+                onClose={() => setBrowsing(false)}
+              />
+            )}
+          </span>
+        );
+        break;
+      default:
+        field = <input value={str} onChange={(e) => set(e.target.value)} />;
+    }
   }
 
   return (

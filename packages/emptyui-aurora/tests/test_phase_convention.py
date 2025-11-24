@@ -2,41 +2,16 @@
 
 Uses the official synthetic halfspace test dataset (test12rr) that the
 mth5/aurora tutorial processes: aurora reports Zxy phase ~+45°, Zyx ~-135°
-for a uniform halfspace. Our first-pass LSQ estimator must reproduce that
-convention. Skipped when the synthetic data cannot be generated (offline).
+for a uniform halfspace. Our estimators must reproduce that convention. The
+dataset is generated on the fly by the ``test12rr_runts`` fixture so the test
+runs offline / in CI without gitignored raw instrument data.
 """
 
 from __future__ import annotations
 
-import pathlib
-
 import numpy as np
 import pytest
 from emptyui_aurora._processing import compute_fc, estimate_tf
-
-SYNTH = pathlib.Path("/tmp/opencode/synth/test12rr.h5")
-
-
-def _runts():
-    import warnings
-
-    warnings.filterwarnings("ignore")
-    from mth5.data.make_mth5_from_asc import create_test12rr_h5
-    from mth5.mth5 import MTH5
-
-    target = SYNTH.parent
-    if not SYNTH.exists():
-        create_test12rr_h5(target_folder=target)
-    m = MTH5()
-    m = m.open_mth5(str(SYNTH), "r")
-    sg = m.survey_group  # v0.1.0 synthetic file
-    st = sg.stations_group.get_station("test1")
-    rid = st.run_summary.iloc[0]["id"]
-    runts = st.get_run(rid).to_runts()
-    m.close_mth5()
-    for c in runts.channels:
-        runts.dataset[c] = runts.dataset[c] - runts.dataset[c].mean()
-    return runts
 
 
 @pytest.mark.parametrize("engine,remote_reference,use_dummy", [
@@ -45,8 +20,10 @@ def _runts():
     ("Robust", True, False),    # self-reference (no ref_fc connected)
     ("Robust", True, True),     # dummy remote station (duplicated data via ref_fc)
 ])
-def test_phase_convention_matches_aurora_halfspace(engine, remote_reference, use_dummy):
-    runts = _runts()
+def test_phase_convention_matches_aurora_halfspace(
+    test12rr_runts, engine, remote_reference, use_dummy
+):
+    runts = test12rr_runts
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5, "hamming",
                     magnetic_unit="h")
     # model a second (dummy) remote station by duplicating the data file: a
@@ -66,7 +43,7 @@ def test_phase_convention_matches_aurora_halfspace(engine, remote_reference, use
     assert np.allclose(np.median(yx[ok]), -135.0, atol=8.0)
 
 
-def test_multilevel_merged_phase_convention_matches_aurora_halfspace():
+def test_multilevel_merged_phase_convention_matches_aurora_halfspace(test12rr_runts):
     """A multi-level compute -> per-level estimate -> merge must keep aurora's
     phase convention on the halfspace (this is what the user sees as the
     broadband TF in the browser)."""
@@ -76,7 +53,7 @@ def test_multilevel_merged_phase_convention_matches_aurora_halfspace():
         merge_tf_levels,
     )
 
-    runts = _runts()
+    runts = test12rr_runts
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=3, factor=2, num_samples_window=128,
                                overlap=0.5, window_type="hamming", magnetic_unit="h")

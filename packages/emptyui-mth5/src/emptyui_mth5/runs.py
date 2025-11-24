@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import pandas as pd
 from emptyui import Input, Node, Output, Param
@@ -22,6 +22,9 @@ class ExtractRun(Node):
         Param("start", "string", label="Start (ISO)", default="", optional=True),
         Param("end", "string", label="End (ISO)", default="", optional=True),
     )
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "mth5": {"survey": "survey_id", "station": "station_id"},
+    }
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
                 run: str = "", start: str = "", end: str = "") -> dict[str, Any]:

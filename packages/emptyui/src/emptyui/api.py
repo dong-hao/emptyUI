@@ -67,6 +67,21 @@ class Param:
     max: float | None = None
     step: float | None = None
     description: str = ""
+    #: Auto-change rules driven from the UI: when this param changes to a given
+    #: value (key), set the listed (other_param, value) pairs. Keys are
+    #: serialized as strings (bool -> "true"/"false") for JSON transport.
+    cascade: dict[Any, tuple[tuple[str, Any], ...]] | None = None
+
+    def _cascade_dict(self) -> dict[str, list[list[Any]]] | None:
+        if not self.cascade:
+            return None
+        out: dict[str, list[list[Any]]] = {}
+        for key, actions in self.cascade.items():
+            if isinstance(key, bool):
+                out["true" if key else "false"] = [list(pair) for pair in actions]
+            else:
+                out[str(key)] = [list(pair) for pair in actions]
+        return out
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,6 +95,7 @@ class Param:
             "max": self.max,
             "step": self.step,
             "description": self.description,
+            "cascade": self._cascade_dict(),
         }
 
 
@@ -99,6 +115,14 @@ class Node:
     params: ClassVar[tuple[Param, ...]] = ()
     deps: ClassVar[tuple[str, ...]] = ()
 
+    #: Params to auto-fill (as dropdowns) from an upstream node connected to a
+    #: given input port. Maps input port name -> {target_param: upstream_param}
+    #: (identity mapping = same name), e.g.
+    #: ``{"data": {"survey": "survey", "station": "station", "run": "run"}}``.
+    #: Resolved by the frontend via a recursive chain-walking resolver
+    #: (DESIGN.md §4 "Chain-walking inheritance").
+    inherit: ClassVar[dict[str, dict[str, str]]] = {}
+
     #: subclasses override; signature: execute(ctx, **inputs_and_params)
     execute: Callable[..., dict[str, Any]]
 
@@ -113,6 +137,7 @@ class Node:
             "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params],
             "deps": list(self.deps),
+            "inherit": {k: dict(v) for k, v in self.inherit.items()},
         }
 
 
