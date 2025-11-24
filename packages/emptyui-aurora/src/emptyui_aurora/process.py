@@ -31,10 +31,7 @@ class ComputeFC(Node):
         "MTH5 when an absolute start time is available."
     )
     category = "Processing"
-    inputs = (
-        Input("data", "ts.run", label="time series"),
-        Input("bands", "bands", required=False),
-    )
+    inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("fc", "fc"),)
     params = (
         Param("input_channels", "string", label="Input channels", default="hx,hy"),
@@ -67,7 +64,7 @@ class ComputeFC(Node):
         "data": {"survey": "survey", "station": "station", "run": "run"},
     }
 
-    def execute(self, ctx, data, bands=None, input_channels: str = "hx,hy",
+    def execute(self, ctx, data, input_channels: str = "hx,hy",
                 output_channels: str = "ex,ey", magnetic_unit: str = "h",
                 e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
@@ -121,8 +118,6 @@ class EstimateTF(Node):
     inputs = (
         Input("fc", "fc"),
         Input("ref_fc", "fc", label="ref fc (remote)", required=False),
-        Input("selection", "selection", required=False),
-        Input("bands", "bands", required=False),
     )
     outputs = (
         Output("tf", "tf"),
@@ -141,7 +136,7 @@ class EstimateTF(Node):
               description="Log2 period bands per power-of-2 octave."),
     )
 
-    def execute(self, ctx, fc, ref_fc=None, selection=None, bands=None,
+    def execute(self, ctx, fc, ref_fc=None,
                 estimator_engine: str = "Robust",
                 remote_reference: bool = False,
                 periods_per_octave: int = 4) -> dict[str, Any]:

@@ -127,9 +127,9 @@ node boundary ≈ an aurora pipeline stage:
 | `ts.run` | Run Time Series | `mth5.timeseries.RunTS` (= `mt_timeseries.RunTS`) | Multi-channel time series — the main signal-processing currency; wrap the `RunTS` object directly (emptyUI is mth5-native) |
 | `ts.channel` | Channel Time Series | `mth5.timeseries.ChannelTS` | Single channel (ex/ey/hx/hy/hz); split/merge nodes convert ⇄ `ts.run` |
 | `calibration` | Calibration / Instrument Response | `mt_metadata.filters.*` (Coefficient/PoleZero/FIR/TimeDelay/FAP) | `Calibrate` takes `ts.run` + `calibration` → calibrated `ts.run`. Named for end-user familiarity *(was `mt.response`)* |
-| `selection` | Run Selection | `mth5.processing.KernelDataset` (DataFrame) | Which stations/runs/intervals process; local+remote roles; supports multiple run rows → FC-level merge. Schema = mth5 `KernelDataset` *(was `mt.selection`)* |
-| `config` | Processing Config | `mt_metadata.processing.aurora.Processing` | The aurora "recipe"; feeds `ComputeFC`/`EstimateTF` *(was `mt.config`)* |
-| `bands` | Frequency Bands | `aurora.time_series.frequency_band.FrequencyBands` | Band edges feeding config/ComputeFC *(was `mt.bands`)* |
+| `selection` | Run Selection | `mth5.processing.KernelDataset` (DataFrame) | Which stations/runs/intervals process; local+remote roles; supports multiple run rows → FC-level merge. *Plugin-tier / M4-deferred — no producer in the default pipeline (superseded by ExtractRun → ComputeFC)* |
+| `config` | Processing Config | `mt_metadata.processing.aurora.Processing` | The aurora "recipe". *Plugin-tier / M4-deferred — the TS→FC→TF pipeline splits at the FC boundary and assembles config internally (no live producer)* |
+| `bands` | Frequency Bands | `aurora.time_series.frequency_band.FrequencyBands` | Band edges. *Plugin-tier / M4-deferred — band edges are derived inside EstimateTF (`_period_bands`); EMTF band-setup files are an M4 item* |
 | `decimation` | Decimation Level | aurora `DecimationLevel` | *Plugin-tier*: per-level recipe for advanced multi-config assembly *(was `mt.decimation`)* |
 | `fc` | Fourier Coefficients | mth5 `FCGroup`/`FCDecimationGroup`; aurora STFT | The frequency-domain currency. TS→FC natural; FC→TS plugin-tier (lossy inverse). *(was `spectra` — no formal "spectra" type exists; libraries call this FC)* |
 | `tf.level` | TF (decimation level) | aurora `TTFZ` | Per-decimation-level TF estimate |
@@ -139,8 +139,10 @@ node boundary ≈ an aurora pipeline stage:
 | `any` | Any | — | Wildcard; connects to anything, executor trusts the node |
 
 > `file` was dropped as a port type (paths are parameter widgets, not data
-> flows). `table` covers generic tabular data. `decimation` is reserved for
-> plugin-tier advanced config assembly and is not used by core nodes.
+> flows). `table` covers generic tabular data. `config` / `bands` / `decimation`
+> / `selection` are plugin-tier and M4-deferred: the default pipeline splits at
+> the FC boundary (ComputeFC/EstimateTF) and derives band edges internally, so
+> these tags currently have no live core producer.
 >
 > The right-hand panel always shows both the **display name** and the real
 > **type tag** for every port (e.g. `data: ts.run`), so users can trace the
@@ -165,8 +167,9 @@ node boundary ≈ an aurora pipeline stage:
 - `KernelDataset`/`RunSummary` live in **`mth5.processing`** (legacy aurora
   `read_run_summaries`/`get_selected_runs`/`make_kernel_dataset` are removed).
 - Decimation levels are **independent by default** (fresh `Window`/`Estimator` per
-  level, no shared reference) → `BuildConfig` must explicitly copy settings to
-  each level.
+  level, no shared reference) → `ComputeFC`/`EstimateTF` keep a constant window
+  in samples across levels and share estimator settings (they split the old
+  monolithic `BuildConfig` assembly at the FC boundary).
 - `channel_nomenclature` lives on `Processing` config, not `RunTS`.
 - These pins are plugin-level extras (`emptyui-mth5`, `emptyui-aurora`), never
   core dependencies; workflows record plugin versions for reproducibility.
@@ -205,22 +208,20 @@ for ports so dot and label always align.
 ### Reference MT workflow (type flow)
 
 ```
-LoadMTH5 ─mth5─▶ SelectRuns ──┬─selection──────────────────────────────┐
-                               │                                       ▼
-LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ SaveEDI
-                                         │                           └▶ PlotAppResPhase
-                                         └─fc─▶ Denoise ─fc─▶ EstimateTF
+LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ ExportEDI
+(LoadLemi / LoadCsv)                        │                        └▶ PlotAppResPhase
+                                             └─fc─▶ Denoise ─fc─▶ EstimateTF
+                                                                   └─tf.level─▶ MergeTFLevels
 
-LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ STFT ─fc─▶ PlotSpectrogram
+LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ ComputeFC ─fc─▶ PlotSpectrogram
 ```
 
 Coercion points that require dedicated nodes (mirroring aurora internals):
-1. `selection` + roles → kernel dataset ("configure" node).
-2. `ts.run` ⇄ `ts.channel` via explicit SplitChannels / MergeChannels nodes.
-3. uncalibrated `ts.run` + `calibration` → calibrated `ts.run` (units change).
-4. `tf.level[]` → `tf` (merge; resolves duplicate periods across sampling
+1. `ts.run` ⇄ `ts.channel` via explicit SplitChannels / MergeChannels nodes.
+2. uncalibrated `ts.run` + `calibration` → calibrated `ts.run` (units change).
+3. `tf.level[]` → `tf` (merge; resolves duplicate periods across sampling
    rates / decimation levels — the multi-level merge case).
-5. Format coercions for popular types ship in core (`SaveEDI`, `LoadEDI`,
+4. Format coercions for popular types ship in core (`SaveEDI`, `LoadEDI`,
    …); exotic import/export converters are plugins.
 
 ### Pipeline stage split: TS → FC → TF
@@ -230,15 +231,15 @@ Fourier-coefficient boundary, mirroring both the conceptual MT pipeline
 (decimation → windowing → time/frequency transform → power spectra → TF
 estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
 
-- **`ComputeFC` node (TS → FC)** — input `ts.run`; params: number of levels,
-  per-level decimation factor, window type/length/overlap. Output `fc`.
-  Internally expands uniform decimation levels sequentially (level sample
-  rates derived from factor × initial rate). Persists computed FCs into the
-  workspace MTH5's Fourier-CoEfficients layer.
-- **`EstimateTF` node (FC → TF)** — inputs `fc` + `selection`;
-  params: estimator engine (`OLS`/`RME`/`RME_RR`), remote-reference on/off,
-  input/output/reference channels; optional `bands` input for custom band
-  edges. Output `tf`.
+- **`ComputeFC` node (TS → FC)** — input `ts.run`; params: input/output
+  channel names, magnetic unit (h/b), decimation levels + factor, window
+  length/overlap/type. Output `fc`. Internally expands uniform decimation
+  levels sequentially (level sample rates derived from factor × initial rate).
+  Persists computed FCs into the workspace MTH5's FC layer.
+- **`EstimateTF` node (FC → TF)** — inputs `fc` + optional `ref_fc` (remote
+  reference); params: estimator (`Robust`/`Least Squares`), remote-reference
+  on/off, periods-per-octave. Band edges are derived internally
+  (`_period_bands`). Output `tf` + per-level `tf.level`.
 
 Why this boundary:
 1. **Frequency-domain work**: a first-class `fc` port lets users branch
@@ -317,7 +318,6 @@ and sidebar are generated entirely from it.
   "title": "Bandpass Filter",
   "description": "Butterworth bandpass on time series.",
   "category": "Processing",
-  "plugin": "emptyui-core-nodes",
   "inputs": [
     { "name": "data", "type": "ts.run", "required": true }
   ],
@@ -365,7 +365,10 @@ and sidebar are generated entirely from it.
 
 Widget vocabulary (`number`, `integer`, `string`, `text`, `boolean`, `select`,
 `radio`, `file`, `directory`, `code`, `list`) is fixed in core; plugins choose
-from it so the UI stays consistent without frontend changes.
+from it so the UI stays consistent without frontend changes. The frontend has
+dedicated controls for `boolean`/`select`/`radio`/`number`/`integer`/
+`file`/`directory`; the remaining string-like widgets (`string`/`text`/`code`/
+`list`) fall back to a single-line text input.
 
 ### Param auto-change (`cascade`) & upstream auto-fill (`inherit`)
 
@@ -555,9 +558,9 @@ Design notes:
 
 ## 7. Execution Model
 
-- **Scheduler**: Kahn topological sort; independent branches run concurrently
-  in a thread pool (nodes declare `cpu_bound=True/False` to hint threads vs
-  process pool later).
+- **Scheduler**: Kahn topological sort. The current executor runs branches
+  **sequentially** (M0); concurrent execution in a thread pool is future work
+  (nodes would declare `cpu_bound=True/False` to hint threads vs process pool).
 - **Caching**: each node result is content-addressed by `(node_type, version,
   params, input_handles)`; unchanged upstream ⇒ cached downstream skip.
   MVP: in-memory LRU + optional disk cache.
@@ -576,10 +579,9 @@ Design notes:
 { "event": "run_started",   "run_id": "r1" }
 { "event": "node_status",   "node": "n2", "status": "running" }
 { "event": "node_progress", "node": "n2", "frac": 0.42, "msg": "filtering…" }
-{ "event": "node_log",      "node": "n2", "level": "info", "line": "…" }
 { "event": "artifact",      "node": "n3", "id": "a7", "kind": "image",
   "handle": "h12",
-  "preview_url": "/api/artifacts/a7/preview" }
+  "url": "/api/artifacts/a7/preview" }
 { "event": "node_status",   "node": "n3", "status": "done" }
 { "event": "run_finished",  "run_id": "r1", "status": "completed" }
 ```
@@ -596,11 +598,12 @@ edge, even when one node publishes several figures.
 |--------|------|---------|
 | GET  | `/api/nodes` | Catalog of node manifests (drives sidebar + panels) |
 | POST | `/api/runs` | Validate + start a workflow run |
-| POST | `/api/runs/{id}/cancel` | Cancel a run |
-| GET  | `/api/runs/{id}` | Run status/history |
-| GET  | `/api/artifacts/{id}` | Download artifact |
+| GET  | `/api/runs/{id}` | Run status/outputs |
 | GET  | `/api/artifacts/{id}/preview` | Inline preview (PNG/JSON table) |
 | WS   | `/api/ws` | Run events stream |
+
+> `POST /api/runs/{id}/cancel` and `GET /api/artifacts/{id}` are not yet
+> implemented (cancellation + artifact download are future work).
 
 MVP keeps state on the file-based workspace (§3 Storage); a DB is added only
 if run history/UI state demands it.
@@ -616,15 +619,15 @@ Components:
 - **NodePalette** — grouped by `category`, populated from `GET /api/nodes`.
 - **Inline node params (default behavior, ComfyUI paradigm)** — a node's
   parameters render as widgets directly on the node body; the right-hand
-  PropertiesPanel keeps only metadata (node id, type, version, ports,
-  description) and node-level actions. Path-like widgets get a browse button
+  PropertiesPanel shows metadata (node id, type, version, ports, description,
+  deps) plus a **Delete node** action. Path-like widgets get a browse button
   backed by the server-side file browser (`GET /api/files`).
-- **Preview Plot node** — renders an incoming `plot` inside the node body;
-  sized by the standard node drag-resize. Multiple viewers can attach to the
-  same figure.
-- **ResultPanel** — run-level gallery of all artifacts (convenience; the
-  Preview Plot nodes are the primary per-figure viewers).
-- **Toolbar** — new/open/save workflow, run, cancel, export.
+- **Preview Plot / View Table nodes** — render an incoming `plot`/`table`
+  inside the node body, sized by the standard node drag-resize. Multiple
+  viewers can attach to the same figure/table.
+- **Toolbar** — run; new/open/save workflow. (Cancel and export are future
+  work; run-level artifact gallery is not implemented — viewers on nodes are
+  the per-figure/table display.)
 
 State split:
 - Zustand store: workflow document (single source), selection, connection drafts.
@@ -697,10 +700,9 @@ progress.
 - `emptyui-mth5` plugin (`mth5==0.6.8`): Load/SaveMTH5, ExtractRun /
   SplitChannels / MergeChannels, transfer-function I/O, `Merge Runs`
   (FC-level + physical modes), FC read/write.
-- `emptyui-aurora` plugin (`aurora==0.6.2`): `SelectRuns` / `ComputeFC` /
-  `EstimateTF` / `FrequencyBands` nodes (KernelDataset-native, mth5
-  `RunSummary` schema); per-level `tf.level` merge node;
-  TF plots (apparent resistivity/phase, phase tensor).
+- `emptyui-aurora` plugin (`aurora==0.6.2`): `ComputeFC` / `EstimateTF` /
+  `MergeTFLevels` nodes (FC-boundary split; estimators OLS / robust RME /
+  remote-reference RME_RR); TF plots (apparent resistivity/phase).
 - Table viewer component; export coercion nodes for popular formats
   (EDI/ZMM via mt_metadata).
 

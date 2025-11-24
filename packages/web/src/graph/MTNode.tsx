@@ -25,7 +25,8 @@ function useInputPlotArtifact(nodeId: string) {
  * Custom node renderer (DESIGN.md §9 + Port rendering conventions):
  * typed ports inside the edges aligned with labels, and — following the
  * ComfyUI paradigm — the node's parameters rendered inline on the node
- * body. The right-hand panel keeps only metadata (id, version, ports).
+ * body. The right-hand panel keeps metadata (id, version, ports,
+ * description, deps) and a Delete action (see PropertiesPanel).
  */
 export function MTNode({ id, data, selected }: NodeProps) {
   const catalog = useCatalog((s) => s.catalog);

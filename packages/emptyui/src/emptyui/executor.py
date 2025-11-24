@@ -85,12 +85,10 @@ class Executor:
                 if not port.required:
                     kwargs.setdefault(port.name, None)
 
-            from emptyui.api import Param
-
             for param in manifest.params:
                 if param.name in wnode.params:
                     kwargs[param.name] = wnode.params[param.name]
-                elif param.default is not None or not isinstance(param, Param):
+                elif param.default is not None:
                     kwargs.setdefault(param.name, param.default)
 
             ctx = RunContext(

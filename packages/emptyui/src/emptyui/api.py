@@ -58,7 +58,7 @@ class Param:
 
     name: str
     widget: str  # number | integer | string | text | boolean | select |
-    #               file | directory | code | list
+    #               radio | file | directory | code | list
     label: str = ""
     default: Any = None
     optional: bool = False

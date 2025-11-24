@@ -53,7 +53,6 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const api = {
-  health: () => getJson<{ status: string }>("/health"),
   nodes: () => getJson<Catalog>("/nodes"),
   runWorkflow: async (workflow: unknown): Promise<{ run_id: string }> => {
     const res = await fetch(`${BASE}/runs`, {
@@ -77,8 +76,4 @@ export const api = {
 export function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}/api/ws`;
-}
-
-export function artifactSrc(url: string): string {
-  return url; // same-origin via vite proxy
 }
