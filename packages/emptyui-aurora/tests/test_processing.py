@@ -58,6 +58,52 @@ def test_compute_fc_and_estimate_tf():
     assert Zyx > 0
 
 
+def test_tipper_bz_output_recovered():
+    """Outputs e1,e2,bz give a 3x2 TF: 2x2 impedance plus the vertical-field
+    geomagnetic transfer function (tipper) as the hz row. bz is magnetic, so it
+    must NOT receive the electric (mV/km -> V/m) scaling — the tipper is
+    dimensionless and recovered ~ [0.5, -0.3]."""
+    import xarray as xr
+
+    sr = 8.0
+    n = 16384
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(7)
+    # broadband inputs so signal is present across all period bands
+    hx = rng.standard_normal(n)
+    hy = rng.standard_normal(n)
+    ex = 1.0 * hx + 3.0 * hy + 0.1 * rng.standard_normal(n)  # impedance [[1,3],[-1,4]]
+    ey = -1.0 * hx + 4.0 * hy + 0.1 * rng.standard_normal(n)
+    bz = 0.5 * hx - 0.3 * hy + 0.1 * rng.standard_normal(n)  # tipper [0.5,-0.3]
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {"e1": ("time", ex), "e2": ("time", ey), "bz": ("time", bz),
+                 "bx": ("time", hx), "by": ("time", hy)},
+                coords={"time": t},
+            )
+
+    runts = FakeRunTS()
+    fc = compute_fc(runts, ["bx", "by"], ["e1", "e2", "bz"],
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    periods, Z = estimate_tf(fc, ["bx", "by"], ["e1", "e2", "bz"],
+                             periods_per_octave=8)
+    assert Z.shape[1:] == (3, 2)  # n_out x n_in (includes the tipper row)
+    ok = np.all(np.isfinite(Z), axis=(1, 2))
+    # tipper row is dimensionless and recovered: Tzx ~ 0.5, Tzy ~ -0.3
+    assert np.median(Z[:, 2, 0][ok].real) == pytest.approx(0.5, abs=0.15)
+    assert np.median(Z[:, 2, 1][ok].real) == pytest.approx(-0.3, abs=0.15)
+
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"])
+    arr = tf.dataset["transfer_function"]
+    # tipper populated on the hz row; impedance on ex/ey x hx/hy
+    assert np.any(np.abs(arr.sel(output="hz").values) > 0)
+    assert np.any(np.abs(arr.sel(output="ex", input="hx").values) > 0)
+
+
 def test_magnetic_unit_h_vs_b_conversion():
     from emptyui_aurora._processing import MU0
 

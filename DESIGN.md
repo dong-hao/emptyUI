@@ -235,11 +235,15 @@ estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
   channel names, magnetic unit (h/b), decimation levels + factor, window
   length/overlap/type. Output `fc`. Internally expands uniform decimation
   levels sequentially (level sample rates derived from factor × initial rate).
-  Persists computed FCs into the workspace MTH5's FC layer.
+  Persists computed FCs into the workspace MTH5's FC layer. Outputs may be the
+  electric pair and/or a vertical magnetic channel (e.g. `e1,e2,bz`) to also
+  produce the vertical-field geomagnetic transfer function (tipper).
 - **`EstimateTF` node (FC → TF)** — inputs `fc` + optional `ref_fc` (remote
   reference); params: estimator (`Robust`/`Least Squares`), remote-reference
   on/off, periods-per-octave. Band edges are derived internally
-  (`_period_bands`). Output `tf` + per-level `tf.level`.
+  (`_period_bands`). Output `tf` + per-level `tf.level`. The TF rows map to
+  the output channels (ex/ey and hz when a vertical channel is present), cols
+  to the inputs — a 2x2 impedance, or a 3x2 impedance + tipper.
 
 Why this boundary:
 1. **Frequency-domain work**: a first-class `fc` port lets users branch

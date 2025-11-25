@@ -91,6 +91,10 @@ cd packages/web && npm install && npm run dev
     the first available (instead of erroring on the removed `surveys_list`
     attribute) and supports both modern (`surveys_group`) and legacy
     single-survey (`survey_group`) archive layouts.
+  - **Tippers**: `Compute FC`/`Estimate TF` accept a vertical magnetic output
+    (e.g. `e1,e2,bz`) to estimate the geomagnetic transfer function (tipper) in
+    addition to the 2×2 impedance; the unit normalization now treats a magnetic
+    output as magnetic (not electric) so the tipper stays dimensionless.
   - **CI fixture**: `test12rr` (synthetic halfspace) is generated on the fly by
     test fixtures, so the MT tests run in CI without gitignored LEMI/BGS data.
   - **Cleanup**: removed superseded legacy aurora config/selection nodes

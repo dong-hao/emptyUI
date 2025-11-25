@@ -26,9 +26,12 @@ class ComputeFC(Node):
     description = (
         "Windowed STFT to Fourier coefficients (fc) over N cascading "
         "decimation levels (constant window in samples; sample rate halves by "
-        "``factor`` per level). Specify input/output channel component names "
-        "(LEMI: bx,by / e1,e2). Persists each level's FC into the workspace "
-        "MTH5 when an absolute start time is available."
+        "``factor`` per level). Specify input (horizontal magnetic) and output "
+        "channel component names — outputs may be the electric pair (ex,ey) "
+        "and/or a vertical magnetic channel (bz) for a geomagnetic transfer "
+        "function (tipper), e.g. inputs bx,by / outputs e1,e2,bz. Persists "
+        "each level's FC into the workspace MTH5 when an absolute start time "
+        "is available."
     )
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series"),)
@@ -74,8 +77,13 @@ class ComputeFC(Node):
                 run: str = "") -> dict[str, Any]:
         ins = [c.strip() for c in input_channels.split(",") if c.strip()]
         outs = [c.strip() for c in output_channels.split(",") if c.strip()]
-        if len(ins) != 2 or len(outs) != 2:
-            raise ValueError("need exactly two input and two output channels")
+        if len(ins) != 2 or len(outs) < 1:
+            raise ValueError(
+                "need two input channels (horizontal magnetic Hx/Hy or Bx/By) "
+                "and one or more output channels (electric Ex/Ey and/or "
+                "vertical Bz for a tipper), e.g. inputs 'bx,by', outputs "
+                "'e1,e2' or 'e1,e2,bz'"
+            )
         levels = compute_fc_levels(
             data, ins, outs, num_decimations=decimation_levels, factor=factor,
             num_samples_window=window_samples, overlap=overlap, window_type=window_type,
