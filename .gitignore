@@ -28,6 +28,15 @@ examples/output/
 Screenshot-emptyUI.png
 Screenshot-comfyUI.png
 
+# Playwright MCP browser-test artifacts
+.playwright-mcp/
+*.png
+
+# Playwright test-runner artifacts
+packages/web/test-results/
+packages/web/playwright-report/
+packages/web/blob-report/
+
 # Large raw instrument data (LEMI etc.)
 examples/data/lemi-424-test/
 examples/data/lemi_test_data/

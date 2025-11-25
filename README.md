@@ -32,6 +32,29 @@ uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]"
 cd packages/web && npm install && npm run dev
 ```
 
+## Browser end-to-end tests (Playwright)
+
+Headless full-stack regression tests live in `packages/web/e2e/` (Playwright
+Test runner — separate from the interactive Playwright MCP setup). The suite
+starts both servers itself (Vite + the FastAPI backend, see
+`playwright.config.ts`) and drives the real UI:
+
+```bash
+cd packages/web
+npm install
+npx playwright install chromium   # one-time browser download
+
+npm test                    # headless (default)
+npm run test:headed         # watch the browser while it runs
+```
+
+- Requires the Python packages installed per the Development section (the
+  backend is launched from the repo-root `.venv`).
+- CI: `.github/workflows/e2e.yml` runs the same suite headless on
+  ubuntu-latest (backend via `uv`, frontend via `npm ci`).
+- Artifacts (`test-results/`, `playwright-report/`, `.playwright-mcp/`) are
+  gitignored.
+
 ## Status
 
 - **M0 — complete**: monorepo scaffold; core Node API/registry/validator;

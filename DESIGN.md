@@ -712,6 +712,16 @@ State split:
 - TanStack Query: server resources (node catalog, artifacts).
 - WebSocket client: ephemeral run state overlaid onto node statuses.
 
+End-to-end testing:
+- **Playwright Test runner** (`packages/web/e2e/`, headless, full-stack): the
+  config starts both the Vite dev server and the FastAPI backend via
+  `webServer` (backend resolves the repo-root `.venv` or falls back to
+  `python3`), so the suite exercises the real UI + executor + artifact
+  pipeline. Run with `npm test` (see README); CI runs it headless on
+  ubuntu-latest (`.github/workflows/e2e.yml`).
+- **Playwright MCP** (`@playwright/mcp` via opencode `mcp` config) is the
+  interactive/exploratory counterpart for agent-driven browser debugging.
+
 Connection rules (port types, cycle prevention) enforced client-side for UX,
 re-validated server-side before every run.
 
