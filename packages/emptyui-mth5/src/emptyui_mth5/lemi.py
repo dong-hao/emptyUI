@@ -13,7 +13,9 @@ class LoadLemi(Node):
     title = "Load LEMI-424"
     description = (
         "Convert raw LEMI-424 long-period data (.INF/.TXT) into an MTH5 "
-        "archive and open it as the data source."
+        "archive and open it as the data source. The channel nomenclature "
+        "selects which electric pair to read: lemi12 uses e1/e2, lemi34 uses "
+        "e3/e4 (4-channel instruments)."
     )
     category = "Data I/O"
     inputs = ()
@@ -25,11 +27,17 @@ class LoadLemi(Node):
         Param("mth5_filename", "string", label="Output file name", default="from_lemi424.mth5"),
         Param("save_path", "directory", label="Output directory", default="",
               optional=True),
+        Param("channel_nomenclature", "select", label="Channel nomenclature",
+              options=("lemi12", "lemi34"), default="lemi12",
+              description="mt_metadata CHANNEL_MAPS keyword: lemi12 = electric "
+                          "pair e1/e2 (default), lemi34 = pair e3/e4"),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "survey",
                 station_id: str = "station", mth5_filename: str = "from_lemi424.mth5",
-                save_path: str = "") -> dict[str, Any]:
+                save_path: str = "",
+                channel_nomenclature: str = "lemi12") -> dict[str, Any]:
+        from mth5 import read_file
         from mth5.clients.lemi424 import LEMI424Client
         from mth5.mth5 import MTH5
 
@@ -38,8 +46,6 @@ class LoadLemi(Node):
             raise FileNotFoundError(f"LEMI data dir not found: {data_path}")
         save = str(Path(save_path).expanduser().resolve()) if save_path else None
 
-        # Use LEMI424Client directly: mth5 0.6.8's MakeMTH5.from_lemi424 has a
-        # duplicate sample_rates kwarg bug; LEMI424Client hardcodes sample_rates=[1].
         client = LEMI424Client(
             data_path=data_path,
             save_path=save,
@@ -52,11 +58,38 @@ class LoadLemi(Node):
         if target.exists():
             ctx.logger.warning("overwriting existing MTH5 at %s", target)
             target.unlink()
-        created = client.make_mth5_from_lemi424(survey_id, station_id)
+
+        # LEMI-424 raw files carry four electric channels (e1..e4); the
+        # LEMI424Client hardcodes e1/e2, so the conversion loop below mirrors
+        # it but selects the pair via the mt_metadata nomenclature.
+        e_channels = (
+            ["e3", "e4"] if channel_nomenclature == "lemi34" else ["e1", "e2"]
+        )
+        client.collection.survey_id = survey_id
+        client.collection.station_id = station_id
+        runs = client.get_run_dict()
+
+        with MTH5(**client.h5_kwargs) as m:
+            m.open_mth5(str(target), client.mth5_file_mode)
+            survey_group = m.add_survey(client.collection.survey_id)
+            for st_id, runs_by_id in runs.items():
+                station_group = survey_group.stations_group.add_station(st_id)
+                for run_id, run_df in runs_by_id.items():
+                    run_group = station_group.add_run(run_id)
+                    run_ts = read_file(
+                        run_df.fn.to_list(),
+                        e_channels=e_channels,
+                        calibration_dict=client.collection.calibration_dict,
+                    )
+                    run_ts.run_metadata.id = run_id
+                    run_group.from_runts(run_ts)
+                station_group.metadata.update(run_ts.station_metadata)
+                station_group.write_metadata()
+            survey_group.update_metadata()
 
         archive = MTH5()
-        archive.open_mth5(created, mode="a")
-        ctx.progress(1.0, f"loaded LEMI -> {Path(created).name}")
+        archive.open_mth5(str(target), mode="a")
+        ctx.progress(1.0, f"loaded LEMI -> {target.name}")
         return {"mth5": archive}
 
 

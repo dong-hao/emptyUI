@@ -10,21 +10,40 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from emptyui_mth5.nomenclature import (
+    STANDARD_INPUTS,
+    STANDARD_OUTPUTS,
+    channel_map,
+    infer_keyword,
+    is_electric_name,
+    is_magnetic_name,
+    magnetic_unit_for,
+    magnetic_unit_from_channels,
+)
 
 MU0 = 4.0 * np.pi * 1e-7
 
 
-def _is_electric(name: str) -> bool:
-    """True for electric (E) output component names (ex,ey,e1,e2,...)."""
-    n = name.strip().lower()
-    return n in ("ex", "ey", "e1", "e2", "e3") or (
-        len(n) >= 2 and n[0] == "e" and n[1].isdigit()
-    )
+def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
+    """Resolve the magnetic-unit mode: explicit 'h'/'b' wins; otherwise derive
+    it from the nomenclature keyword (mt_metadata CHANNEL_MAPS) or, failing
+    that, from the actual channel names (bx/by -> fluxgate B, hx/hy -> coil H).
+    """
+    mu = str(magnetic_unit or "auto").strip().lower()
+    if mu in ("h", "b"):
+        return mu
+    if keyword:
+        return magnetic_unit_for(keyword)
+    return magnetic_unit_from_channels(input_channels)
 
 
-def _is_magnetic(name: str) -> bool:
-    """True for magnetic (B/H) component names (bx,by,bz,hx,hy,hz)."""
-    return name.strip().lower() in ("hx", "hy", "hz", "bx", "by", "bz")
+def _resolve_keyword(channel_nomenclature, input_channels, output_channels):
+    """Resolve the nomenclature keyword: explicit value, or best-effort
+    inference from the actual channel names."""
+    kw = str(channel_nomenclature or "").strip().lower()
+    if kw and kw != "auto":
+        return kw
+    return infer_keyword(list(input_channels) + list(output_channels))
 
 
 def to_channels(value):
@@ -90,9 +109,10 @@ def compute_fc(
     window_length_s,
     overlap,
     window_type,
-    magnetic_unit="h",
+    magnetic_unit="auto",
     e_dipole_length_m=None,
     start_datetime=None,
+    channel_nomenclature=None,
 ):
     """Windowed STFT -> fc xarray Dataset (dims frequency x time).
 
@@ -101,9 +121,13 @@ def compute_fc(
     report a huge DC offset that would otherwise swamp the autopower and drive
     Z -> 0).
 
-    ``magnetic_unit``: "h" (coil sensors already give H) or "b" (fluxgate
-    gives absolute B) — for "b", input channels are converted B->H (divide by
-    μ0) so the fc always carries H.
+    ``magnetic_unit``: "auto" (default) derives the mode from the channel
+    nomenclature / actual channel names — "b" (fluxgate gives absolute B,
+    converted B->H by dividing by μ0) or "h" (coil sensors already give H).
+    An explicit "h"/"b" always wins (legacy workflows keep working).
+    ``channel_nomenclature``: mt_metadata CHANNEL_MAPS keyword (e.g. "lemi12")
+    used to interpret channel names; when None/auto it is inferred and recorded
+    on the fc so EstimateTF can map back to standard TF coordinates.
 
     ``e_dipole_length_m``: LEMI-style instruments store E as the raw potential
     difference (mV) between electrodes, not an E-field. When set, output (E)
@@ -131,7 +155,8 @@ def compute_fc(
     nperseg = max(8, int(window_length_s * sample_rate))
     noverlap = int(nperseg * overlap)
     win = _window(window_type)
-    b_to_h = magnetic_unit == "b"
+    keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
+    b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
     fc_vars = {}
@@ -147,11 +172,11 @@ def compute_fc(
                 # LEMI fluxgate B is in nT; H [A/m] = B[T]/mu0 = B[nT]*1e-9/mu0
                 x = x * 1e-9 / MU0
             # else: coil sensor already gives H [A/m], unchanged
-        elif _is_magnetic(comp):  # vertical magnetic output (bz/hz) — tipper
+        elif is_magnetic_name(comp):  # vertical magnetic output (bz/hz) — tipper
             # same units as the magnetic inputs, so Bz/H is dimensionless
             if b_to_h:
                 x = x * 1e-9 / MU0
-        elif _is_electric(comp):  # electric output channel
+        elif is_electric_name(comp):  # electric output channel
             if e_scale is not None:
                 # raw potential (mV) -> V/m via dipole length
                 x = x * e_scale
@@ -183,7 +208,8 @@ def compute_fc(
             "window_type": window_type,
             "input_channels": ",".join(input_channels),
             "output_channels": ",".join(output_channels),
-            "magnetic_unit": magnetic_unit,
+            "magnetic_unit": b_to_h and "b" or "h",
+            "channel_nomenclature": keyword,
             "e_dipole_length_m": e_dipole_length_m or 0.0,
             "start_datetime": start_iso,
         },
@@ -200,9 +226,10 @@ def compute_fc_levels(
     num_samples_window=256,
     overlap=0.5,
     window_type="hamming",
-    magnetic_unit="h",
+    magnetic_unit="auto",
     e_dipole_length_m=None,
     start_datetime=None,
+    channel_nomenclature=None,
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
@@ -224,7 +251,8 @@ def compute_fc_levels(
     channels, sample_rate, start_s, start_dt = to_channels(value)
     if start_datetime is None:
         start_datetime = start_dt
-    b_to_h = magnetic_unit == "b"
+    keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
+    b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
     num_decimations = max(0, int(num_decimations))
@@ -262,7 +290,8 @@ def compute_fc_levels(
                 "window_type": window_type,
                 "input_channels": ",".join(input_channels),
                 "output_channels": ",".join(output_channels),
-                "magnetic_unit": magnetic_unit,
+                "magnetic_unit": b_to_h and "b" or "h",
+                "channel_nomenclature": keyword,
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
                 "start_datetime": start_iso,
             },
@@ -284,10 +313,10 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
         if comp in input_channels and b_to_h:
             x = x * 1e-9 / MU0  # fluxgate B [nT] -> H [A/m]
         elif comp in output_channels:
-            if _is_magnetic(comp):  # vertical magnetic output (tipper)
+            if is_magnetic_name(comp):  # vertical magnetic output (tipper)
                 if b_to_h:
                     x = x * 1e-9 / MU0  # Bz -> Hz, same units as inputs
-            elif _is_electric(comp):
+            elif is_electric_name(comp):
                 if e_scale is not None:
                     x = x * e_scale  # raw potential (mV) -> V/m
                 else:
@@ -353,6 +382,22 @@ def _resolve_estimator(estimator_engine, remote_reference) -> str:
     raise ValueError(f"unknown estimator engine: {estimator_engine!r}")
 
 
+def _normalize_fc_layout(fc):
+    """Normalize an fc to a ``(frequency, time)`` data layout.
+
+    emptyUI's :func:`compute_fc` produces ``(frequency, time)``; mth5's FC
+    persistence stores ``(time, frequency)`` and ``to_xarray`` returns that
+    layout. The band loop indexes ``fc[channel][f_idx, :]`` (frequency rows),
+    so read-back FCs must be transposed first.
+    """
+    if "frequency" not in fc.dims or "time" not in fc.dims:
+        raise ValueError("fc must have 'frequency' and 'time' dimensions")
+    first = next(iter(fc.data_vars))
+    if fc[first].dims[0] != "frequency":
+        fc = fc.transpose("frequency", "time")
+    return fc
+
+
 def estimate_tf(
     fc,
     input_channels,
@@ -393,15 +438,29 @@ def estimate_tf(
     remote reference is requested), the local input channels are reused as the
     reference — a self-reference (degenerate but well-defined, equals RME).
     This is also what a duplicated/identical "dummy remote station" reduces to.
+
+    FCs read back from an mth5 archive carry a ``(time, frequency)`` layout
+    (mth5 ``to_xarray``), while :func:`compute_fc` produces
+    ``(frequency, time)``; both are normalized to ``(frequency, time)`` here.
     """
 
     engine = _resolve_estimator(estimator_engine, remote_reference)
 
+    fc = _normalize_fc_layout(fc)
     freq = fc["frequency"].values
     ok = freq > 0  # exclude DC bin (period would be infinite)
     freq = freq[ok]
     fc = fc.isel(frequency=ok)
     logf = np.log2(freq)
+
+    if ref_fc is not None:
+        ref_fc = _normalize_fc_layout(ref_fc)
+        ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
+        if not np.array_equal(ref_fc["frequency"].values, freq):
+            raise ValueError(
+                "remote-reference fc has a different frequency grid than the "
+                "local fc — compute both with the same window settings"
+            )
 
     # Realistic, octave-aligned period bands for this decimation level.
     periods_out, edges = _period_bands(fc, periods_per_octave)
@@ -457,7 +516,11 @@ def _period_bands(fc, periods_per_octave=4):
     combined by the merge). Returns (periods shortest→longest, log2-frequency
     edges high→low) for the :func:`estimate_tf` band loop.
     """
-    fs = float(fc.attrs["sample_rate"])
+    fs = float(fc.attrs.get("sample_rate") or 0.0)
+    if not fs:
+        # fc without attrs (e.g. read back from mth5 before enrichment): the
+        # Nyquist bin is fs/2, so the native rate is recoverable from the grid.
+        fs = 2.0 * float(fc["frequency"].values.max())
     ppo = max(1, int(periods_per_octave))
     p_short = 4.0 / fs  # Fs/4 as the highest trusted frequency
 
@@ -534,51 +597,63 @@ def _solve_band(H, E, R, input_channels, output_channels, engine):
     return np.asarray(est.b).T
 
 
-_OUT_COORDS = ["ex", "ey", "hz"]
-_IN_COORDS = ["hx", "hy"]
-#: Map user channel names onto mt_metadata's standard TF positions.
-_OUT_NAME = {
-    "e1": "ex", "ex": "ex",
-    "e2": "ey", "ey": "ey", "e3": "ey",
-    "bz": "hz", "hz": "hz",
-}
-_IN_NAME = {
-    "bx": "hx", "hx": "hx",
-    "by": "hy", "hy": "hy",
-}
+_OUT_COORDS = tuple(STANDARD_OUTPUTS)  # ("ex", "ey", "hz")
+_IN_COORDS = tuple(STANDARD_INPUTS)  # ("hx", "hy")
 
 
-def build_tf(periods, Z, input_channels, output_channels):
-    """Build an mt_metadata TF with standard ex/ey/hz x hx/hy coordinates.
+def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=None):
+    """Build an mt_metadata TF carrying the actual channel names plus the
+    channel_nomenclature map (aurora-style).
 
-    User channel names are mapped onto the standard positions: electric
-    e1/e2 (or ex/ey) -> ex/ey, vertical bz/hz -> hz; magnetic bx/by (or
-    hx/hy) -> hx/hy. Both the impedance (ex,ey rows) and the tipper (hz row)
-    are populated when the corresponding output channel is present.
+    mt_metadata's TF uses ``channel_nomenclature`` (standard -> actual) to
+    define its coordinate names — ``tf.ex``/``tf.hx`` return the *actual*
+    instrument names and ``has_impedance``/``impedance``/``tipper`` are all
+    nomenclature-aware. The TF is therefore built with the actual names as
+    coordinates and the map attached, exactly like aurora's
+    ``TF(channel_nomenclature=...)``, so aurora tooling (``TTFZ``,
+    ``TransferFunctionCollection``) can consume it directly. Exporters that
+    require standard names (EDI/XML) standardize on write; ``ExportTF`` maps
+    back for the ZMM writer.
+
+    The actual channel names are resolved through the mt_metadata CHANNEL_MAPS
+    reverse mapping for the given nomenclature keyword: lemi12 maps e1/e2 (and
+    bx/by/bz), lemi34 maps e3/e4, phoenix123 maps e1/e2/h1/h2/h3, default maps
+    ex/ey/hx/hy/hz. When no keyword is given it is inferred from the channel
+    names. Both the impedance (ex,ey rows) and the tipper (hz row) are
+    populated when the corresponding output channel is present.
     """
     import xarray as xr
     from mt_metadata.transfer_functions.core import TF
 
-    out_rows = [_OUT_NAME.get(c.strip().lower()) for c in output_channels]
-    in_cols = [_IN_NAME.get(c.strip().lower()) for c in input_channels]
+    keyword = _resolve_keyword(
+        channel_nomenclature, input_channels, output_channels
+    )
+    mapping = channel_map(keyword)  # standard -> actual
+
+    out_coords = [mapping[s] for s in _OUT_COORDS]
+    in_coords = [mapping[s] for s in _IN_COORDS]
+    reverse = {v.lower(): k for k, v in mapping.items()}
 
     data = np.zeros((len(periods), len(_OUT_COORDS), len(_IN_COORDS)), dtype=complex)
-    for ri, oc in enumerate(out_rows):
-        if oc is None or oc not in _OUT_COORDS:
+    for ri, oc in enumerate(output_channels):
+        std = reverse.get(str(oc).strip().lower())
+        if std is None or std not in _OUT_COORDS:
             continue
-        for ci, ic in enumerate(in_cols):
-            if ic is None or ic not in _IN_COORDS:
+        for ci, ic in enumerate(input_channels):
+            ist = reverse.get(str(ic).strip().lower())
+            if ist is None or ist not in _IN_COORDS:
                 continue
-            data[:, _OUT_COORDS.index(oc), _IN_COORDS.index(ic)] = Z[:, ri, ci]
+            data[:, _OUT_COORDS.index(std), _IN_COORDS.index(ist)] = Z[:, ri, ci]
 
     tf = TF()
+    tf.channel_nomenclature = {s: mapping[s] for s in ("ex", "ey", "hx", "hy", "hz")}
     arr = xr.DataArray(
         data,
         dims=("period", "output", "input"),
         coords={
             "period": periods,
-            "output": _OUT_COORDS,
-            "input": _IN_COORDS,
+            "output": out_coords,
+            "input": in_coords,
         },
     )
     # use the property setter (tf.dataset[...] = arr writes to the xarray
@@ -595,14 +670,17 @@ def estimate_tf_levels(
     remote_reference=False,
     periods_per_octave=4,
     ref_levels=None,
+    channel_nomenclature=None,
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
 
     Returns ``{level: {"periods": P, "Z": Z[2x2], "input_channels": ...,
-    "output_channels": ...}}``. ``ref_levels`` is an optional same-shaped
-    container (or a single fc) used as the remote reference per level.
+    "output_channels": ..., "channel_nomenclature": ...}}``. ``ref_levels`` is
+    an optional same-shaped container (or a single fc) used as the remote
+    reference per level.
     """
+    keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
     result = {}
     for level, fc in sorted(levels.items()):
         ref_fc = ref_levels.get(level) if isinstance(ref_levels, dict) else ref_levels
@@ -618,6 +696,7 @@ def estimate_tf_levels(
             "Z": Z,
             "input_channels": list(input_channels),
             "output_channels": list(output_channels),
+            "channel_nomenclature": keyword,
         }
     return result
 

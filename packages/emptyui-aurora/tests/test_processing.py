@@ -99,9 +99,13 @@ def test_tipper_bz_output_recovered():
 
     tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"])
     arr = tf.dataset["transfer_function"]
-    # tipper populated on the hz row; impedance on ex/ey x hx/hy
-    assert np.any(np.abs(arr.sel(output="hz").values) > 0)
-    assert np.any(np.abs(arr.sel(output="ex", input="hx").values) > 0)
+    # tipper populated on the hz row; impedance on ex/ey x hx/hy — selected
+    # through the nomenclature-aware accessors (actual names as coordinates)
+    assert np.any(np.abs(arr.sel(output=tf.hz).values) > 0)
+    assert np.any(np.abs(arr.sel(output=tf.ex, input=tf.hx).values) > 0)
+    assert tf.channel_nomenclature == {
+        "ex": "e1", "ey": "e2", "hx": "bx", "hy": "by", "hz": "bz",
+    }
 
 
 def test_magnetic_unit_h_vs_b_conversion():
@@ -118,6 +122,168 @@ def test_magnetic_unit_h_vs_b_conversion():
     # the h-case (already H) scaled by 1e-9/mu0
     ratio = np.median(np.abs(fc_b["hx"].values) / np.abs(fc_h["hx"].values))
     assert np.isclose(ratio, 1e-9 / MU0, rtol=1e-6)
+
+
+def test_magnetic_unit_auto_derived_from_channel_names():
+    """'auto' must derive the B/H mode from the nomenclature/channel names:
+    bx/by (fluxgate, nT) -> B->H conversion; hx/hy (coil, A/m) -> unchanged."""
+    import xarray as xr
+    from emptyui_aurora._processing import compute_fc
+
+    sr = 8.0
+    n = 8192
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(0)
+    hx = 50 * np.sin(2 * np.pi * 0.5 * t) + 5 * rng.standard_normal(n)
+    hy = 40 * np.sin(2 * np.pi * 1.3 * t) + 5 * rng.standard_normal(n)
+    ex = 1.0 * hx + 3.0 * hy + rng.standard_normal(n) * 8
+    ey = 2.0 * hx + 1.0 * hy + rng.standard_normal(n) * 8
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {"e1": ("time", ex), "e2": ("time", ey),
+                 "bx": ("time", hx), "by": ("time", hy)},
+                coords={"time": t},
+            )
+
+    runts = FakeRunTS()
+
+    fc_b_auto = compute_fc(runts, ["bx", "by"], ["e1", "e2"],
+                           window_length_s=256, overlap=0.5, window_type="hamming",
+                           magnetic_unit="auto")
+    fc_b_manual = compute_fc(runts, ["bx", "by"], ["e1", "e2"],
+                             window_length_s=256, overlap=0.5, window_type="hamming",
+                             magnetic_unit="b")
+    np.testing.assert_allclose(fc_b_auto["bx"].values, fc_b_manual["bx"].values)
+    assert fc_b_auto.attrs["magnetic_unit"] == "b"
+    assert fc_b_auto.attrs["channel_nomenclature"] == "lemi12"
+
+    # hx/hy naming (default nomenclature) means coil H: unchanged, unit 'h'
+    runts_h = _synthetic_runts()
+    fc_h_auto = compute_fc(runts_h, ["hx", "hy"], ["ex", "ey"],
+                           window_length_s=256, overlap=0.5, window_type="hamming",
+                           magnetic_unit="auto")
+    fc_h_manual = compute_fc(runts_h, ["hx", "hy"], ["ex", "ey"],
+                             window_length_s=256, overlap=0.5, window_type="hamming",
+                             magnetic_unit="h")
+    np.testing.assert_allclose(fc_h_auto["hx"].values, fc_h_manual["hx"].values)
+    assert fc_h_auto.attrs["magnetic_unit"] == "h"
+    assert fc_h_auto.attrs["channel_nomenclature"] == "default"
+
+
+def test_build_tf_lemi34_four_channel():
+    """A 4-E-channel LEMI instrument (lemi34: ex=e3, ey=e4) must map both
+    electric outputs onto the standard ex/ey TF rows — the previous hardcoded
+    map dropped e4 entirely."""
+    import xarray as xr
+
+    sr = 8.0
+    n = 16384
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(11)
+    hx = rng.standard_normal(n)
+    hy = rng.standard_normal(n)
+    ex = 1.0 * hx + 3.0 * hy + 0.1 * rng.standard_normal(n)
+    ey = -1.0 * hx + 4.0 * hy + 0.1 * rng.standard_normal(n)
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {"e3": ("time", ex), "e4": ("time", ey),
+                 "bx": ("time", hx), "by": ("time", hy)},
+                coords={"time": t},
+            )
+
+    runts = FakeRunTS()
+    fc = compute_fc(runts, ["bx", "by"], ["e3", "e4"],
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert fc.attrs["channel_nomenclature"] == "lemi34"
+    periods, Z = estimate_tf(fc, ["bx", "by"], ["e3", "e4"],
+                             periods_per_octave=8)
+    tf = build_tf(periods, Z, ["bx", "by"], ["e3", "e4"])
+    arr = tf.dataset["transfer_function"]
+    # both electric outputs are mapped: ex row (e3) and ey row (e4) populated —
+    # selected via the nomenclature accessors (actual names as coordinates)
+    assert tf.channel_nomenclature == {
+        "ex": "e3", "ey": "e4", "hx": "bx", "hy": "by", "hz": "bz",
+    }
+    assert np.any(np.abs(arr.sel(output=tf.ex, input=tf.hx).values) > 0)
+    assert np.any(np.abs(arr.sel(output=tf.ey, input=tf.hx).values) > 0)
+    assert np.any(np.abs(arr.sel(output=tf.ey, input=tf.hy).values) > 0)
+
+
+def test_build_tf_phoenix123_nomenclature():
+    """phoenix123 channels (h1/h2/h3, e1/e2) map onto the standard TF grid."""
+    from emptyui_aurora._processing import build_tf
+
+    periods = np.array([2.0, 4.0, 8.0])
+    Z = np.zeros((3, 2, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j  # ex x hx
+    Z[:, 1, 1] = 2 + 0j  # ey x hy
+    tf = build_tf(periods, Z, ["h1", "h2"], ["e1", "e2"],
+                  channel_nomenclature="phoenix123")
+    arr = tf.dataset["transfer_function"]
+    assert tf.channel_nomenclature == {
+        "ex": "e1", "ey": "e2", "hx": "h1", "hy": "h2", "hz": "h3",
+    }
+    assert np.any(np.abs(arr.sel(output=tf.ex, input=tf.hx).values) > 0)
+    assert np.any(np.abs(arr.sel(output=tf.ey, input=tf.hy).values) > 0)
+
+
+def test_estimate_tf_accepts_mth5_read_fc_layout():
+    """FCs read back from an mth5 archive have a (time, frequency) layout and
+    no attrs; the band loop must transpose them and still estimate."""
+    import xarray as xr
+    from emptyui_aurora._processing import estimate_tf
+
+    sr = 8.0
+    n = 8192
+    t = np.arange(n) / sr
+    rng = np.random.default_rng(3)
+    hx = rng.standard_normal(n)
+    hy = rng.standard_normal(n)
+    ex = 1.0 * hx + 3.0 * hy + 0.1 * rng.standard_normal(n)
+    ey = -1.0 * hx + 4.0 * hy + 0.1 * rng.standard_normal(n)
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {"ex": ("time", ex), "ey": ("time", ey),
+                 "hx": ("time", hx), "hy": ("time", hy)},
+                coords={"time": t},
+            )
+
+    fc = compute_fc(FakeRunTS(), ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    # mth5 stores (time, frequency); emulate the read-back layout + bare attrs
+    mth5_layout = fc.transpose("time", "frequency").copy()
+    mth5_layout.attrs = {}
+    periods, Z = estimate_tf(mth5_layout, ["hx", "hy"], ["ex", "ey"],
+                             estimator_engine="Least Squares", periods_per_octave=8)
+    assert periods.size > 1
+    assert np.all(np.isfinite(Z))
+    assert np.any(np.abs(Z) > 0)
+
+
+def test_remote_reference_grid_mismatch_raises_clear_error():
+    """A remote-reference fc with a different window (frequency grid) must fail
+    with a clear message instead of aurora's bare Exception."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    ref = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                     window_length_s=512, overlap=0.5, window_type="hamming")
+    with pytest.raises(ValueError, match="frequency grid"):
+        estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                    estimator_engine="Robust", remote_reference=True,
+                    ref_fc=ref, periods_per_octave=8)
 
 
 def test_build_tf_returns_mt_metadata_tf():

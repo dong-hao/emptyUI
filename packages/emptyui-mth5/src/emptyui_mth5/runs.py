@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+import numpy as np
 import pandas as pd
 from emptyui import Input, Node, Output, Param
+
+from .nomenclature import (
+    KEYWORDS,
+    infer_keyword,
+    is_electric_name,
+    standard_name,
+)
 
 
 def _resolve_survey(mth5, survey: str):
@@ -74,7 +82,8 @@ class ExtractRun(Node):
         Param("end", "string", label="End (ISO)", default="", optional=True),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
-        "mth5": {"survey": "survey_id", "station": "station_id"},
+        "mth5": {"survey": "survey_id", "station": "station_id",
+                 "channel_nomenclature": "channel_nomenclature"},
     }
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
@@ -92,20 +101,62 @@ class ExtractRun(Node):
 class SplitChannels(Node):
     type = "mth5.runs.split_channels"
     title = "Split Channels"
-    description = "Split a run time series into individual channels."
+    description = (
+        "Split a run time series into individual channels. Channel names are "
+        "resolved through the mt_metadata channel nomenclature (LEMI e1/e2 or "
+        "e3/e4, bx/by/bz, ...) onto the standard ex/ey/hx/hy/hz outputs."
+    )
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("ex", "ts.channel"), Output("ey", "ts.channel"),
                Output("hx", "ts.channel"), Output("hy", "ts.channel"),
                Output("hz", "ts.channel"))
-    params = ()
+    params = (
+        Param("channel_nomenclature", "select", label="Channel nomenclature",
+              options=("auto",) + KEYWORDS, default="auto",
+              description="mt_metadata CHANNEL_MAPS keyword; auto infers it "
+                          "from the actual channel names"),
+    )
 
-    def execute(self, ctx, data) -> dict[str, Any]:
+    def execute(self, ctx, data,
+                channel_nomenclature: str = "auto") -> dict[str, Any]:
+        names = _channel_names(data)
+        kw = (channel_nomenclature if channel_nomenclature != "auto"
+              else infer_keyword(names))
         out = {}
         for comp in ("ex", "ey", "hx", "hy", "hz"):
-            chan = getattr(data, comp, None)
-            out[comp] = chan
+            actual = standard_name(kw, comp)
+            out[comp] = _get_channel(data, actual) if actual in names else None
         return out
+
+
+def _channel_names(data) -> list[str]:
+    """Actual channel names of a ts.run payload (RunTS or core TimeSeries)."""
+    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
+        return [str(c) for c in data.dataset.data_vars]
+    if hasattr(data, "channels"):
+        ch = data.channels
+        if isinstance(ch, dict):
+            return [str(k) for k in ch]
+        return [str(c) for c in ch]
+    raise TypeError(
+        f"cannot interpret ts.run value of type {type(data).__name__}"
+    )
+
+
+def _get_channel(data, name: str):
+    """Return a ChannelTS for ``name`` (mth5 RunTS) or a ChannelTS wrapper for
+    a core TimeSeries channel. Uses exact-name lookup only — never getattr on
+    a component that is absent (mt_timeseries raises NameError)."""
+    if hasattr(data, "dataset") and not isinstance(data, dict):
+        return getattr(data, name)
+    from mt_timeseries import ChannelTS
+
+    arr = np.asarray(data.channels[name], dtype=float)
+    ch = ChannelTS("electric" if is_electric_name(name) else "magnetic",
+                   data=arr)
+    ch.component = name
+    return ch
 
 
 class MergeChannels(Node):
@@ -129,10 +180,7 @@ class MergeChannels(Node):
         channels = [c for c in (ex, ey, hx, hy, hz) if c is not None]
         if not channels:
             raise ValueError("at least one channel required")
-        merged = channels[0]
-        for c in channels[1:]:
-            merged = merged + c
-        runts = RunTS(dataset=merged.dataset)
+        runts = RunTS(array_list=channels)
         return {"data": runts}
 
 

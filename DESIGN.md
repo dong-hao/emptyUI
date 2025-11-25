@@ -7,8 +7,8 @@ Status: v0.2 — design frozen for M0/M1 (2026-08-25).
 Changes after v0.1: aurora-informed port type system, node categories,
 TS→FC→TF stage split, MTH5-backed file storage, backend-decided port colors
 and ComfyUI-style port rendering conventions (§3).
-Implementation status: **M0 complete; M1 complete; M2 in progress** — mth5/
-aurora plugins scaffolded; ComputeFC (TS→FC windowed STFT) and EstimateTF
+Implementation status: **M0 complete; M1 complete; M2 complete** — mth5/
+aurora plugins delivered; ComputeFC (TS→FC windowed STFT) and EstimateTF
 (FC→TF cross-power LSQ) implemented and verified end-to-end through the
 executor on real 1 Hz LEMI-424 and BGS long-period data (Load LEMI → Detrend
 → ComputeFC → EstimateTF → Export EDI / Plot AppRes&Phase).
@@ -21,10 +21,13 @@ Processing correctness milestones:
   aurora-backed and share aurora's convention (Zxy≈+45°, Zyx≈−135°).
 - Detrending moved to the dedicated `core.filter.detrend` node (mean/linear/
   none); `e_dipole_length_m` optional (off by default — LEMI output is mV/km).
+- **Channel nomenclature** (2026-09-05): instrument naming is handled through
+  mt_metadata's canonical `CHANNEL_MAPS` (§3 "Channel nomenclature") instead
+  of hardcoded name tables; the magnetic B/H mode is derived automatically and
+  TFs are built aurora-style (actual channel names + nomenclature map).
 Estimator: **robust RME/RME_RR implemented** (aurora-backed) with remote
-reference support; multi-level decimation/FC persistence and Calibrate are
-follow-ups. See §13 for the current plan, priorities and divide-and-conquer
-tracks.
+reference support; multi-level decimation/FC persistence, Calibrate, table
+viewer and tippers delivered. See §13/§14 for the (historical) plan records.
 
 ---
 
@@ -111,8 +114,8 @@ typed data — so they can't feed processing nodes, but their figures can branch
 to `Preview Plot` / `Save Plot` nodes. This mirrors ComfyUI's IMAGE port +
 Preview/Save Image pattern: multiple results are each handled by their own
 viewer node (drag-resizable, positioned anywhere on the canvas) instead of a
-single fixed results pane. The run-level Results panel remains as a
-convenience gallery.
+single fixed results pane. There is **no run-level gallery** — the
+node-embedded viewers are the primary (and only) display.
 
 ### Port types (the ComfyUI-equivalent)
 
@@ -231,19 +234,26 @@ Fourier-coefficient boundary, mirroring both the conceptual MT pipeline
 (decimation → windowing → time/frequency transform → power spectra → TF
 estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
 
-- **`ComputeFC` node (TS → FC)** — input `ts.run`; params: input/output
-  channel names, magnetic unit (h/b), decimation levels + factor, window
-  length/overlap/type. Output `fc`. Internally expands uniform decimation
-  levels sequentially (level sample rates derived from factor × initial rate).
+- **`ComputeFC` node (TS → FC)** — input `ts.run`; params: channel
+  nomenclature (auto/default/lemi12/lemi34/phoenix123/musgraves — presets the
+  channel names via `cascade`), input/output channel names, decimation levels
+  + factor, window samples/overlap/type. Output `fc`. Internally expands
+  uniform decimation levels sequentially (level sample rates derived from
+  factor × initial rate; constant window in samples, aurora-style D2).
   Persists computed FCs into the workspace MTH5's FC layer. Outputs may be the
   electric pair and/or a vertical magnetic channel (e.g. `e1,e2,bz`) to also
-  produce the vertical-field geomagnetic transfer function (tipper).
+  produce the vertical-field geomagnetic transfer function (tipper). The
+  magnetic B/H mode is **derived automatically** from the nomenclature /
+  channel names (bx/by → fluxgate B→H; hx/hy → coil H) — the `magnetic_unit`
+  select defaults to `auto` and exists only for legacy saved workflows.
 - **`EstimateTF` node (FC → TF)** — inputs `fc` + optional `ref_fc` (remote
   reference); params: estimator (`Robust`/`Least Squares`), remote-reference
   on/off, periods-per-octave. Band edges are derived internally
-  (`_period_bands`). Output `tf` + per-level `tf.level`. The TF rows map to
-  the output channels (ex/ey and hz when a vertical channel is present), cols
-  to the inputs — a 2x2 impedance, or a 3x2 impedance + tipper.
+  (`_period_bands`). Output `tf` + per-level `tf.level`. The TF is built
+  aurora-style (§3 "Channel nomenclature"): rows/cols carry the **actual**
+  channel names (e1/e2/hz × hx/hy or the LEMI equivalents) and the
+   `channel_nomenclature` map is attached to the mt_metadata TF — a 2x2
+   impedance, or a 3x2 impedance + tipper.
 
 Why this boundary:
 1. **Frequency-domain work**: a first-class `fc` port lets users branch
@@ -260,6 +270,41 @@ Why this boundary:
 The full-config passthrough (`config` port) remains available at plugin
 tier for advanced cases (e.g. per-level customization via a `decimation`
 fan-in assembler).
+
+### Channel nomenclature (mt_metadata CHANNEL_MAPS)
+
+Instrument channel naming is **not** re-invented: `emptyui-mth5/nomenclature.py`
+builds on mt_metadata's canonical `CHANNEL_MAPS`
+(`default`/`lemi12`/`lemi34`/`phoenix123`/`musgraves`/`nims`) as the single
+source of truth for standard ⇄ actual channel names. Following the
+aurora/mt_metadata design, channels are **never renamed in the data** — a RunTS
+keeps `e1`/`bx`/... names; the nomenclature keyword is carried as metadata
+(fc attrs, TF map) and used only to interpret names:
+
+- **Unit normalization** (B vs H) is derived from the nomenclature/channel
+  names, not a manual switch: `bx/by/bz` → fluxgate B→H conversion; `hx/hy/hz`
+  → coil H (unchanged).
+- **`Load LEMI-424`** exposes a `channel_nomenclature` select (lemi12/lemi34):
+  LEMI instruments can carry four E channels (e1..e4); the keyword selects
+  which electric pair is read into the MTH5 (mt_io `e_channels`).
+- **`Split Channels` / `Merge Channels`** resolve the standard ex/ey/hx/hy/hz
+  ports onto the actual names via the nomenclature (exact-name lookup, never
+  `getattr` on an absent component).
+- **`ComputeFC`** records the resolved keyword on each fc's attrs
+  (`channel_nomenclature`, `magnetic_unit`), so `EstimateTF`/`MergeTFLevels`
+  can map back without re-entry. FCs read from an mth5 archive are enriched
+  with the same attrs by `mth5.fc.read`.
+- **`EstimateTF`** builds the mt_metadata TF the way aurora does
+  (`TF(channel_nomenclature=...)`): coordinates are the **actual** instrument
+  names and `tf.channel_nomenclature` carries the standard→actual map, so
+  aurora's `TTFZ`/`TransferFunctionCollection` can consume emptyUI TFs and the
+  instrument naming is preserved as provenance. All TF accessors
+  (`tf.ex`/`tf.hx`, `has_impedance`, `impedance`, `tipper`) are
+  nomenclature-aware; display nodes select components via `tf.ex/ey/hx/hy`.
+- **Exporters**: EDI/XML/AVG standardize on write (mt_metadata's writers
+  always emit standard channel names); the ZMM writer in mt_metadata 1.0.10
+  assumes standard names, so `ExportTF` relabels to a standard-coordinates
+  copy for `zmm` output.
 
 ### Merging multiple runs into one TF estimate
 
@@ -298,10 +343,12 @@ No internal database or bespoke data format. **MTH5 is the server-side
 container** — it already stores time series, Fourier coefficients, and
 transfer functions with full metadata:
 
-- The server maintains a workspace directory (e.g. `~/.emptyui/workspace/`).
-  Every intermediate result a node chooses to persist is written as an
-  HDF5/Zarr group inside a workspace MTH5-compatible tree; handles reference
-  these paths.
+- The server maintains a workspace directory **per run** (a
+  `tempfile.mkdtemp()` workspace, `ctx.workspace`). Every intermediate result
+  a node chooses to persist is written as an HDF5 group inside a workspace
+  MTH5-compatible tree (`<workspace>/workspace.mth5`, see `persist.py`);
+  handles reference these paths. A persistent `~/.emptyui/workspace/`
+  (surviving across runs) is a future item.
 - Nothing reaches the user's disk outside the workspace until they
   explicitly export/save-as (`SaveEDI`, `SaveMTH5`, download artifact…).
 - Benefits: free interoperability with the existing CLI ecosystem (any mth5/
@@ -381,18 +428,26 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
 - **`cascade`** (per param): when the user changes this param to a given value
   (key), the UI sets the listed `(other_param, value)` pairs. Keys serialize as
   strings for JSON (`bool` → `"true"`/`"false"`). Used, e.g., for `Compute FC`'s
-  magnetic input `h ⇄ b` to swap channel names, and for `Estimate TF`'s
-  remote-reference to force the Robust estimator:
+  channel-nomenclature select to preset the input/output channel names per
+  mt_metadata nomenclature, and for `Estimate TF`'s remote-reference to force
+  the Robust estimator:
 
   ```python
-  Param("magnetic_unit", "radio", default="h", options=("h", "b"),
+  Param("channel_nomenclature", "select", default="auto",
+        options=("auto", "lemi12", "lemi34", "phoenix123", "musgraves", "default"),
         cascade={
-            "h": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
-            "b": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
+            "lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
+            "lemi34": (("input_channels", "bx,by"), ("output_channels", "e3,e4")),
+            ...
         }),
   Param("remote_reference", "boolean", default=False,
         cascade={True: (("estimator_engine", "Robust"),)}),
   ```
+
+  The magnetic B/H mode is **not** a manual choice: it is derived from the
+  channel nomenclature / actual channel names (`bx/by` → fluxgate B→H;
+  `hx/hy` → coil H) — the `magnetic_unit` select defaults to `auto` and exists
+  only for legacy saved workflows.
 
 - **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
   an upstream node is connected to that port, those params render as dropdowns
@@ -403,13 +458,20 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
 
   ```python
   inherit: ClassVar[dict[str, dict[str, str]]] = {
-      "data": {"survey": "survey", "station": "station", "run": "run"},
+      "data": {"survey": "survey", "station": "station", "run": "run",
+               "channel_nomenclature": "channel_nomenclature"},
   }
   # Extract Run pulling from Load LEMI-424 (name mapping):
   inherit: ClassVar[dict[str, dict[str, str]]] = {
-      "mth5": {"survey": "survey_id", "station": "station_id"},
+      "mth5": {"survey": "survey_id", "station": "station_id",
+               "channel_nomenclature": "channel_nomenclature"},
   }
   ```
+
+  `channel_nomenclature` is inheritable end-to-end: `Load LEMI-424` → `Extract
+  Run` → `Compute FC` chain-walks the keyword (e.g. `lemi12`) so downstream
+  nodes are pre-populated; the run-time fallback infers it from the actual
+  channel names when no upstream value exists.
 
 Both serialize into the node manifest; the frontend applies them generically.
 
@@ -578,12 +640,16 @@ Design notes:
   MVP: in-memory LRU + optional disk cache.
 - **Progress**: nodes call `ctx.progress(frac, message)`; executor forwards to
   all connected WebSocket clients.
-- **Failure**: a failed node halts its dependents only; other branches continue.
-  Errors carry structured info (message, traceback excerpt, node id).
+- **Failure**: *design* — a failed node halts its dependents only; other
+  branches continue. *Current executor (M1/M2)*: a node failure aborts the
+  whole run (error event + `run_finished: failed`); per-branch continuation is
+  future work.
 - **Partial runs**: user can run a single node ("execute to here"), enabled by
   the caching scheme.
-- **Cancellation**: client sends a cancel message; executor checks a token
-  between node steps.
+- **Cancellation**: *design* — client sends a cancel message; executor checks a
+  token between node steps. *Current*: the `Executor.cancel()` token exists and
+  is checked between nodes, but no `POST /runs/{id}/cancel` endpoint/UI button
+  is wired yet.
 
 ### Run lifecycle events (WebSocket)
 
@@ -721,13 +787,13 @@ progress.
 **M3 — Power features**
 - Caching + partial execution; sub-workflows; remote-server mode docs
   (same API, deployed elsewhere); plugin packaging guide + example template.
-- **Dynamic "select from" options** (deferred from M2): selection-style nodes
-  (`Select Runs`, `Extract Run`, `Split Channels`) auto-populate dropdowns by
-  inspecting the connected upstream source (e.g. open the mth5 read-only and
-  list surveys/stations/runs). Design: manifest params gain an
-  `options_from: { input, attr }` field; new `POST /api/options` resolves the
-  upstream source and returns candidates; frontend renders a populated
-  `<select>` refreshed on connection changes. Nice-to-have UX, not critical.
+- **Dynamic "select from" options**: delivered (2026-09-05) via the
+  **chain-walking inheritance** mechanism of §4 instead of the originally
+  sketched `options_from`/`POST /api/options` design: `Compute FC`'s
+  survey/station/run (and channel nomenclature) auto-fill as editable
+  comboboxes from the connected upstream chain, frontend-only, with no
+  backend options endpoint. Selection-style nodes (`Extract Run`, `Split
+  Channels`) resolve the upstream source server-side at run time.
 
 **M4 — Community**
 - Plugin index/publish flow, docs site, more visualization nodes,
@@ -762,10 +828,10 @@ progress.
 
 ## 13. Upcoming Plan — Remaining M2 (2026-08-29)
 
-Status: M2 is in progress; ComputeFC/EstimateTF and the EDI/XML export coercion
-are verified end-to-end. This section records the agreed priority order and the
-divide-and-conquer tracks for finishing M2. It supersedes the one-line "next
-milestone" note above.
+Status: **M2 delivered** (2026-09-05); every item in the inventory below is
+done. This section is retained as the historical plan record — the agreed
+priority order and divide-and-conquer tracks for finishing M2. It supersedes
+the one-line "next milestone" note above.
 
 ### Remaining M2 deliverables
 
@@ -808,7 +874,8 @@ Inventory against §11. ~~Struck~~ items are delivered; the gaps:
   with `Remote Reference` raises a clear error rather than silently degrading.
   Should LS+RR ever be wanted, the `_solve_band` dispatch makes it a small,
   local addition — but we keep the two-option surface to match aurora's design.
-- **P1 — Multi-level decimation + FC persistence + MergeTFLevels.** Second value:
+- **P1 — Multi-level decimation + FC persistence + MergeTFLevels.** ✅ delivered
+  (2026-08-29). Second value:
   without it we process a single sampling rate and cannot produce broadband
   apparent-resistivity/phase curves spanning decades. **Largest, riskiest** chunk
   (data model + mth5 persistence + per-level estimator + merge node). Sequenced
@@ -823,9 +890,9 @@ Inventory against §11. ~~Struck~~ items are delivered; the gaps:
 
 ```
 Track A (backend, sci)   Robust RME/RME_RR  →  EstimateTF honors estimator_engine (+ remote_reference)   ✅
-Track B (backend, arch)  Multi-level ComputeFC + FC persistence + MergeTFLevels   (largest)
+Track B (backend, arch)  Multi-level ComputeFC + FC persistence + MergeTFLevels   (largest)              ✅
 Track C (frontend)       Table viewer + "View Selection" Display node            ✅
-Track D (backend, I/O)   Calibrate node + calibration port wiring
+Track D (backend, I/O)   Calibrate node + calibration port wiring                                       ✅
 ```
 
 - **A and C are fully independent** → run concurrently immediately.
@@ -848,10 +915,11 @@ Track D (backend, I/O)   Calibrate node + calibration port wiring
 
 ## 14. Current Plan — M2: Multi-level Decimation + FC Persistence (2026-08-29)
 
-Status: the biggest remaining M2 chunk (Track B). This is the plan for
-broadband MT — processing more than one decimation level so the apparent
-resistivity/phase curves span decades. It is grounded in reading the pinned
-aurora 0.6.2 / mth5 0.6.8 source (§14.1).
+Status: **delivered** (all four phases landed 2026-08-29; see the phase notes
+below). This section is the historical plan for broadband MT — processing more
+than one decimation level so the apparent resistivity/phase curves span
+decades. It is grounded in reading the pinned aurora 0.6.2 / mth5 0.6.8 source
+(§14.1).
 
 ### 14.1 What aurora actually does (grounding)
 
@@ -936,7 +1004,7 @@ single straight line while keeping the lower-level building block available.
   the helper for `tf.level` inputs.
 - Tests: multi-level → merged TF on LEMI/BGS; broadband coverage; per-level phase convention.
 
-**Phase 4 — Integration & verification**
+**Phase 4 — Integration & verification** ✅ delivered
 - End-to-end reference workflow (Load → ExtractRun → ComputeFC(multi) → EstimateTF → Export EDI /
   Plot AppRes&Phase) on real data; compare vs single-level; update DESIGN/README.
 - Cross-cutting: keep the `test12rr`-generated fixture in CI so these tests run without gitignored
@@ -961,8 +1029,12 @@ and returns a single merged `tf`, with `merge_tf_levels()` shared by the
 start is known; a specially named `workspace.mth5` in `ctx.workspace` holds
 persisted FCs per (survey, station, run, decimation level) via `persist_fc_level`
 / `load_fc_level` (in `emptyui-mth5/persist.py`); `ComputeFC` auto-persists
-level 0 when an absolute start is available and skips with a warning otherwise.
-Round-trip fc→mth5→fc verified (datetime required).
+**every** level when an absolute start is available and skips with a warning
+otherwise. Round-trip fc→mth5→fc verified (datetime required). Note
+(2026-09-05): the mth5 read-back path is now complete — `mth5.fc.read`
+enriches the read-back fc with the metadata `EstimateTF` needs (sample rate,
+channel roles via the nomenclature) and `estimate_tf` normalizes mth5's
+`(time, frequency)` layout.
 
 **Phase 2 delivered (2026-08-29):** `ComputeFC` now generates N cascading
 decimation levels via `compute_fc_levels` (`_processing.py`): level 0 is the
@@ -979,12 +1051,12 @@ single-level container for backward compatibility; multi-level TF estimation
 `estimate_tf_levels` (`_processing.py`) estimates a per-level TF for every
 decimation level (reusing the aurora-backed `_solve_band`); `merge_tf_levels`
 concatenates levels, sorts by period, drops degenerate bands, and resolves
-near-duplicate periods by keeping the highest-sample-rate level → one broadband
-`tf`. `EstimateTF` now loops levels and returns the merged `tf` (D5) plus a
-`tf_levels` (`tf.level`) output; `MergeTFLevels` is functional (merges a
-`tf.level` container). Verified: multi-level merged TF keeps aurora's phase
-convention on the halfspace (Zxy≈+45°, Zyx≈−135°); end-to-end on LEMI
-(4 levels → 64 merged periods → EDI).
+near-duplicate periods by keeping the **deepest** level → one broadband
+`tf` (per the final spec below). `EstimateTF` now loops levels and returns the
+merged `tf` (D5) plus a `tf_levels` (`tf.level`) output; `MergeTFLevels` is
+functional (merges a `tf.level` container). Verified: multi-level merged TF
+keeps aurora's phase convention on the halfspace (Zxy≈+45°, Zyx≈−135°);
+end-to-end on LEMI (4 levels → 64 merged periods → EDI).
 
 **Period banding rework (2026-08-29, feedback-driven).**
 - **Periods per octave** (`periods_per_octave`, default 4) replaces `periods_per_decade`;
@@ -993,8 +1065,7 @@ convention on the halfspace (Zxy≈+45°, Zyx≈−135°); end-to-end on LEMI
   its Nyquist period (2/fs) to the next level's Nyquist period (2·factor/fs); band centers sit
   on a global log2 grid including both end points, so level *i*'s last period **exactly equals**
   level *i+1*'s first period. Levels therefore tile continuously (no gaps), and the merge simply
-  de-duplicates the single shared boundary period — keeping the higher-sample-rate level (whose
-  boundary estimate is well within its window, vs the deeper level's noisier Nyquist edge). This
+  de-duplicates the single shared boundary period. This
   achieves aurora's "consistent frequency points between levels" without external band files.
 - **Realistic period range**: the longest period is clamped to the window reliability cap
   (N/(2·fs), ≥2 cycles) and the octave boundary — no more "longest period = window length"

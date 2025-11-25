@@ -66,8 +66,10 @@ class ViewTF(Node):
             phase = np.angle(z, deg=True)
             return rho, phase
 
-        rho_xy, ph_xy = _rho_phase("ex", "hy")
-        rho_yx, ph_yx = _rho_phase("ey", "hx")
+        # nomenclature-aware accessors: tf.ex/ey/hx/hy are the *actual*
+        # instrument channel names of this TF
+        rho_xy, ph_xy = _rho_phase(tf.ex, tf.hy)
+        rho_yx, ph_yx = _rho_phase(tf.ey, tf.hx)
         records = [
             {
                 "period_s": round(float(p), 5),

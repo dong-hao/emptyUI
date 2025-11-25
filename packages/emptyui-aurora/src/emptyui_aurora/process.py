@@ -11,6 +11,10 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
+from emptyui_mth5.nomenclature import (
+    KEYWORDS,
+    classify_channels,
+)
 
 from ._processing import (
     build_tf,
@@ -18,6 +22,17 @@ from ._processing import (
     estimate_tf_levels,
     merge_tf_levels,
 )
+
+_NOMENCLATURE_OPTIONS = ("auto",) + KEYWORDS
+
+#: Nomenclature presets (actual channel names, mt_metadata CHANNEL_MAPS).
+_NOMENCLATURE_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
+    "lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
+    "lemi34": (("input_channels", "bx,by"), ("output_channels", "e3,e4")),
+    "musgraves": (("input_channels", "bx,by"), ("output_channels", "ex,ey")),
+    "phoenix123": (("input_channels", "h1,h2"), ("output_channels", "e1,e2")),
+    "default": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
+}
 
 
 class ComputeFC(Node):
@@ -29,23 +44,29 @@ class ComputeFC(Node):
         "``factor`` per level). Specify input (horizontal magnetic) and output "
         "channel component names — outputs may be the electric pair (ex,ey) "
         "and/or a vertical magnetic channel (bz) for a geomagnetic transfer "
-        "function (tipper), e.g. inputs bx,by / outputs e1,e2,bz. Persists "
-        "each level's FC into the workspace MTH5 when an absolute start time "
-        "is available."
+        "function (tipper), e.g. inputs bx,by / outputs e1,e2,bz. The channel "
+        "nomenclature (mt_metadata CHANNEL_MAPS: lemi12/lemi34/...) decides "
+        "which names mean what — magnetic B vs H is derived from it, no manual "
+        "switch needed. Persists each level's FC into the workspace MTH5 when "
+        "an absolute start time is available."
     )
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("fc", "fc"),)
     params = (
+        Param("channel_nomenclature", "select", label="Channel nomenclature",
+              options=_NOMENCLATURE_OPTIONS, default="auto",
+              description="mt_metadata CHANNEL_MAPS keyword: maps standard "
+                          "components (ex/ey/hx/hy/hz) to the instrument's "
+                          "actual channel names and derives magnetic units",
+              cascade={k: list(v) for k, v in _NOMENCLATURE_PRESETS.items()}),
         Param("input_channels", "string", label="Input channels", default="hx,hy"),
         Param("output_channels", "string", label="Output channels", default="ex,ey"),
-        Param("magnetic_unit", "radio", label="Magnetic input", default="h",
-              options=("h", "b"),
-              description="h = coil sensor (already H); b = fluxgate (B converted to H)",
-              cascade={
-                  "h": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
-                  "b": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
-              }),
+        Param("magnetic_unit", "select", label="Magnetic input",
+              default="auto", options=("auto", "h", "b"),
+              description="auto (default) = derived from the channel "
+                          "nomenclature / names (bx/by → fluxgate B, hx/hy → "
+                          "coil H); h/b override for legacy workflows"),
         Param("e_dipole_length_m", "number", label="E dipole length (m)", default=None,
               optional=True,
               description="LEMI stores E as mV potential; divide by dipole length to get V/m"),
@@ -64,11 +85,13 @@ class ComputeFC(Node):
         Param("run", "string", label="Run id", default="", optional=True),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
-        "data": {"survey": "survey", "station": "station", "run": "run"},
+        "data": {"survey": "survey", "station": "station", "run": "run",
+                 "channel_nomenclature": "channel_nomenclature"},
     }
 
     def execute(self, ctx, data, input_channels: str = "hx,hy",
-                output_channels: str = "ex,ey", magnetic_unit: str = "h",
+                output_channels: str = "ex,ey", channel_nomenclature: str = "auto",
+                magnetic_unit: str = "auto",
                 e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
                 window_samples: int = 256,
@@ -87,7 +110,9 @@ class ComputeFC(Node):
         levels = compute_fc_levels(
             data, ins, outs, num_decimations=decimation_levels, factor=factor,
             num_samples_window=window_samples, overlap=overlap, window_type=window_type,
-            magnetic_unit=magnetic_unit, e_dipole_length_m=e_dipole_length_m,
+            magnetic_unit=magnetic_unit,
+            e_dipole_length_m=e_dipole_length_m,
+            channel_nomenclature=channel_nomenclature,
         )
         if persist:
             from emptyui_mth5.persist import persist_fc_level, runts_context
@@ -152,17 +177,33 @@ class EstimateTF(Node):
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
         sample_fc = next(iter(levels.values()))
-        ins = [c.strip() for c in (sample_fc.attrs.get("input_channels") or "hx,hy").split(",")]
-        outs = [c.strip() for c in (sample_fc.attrs.get("output_channels") or "ex,ey").split(",")]
+        kw = sample_fc.attrs.get("channel_nomenclature") or None
+        ins_raw = sample_fc.attrs.get("input_channels")
+        outs_raw = sample_fc.attrs.get("output_channels")
+        if ins_raw and outs_raw:
+            ins = [c.strip() for c in ins_raw.split(",") if c.strip()]
+            outs = [c.strip() for c in outs_raw.split(",") if c.strip()]
+        else:
+            # fc without attrs (e.g. read back from an mth5 archive): classify
+            # the channels through the nomenclature instead of assuming names.
+            ins, outs, _ = classify_channels(
+                [str(c) for c in sample_fc.data_vars], kw
+            )
+        if not ins or not outs:
+            raise ValueError(
+                "could not determine input/output channels from the fc — "
+                f"data_vars: {list(sample_fc.data_vars)}"
+            )
         per_level = estimate_tf_levels(
             levels, ins, outs,
             estimator_engine=estimator_engine,
             remote_reference=remote_reference,
             periods_per_octave=periods_per_octave,
             ref_levels=ref_fc,
+            channel_nomenclature=kw,
         )
         periods, Z = merge_tf_levels(per_level)
-        tf = build_tf(periods, Z, ins, outs)
+        tf = build_tf(periods, Z, ins, outs, channel_nomenclature=kw)
         ctx.progress(
             1.0,
             f"estimated TF ({estimator_engine}) over {len(levels)} level(s), "
@@ -187,8 +228,9 @@ class MergeTFLevels(Node):
         first = next(iter(tf_levels.values()))
         ins = list(first["input_channels"])
         outs = list(first["output_channels"])
+        kw = first.get("channel_nomenclature") or None
         periods, Z = merge_tf_levels(tf_levels)
-        tf = build_tf(periods, Z, ins, outs)
+        tf = build_tf(periods, Z, ins, outs, channel_nomenclature=kw)
         ctx.progress(1.0, f"merged {len(tf_levels)} TF levels -> {len(periods)} periods")
         return {"tf": tf}
 

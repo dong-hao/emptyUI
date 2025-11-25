@@ -44,11 +44,13 @@ cd packages/web && npm install && npm run dev
     PNG artifacts). Verified end-to-end on a 4-channel 150 Hz synthetic CSV.
   - Async run execution on worker threads; events streamed to the browser
     over WebSocket (`/api/ws`); per-node status/progress overlaid on nodes.
-  - Artifact store: `GET /api/artifacts/{id}/preview` serves plot PNGs;
-    docked result panel in the UI shows the latest plot + thumbnails.
+  - Artifact store: `GET /api/artifacts/{id}/preview` serves plot PNGs and
+    JSON tables; `Preview Plot` / `View Table` nodes render them inline in the
+    browser (no run-level gallery — node-embedded viewers are the display, see
+    DESIGN.md §9).
   - Workflow save/load as `emptyui/workflow` v1 JSON (port names and
     positions preserved; edge colors re-derived from port types on load).
-- **M2 — in progress**: mth5/aurora plugins scaffolded; port-type naming
+- **M2 — complete**: mth5/aurora plugins; port-type naming
   overhaul; LEMI-424 loader (`mth5.io.lemi`), Extract Run, Detrend
   (mean/linear/none), ComputeFC (TS→FC windowed STFT), EstimateTF (FC→TF
   cross-power LSQ), TF export to EDI, Plot AppRes & Phase (diagonal/
@@ -72,6 +74,23 @@ cd packages/web && npm install && npm run dev
     `calibration` filter via frequency-domain response removal.
   M2 is now complete (all §11 M2 deliverables delivered).
 - **M2 — Phase 4 polish**:
+  - **Channel nomenclature**: `Compute FC` (and `Split Channels`, `Load
+    LEMI-424`) expose an mt_metadata `channel_nomenclature` select
+    (`auto`/`default`/`lemi12`/`lemi34`/`phoenix123`/`musgraves`), driven by
+    `mt_metadata`'s canonical `CHANNEL_MAPS`. Selecting `lemi12`/`lemi34`
+    auto-sets the channel names (`bx,by`/`e1,e2` or `e3,e4`) via manifest
+    `cascade`; the **magnetic B/H mode is now derived automatically** from the
+    nomenclature/channel names (bx/by → fluxgate B→H conversion; hx/hy → coil H),
+    replacing the old manual `magnetic_unit` radio (kept as an `auto`/`h`/`b`
+    select for legacy saved workflows). `Load LEMI-424` now selects the
+    electric pair via nomenclature (lemi12 = e1/e2, lemi34 = e3/e4 — LEMI
+    instruments can carry four E channels). `EstimateTF` builds the TF the
+    way aurora does: with the **actual channel names as coordinates** plus the
+    `channel_nomenclature` map attached to the mt_metadata TF (so aurora
+    tooling can consume it and the instrument naming is preserved as
+    provenance); exporters that require standard names (EDI/XML/AVG)
+    standardize on write, and `ExportTF` relabels for the ZMM writer, which
+    mt_metadata 1.0.10 assumes standard names.
   - **Auto field change**: switching `Compute FC` magnetic input `h ⇄ b`
     auto-updates the channel names (`hx,hy/ex,ey` ⇄ `bx,by/e1,e2`); ticking
     `Remote Reference` on `Estimate TF` auto-switches the estimator to Robust.
@@ -110,5 +129,5 @@ cd packages/web && npm install && npm run dev
   button).
 - **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
   nodes render figures inline (drag-resizable) and `Save Plot` exports them —
-  ComfyUI's Preview/Save Image pattern. The Results panel is a run-level
-  gallery, not the primary viewer.
+  ComfyUI's Preview/Save Image pattern. There is no run-level gallery; the
+  node-embedded viewers are the primary (and only) display (DESIGN.md §9).

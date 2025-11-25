@@ -36,7 +36,7 @@ def _lemi_workflow(lemi_path, out_dir):
             _node("d", "core.filter.detrend", {"method": "mean"}),
             _node("c", "aurora.process.compute_fc",
                   {"input_channels": "bx,by", "output_channels": "e1,e2",
-                   "magnetic_unit": "b", "window_samples": 4096}),
+                   "channel_nomenclature": "lemi12", "window_samples": 4096}),
             _node("t", "aurora.process.estimate_tf", {}),
             _node("e", "mth5.tf.export",
                   {"path": str(out_dir / "lemi_tf"), "file_type": "edi"}),

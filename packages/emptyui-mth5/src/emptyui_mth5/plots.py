@@ -36,10 +36,12 @@ class PlotAppResPhase(Node):
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
 
+        # nomenclature-aware accessors: tf.ex/ey/hx/hy are the *actual*
+        # instrument channel names (e.g. e1/e2/bx/by for a LEMI TF)
         if mode == "off-diagonal":
-            components = [("zxy", "ex", "hy"), ("zyx", "ey", "hx")]
+            components = [("zxy", tf.ex, tf.hy), ("zyx", tf.ey, tf.hx)]
         else:
-            components = [("zxx", "ex", "hx"), ("zyy", "ey", "hy")]
+            components = [("zxx", tf.ex, tf.hx), ("zyy", tf.ey, tf.hy)]
 
         period = np.asarray(Z.coords["period"], dtype=float)
         omega = 2.0 * np.pi / period

@@ -5,7 +5,55 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from emptyui import Input, Node, Output, Param
+
+from .nomenclature import STANDARD_INPUTS, STANDARD_OUTPUTS
+
+
+def _to_standard_coords(tf):
+    """Return a copy of the TF relabelled to standard coordinates.
+
+    TFs built by emptyUI carry the *actual* instrument channel names as
+    coordinates plus the ``channel_nomenclature`` map (aurora-style). The ZMM
+    writer in mt_metadata 1.0.10 assumes standard names (its channel_dict is
+    built from standard-named Channel objects), so exporting a LEMI-named TF
+    to ZMM fails; this helper produces a standard-labelled copy for that
+    writer. Station/survey metadata is carried over.
+    """
+    import xarray as xr
+    from mt_metadata.transfer_functions.core import TF
+
+    arr = tf.dataset["transfer_function"]
+    inv = tf.inverse_channel_nomenclature  # actual -> standard
+    out = [inv.get(str(c), str(c)) for c in arr.coords["output"].values]
+    inp = [inv.get(str(c), str(c)) for c in arr.coords["input"].values]
+    data = np.zeros(
+        (arr.sizes["period"], len(STANDARD_OUTPUTS), len(STANDARD_INPUTS)),
+        dtype=complex,
+    )
+    for oi, o in enumerate(out):
+        if o not in STANDARD_OUTPUTS:
+            continue
+        for ii, i in enumerate(inp):
+            if i not in STANDARD_INPUTS:
+                continue
+            data[:, STANDARD_OUTPUTS.index(o), STANDARD_INPUTS.index(i)] = (
+                arr.isel(output=oi, input=ii).values
+            )
+    std = TF()
+    std.transfer_function = xr.DataArray(
+        data,
+        dims=("period", "output", "input"),
+        coords={
+            "period": arr.coords["period"].values,
+            "output": list(STANDARD_OUTPUTS),
+            "input": list(STANDARD_INPUTS),
+        },
+    )
+    std.station_metadata = tf.station_metadata
+    std.survey_metadata = tf.survey_metadata
+    return std
 
 
 class ImportTF(Node):
@@ -47,7 +95,8 @@ class ExportTF(Node):
             base, ext = out.with_suffix(""), out.suffix.lstrip(".")
             file_type = ext or file_type
             out = base
-        saved = tf.write(
+        export_tf = _to_standard_coords(tf) if file_type == "zmm" else tf
+        saved = export_tf.write(
             save_dir=str(out.parent),
             fn_basename=out.name,
             file_type=file_type,
