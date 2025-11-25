@@ -113,3 +113,43 @@ def test_persist_multiple_decimation_levels(tmp_path: Path):
             levels[level].sizes["time"],
             levels[level].sizes["frequency"],
         )
+
+
+def test_read_back_fc_feeds_estimate_tf(tmp_path: Path):
+    """The full FC round-trip through an mth5 archive must produce an fc that
+    EstimateTF can consume: attrs enriched (sample_rate, channel roles via the
+    nomenclature) and the (time, frequency) layout normalized."""
+    from emptyui_aurora._processing import estimate_tf
+    from emptyui_mth5.fc import FCGroupToSpectra
+    from mth5.mth5 import MTH5
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    runts = _FakeRunTS()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+
+    survey, station, run = runts_context(runts)
+    path = persist_fc_level(ctx, fc, 0, fc.attrs["sample_rate"],
+                            survey=survey, station=station, run=run)
+
+    m = MTH5()
+    m.open_mth5(str(path), mode="r")
+    try:
+        spectra = FCGroupToSpectra().execute(
+            ctx, m, survey=survey, station=station, run=run,
+            decimation_level=0,
+        )["fc"]
+    finally:
+        m.close_mth5()
+
+    # enrichment: the read-back fc carries the metadata EstimateTF needs
+    assert spectra.attrs["sample_rate"] > 0
+    assert spectra.attrs["channel_nomenclature"] == "default"
+    assert spectra.attrs["input_channels"] == "hx,hy"
+    assert spectra.attrs["output_channels"] == "ex,ey"
+
+    periods, Z = estimate_tf(spectra, ["hx", "hy"], ["ex", "ey"],
+                             estimator_engine="Least Squares",
+                             periods_per_octave=8)
+    assert periods.size > 1
+    assert np.all(np.isfinite(Z))

@@ -10,6 +10,9 @@ from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
 
+from .nomenclature import classify_channels, infer_keyword
+from .runs import _resolve_station, _resolve_survey
+
 
 class FCGroupToSpectra(Node):
     type = "mth5.fc.read"
@@ -33,13 +36,37 @@ class FCGroupToSpectra(Node):
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
                 run: str = "", decimation_level: int = 0,
                 channels: str = "") -> dict[str, Any]:
-        survey_obj = mth5.get_survey(survey) if survey else mth5.survey_group
-        station_obj = survey_obj.stations_group.get_station(station)
+        survey_obj = _resolve_survey(mth5, survey)
+        station_obj = _resolve_station(survey_obj, station)
         fc_group = station_obj.fourier_coefficients_group.get_fc_group(run)
         dec = fc_group.get_decimation_level(f"{decimation_level}")
         chan_list = [c.strip() for c in channels.split(",") if c.strip()] or None
         spectra = dec.to_xarray(channels=chan_list)
+        # mth5's to_xarray drops the FC metadata; enrich the attrs so the
+        # downstream EstimateTF can derive periods/channels (sample_rate is
+        # required by _period_bands, channel roles via the nomenclature).
+        _enrich_fc_attrs(spectra, dec, decimation_level)
         return {"fc": spectra}
+
+
+def _enrich_fc_attrs(spectra, dec, decimation_level: int) -> None:
+    """Attach sample rate + channel roles to a read-back fc (mth5 to_xarray
+    returns a bare Dataset without attrs)."""
+    summary = dec.channel_summary
+    if len(summary) and "sample_rate" not in spectra.attrs:
+        spectra.attrs["sample_rate"] = float(
+            summary["sample_rate_decimation_level"].iloc[0]
+        )
+    spectra.attrs.setdefault("decimation_level", int(decimation_level))
+    names = [str(c) for c in spectra.data_vars]
+    kw = infer_keyword(names)
+    ins, outs, _ = classify_channels(names, kw)
+    if "input_channels" not in spectra.attrs:
+        spectra.attrs["input_channels"] = ",".join(ins)
+    if "output_channels" not in spectra.attrs:
+        spectra.attrs["output_channels"] = ",".join(outs)
+    if "channel_nomenclature" not in spectra.attrs:
+        spectra.attrs["channel_nomenclature"] = kw
 
 
 class SpectraToFCGroup(Node):
