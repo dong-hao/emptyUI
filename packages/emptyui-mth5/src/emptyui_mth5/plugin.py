@@ -15,7 +15,7 @@ from .io import LoadMth5, SaveMth5
 from .lemi import LoadLemi
 from .merge import MergeRuns
 from .plots import PlotAppResPhase
-from .runs import ExtractRun, MergeChannels, SplitChannels
+from .runs import AlignRuns, ExtractRun, MergeChannels, SplitChannels
 from .tables import ViewSelection, ViewTF
 from .tf import ExportTF, ImportTF
 
@@ -27,6 +27,7 @@ def register(registry) -> None:
     registry.add(ExtractRun)
     registry.add(SplitChannels)
     registry.add(MergeChannels)
+    registry.add(AlignRuns)
     registry.add(MergeRuns)
     registry.add(ImportTF)
     registry.add(ExportTF)

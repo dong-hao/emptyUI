@@ -264,7 +264,27 @@ estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
   aurora-style (§3 "Channel nomenclature"): rows/cols carry the **actual**
   channel names (e1/e2/hz × hx/hy or the LEMI equivalents) and the
    `channel_nomenclature` map is attached to the mt_metadata TF — a 2x2
-   impedance, or a 3x2 impedance + tipper.
+   impedance, or a 3x2 impedance + tipper. The remote reference (**RME_RR**,
+   aurora-backed) pairs local/remote FC samples by row, so the ref fc must
+   share the local fc's **frequency AND time grids** — both are validated
+   (clear errors); the runs must be aligned first (see `Align Runs` below).
+- **`Align Runs` node (`mth5.runs.align`)** — two `ts.run` inputs → two
+  `ts.run` outputs, both normalized to an mth5 `RunTS` cropped to their
+  **common acquisition overlap**. Required for remote-reference processing:
+  the two stations must share the same sample rate (aurora hard-errors on
+  mixed rates), and after alignment both FCs have identical time grids so
+  RME_RR pairs the correct windows. The overlap is computed from absolute
+  start/end times (GPS) when available, with a warning fallback to relative
+  offsets. The remote station may be **magnetic-only** (bx,by) — a Compute FC
+  on such a run resolves to a reference FC (magnetic channels as outputs) and
+  only the magnetic channels are used by EstimateTF's `ref_fc`. The node
+  also computes the inter-station coherence of the horizontal magnetic field
+  (64–1024 s band) and **warns when it is weak** — a clock offset or an
+  un-filled data gap breaks station alignment and silently degrades remote
+  reference (mt_io's LEMI reader indexes files by *row*, not by timestamp, so
+  recording gaps must be filled at conversion — see
+  `scripts/convert_bgs_lemi.py`, which interpolates over gaps so one row ==
+  one true second).
 
 Why this boundary:
 1. **Frequency-domain work**: a first-class `fc` port lets users branch

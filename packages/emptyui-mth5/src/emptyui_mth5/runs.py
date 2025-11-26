@@ -12,6 +12,7 @@ from .nomenclature import (
     KEYWORDS,
     infer_keyword,
     is_electric_name,
+    is_magnetic_name,
     standard_name,
 )
 
@@ -188,3 +189,184 @@ def register(registry) -> None:
     registry.add(ExtractRun)
     registry.add(SplitChannels)
     registry.add(MergeChannels)
+    registry.add(AlignRuns)
+
+
+def _run_time_info(data):
+    """-> (channels {name: np.ndarray}, sample_rate, abs_start | None, rel_start).
+
+    ``abs_start`` is a pandas Timestamp when the payload carries a real
+    absolute start (mth5 RunTS GPS time index or a core TimeSeries with
+    ``start_datetime``). mt_timeseries uses the 1980 epoch for unknown starts,
+    which is treated as "no absolute time".
+    """
+    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
+        ds = data.dataset
+        ch = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
+        sr = float(data.sample_rate)
+        abs_start = None
+        try:
+            ts = pd.Timestamp(str(getattr(data, "start", None)))
+            if ts != pd.Timestamp("1980-01-01T00:00:00"):
+                abs_start = ts
+        except (TypeError, ValueError):
+            pass
+        return ch, sr, abs_start, 0.0
+    if hasattr(data, "channels") and hasattr(data, "sample_rate"):  # core TimeSeries
+        ch = {str(k): np.asarray(v, dtype=float) for k, v in data.channels.items()}
+        sr = float(data.sample_rate)
+        rel = float(getattr(data, "start", 0.0) or 0.0)
+        sd = getattr(data, "start_datetime", "") or ""
+        abs_start = pd.Timestamp(sd) if sd else None
+        return ch, sr, abs_start, rel
+    raise TypeError(f"cannot interpret ts.run value of type {type(data).__name__}")
+
+
+def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso):
+    """Rebuild a ts.run payload cropped to [start_idx, start_idx+n_common).
+
+    Both aligned outputs are normalized to an mth5 ``RunTS`` (regardless of
+    input type) so downstream consumers — aurora compute_fc and the core
+    display/filter nodes via ``coerce_run`` — accept them. The absolute start
+    is stamped so downstream FC time grids are identical for both runs.
+    """
+    from mt_timeseries import ChannelTS
+    from mth5.timeseries import RunTS
+
+    pieces = []
+    for name, arr in channels.items():
+        seg = np.asarray(arr, dtype=float)[start_idx:start_idx + n_common].copy()
+        ctype = "electric" if is_electric_name(name) else (
+            "magnetic" if is_magnetic_name(name) else "auxiliary"
+        )
+        ch = ChannelTS(ctype, data=seg, start=start_iso or None,
+                       sample_rate=float(sample_rate))
+        ch.component = name
+        pieces.append(ch)
+    kwargs = {}
+    meta = getattr(source, "run_metadata", None)
+    if meta is not None:
+        kwargs["run_metadata"] = meta
+    return RunTS(array_list=pieces, **kwargs)
+
+
+class AlignRuns(Node):
+    type = "mth5.runs.align"
+    title = "Align Runs"
+    description = (
+        "Crop two time series to their common acquisition overlap so their "
+        "Fourier coefficients can be paired — the first step of remote-"
+        "reference processing. Both runs must share the same sample rate "
+        "(aurora hard-errors on mixed rates). The overlap is computed from "
+        "absolute start/end times (GPS); when no absolute times are available "
+        "the relative offsets are used with a warning. Both outputs are "
+        "normalized to an mth5 RunTS over the identical interval — run "
+        "Compute FC on both with identical window/decimation settings."
+    )
+    category = "Processing"
+    inputs = (
+        Input("data1", "ts.run", label="time series 1"),
+        Input("data2", "ts.run", label="time series 2"),
+    )
+    outputs = (
+        Output("data1", "ts.run", label="time series 1"),
+        Output("data2", "ts.run", label="time series 2"),
+    )
+    params = ()
+
+    def execute(self, ctx, data1, data2) -> dict[str, Any]:
+        ch1, sr1, a1, r1 = _run_time_info(data1)
+        ch2, sr2, a2, r2 = _run_time_info(data2)
+        if abs(sr1 - sr2) > 1e-9 * max(sr1, sr2, 1.0):
+            raise ValueError(
+                f"runs have different sample rates: {sr1} vs {sr2} Hz — "
+                "remote reference requires identical sampling"
+            )
+        sr = sr1
+        n1 = max((len(v) for v in ch1.values()), default=0)
+        n2 = max((len(v) for v in ch2.values()), default=0)
+        if n1 < 1 or n2 < 1:
+            raise ValueError("runs have no samples")
+
+        if a1 is not None and a2 is not None:
+            t0 = max(a1, a2)
+            t1 = min(
+                a1 + pd.Timedelta(seconds=n1 / sr),  # exclusive end
+                a2 + pd.Timedelta(seconds=n2 / sr),
+            )
+            if t1 <= t0:
+                raise ValueError(
+                    f"runs do not overlap: [{a1}, ...] vs [{a2}, ...]"
+                )
+            n_common = max(1, int((t1 - t0).total_seconds() * sr))
+            i1 = round((t0 - a1).total_seconds() * sr)
+            i2 = round((t0 - a2).total_seconds() * sr)
+            start_iso = t0.isoformat()
+        else:
+            if a1 is None and a2 is None:
+                ctx.logger.warning(
+                    "no absolute start times — aligning by relative offsets"
+                )
+            else:
+                ctx.logger.warning(
+                    "one run lacks an absolute start — aligning by relative offsets"
+                )
+            r0 = max(r1, r2)
+            r_end = min(r1 + n1 / sr, r2 + n2 / sr)  # exclusive end
+            if r_end <= r0:
+                raise ValueError("runs do not overlap (relative time axes)")
+            n_common = max(1, int((r_end - r0) * sr))
+            i1 = round((r0 - r1) * sr)
+            i2 = round((r0 - r2) * sr)
+            start_iso = ""
+
+        if i1 + n_common > n1:
+            n_common = n1 - i1
+        if i2 + n_common > n2:
+            n_common = n2 - i2
+        if n_common < 1:
+            raise ValueError("runs have no overlapping samples")
+
+        out1 = _crop_to_runts(data1, ch1, sr, i1, n_common, start_iso)
+        out2 = _crop_to_runts(data2, ch2, sr, i2, n_common, start_iso)
+        _warn_if_uncorrelated(ctx, out1, out2, sr, n_common)
+        ctx.progress(
+            1.0,
+            f"aligned runs: {n_common} samples ({n_common / sr:.1f} s) overlap",
+        )
+        return {"data1": out1, "data2": out2}
+
+
+def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
+    """Diagnostic: warn when the stations' horizontal magnetic fields are not
+    coherent at long periods after alignment.
+
+    A clock offset or an un-filled data gap (mt_io's LEMI reader indexes by
+    row, not by timestamp!) breaks station alignment and would silently
+    degrade a remote-reference estimate — this catches that before the user
+    looks at a rough TF.
+    """
+    names1 = {str(c) for c in out1.dataset.data_vars}
+    names2 = {str(c) for c in out2.dataset.data_vars}
+    mags = [c for c in names1 if is_magnetic_name(c) and c in names2]
+    if not mags:
+        return
+    from scipy.signal import coherence
+
+    nperseg = min(4096, max(256, int(n_common // 4)))
+    x = np.asarray(out1.dataset[mags[0]].values, dtype=float)
+    y = np.asarray(out2.dataset[mags[0]].values, dtype=float)
+    f, C = coherence(x, y, fs=float(sr), nperseg=nperseg, noverlap=nperseg // 2)
+    band = (f >= 1.0 / 1024.0) & (f <= 1.0 / 64.0)
+    if not band.any():
+        return
+    c = float(np.nanmedian(C[band]))
+    if c < 0.5:
+        ctx.logger.warning(
+            "aligned stations are weakly coherent at long periods "
+            "(median %.2f for %s) — remote reference will be degraded; "
+            "check for clock offsets or un-filled data gaps between the sites",
+            c, mags[0],
+        )
+    else:
+        ctx.logger.info("station coherence (%s, 64-1024 s): %.2f", mags[0], c)

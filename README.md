@@ -160,6 +160,22 @@ npm run test:headed         # watch the browser while it runs
     case-insensitive, and `Plot Spectrogram` defaults to the first electric
     channel when left empty (previously hardcoded `"Ex"`, which failed on
     LEMI/phoenix runs).
+  - **Remote reference end-to-end**: new **Align Runs** node
+    (`mth5.runs.align`) crops two time series to their common acquisition
+    overlap (same sample rate required; absolute GPS times preferred,
+    relative-offset fallback with a warning) so their FCs can be paired —
+    the prerequisite for `Estimate TF`'s Robust + Remote Reference (RME_RR).
+    `estimate_tf` now validates that the remote fc shares the local fc's
+    **time grid** as well as the frequency grid (clear "align the runs"
+    error). A magnetic-only remote station is supported: empty output
+    channels resolve to a reference FC (magnetic channels as outputs). Align
+    Runs also measures inter-station magnetic coherence and warns when it is
+    weak (clock offsets / un-filled data gaps break alignment — mt_io's LEMI
+    reader indexes by row, so `scripts/convert_bgs_lemi.py` interpolates over
+    recording gaps: one row == one true second). Tested end-to-end on the BGS
+    LEMI sites NO46 + NX37 (48 h common window, decimated FCs, RME_RR, EDI
+    export) plus an offline synthetic two-station test and a coherence
+    regression guard.
   - **Run cancellation**: `POST /api/runs/{id}/cancel` sets a per-run cancel
     token that the executor polls between nodes; the toolbar **✕ Cancel**
     button is enabled while a run is queued/running and stops the pipeline at

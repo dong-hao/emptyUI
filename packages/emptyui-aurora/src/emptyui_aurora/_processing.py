@@ -129,10 +129,21 @@ def _resolve_io_channels(available, channel_nomenclature, input_channels,
             f"set input_channels explicitly (e.g. 'bx,by')"
         )
     if not outs:
-        raise ValueError(
-            f"no output channels available — requested {output_channels!r} "
-            f"against data {available}"
-        )
+        if auto_outs and len(ins) == 2:
+            # A magnetic-only run (no electric/vertical channels) is a remote-
+            # reference station: the FC carries the magnetic channels, which is
+            # exactly what EstimateTF's ref_fc consumes.
+            _log.warning(
+                "no electric/vertical output channels in the data %s — using "
+                "the magnetic channels %s as outputs (remote-reference fc)",
+                available, ins,
+            )
+            outs = list(ins)
+        else:
+            raise ValueError(
+                f"no output channels available — requested {output_channels!r} "
+                f"against data {available}"
+            )
     return ins, outs, keyword
 
 
@@ -554,6 +565,15 @@ def estimate_tf(
             raise ValueError(
                 "remote-reference fc has a different frequency grid than the "
                 "local fc — compute both with the same window settings"
+            )
+        # RME_RR pairs local/remote samples by row, so the FCs must share the
+        # same window (time) grid — the runs have to be cropped to their
+        # common acquisition overlap (Align Runs) before computing FCs.
+        if not np.array_equal(ref_fc["time"].values, fc["time"].values):
+            raise ValueError(
+                "remote-reference fc has a different time grid than the local "
+                "fc — the runs are not aligned; crop both to their common "
+                "acquisition overlap (Align Runs) before computing FCs"
             )
 
     # Realistic, octave-aligned period bands for this decimation level.
