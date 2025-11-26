@@ -144,6 +144,22 @@ npm run test:headed         # watch the browser while it runs
     `selection` input ports on `Compute FC`/`Estimate TF`; the default pipeline
     is `ExtractRun → ComputeFC → EstimateTF (+ MergeTFLevels)`.
 - **M3 — in progress**:
+  - **ComputeFC channel auto-configuration**: the tipper is on by default —
+    `Compute FC`'s output channels resolve to the electric pair **plus** the
+    vertical magnetic channel (bz/h3/hz) when the run contains one
+    (impedance-only or tipper-only FCs are derived from what the data actually
+    has; a requested-but-missing output is dropped with a warning). Empty
+    input/output channel fields auto-detect from the data + nomenclature
+    (case-insensitive, e.g. CSV `Ex,Ey,Hx,Hy`), and a nomenclature keyword
+    inherited from the upstream chain (Load LEMI-424 → Extract Run → Compute
+    FC) auto-fills the fields — explicit user choices are never overridden.
+  - **Display nodes accept standard names / auto-select**: `Plot Time
+    Series`'s channel list and `Plot Spectrogram`'s channel field now resolve
+    through the inferred channel nomenclature — standard names (ex/ey/hx/hy/hz)
+    map to the instrument names (e.g. `ex` → `e1` on LEMI data), matching is
+    case-insensitive, and `Plot Spectrogram` defaults to the first electric
+    channel when left empty (previously hardcoded `"Ex"`, which failed on
+    LEMI/phoenix runs).
   - **Run cancellation**: `POST /api/runs/{id}/cancel` sets a per-run cancel
     token that the executor polls between nodes; the toolbar **✕ Cancel**
     button is enabled while a run is queued/running and stops the pipeline at

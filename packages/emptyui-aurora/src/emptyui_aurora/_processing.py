@@ -8,12 +8,15 @@ RME / remote-reference RME_RR, all aurora-backed via :func:`_solve_band`).
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 from emptyui_mth5.nomenclature import (
     STANDARD_INPUTS,
     STANDARD_OUTPUTS,
     channel_map,
+    default_channels,
     infer_keyword,
     is_electric_name,
     is_magnetic_name,
@@ -22,6 +25,17 @@ from emptyui_mth5.nomenclature import (
 )
 
 MU0 = 4.0 * np.pi * 1e-7
+
+_log = logging.getLogger("emptyui")
+
+
+def _split_names(value) -> list[str]:
+    """Split a comma-separated channel list (or an iterable of names); None -> []."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(c).strip() for c in value if str(c).strip()]
+    return [c.strip() for c in str(value).split(",") if c.strip()]
 
 
 def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
@@ -37,13 +51,89 @@ def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
     return magnetic_unit_from_channels(input_channels)
 
 
-def _resolve_keyword(channel_nomenclature, input_channels, output_channels):
+def _resolve_keyword(channel_nomenclature, input_channels, output_channels,
+                     available=None):
     """Resolve the nomenclature keyword: explicit value, or best-effort
-    inference from the actual channel names."""
+    inference. With explicit channel fields, inference uses those names (so a
+    user requesting the e3/e4 pair on a 4-E-channel run resolves to lemi34);
+    with auto (empty) fields it falls back to the channels actually present in
+    the data."""
     kw = str(channel_nomenclature or "").strip().lower()
     if kw and kw != "auto":
         return kw
-    return infer_keyword(list(input_channels) + list(output_channels))
+    requested = _split_names(input_channels) + _split_names(output_channels)
+    if requested:
+        return infer_keyword(requested)
+    if available:
+        return infer_keyword(available)
+    return "default"
+
+
+def _resolve_io_channels(available, channel_nomenclature, input_channels,
+                         output_channels):
+    """Resolve the actual input/output channel names for a compute_fc call.
+
+    Empty (or "auto") fields are resolved automatically from the nomenclature
+    and the data: inputs = the horizontal magnetic pair, outputs = the
+    electric pair **plus** the vertical magnetic channel (tipper) — each
+    included only when the channel is actually present. This makes the tipper
+    available by default while keeping an impedance-only FC when the data has
+    no vertical channel, and a tipper-only FC when the data carries only
+    magnetic channels.
+
+    Explicit names are used as-is; an explicit output channel missing from the
+    data is dropped with a warning (the vertical magnetic channel is a
+    best-effort extension), while a missing input channel is an error.
+    """
+    available = [str(c) for c in available]
+    keyword = _resolve_keyword(
+        channel_nomenclature, input_channels, output_channels, available
+    )
+    ins = _split_names(input_channels)
+    outs = _split_names(output_channels)
+    auto_ins = not ins or ins == ["auto"]
+    auto_outs = not outs or outs == ["auto"]
+    if auto_ins or auto_outs:
+        d_ins, d_outs = default_channels(keyword)
+    if auto_ins:
+        ins = d_ins
+    if auto_outs:
+        outs = d_outs
+
+    # Normalize to the exact names present in the data (case-insensitive —
+    # e.g. a CSV with 'Ex,Ey,Hx,Hy' satisfies the standard 'ex,ey,hx,hy').
+    def present(name) -> str | None:
+        low = str(name).strip().lower()
+        for c in available:
+            if str(c).lower() == low:
+                return c
+        return None
+
+    resolved_ins = [present(c) for c in ins]
+    missing_ins = [c for c in resolved_ins if c is None]
+    ins = [c for c in resolved_ins if c is not None]
+    resolved_outs = [present(c) for c in outs]
+    missing = [c for c in resolved_outs if c is None]
+    outs = [c for c in resolved_outs if c is not None]
+    if missing:
+        _log.warning(
+            "dropping output channel(s) %s not present in the data %s "
+            "(tipper is a best-effort extension — the vertical magnetic "
+            "channel is included only when available)",
+            missing, available,
+        )
+    if len(ins) != 2:
+        raise ValueError(
+            f"need two input channels (horizontal magnetic Hx/Hy or Bx/By) — "
+            f"resolved {ins} (missing {missing_ins}) from data {available}; "
+            f"set input_channels explicitly (e.g. 'bx,by')"
+        )
+    if not outs:
+        raise ValueError(
+            f"no output channels available — requested {output_channels!r} "
+            f"against data {available}"
+        )
+    return ins, outs, keyword
 
 
 def to_channels(value):
@@ -155,7 +245,9 @@ def compute_fc(
     nperseg = max(8, int(window_length_s * sample_rate))
     noverlap = int(nperseg * overlap)
     win = _window(window_type)
-    keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
+    input_channels, output_channels, keyword = _resolve_io_channels(
+        list(channels), channel_nomenclature, input_channels, output_channels
+    )
     b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
@@ -251,7 +343,9 @@ def compute_fc_levels(
     channels, sample_rate, start_s, start_dt = to_channels(value)
     if start_datetime is None:
         start_datetime = start_dt
-    keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
+    input_channels, output_channels, keyword = _resolve_io_channels(
+        list(channels), channel_nomenclature, input_channels, output_channels
+    )
     b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 

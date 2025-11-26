@@ -246,6 +246,17 @@ estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
   magnetic B/H mode is **derived automatically** from the nomenclature /
   channel names (bx/by → fluxgate B→H; hx/hy → coil H) — the `magnetic_unit`
   select defaults to `auto` and exists only for legacy saved workflows.
+  **Channel auto-configuration**: empty input/output channel fields resolve
+  from the data and its nomenclature — inputs = the horizontal magnetic pair,
+  outputs = the electric pair **plus** the vertical magnetic channel when the
+  run contains one (tipper by default); a run with no electric channels yields
+  a tipper-only FC, and an explicitly requested output missing from the data
+  is dropped with a warning (best-effort vertical extension; missing inputs
+  stay a hard error). Matching is case-insensitive (CSV `Ex,Ey,Hx,Hy`). When
+  the nomenclature keyword is known from the upstream chain (Load LEMI-424 →
+  Extract Run → Compute FC), the frontend auto-fills the fields from the
+  inherited keyword (defaults may be overridden by inheritance; explicit user
+  choices never are).
 - **`EstimateTF` node (FC → TF)** — inputs `fc` + optional `ref_fc` (remote
   reference); params: estimator (`Robust`/`Least Squares`), remote-reference
   on/off, periods-per-octave. Band edges are derived internally
@@ -290,6 +301,23 @@ keeps `e1`/`bx`/... names; the nomenclature keyword is carried as metadata
 - **`Split Channels` / `Merge Channels`** resolve the standard ex/ey/hx/hy/hz
   ports onto the actual names via the nomenclature (exact-name lookup, never
   `getattr` on an absent component).
+- **`ComputeFC` channel auto-configuration**: empty input/output channel
+  fields resolve from the data + its nomenclature — the horizontal magnetic
+  pair as inputs, the electric pair plus the vertical magnetic channel
+  (tipper) as outputs when present; a magnetic-only run yields a tipper-only
+  FC; requested-but-missing outputs are dropped with a warning (missing
+  inputs stay errors). The frontend auto-fills the fields from an
+  upstream-inherited keyword (Load LEMI-424 → Extract Run → Compute FC).
+- **Display nodes accept standard names / auto-select** (`core.plot.*`):
+  `Plot Time Series`'s channel spec and `Plot Spectrogram`'s channel field
+  resolve through the inferred nomenclature — standard component names
+  (ex/ey/hx/hy/hz) map to the instrument names (e.g. `ex` → `e1` on LEMI
+  data), matching is case-insensitive, and `Plot Spectrogram` defaults to
+  the first electric channel when the field is empty (no more hardcoded
+  `"Ex"` that fails on LEMI/phoenix runs). Core nodes keep the plugin
+  dependency policy: the resolver lazily imports mt_metadata's canonical
+  `CHANNEL_MAPS` with a mirrored fallback
+  (`emptyui-core-nodes/_channels.py`).
 - **`ComputeFC`** records the resolved keyword on each fc's attrs
   (`channel_nomenclature`, `magnetic_unit`), so `EstimateTF`/`MergeTFLevels`
   can map back without re-entry. FCs read from an mth5 archive are enriched

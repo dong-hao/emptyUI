@@ -38,6 +38,7 @@ export function ParamField({ param, value, onChange, compact, disabled, selectOp
           list={listId}
           value={str}
           disabled={disabled}
+          placeholder={param.placeholder}
           onChange={(e) => set(e.target.value)}
         />
         <datalist id={listId}>
@@ -130,7 +131,13 @@ export function ParamField({ param, value, onChange, compact, disabled, selectOp
         );
         break;
       default:
-        field = <input value={str} onChange={(e) => set(e.target.value)} />;
+        field = (
+          <input
+            value={str}
+            placeholder={param.placeholder}
+            onChange={(e) => set(e.target.value)}
+          />
+        );
     }
   }
 

@@ -412,3 +412,142 @@ def test_multi_level_merge_broadband():
     assert np.all(np.isfinite(Z))
     assert Z.shape[0] == len(P)
     assert not np.allclose(Z, 0)
+
+
+def _runts_with_channels(channels: dict[str, np.ndarray], sr: float = 8.0):
+    """Build a fake ts.run-like object with the given named channels."""
+    import xarray as xr
+
+    n = len(next(iter(channels.values())))
+    t = np.arange(n) / sr
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {k: ("time", v) for k, v in channels.items()},
+                coords={"time": t},
+            )
+
+    return FakeRunTS()
+
+
+def test_compute_fc_auto_detects_lemi_channels_including_tipper():
+    """Empty input/output fields resolve from the data + nomenclature: lemi12
+    names (bx,by / e1,e2) plus the vertical magnetic channel (bz) — the tipper
+    is included by default when the run carries it."""
+    rng = np.random.default_rng(3)
+    n = 4096
+    runts = _runts_with_channels({
+        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
+        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
+        "bz": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "", "",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"bx", "by", "e1", "e2", "bz"}
+    assert fc.attrs["input_channels"] == "bx,by"
+    assert fc.attrs["output_channels"] == "e1,e2,bz"
+    assert fc.attrs["channel_nomenclature"] == "lemi12"
+
+
+def test_compute_fc_auto_drops_missing_vertical():
+    """No vertical channel in the data -> impedance-only FC, no error."""
+    rng = np.random.default_rng(4)
+    n = 4096
+    runts = _runts_with_channels({
+        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
+        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "", "",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
+    assert fc.attrs["output_channels"] == "e1,e2"
+
+
+def test_compute_fc_auto_tipper_only_when_no_electric():
+    """Magnetic-only run (bx,by,bz) -> tipper-only FC (no impedance channels)."""
+    rng = np.random.default_rng(5)
+    n = 4096
+    runts = _runts_with_channels({
+        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
+        "bz": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "", "",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"bx", "by", "bz"}
+    assert fc.attrs["output_channels"] == "bz"
+
+
+def test_compute_fc_auto_phoenix_names():
+    """phoenix123 data (h1,h2,e1,e2,h3) resolves to the actual names."""
+    rng = np.random.default_rng(6)
+    n = 4096
+    runts = _runts_with_channels({
+        "h1": rng.standard_normal(n), "h2": rng.standard_normal(n),
+        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
+        "h3": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "", "",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"h1", "h2", "e1", "e2", "h3"}
+    assert fc.attrs["input_channels"] == "h1,h2"
+    assert fc.attrs["output_channels"] == "e1,e2,h3"
+    assert fc.attrs["channel_nomenclature"] == "phoenix123"
+    # coil sensors: H already, no B->H conversion
+    assert fc.attrs["magnetic_unit"] == "h"
+
+
+def test_compute_fc_auto_standard_names():
+    """Standard-named data with empty fields resolves to hx,hy / ex,ey."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, "", "",
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
+    assert fc.attrs["channel_nomenclature"] == "default"
+
+
+def test_compute_fc_explicit_missing_output_dropped_with_warning():
+    """An explicitly requested output channel missing from the data is dropped
+    (best-effort tipper extension), not an error."""
+    rng = np.random.default_rng(7)
+    n = 4096
+    runts = _runts_with_channels({
+        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
+        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "bx,by", "e1,e2,bz",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
+    assert fc.attrs["output_channels"] == "e1,e2"
+
+
+def test_compute_fc_explicit_missing_input_errors():
+    """A missing INPUT channel stays a hard error."""
+    rng = np.random.default_rng(8)
+    n = 4096
+    runts = _runts_with_channels({
+        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
+        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
+    })
+    with pytest.raises(ValueError, match="input"):
+        compute_fc(runts, "hx,hy", "e1,e2",
+                   window_length_s=128, overlap=0.5, window_type="hamming")
+
+
+def test_compute_fc_auto_case_insensitive_channel_names():
+    """CSV-style uppercase channel names (Ex,Ey,Hx,Hy) resolve case-
+    insensitively; the fc uses the exact names present in the data."""
+    rng = np.random.default_rng(9)
+    n = 4096
+    runts = _runts_with_channels({
+        "Ex": rng.standard_normal(n), "Ey": rng.standard_normal(n),
+        "Hx": rng.standard_normal(n), "Hy": rng.standard_normal(n),
+    })
+    fc = compute_fc(runts, "", "",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"Ex", "Ey", "Hx", "Hy"}
+    assert fc.attrs["input_channels"] == "Hx,Hy"
+    assert fc.attrs["output_channels"] == "Ex,Ey"
+    assert fc.attrs["channel_nomenclature"] == "default"

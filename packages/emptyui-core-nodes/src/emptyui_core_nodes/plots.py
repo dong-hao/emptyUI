@@ -15,17 +15,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from emptyui import Input, Node, Output, Param
 
+from ._channels import auto_channel, resolve_channels
 from .types import TimeSeries, coerce_run
 
 
 def _select_channels(data: TimeSeries, spec: str) -> list[str]:
-    if not spec:
-        return list(data.channels)
-    names = [s.strip() for s in spec.split(",") if s.strip()]
-    missing = [n for n in names if n not in data.channels]
-    if missing:
-        raise ValueError(f"channels {missing} not in data {list(data.channels)}")
-    return names
+    """Resolve a channel spec against the data (empty = all). Standard
+    component names (ex/ey/hx/hy/hz) are mapped through the inferred
+    nomenclature; matching is case-insensitive."""
+    return resolve_channels(list(data.channels), spec)
 
 
 class PlotTimeSeriesNode(Node):
@@ -37,7 +35,11 @@ class PlotTimeSeriesNode(Node):
     outputs = (Output("plot", "plot"),)
     params = (
         Param("channels", "string", label="Channels (comma-sep, empty=all)",
-              default="", optional=True),
+              default="", optional=True,
+              description="Channel names to plot; empty = all channels. "
+                          "Standard names (ex/ey/hx/hy/hz) are mapped through "
+                          "the inferred channel nomenclature; matching is "
+                          "case-insensitive."),
         Param("seconds", "number", label="Duration to plot (s)", default=None,
               optional=True),
     )
@@ -74,17 +76,25 @@ class PlotSpectrogramNode(Node):
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)
     params = (
-        Param("channel", "string", label="Channel", default="Ex"),
+        Param("channel", "string", label="Channel", default="",
+              placeholder="auto (first electric channel)",
+              description="Channel to spectrogram; empty = first electric "
+                          "channel (or first channel). Standard names "
+                          "(ex/ey/hx/hy/hz) are mapped through the inferred "
+                          "channel nomenclature."),
         Param("window_s", "number", label="Window length (s)", default=10.0),
     )
 
-    def execute(self, ctx, data, channel: str = "Ex",
+    def execute(self, ctx, data, channel: str = "",
                 window_s: float = 10.0) -> dict[str, Any]:
         data = coerce_run(data)
         from scipy.signal import spectrogram
 
-        if channel not in data.channels:
-            raise ValueError(f"channel '{channel}' not in {list(data.channels)}")
+        if str(channel or "").strip():
+            names = resolve_channels(list(data.channels), channel)
+        else:
+            names = [auto_channel(list(data.channels))]
+        channel = names[0]
         x = data.channels[channel]
         nperseg = max(8, int(window_s * data.sample_rate))
 

@@ -26,12 +26,15 @@ from ._processing import (
 _NOMENCLATURE_OPTIONS = ("auto",) + KEYWORDS
 
 #: Nomenclature presets (actual channel names, mt_metadata CHANNEL_MAPS).
+#: Each preset includes the vertical magnetic channel (bz/h3) so the tipper is
+#: computed by default; ComputeFC drops it when the data has no vertical
+#: channel (best-effort extension, see _processing._resolve_io_channels).
 _NOMENCLATURE_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
-    "lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2")),
-    "lemi34": (("input_channels", "bx,by"), ("output_channels", "e3,e4")),
-    "musgraves": (("input_channels", "bx,by"), ("output_channels", "ex,ey")),
-    "phoenix123": (("input_channels", "h1,h2"), ("output_channels", "e1,e2")),
-    "default": (("input_channels", "hx,hy"), ("output_channels", "ex,ey")),
+    "lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2,bz")),
+    "lemi34": (("input_channels", "bx,by"), ("output_channels", "e3,e4,bz")),
+    "musgraves": (("input_channels", "bx,by"), ("output_channels", "ex,ey,bz")),
+    "phoenix123": (("input_channels", "h1,h2"), ("output_channels", "e1,e2,h3")),
+    "default": (("input_channels", "hx,hy"), ("output_channels", "ex,ey,hz")),
 }
 
 
@@ -44,7 +47,11 @@ class ComputeFC(Node):
         "``factor`` per level). Specify input (horizontal magnetic) and output "
         "channel component names — outputs may be the electric pair (ex,ey) "
         "and/or a vertical magnetic channel (bz) for a geomagnetic transfer "
-        "function (tipper), e.g. inputs bx,by / outputs e1,e2,bz. The channel "
+        "function (tipper), e.g. inputs bx,by / outputs e1,e2,bz. Empty input/"
+        "output channels auto-detect from the data and its nomenclature — the "
+        "vertical magnetic channel is included by default when present (tipper "
+        "by default; impedance-only or tipper-only FCs are derived from what "
+        "the run actually contains). The channel "
         "nomenclature (mt_metadata CHANNEL_MAPS: lemi12/lemi34/...) decides "
         "which names mean what — magnetic B vs H is derived from it, no manual "
         "switch needed. Persists each level's FC into the workspace MTH5 when "
@@ -60,8 +67,19 @@ class ComputeFC(Node):
                           "components (ex/ey/hx/hy/hz) to the instrument's "
                           "actual channel names and derives magnetic units",
               cascade={k: list(v) for k, v in _NOMENCLATURE_PRESETS.items()}),
-        Param("input_channels", "string", label="Input channels", default="hx,hy"),
-        Param("output_channels", "string", label="Output channels", default="ex,ey"),
+        Param("input_channels", "string", label="Input channels", default="",
+              placeholder="auto (detect from data)",
+              description="Two horizontal magnetic channel names (e.g. 'bx,by' "
+                          "or 'h1,h2'). Empty = resolve from the nomenclature "
+                          "and the data (mt_metadata CHANNEL_MAPS)."),
+        Param("output_channels", "string", label="Output channels", default="",
+              placeholder="auto (detect from data)",
+              description="Electric pair and/or vertical magnetic channel "
+                          "(e.g. 'e1,e2' or 'e1,e2,bz' for a tipper). Empty = "
+                          "resolve from the nomenclature and the data: the "
+                          "electric pair plus the vertical magnetic channel "
+                          "when present; a vertical-only run yields a "
+                          "tipper-only FC."),
         Param("magnetic_unit", "select", label="Magnetic input",
               default="auto", options=("auto", "h", "b"),
               description="auto (default) = derived from the channel "
@@ -89,8 +107,8 @@ class ComputeFC(Node):
                  "channel_nomenclature": "channel_nomenclature"},
     }
 
-    def execute(self, ctx, data, input_channels: str = "hx,hy",
-                output_channels: str = "ex,ey", channel_nomenclature: str = "auto",
+    def execute(self, ctx, data, input_channels: str = "",
+                output_channels: str = "", channel_nomenclature: str = "auto",
                 magnetic_unit: str = "auto",
                 e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
@@ -98,17 +116,12 @@ class ComputeFC(Node):
                 overlap: float = 0.5, window_type: str = "hamming",
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
-        ins = [c.strip() for c in input_channels.split(",") if c.strip()]
-        outs = [c.strip() for c in output_channels.split(",") if c.strip()]
-        if len(ins) != 2 or len(outs) < 1:
-            raise ValueError(
-                "need two input channels (horizontal magnetic Hx/Hy or Bx/By) "
-                "and one or more output channels (electric Ex/Ey and/or "
-                "vertical Bz for a tipper), e.g. inputs 'bx,by', outputs "
-                "'e1,e2' or 'e1,e2,bz'"
-            )
+        # Channel names resolve inside compute_fc_levels (empty fields = auto
+        # from nomenclature + data; tipper included when the vertical channel
+        # is present, missing outputs dropped with a warning).
         levels = compute_fc_levels(
-            data, ins, outs, num_decimations=decimation_levels, factor=factor,
+            data, input_channels, output_channels,
+            num_decimations=decimation_levels, factor=factor,
             num_samples_window=window_samples, overlap=overlap, window_type=window_type,
             magnetic_unit=magnetic_unit,
             e_dipole_length_m=e_dipole_length_m,

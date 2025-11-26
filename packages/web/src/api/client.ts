@@ -18,6 +18,8 @@ export interface ParamSpec {
   max?: number;
   step?: number;
   description?: string;
+  /** Placeholder text for text inputs (e.g. "auto (detect from data)"). */
+  placeholder?: string;
   /** Auto-change rules: value key -> [targetParam, targetValue][] */
   cascade?: Record<string, [string, unknown][]>;
 }

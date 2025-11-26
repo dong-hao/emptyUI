@@ -63,8 +63,10 @@ test("Compute FC renders the channel nomenclature select and cascades channel na
   await expect(magnetic).toHaveValue("auto");
   await expect(magnetic.locator("option")).toHaveText(["auto", "h", "b"]);
 
-  // Cascade: selecting lemi12 swaps the channel names to the LEMI convention.
+  // Cascade: selecting lemi12 swaps the channel names to the LEMI convention
+  // — the vertical magnetic channel (bz) is included so the tipper is on by
+  // default (dropped automatically when the run has no vertical channel).
   await nomenclature.selectOption("lemi12");
   await expect(param(node, "Input channels").locator("input")).toHaveValue("bx,by");
-  await expect(param(node, "Output channels").locator("input")).toHaveValue("e1,e2");
+  await expect(param(node, "Output channels").locator("input")).toHaveValue("e1,e2,bz");
 });

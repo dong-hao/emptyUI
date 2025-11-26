@@ -69,20 +69,46 @@ export function MTNode({ id, data, selected }: NodeProps) {
     state.updateNodeData(id, (prev) => ({ params: { ...prev.params, ...updates } }));
   };
 
-  // Auto-fill inheritable params that are still empty once a source is connected.
+  // Auto-fill inheritable params that are still unset once a source is
+  // connected. "Unset" includes a value equal to the manifest default (e.g.
+  // channel_nomenclature defaults to "auto" — an upstream-provided keyword may
+  // override it, but an explicit user choice never is).
   useEffect(() => {
     const state = useWorkflow.getState();
     const ctx = makeInheritContext(catalog?.nodes, state.nodes, state.edges);
     const cur =
       (state.nodes.find((n) => n.id === id)?.data as MTNodeData | undefined)?.params ?? {};
+    const isUnset = (name: string, value: unknown) => {
+      const spec = params.find((p) => p.name === name);
+      const dflt = spec?.default;
+      return (
+        value === undefined ||
+        value === null ||
+        String(value).trim() === "" ||
+        (dflt !== undefined && dflt !== null && String(value) === String(dflt))
+      );
+    };
     const updates: Record<string, unknown> = {};
     for (const p of params) {
       if (!inheritable.has(p.name)) continue;
       const opts = resolveInherited(ctx, id, p.name);
       if (opts.length === 0) continue;
-      const empty =
-        cur[p.name] === undefined || cur[p.name] === null || String(cur[p.name]).trim() === "";
-      if (empty) updates[p.name] = opts[0];
+      if (isUnset(p.name, cur[p.name])) updates[p.name] = opts[0];
+    }
+    // Inherited values bypass setParam, so apply the manifest cascade manually
+    // (e.g. an inherited channel_nomenclature also fills input/output channels
+    // — including the vertical magnetic channel for the tipper).
+    const merged = { ...cur, ...updates };
+    for (const [name, value] of Object.entries(updates)) {
+      const spec = params.find((p) => p.name === name);
+      const actions = spec?.cascade?.[String(value)];
+      if (!actions) continue;
+      for (const [target, tv] of actions) {
+        if (isUnset(target, merged[target])) {
+          updates[target] = tv;
+          merged[target] = tv;
+        }
+      }
     }
     if (Object.keys(updates).length) {
       state.updateNodeData(id, (prev) => ({ params: { ...prev.params, ...updates } }));
