@@ -224,6 +224,12 @@ async function buildPipeline(page: Page) {
     node: "Preview Plot",
     port: "plot: plot",
   });
+}
+
+test("runs a Load CSV -> Plot Time Series -> Preview pipeline end-to-end", async ({
+  page,
+}) => {
+  await buildPipeline(page);
 
   await page.getByRole("button", { name: "▶ Run" }).click();
   await expect(page.locator(".run-status.completed")).toBeVisible({
@@ -234,4 +240,25 @@ async function buildPipeline(page: Page) {
   const preview = page.locator(".mt-preview img");
   await expect(preview).toBeVisible({ timeout: 30_000 });
   await expect(preview).toHaveAttribute("src", /\/api\/artifacts\//);
+
+  // The viewer node exposes a download link for the full artifact.
+  const downloadPromise = page.waitForEvent("download");
+  await node(page, "Preview Plot").getByLabel("Download artifact").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.png$/);
+});
+
+test("cancelling a running run stops the pipeline", async ({ page }) => {
+  await buildPipeline(page);
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  // Cancel is available as soon as the run is queued; clicking immediately
+  // lands the cancel request long before the pipeline (~2s) can complete.
+  await page.getByRole("button", { name: "✕ Cancel" }).click();
+
+  await expect(page.locator(".run-status.cancelled")).toBeVisible({
+    timeout: 30_000,
+  });
+  // A cancelled run frees the Run button for another attempt.
+  await expect(page.getByRole("button", { name: "▶ Run" })).toBeEnabled();
 });

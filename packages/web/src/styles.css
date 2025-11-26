@@ -445,6 +445,10 @@ button.primary {
   background: #fadbd8;
   color: #c0392b;
 }
+.run-status.cancelled {
+  background: #ebedf0;
+  color: #566573;
+}
 
 .error-msg {
   color: #c0392b;
@@ -490,6 +494,7 @@ button.primary {
   justify-content: center;
   overflow: hidden;
   background: #111;
+  position: relative;
 }
 
 .mt-preview img {
@@ -511,12 +516,35 @@ button.primary {
   overflow: auto;
   background: #161616;
   padding: 0.3rem;
+  position: relative;
 }
 
 .mt-table .muted-small {
   padding: 0.6rem;
   color: #aaa;
   display: block;
+}
+
+/* artifact download link (Preview Plot / View Table nodes) */
+.mt-download {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.mt-download:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .data-table {

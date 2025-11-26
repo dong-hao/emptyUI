@@ -647,9 +647,12 @@ Design notes:
 - **Partial runs**: user can run a single node ("execute to here"), enabled by
   the caching scheme.
 - **Cancellation**: *design* — client sends a cancel message; executor checks a
-  token between node steps. *Current*: the `Executor.cancel()` token exists and
-  is checked between nodes, but no `POST /runs/{id}/cancel` endpoint/UI button
-  is wired yet.
+  token between node steps. *Current*: implemented — `POST /api/runs/{id}/cancel`
+  sets a per-run `threading.Event` that the executor polls between nodes
+  (including after the final node, so cancelling during the last node reports
+  `cancelled` rather than `completed`); the toolbar **✕ Cancel** button is
+  enabled while a run is queued/running. The executor still cannot interrupt a
+  node mid-execution — cancellation takes effect at the next node boundary.
 
 ### Run lifecycle events (WebSocket)
 
@@ -678,10 +681,13 @@ edge, even when one node publishes several figures.
 | POST | `/api/runs` | Validate + start a workflow run |
 | GET  | `/api/runs/{id}` | Run status/outputs |
 | GET  | `/api/artifacts/{id}/preview` | Inline preview (PNG/JSON table) |
+| GET  | `/api/artifacts/{id}` | Full artifact download (`Content-Disposition: attachment`) |
+| POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
 | WS   | `/api/ws` | Run events stream |
 
-> `POST /api/runs/{id}/cancel` and `GET /api/artifacts/{id}` are not yet
-> implemented (cancellation + artifact download are future work).
+> Cancellation and artifact download are implemented (see rows above). A
+> run-level artifact gallery is still not implemented — viewers on nodes are
+> the per-figure/table display, each with its own download link.
 
 MVP keeps state on the file-based workspace (§3 Storage); a DB is added only
 if run history/UI state demands it.
@@ -702,10 +708,13 @@ Components:
   backed by the server-side file browser (`GET /api/files`).
 - **Preview Plot / View Table nodes** — render an incoming `plot`/`table`
   inside the node body, sized by the standard node drag-resize. Multiple
-  viewers can attach to the same figure/table.
-- **Toolbar** — run; new/open/save workflow. (Cancel and export are future
-  work; run-level artifact gallery is not implemented — viewers on nodes are
-  the per-figure/table display.)
+  viewers can attach to the same figure/table. Each viewer exposes a **⤓
+  download** link for the full artifact (`GET /api/artifacts/{id}`) next to
+  the inline display.
+- **Toolbar** — run, cancel (✕, enabled while a run is queued/running);
+  new/open/save workflow. Run-level artifact gallery is not implemented —
+  viewers on nodes are the per-figure/table display, each with its own
+  download link.
 
 State split:
 - Zustand store: workflow document (single source), selection, connection drafts.

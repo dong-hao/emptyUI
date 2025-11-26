@@ -71,6 +71,12 @@ export const api = {
     return res.json();
   },
   getRun: (runId: string) => getJson<Record<string, unknown>>(`/runs/${runId}`),
+  cancelRun: async (runId: string): Promise<{ run_id: string; status: string }> => {
+    const res = await fetch(`${BASE}/runs/${runId}/cancel`, { method: "POST" });
+    if (!res.ok) throw new Error(`POST /runs/${runId}/cancel: ${res.status}`);
+    return res.json();
+  },
+  artifactUrl: (artifactId: string) => `${BASE}/artifacts/${artifactId}`,
 };
 
 export function wsUrl(): string {

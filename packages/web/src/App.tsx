@@ -112,6 +112,17 @@ export default function App() {
     }
   };
 
+  const handleCancel = async () => {
+    const runId = useRun.getState().runId;
+    if (!runId) return;
+    try {
+      setMessage(null);
+      await api.cancelRun(runId);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const handleSave = () => {
     const doc = serializeWorkflow(nodes, edges);
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
@@ -139,6 +150,13 @@ export default function App() {
         <strong>emptyUI</strong>
         <button onClick={handleRun} disabled={runStatus === "running" || nodes.length === 0}>
           ▶ Run
+        </button>
+        <button
+          className="danger"
+          onClick={handleCancel}
+          disabled={runStatus !== "running" && runStatus !== "queued"}
+        >
+          ✕ Cancel
         </button>
         <button onClick={handleSave} disabled={nodes.length === 0}>
           Save

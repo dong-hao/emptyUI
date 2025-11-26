@@ -55,6 +55,25 @@ class EventHub:
             self.disconnect(ws)
 
 
+_IMAGE_MEDIA = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+}
+
+
+def _artifact_media(kind: str, path: str) -> tuple[str, str]:
+    """(media_type, file extension) for an artifact, derived from kind and path."""
+    suffix = Path(path).suffix.lower()
+    if kind == "image" or suffix in _IMAGE_MEDIA:
+        return _IMAGE_MEDIA.get(suffix, "image/png"), suffix or ".png"
+    if kind == "table" or suffix == ".json":
+        return "application/json", ".json"
+    return "application/octet-stream", suffix or ".bin"
+
+
 def create_app(registry: Registry | None = None) -> FastAPI:
     app = FastAPI(title="emptyui", version="0.2.0")
     app.add_middleware(
@@ -96,7 +115,13 @@ def create_app(registry: Registry | None = None) -> FastAPI:
             state["run_counter"] += 1
             run_id = f"r{state['run_counter']}"
         workspace = Path(tempfile.mkdtemp(prefix=f"emptyui-{run_id}-"))
-        runs[run_id] = {"events": [], "summary": {"status": "queued"}, "workspace": str(workspace)}
+        cancel_event = threading.Event()
+        runs[run_id] = {
+            "events": [],
+            "summary": {"status": "queued"},
+            "workspace": str(workspace),
+            "cancel_event": cancel_event,
+        }
 
         def emit(event: dict) -> None:
             event = {"run_id": run_id, **event}
@@ -111,10 +136,17 @@ def create_app(registry: Registry | None = None) -> FastAPI:
 
         def worker() -> None:
             try:
-                summary = executor.run(workflow, emit=emit, workspace=workspace)
-                runs[run_id]["summary"] = summary
+                summary = executor.run(
+                    workflow,
+                    emit=emit,
+                    workspace=workspace,
+                    cancel_event=cancel_event,
+                )
+                with lock:
+                    runs[run_id]["summary"] = summary
             except Exception as exc:  # noqa: BLE001 — reported to clients
-                runs[run_id]["summary"] = {"status": "failed", "error": str(exc)}
+                with lock:
+                    runs[run_id]["summary"] = {"status": "failed", "error": str(exc)}
 
         threading.Thread(target=worker, daemon=True, name=f"run-{run_id}").start()
         return {"run_id": run_id, "status": "queued"}
@@ -125,6 +157,23 @@ def create_app(registry: Registry | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="unknown run")
         return {"run_id": run_id, **runs[run_id]["summary"],
                 "events": runs[run_id]["events"]}
+
+    @app.post("/api/runs/{run_id}/cancel")
+    def cancel_run(run_id: str) -> dict:
+        """Request cancellation; the executor checks the token between nodes."""
+        if run_id not in runs:
+            raise HTTPException(status_code=404, detail="unknown run")
+        info = runs[run_id]
+        info["cancel_event"].set()
+        # A queued run that has not started yet would otherwise wait for the
+        # worker to wake; mark it cancelled immediately (the worker's own
+        # summary, also "cancelled", is written last and wins). The lock
+        # linearizes against the worker's final summary write.
+        with lock:
+            if info["summary"]["status"] in ("queued", "running"):
+                info["summary"]["status"] = "cancelled"
+            status = info["summary"]["status"]
+        return {"run_id": run_id, "status": status}
 
     @app.get("/api/files")
     def list_files(path: str = "") -> dict:
@@ -154,13 +203,21 @@ def create_app(registry: Registry | None = None) -> FastAPI:
         info = artifacts.get(artifact_id)
         if info is None:
             raise HTTPException(status_code=404, detail="unknown artifact")
-        if info["kind"] == "image":
-            media = "image/png"
-        elif info["kind"] == "table":
-            media = "application/json"
-        else:
-            media = "application/octet-stream"
+        media, _ext = _artifact_media(info["kind"], info["path"])
         return FileResponse(info["path"], media_type=media)
+
+    @app.get("/api/artifacts/{artifact_id}")
+    def artifact_download(artifact_id: str) -> FileResponse:
+        """Full artifact download (Content-Disposition: attachment)."""
+        info = artifacts.get(artifact_id)
+        if info is None:
+            raise HTTPException(status_code=404, detail="unknown artifact")
+        media, ext = _artifact_media(info["kind"], info["path"])
+        return FileResponse(
+            info["path"],
+            media_type=media,
+            filename=f"{artifact_id}{ext}",
+        )
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

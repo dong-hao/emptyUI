@@ -143,6 +143,20 @@ npm run test:headed         # watch the browser while it runs
     (`BuildConfig`/`FrequencyBands`/`SelectRuns`) and the unused `bands`/
     `selection` input ports on `Compute FC`/`Estimate TF`; the default pipeline
     is `ExtractRun → ComputeFC → EstimateTF (+ MergeTFLevels)`.
+- **M3 — in progress**:
+  - **Run cancellation**: `POST /api/runs/{id}/cancel` sets a per-run cancel
+    token that the executor polls between nodes; the toolbar **✕ Cancel**
+    button is enabled while a run is queued/running and stops the pipeline at
+    the next node boundary (a cancelled run reports `cancelled`, and the Run
+    button is freed for a retry). Nodes already executing finish first.
+  - **Artifact download**: `GET /api/artifacts/{id}` serves the full artifact
+    with `Content-Disposition: attachment`; `Preview Plot` / `View Table` nodes
+    expose a **⤓ download** link next to the inline display (the `/preview`
+    endpoint stays inline-only).
+  - **E2E regression suite**: headless Playwright tests in `packages/web/e2e/`
+    (full-stack — see the Browser end-to-end tests section) cover the app
+    boot, nomenclature cascade, the Load CSV → Plot → Preview pipeline,
+    artifact download, and run cancellation.
 
 ### UI conventions (stable)
 

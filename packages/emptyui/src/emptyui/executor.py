@@ -1,12 +1,14 @@
 """DAG executor (DESIGN.md §7).
 
-M0: sequential topological execution over validated workflows.
-Concurrency, disk caching and cancellation land in M1–M3; the handle-keyed
-structure below is already cache-ready.
+M0: sequential topological execution over validated workflows. Cancellation
+is supported via a threading.Event polled between nodes; concurrency and
+disk caching remain M3. The handle-keyed structure below is already
+cache-ready.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -29,10 +31,10 @@ class Executor:
 
     def __init__(self, registry) -> None:
         self.registry = registry
-        self._cancelled = False
+        self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
-        self._cancelled = True
+        self._cancel_event.set()
 
     def _topo_order(self, workflow: Workflow) -> list[str]:
         indegree = {n.id: 0 for n in workflow.nodes}
@@ -51,9 +53,22 @@ class Executor:
                     queue.append(nxt)
         return order
 
-    def run(self, workflow: Workflow, emit=print, workspace=None) -> dict[str, Any]:
-        """Execute the workflow; returns a run summary."""
-        self._cancelled = False
+    def run(
+        self,
+        workflow: Workflow,
+        emit=print,
+        workspace=None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        """Execute the workflow; returns a run summary.
+
+        `cancel_event` is polled between nodes: when set, the run stops
+        early and returns ``{"status": "cancelled", ...}``. When omitted,
+        the legacy ``cancel()`` token is used (and cleared on entry).
+        """
+        if cancel_event is None:
+            cancel_event = self._cancel_event
+            cancel_event.clear()
         store = DataStore()
         started = time.monotonic()
         if workspace is not None:
@@ -65,7 +80,7 @@ class Executor:
         by_id = {n.id: n for n in workflow.nodes}
 
         for node_id in order:
-            if self._cancelled:
+            if cancel_event.is_set():
                 emit({"event": "run_finished", "status": "cancelled"})
                 return {"status": "cancelled", "outputs": outputs_by_node}
 
@@ -135,6 +150,13 @@ class Executor:
                     }
                 )
             emit({"event": "node_status", "node": node_id, "status": "done"})
+
+            # Cancellation is polled between nodes — including after the last
+            # one, so cancelling a run that is mid-way through its final node
+            # still reports "cancelled" instead of "completed".
+            if cancel_event.is_set():
+                emit({"event": "run_finished", "status": "cancelled"})
+                return {"status": "cancelled", "outputs": outputs_by_node}
 
         emit(
             {

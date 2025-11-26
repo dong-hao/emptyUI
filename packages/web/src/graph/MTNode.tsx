@@ -1,5 +1,6 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
@@ -215,7 +216,18 @@ function PreviewBody({ nodeId }: { nodeId: string }) {
     <>
       <div className="mt-preview">
         {artifact ? (
-          <img src={artifact.url} alt={`preview ${artifact.id}`} />
+          <>
+            <img src={artifact.url} alt={`preview ${artifact.id}`} />
+            <a
+              className="mt-download"
+              href={api.artifactUrl(artifact.id)}
+              download
+              aria-label="Download artifact"
+              title="Download artifact"
+            >
+              ⤓
+            </a>
+          </>
         ) : (
           <span className="muted-small">connect a plot · run to render</span>
         )}
@@ -301,6 +313,17 @@ function TableBody({ nodeId }: { nodeId: string }) {
   return (
     <>
       <div className="mt-table">
+        {artifact && (
+          <a
+            className="mt-download"
+            href={api.artifactUrl(artifact.id)}
+            download
+            aria-label="Download artifact"
+            title="Download artifact"
+          >
+            ⤓
+          </a>
+        )}
         {err ? (
           <span className="muted-small">{err}</span>
         ) : !artifact ? (
