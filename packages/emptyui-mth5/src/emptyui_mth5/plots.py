@@ -76,5 +76,62 @@ class PlotAppResPhase(Node):
         return {"plot": artifact}
 
 
+class PlotTipper(Node):
+    type = "mth5.plot.tipper"
+    title = "Plot Tipper"
+    description = (
+        "Geomagnetic transfer function (tipper) magnitude and phase vs period "
+        "for the vertical-field components Tzx and Tzy, derived from a "
+        "transfer function that includes a vertical magnetic output (e.g. "
+        "'e1,e2,bz'). The tipper is dimensionless (Bz/H or Hz/H) and typically "
+        "|T| < 1."
+    )
+    category = "Display"
+    inputs = (Input("tf", "tf", label="tf"),)
+    outputs = (Output("plot", "plot"),)
+    params = ()
+
+    def execute(self, ctx, tf) -> dict[str, Any]:
+        if not tf.has_tipper():
+            raise ValueError(
+                "transfer function has no tipper data (no vertical magnetic "
+                "output — compute the FC with e.g. 'e1,e2,bz' outputs)"
+            )
+
+        # nomenclature-aware accessor: tf.tipper is the (period, hz, [hx, hy])
+        # array with the *actual* instrument channel names
+        t = tf.tipper
+        period = np.asarray(t.coords["period"], dtype=float)
+        tzx = t.sel(**tf.index_tzx).values.astype(complex)
+        tzy = t.sel(**tf.index_tzy).values.astype(complex)
+
+        fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+        for label, comp in (("Tzx", tzx), ("Tzy", tzy)):
+            mag = np.abs(comp)
+            phase = np.angle(comp, deg=True)
+            ok = np.isfinite(mag) & (mag > 0)
+            if ok.sum() == 0:
+                continue  # skip empty bands instead of a log-scale warning
+            axes[0].loglog(period[ok], mag[ok], ".-", label=label)
+            axes[1].semilogx(period[ok], phase[ok], ".-", label=label)
+
+        axes[0].set_ylabel("|Tipper| (dimensionless)")
+        axes[0].legend()
+        axes[0].grid(True, which="both", alpha=0.3)
+        axes[1].set_ylabel("Phase (deg)")
+        axes[1].set_xlabel("Period (s)")
+        axes[1].legend()
+        axes[1].grid(True, which="both", alpha=0.3)
+        fig.suptitle("Geomagnetic transfer function (tipper)")
+        fig.tight_layout()
+
+        path = ctx.workspace / "plot_tipper.png"
+        fig.savefig(path, dpi=110)
+        plt.close(fig)
+        artifact = ctx.publish_artifact(path, kind="image")
+        return {"plot": artifact}
+
+
 def register(registry) -> None:
     registry.add(PlotAppResPhase)
+    registry.add(PlotTipper)

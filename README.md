@@ -77,7 +77,8 @@ npm run test:headed         # watch the browser while it runs
   overhaul; LEMI-424 loader (`mth5.io.lemi`), Extract Run, Detrend
   (mean/linear/none), ComputeFC (TS→FC windowed STFT), EstimateTF (FC→TF
   cross-power LSQ), TF export to EDI, Plot AppRes & Phase (diagonal/
-  off-diagonal). Verified end-to-end through the executor on real 1 Hz
+  off-diagonal), Plot Tipper (Tzx/Tzy magnitude + phase). Verified
+  end-to-end through the executor on real 1 Hz
   LEMI-424 and BGS long-period data, plus the official synthetic halfspace.
   Processing-correctness fixes:
   - **Unit normalization**: B→H (nT→T→H) and mV/km→V/m; the missing nT→T
@@ -175,7 +176,10 @@ npm run test:headed         # watch the browser while it runs
     recording gaps: one row == one true second). Tested end-to-end on the BGS
     LEMI sites NO46 + NX37 (48 h common window, decimated FCs, RME_RR, EDI
     export) plus an offline synthetic two-station test and a coherence
-    regression guard.
+    regression guard. The bundled BGS pair is **truly continuous**: the
+    common window starts at 2024-02-29 11:14:00, after NO46's only recording
+    gap (1254 s); converter gap-filling remains as a safety net for other
+    data.
   - **Run cancellation**: `POST /api/runs/{id}/cancel` sets a per-run cancel
     token that the executor polls between nodes; the toolbar **✕ Cancel**
     button is enabled while a run is queued/running and stops the pipeline at

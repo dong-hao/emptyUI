@@ -14,7 +14,7 @@ from .fc import FCGroupToSpectra, SpectraToFCGroup
 from .io import LoadMth5, SaveMth5
 from .lemi import LoadLemi
 from .merge import MergeRuns
-from .plots import PlotAppResPhase
+from .plots import PlotAppResPhase, PlotTipper
 from .runs import AlignRuns, ExtractRun, MergeChannels, SplitChannels
 from .tables import ViewSelection, ViewTF
 from .tf import ExportTF, ImportTF
@@ -34,6 +34,7 @@ def register(registry) -> None:
     registry.add(FCGroupToSpectra)
     registry.add(SpectraToFCGroup)
     registry.add(PlotAppResPhase)
+    registry.add(PlotTipper)
     registry.add(ViewSelection)
     registry.add(ViewTF)
     registry.add(Calibrate)
