@@ -51,6 +51,32 @@ def _to_standard_coords(tf):
             "input": list(STANDARD_INPUTS),
         },
     )
+    # carry the error field over (same standard-coordinate remap) so ZMM/XML
+    # exports keep the error/variance information.
+    if "transfer_function_error" in tf.dataset:
+        err = np.zeros(
+            (arr.sizes["period"], len(STANDARD_OUTPUTS), len(STANDARD_INPUTS)),
+            dtype=float,
+        )
+        err_arr = tf.dataset["transfer_function_error"]
+        for oi, o in enumerate(out):
+            if o not in STANDARD_OUTPUTS:
+                continue
+            for ii, i in enumerate(inp):
+                if i not in STANDARD_INPUTS:
+                    continue
+                err[:, STANDARD_OUTPUTS.index(o), STANDARD_INPUTS.index(i)] = (
+                    err_arr.isel(output=oi, input=ii).values
+                )
+        std.transfer_function_error = xr.DataArray(
+            err,
+            dims=("period", "output", "input"),
+            coords={
+                "period": arr.coords["period"].values,
+                "output": list(STANDARD_OUTPUTS),
+                "input": list(STANDARD_INPUTS),
+            },
+        )
     std.station_metadata = tf.station_metadata
     std.survey_metadata = tf.survey_metadata
     return std

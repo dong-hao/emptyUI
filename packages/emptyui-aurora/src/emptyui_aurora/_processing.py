@@ -512,9 +512,10 @@ def estimate_tf(
     periods_per_octave=4,
     ref_fc=None,
 ):
-    """MT transfer-function estimate -> (periods, Z[n_out x n_in complex]).
+    """MT transfer-function estimate -> (periods, Z[n_out x n_in complex], Z_err).
 
     Z rows = outputs (e.g. ex,ey and optionally bz/hz), cols = inputs (hx,hy).
+    Z_err holds the standard error of each complex element (same orientation).
     With outputs = [ex,ey] this is the 2x2 impedance; adding a vertical
     magnetic output (bz/hz) extends it to a 3x2 whose third row is the
     geomagnetic transfer function (tipper). The fc already
@@ -586,6 +587,7 @@ def estimate_tf(
     # when outputs are ex/ey, extended to a 3x2 (with a bz/hz tipper row) when a
     # vertical channel is included.
     Zout = np.zeros((nbands, n_out, n_in), dtype=complex)
+    Zerr = np.zeros((nbands, n_out, n_in), dtype=float)
 
     for b in range(nbands):
         sel = (logf <= edges[b]) & (logf > edges[b + 1])
@@ -610,11 +612,11 @@ def estimate_tf(
         if H.shape[0] < 2:  # too few observations for a stable estimate
             continue
         R_band = np.concatenate(R, axis=0) if engine == "RME_RR" else None
-        Zout[b] = _solve_band(H, E, R_band, input_channels, output_channels, engine)
+        Zout[b], Zerr[b] = _solve_band(H, E, R_band, input_channels, output_channels, engine)
 
     # All estimators now come from aurora and share aurora's impedance
     # convention, so no sign/phase rotation is applied.
-    return periods_out, Zout
+    return periods_out, Zout, Zerr
 
 
 def _period_bands(fc, periods_per_octave=4):
@@ -690,8 +692,16 @@ def _ds(channels):
 def _solve_band(H, E, R, input_channels, output_channels, engine):
     """Estimate one frequency band via an aurora estimator (OLS/RME/RME_RR).
 
-    Returns Z[2x2] in emptyUI's (output, input) orientation, already in
-    aurora's impedance convention (aurora's b is [n_input, n_output]).
+    Returns ``(Z, Z_err)`` — Z[2x2] in emptyUI's (output, input) orientation,
+    already in aurora's impedance convention (aurora's b is
+    [n_input, n_output]), and the standard error of each complex impedance
+    element (same orientation). The errors follow aurora's own
+    ``TTFZ.standard_error()``: ``std = sqrt(|cov_ss_inv[i,i] * cov_nn[o,o]|)``
+    where ``cov_ss_inv`` is the inverse signal covariance of the inputs and
+    ``cov_nn`` the noise covariance of the outputs. RME/RME_RR populate these
+    during estimation (``IterControl(return_covariance=True)``, the default);
+    OLS does not, so the classical covariance ``(XᴴX)⁻¹·σ²`` is computed from
+    the residuals instead.
     """
     from aurora.transfer_function.regression.base import RegressionEstimator
     from aurora.transfer_function.regression.iter_control import IterControl
@@ -702,20 +712,89 @@ def _solve_band(H, E, R, input_channels, output_channels, engine):
     if engine == "OLS":
         est = RegressionEstimator(X, Y)
         est.estimate_ols(mode="solve")
+        Z_err = _ols_band_errors(est, len(output_channels))
     elif engine == "RME_RR":
         est = RME_RR(X=X, Y=Y, Z=Z, iter_control=IterControl())
         est.estimate()
+        Z_err = _estimator_band_errors(est, input_channels, output_channels)
     else:
         est = RME(X=X, Y=Y, iter_control=IterControl())
         est.estimate()
-    return np.asarray(est.b).T
+        Z_err = _estimator_band_errors(est, input_channels, output_channels)
+    return np.asarray(est.b).T, Z_err
+
+
+def _cov_diag(values, channel_names, channels):
+    """Diagonal of a covariance matrix re-ordered to ``channels`` order.
+
+    aurora's covariance DataArrays use its own channel-name coordinate order;
+    the values array is indexed by the *declared* name order, so this maps our
+    channel list onto it defensively.
+    """
+    idx = [channel_names.index(c) for c in channels]
+    return np.asarray(values)[np.ix_(idx, idx)]
+
+
+def _cov_coords(cov):
+    """Channel names from an aurora covariance DataArray coordinate."""
+    for key in ("input_channel_1", "output_channel_1"):
+        if key in cov.coords:
+            return list(cov.coords[key].values)
+    return list(cov.dims[0] if cov.dims else [])
+
+
+def _std_from_cov(cov_ss_inv, cov_nn, input_channels, output_channels):
+    """aurora ``TTFZ.standard_error()``: sqrt(|cov_ss_inv[i,i] * cov_nn[o,o]|)."""
+    n_in, n_out = len(input_channels), len(output_channels)
+    std = np.zeros((n_out, n_in), dtype=float)
+    if cov_ss_inv is None or cov_nn is None:
+        return std
+    cs = _cov_diag(cov_ss_inv.values, _cov_coords(cov_ss_inv), input_channels)
+    cn = _cov_diag(cov_nn.values, _cov_coords(cov_nn), output_channels)
+    for o in range(n_out):
+        for i in range(n_in):
+            std[o, i] = np.sqrt(abs(cs[i, i] * cn[o, o]))
+    return std
+
+
+def _estimator_band_errors(est, input_channels, output_channels):
+    """Standard errors from an RME/RME_RR estimator's computed covariances."""
+    return _std_from_cov(est.cov_ss_inv, est.cov_nn, input_channels, output_channels)
+
+
+def _ols_band_errors(est, n_out):
+    """Classical OLS standard errors from residuals: (XᴴX)⁻¹ · σ².
+
+    aurora's OLS path does not populate covariances, so the textbook
+    covariance is computed here (same form aurora uses for RME):
+    ``cov_ss_inv = (XᴴX)⁻¹`` and ``cov_nn = diag(residual SS) / dof``.
+    """
+    X = np.asarray(est.X, dtype=complex)
+    Y = np.asarray(est.Y, dtype=complex)
+    b = np.asarray(est.b, dtype=complex)
+    n_obs, n_in = X.shape
+    dof = n_obs - n_in
+    if dof <= 0 or n_out == 0:
+        return np.zeros((n_out, n_in), dtype=float)
+    cs = np.linalg.inv(X.conj().T @ X)
+    res = Y - X @ b  # [n_obs, n_out]
+    ssr = (res.conj().T @ res).real  # [n_out, n_out]
+    cn = ssr / dof
+    std = np.zeros((n_out, n_in), dtype=float)
+    for o in range(n_out):
+        for i in range(n_in):
+            std[o, i] = np.sqrt(abs(cs[i, i].real * cn[o, o]))
+    return std
 
 
 _OUT_COORDS = tuple(STANDARD_OUTPUTS)  # ("ex", "ey", "hz")
 _IN_COORDS = tuple(STANDARD_INPUTS)  # ("hx", "hy")
 
 
-def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=None):
+def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=None,
+             Z_err=None, survey_id=None, station_id=None, run_id=None,
+             latitude=None, longitude=None, elevation=None, start_datetime=None,
+             processing_notes=None):
     """Build an mt_metadata TF carrying the actual channel names plus the
     channel_nomenclature map (aurora-style).
 
@@ -735,9 +814,16 @@ def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=N
     ex/ey/hx/hy/hz. When no keyword is given it is inferred from the channel
     names. Both the impedance (ex,ey rows) and the tipper (hz row) are
     populated when the corresponding output channel is present.
+
+    ``Z_err`` (optional, same shape as ``Z``) is stored as
+    ``tf.transfer_function_error`` (the std of each complex element) so plots
+    and exports (EDI/XML/ZMM) can carry error bars / error lines. The station
+    identity (survey/station/run id + lat/lon/elevation) is attached to
+    ``tf.survey_metadata``/``tf.station_metadata`` — the single point of truth
+    for plot titles and export headers (DESIGN.md §15).
     """
     import xarray as xr
-    from mt_metadata.transfer_functions.core import TF
+    from mt_metadata.transfer_functions.core import TF, Station, Survey
 
     keyword = _resolve_keyword(
         channel_nomenclature, input_channels, output_channels
@@ -773,6 +859,46 @@ def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=N
     # use the property setter (tf.dataset[...] = arr writes to the xarray
     # Dataset only, not the TF's canonical impedance storage)
     tf.transfer_function = arr
+    if Z_err is not None:
+        err = np.zeros((len(periods), len(_OUT_COORDS), len(_IN_COORDS)), dtype=float)
+        for ri, oc in enumerate(output_channels):
+            std = reverse.get(str(oc).strip().lower())
+            if std is None or std not in _OUT_COORDS:
+                continue
+            for ci, ic in enumerate(input_channels):
+                ist = reverse.get(str(ic).strip().lower())
+                if ist is None or ist not in _IN_COORDS:
+                    continue
+                err[:, _OUT_COORDS.index(std), _IN_COORDS.index(ist)] = Z_err[:, ri, ci]
+        tf.transfer_function_error = xr.DataArray(
+            err,
+            dims=("period", "output", "input"),
+            coords={
+                "period": periods,
+                "output": out_coords,
+                "input": in_coords,
+            },
+        )
+    if station_id or survey_id:
+        if survey_id:
+            surv = Survey()
+            surv.id = survey_id
+            tf.survey_metadata = surv
+        st = Station()
+        st.id = station_id or "local"
+        if latitude is not None:
+            st.location.latitude = float(latitude)
+        if longitude is not None:
+            st.location.longitude = float(longitude)
+        if elevation is not None:
+            st.location.elevation = float(elevation)
+        tf.station_metadata = st
+    if run_id or processing_notes:
+        rm = tf.run_metadata
+        if run_id:
+            rm.id = run_id
+        if processing_notes:
+            rm.comments.value = processing_notes
     return tf
 
 
@@ -789,35 +915,49 @@ def estimate_tf_levels(
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
 
-    Returns ``{level: {"periods": P, "Z": Z[2x2], "input_channels": ...,
-    "output_channels": ..., "channel_nomenclature": ...}}``. ``ref_levels`` is
-    an optional same-shaped container (or a single fc) used as the remote
-    reference per level.
+    Returns ``{level: {"periods": P, "Z": Z[2x2], "Z_err": Z_err,
+    "input_channels": ..., "output_channels": ..., "channel_nomenclature": ...,
+    "survey_id"/"station_id"/"run_id"/"station_latitude"/...: ...}}``.
+    ``ref_levels`` is an optional same-shaped container (or a single fc) used
+    as the remote reference per level.
     """
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
     result = {}
     for level, fc in sorted(levels.items()):
         ref_fc = ref_levels.get(level) if isinstance(ref_levels, dict) else ref_levels
-        periods, Z = estimate_tf(
+        periods, Z, Z_err = estimate_tf(
             fc, input_channels, output_channels,
             estimator_engine=estimator_engine,
             remote_reference=remote_reference,
             periods_per_octave=periods_per_octave,
             ref_fc=ref_fc,
         )
-        result[int(level)] = {
+        entry = {
             "periods": periods,
             "Z": Z,
+            "Z_err": Z_err,
             "input_channels": list(input_channels),
             "output_channels": list(output_channels),
             "channel_nomenclature": keyword,
         }
+        entry.update(_identity_attrs(fc))
+        result[int(level)] = entry
     return result
+
+
+def _identity_attrs(fc):
+    """Station identity attrs carried on an fc (set by ComputeFC)."""
+    return {
+        k: fc.attrs[k]
+        for k in ("survey_id", "station_id", "run_id", "station_latitude",
+                  "station_longitude", "station_elevation", "start_datetime")
+        if fc.attrs.get(k) not in (None, "")
+    }
 
 
 def merge_tf_levels(per_level):
     """Merge per-decimation-level TF estimates into a single broadband
-    (periods, Z).
+    (periods, Z, Z_err).
 
     Levels now share a common octave grid and overlap (each covers from Fs/4 up
     to window/4), so the same period can be estimated by several levels. Because
@@ -827,16 +967,21 @@ def merge_tf_levels(per_level):
     ascending and free of duplicates.
     """
     merged: dict[float, np.ndarray] = {}
+    merged_err: dict[float, np.ndarray] = {}
     for lv in sorted(per_level, reverse=True):  # deepest level wins
         P = np.asarray(per_level[lv]["periods"])
         Z = np.asarray(per_level[lv]["Z"])
+        err = per_level[lv].get("Z_err")
+        err = np.asarray(err) if err is not None else 0.0
         ok = ~np.all(np.abs(Z).reshape(len(Z), -1) == 0, axis=1)
-        for p, z in zip(P[ok], Z[ok]):
+        for p, z, e in zip(P[ok], Z[ok], err[ok]):
             key = round(float(np.log2(p)), 8)  # shared log2 grid -> exact dedup
             merged.setdefault(key, z)
+            merged_err.setdefault(key, e)
     if not merged:
         raise ValueError("no non-degenerate TF bands to merge")
     keys = sorted(merged)
     P = 2.0 ** np.asarray(keys)
     Z = np.stack([merged[k] for k in keys])
-    return P, Z
+    Z_err = np.stack([merged_err[k] for k in keys])
+    return P, Z, Z_err

@@ -142,7 +142,7 @@ def test_remote_reference_end_to_end_decimated(tmp_path):
     per = estimate_tf_levels(levels_a, ins, outs, estimator_engine="Robust",
                              remote_reference=True, periods_per_octave=4,
                              ref_levels=levels_b, channel_nomenclature="lemi12")
-    _, Z = merge_tf_levels(per)
+    _, Z, _ = merge_tf_levels(per)
     assert np.all(np.isfinite(Z))
     ok = np.abs(Z[:, 0, 1]) > 1e-9
     # true impedance [[1,3],[-1,4]] (ex x hx, ex x hy, ey x hx, ey x hy)

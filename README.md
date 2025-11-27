@@ -77,8 +77,7 @@ npm run test:headed         # watch the browser while it runs
   overhaul; LEMI-424 loader (`mth5.io.lemi`), Extract Run, Detrend
   (mean/linear/none), ComputeFC (TS→FC windowed STFT), EstimateTF (FC→TF
   cross-power LSQ), TF export to EDI, Plot AppRes & Phase (diagonal/
-  off-diagonal), Plot Tipper (Tzx/Tzy — switching to real & imaginary
-  panels per the §15 standardization plan). Verified
+  off-diagonal), Plot Tipper (Tzx/Tzy real & imaginary panels). Verified
   end-to-end through the executor on real 1 Hz
   LEMI-424 and BGS long-period data, plus the official synthetic halfspace.
   Processing-correctness fixes:
@@ -97,8 +96,8 @@ npm run test:headed         # watch the browser while it runs
   - **Calibrate**: `mth5.calibrate` removes the instrument response from a
     `ts.run` — using the run's own mth5 channel responses, or an explicit
     `calibration` filter via frequency-domain response removal.
-  M2 is essentially complete — the only open M2 item is the
-  publication-quality plot standardization task (see "Remaining work").
+  M2 is now complete — all §11 M2 deliverables delivered (see also the
+  plot standardization item below).
 - **M2 — Phase 4 polish** (delivered 2026-09-05):
   - **Channel nomenclature**: `Compute FC` (and `Split Channels`, `Load
     LEMI-424`) expose an mt_metadata `channel_nomenclature` select
@@ -146,6 +145,18 @@ npm run test:headed         # watch the browser while it runs
     (`BuildConfig`/`FrequencyBands`/`SelectRuns`) and the unused `bands`/
     `selection` input ports on `Compute FC`/`Estimate TF`; the default pipeline
     is `ExtractRun → ComputeFC → EstimateTF (+ MergeTFLevels)`.
+  - **Plot standardization** (delivered 2026-09-06): publication-quality TF
+    plots per DESIGN.md §15 — USArray conventions (log10 Period × log10 ρ_a,
+    phase 0–90° fold for off-diagonal, diagonal signed [-180, 180°], tipper
+    Re/Im with ylim [-1, 1], ○ XY / ✕ YX markers, equal per-decade scale,
+    error bars with caps, site + LON/LAT title and processing-provenance
+    footer, dpi 150). TF error propagation (estimator covariances →
+    `transfer_function_error`/`tipper_error`) and TF station metadata
+    (survey/station/run + lat/lon/elevation from the run) are wired through
+    ComputeFC → EstimateTF → build_tf, so both plots **and** EDI/XML/ZMM
+    exports carry errors and a complete station header. Core time-series/
+    spectrogram plots got the same treatment (datetime axis, unit hints,
+    identity titles, dpi 150).
 - **M3 — delivered so far**:
   - **ComputeFC channel auto-configuration**: the tipper is on by default —
     `Compute FC`'s output channels resolve to the electric pair **plus** the
@@ -198,13 +209,6 @@ npm run test:headed         # watch the browser while it runs
 
 ### Remaining work (see DESIGN.md §11/§12)
 
-- **M2 — final task (planned)**: publication-quality plot standardization —
-  shared plot style, error bars (requires TF error propagation from the
-  estimators), MT/USArray display conventions (log10 period & ρ_a, phase
-  0–90° fold for off-diagonal, tipper Re/Im with ylim [-1, 1], equal
-  per-decade scale, USArray markers ○ XY / ✕ YX), TF station metadata
-  (needed for plot titles **and** EDI/XML export headers). See
-  DESIGN.md §15.
 - **M3 — not yet started**:
   - Content-addressed result caching + partial execution ("execute to
     here"); the executor currently re-runs the whole DAG every time.

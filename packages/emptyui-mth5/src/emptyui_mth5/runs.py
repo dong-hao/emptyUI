@@ -244,9 +244,10 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
         ch.component = name
         pieces.append(ch)
     kwargs = {}
-    meta = getattr(source, "run_metadata", None)
-    if meta is not None:
-        kwargs["run_metadata"] = meta
+    for attr in ("run_metadata", "station_metadata", "survey_metadata"):
+        meta = getattr(source, attr, None)
+        if meta is not None:
+            kwargs[attr] = meta
     return RunTS(array_list=pieces, **kwargs)
 
 

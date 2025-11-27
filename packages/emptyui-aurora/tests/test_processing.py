@@ -47,7 +47,7 @@ def test_compute_fc_and_estimate_tf():
     assert "frequency" in fc.dims and "time" in fc.dims
     assert set(fc.data_vars) == {"ex", "ey", "hx", "hy"}
 
-    periods, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], periods_per_octave=8)
+    periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], periods_per_octave=8)
     assert periods.size > 1
     assert np.all(np.isfinite(Z))
 
@@ -56,6 +56,59 @@ def test_compute_fc_and_estimate_tf():
     Zyx = np.median(np.abs(Z[:, 1, 0]))
     assert Zxy > 0
     assert Zyx > 0
+
+
+def test_estimate_tf_returns_standard_errors():
+    """estimate_tf returns per-element standard errors for both engines."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    for engine in ("Least Squares", "Robust"):
+        _, Z, Zerr = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                                 estimator_engine=engine, periods_per_octave=8)
+        assert Zerr.shape == Z.shape
+        assert np.all(np.isfinite(Zerr))
+        assert np.all(Zerr >= 0)
+        # bands that produced an estimate carry a strictly positive error
+        est = np.any(np.abs(Z) > 0, axis=(1, 2))
+        assert np.all(Zerr[est] > 0)
+
+
+def test_build_tf_carries_errors_and_station_identity():
+    """build_tf stores element stds in transfer_function_error and the station
+    identity in station/survey metadata (DESIGN.md §15)."""
+    periods = np.array([2.0, 4.0])
+    Z = np.array([[[1 + 0j, 0j], [0j, 2 + 0j]],
+                  [[1 + 0j, 0j], [0j, 2 + 0j]]])
+    Zerr = np.array([[0.1, 0.0], [0.0, 0.2]], dtype=float)
+    Zerr = np.repeat(Zerr[None, :, :], 2, axis=0)
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
+                  channel_nomenclature="lemi12", Z_err=Zerr,
+                  survey_id="bgs_37", station_id="NO46",
+                  latitude=56.72, longitude=-2.85, elevation=120.0)
+    assert tf.has_impedance
+    err = tf.impedance_error
+    assert np.allclose(err.sel(output="e1", input="bx").values, [0.1, 0.1])
+    assert np.allclose(err.sel(output="e2", input="by").values, [0.2, 0.2])
+    assert tf.station_metadata.id == "NO46"
+    assert abs(float(tf.station_metadata.location.latitude) - 56.72) < 1e-9
+    assert abs(float(tf.station_metadata.location.elevation) - 120.0) < 1e-9
+    assert tf.survey_metadata.id == "bgs_37"
+
+
+def test_build_tf_carries_tipper_errors():
+    """A tipper-carrying TF stores the tipper row's errors too."""
+    periods = np.array([2.0, 4.0])
+    Z = np.zeros((2, 3, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j
+    Z[:, 2, 0] = 0.1 + 0.05j  # bz x hx (tipper row)
+    Zerr = np.zeros((2, 3, 2), dtype=float)
+    Zerr[:, 2, 0] = 0.01
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                  channel_nomenclature="lemi12", Z_err=Zerr)
+    assert tf.has_tipper()
+    terr = tf.tipper_error
+    assert np.allclose(terr.sel(output="bz", input="bx").values, [0.01, 0.01])
 
 
 def test_tipper_bz_output_recovered():
@@ -89,7 +142,7 @@ def test_tipper_bz_output_recovered():
     runts = FakeRunTS()
     fc = compute_fc(runts, ["bx", "by"], ["e1", "e2", "bz"],
                     window_length_s=128, overlap=0.5, window_type="hamming")
-    periods, Z = estimate_tf(fc, ["bx", "by"], ["e1", "e2", "bz"],
+    periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e1", "e2", "bz"],
                              periods_per_octave=8)
     assert Z.shape[1:] == (3, 2)  # n_out x n_in (includes the tipper row)
     ok = np.all(np.isfinite(Z), axis=(1, 2))
@@ -203,7 +256,7 @@ def test_build_tf_lemi34_four_channel():
     fc = compute_fc(runts, ["bx", "by"], ["e3", "e4"],
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert fc.attrs["channel_nomenclature"] == "lemi34"
-    periods, Z = estimate_tf(fc, ["bx", "by"], ["e3", "e4"],
+    periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e3", "e4"],
                              periods_per_octave=8)
     tf = build_tf(periods, Z, ["bx", "by"], ["e3", "e4"])
     arr = tf.dataset["transfer_function"]
@@ -265,7 +318,7 @@ def test_estimate_tf_accepts_mth5_read_fc_layout():
     # mth5 stores (time, frequency); emulate the read-back layout + bare attrs
     mth5_layout = fc.transpose("time", "frequency").copy()
     mth5_layout.attrs = {}
-    periods, Z = estimate_tf(mth5_layout, ["hx", "hy"], ["ex", "ey"],
+    periods, Z, _ = estimate_tf(mth5_layout, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Least Squares", periods_per_octave=8)
     assert periods.size > 1
     assert np.all(np.isfinite(Z))
@@ -290,7 +343,7 @@ def test_build_tf_returns_mt_metadata_tf():
     runts = _synthetic_runts()
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
-    periods, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"])
+    periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"])
     tf = build_tf(periods, Z, ["hx", "hy"], ["ex", "ey"])
     assert hasattr(tf, "dataset")
     assert tf.period.size == periods.size
@@ -308,7 +361,7 @@ def test_estimator_engines_run(engine, rr):
     runts = _synthetic_runts()
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
-    periods, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+    periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine=engine, remote_reference=rr,
                              periods_per_octave=8)
     assert periods.size > 1
@@ -323,7 +376,7 @@ def test_legacy_estimator_engine_names_still_accepted():
                     window_length_s=256, overlap=0.5, window_type="hamming")
     for engine in ("OLS", "RME", "RME_RR"):
         rr = engine == "RME_RR"
-        _, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+        _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                            estimator_engine=engine, remote_reference=rr,
                            periods_per_octave=8)
         assert np.all(np.isfinite(Z))
@@ -353,7 +406,7 @@ def test_remote_reference_uses_duplicated_dummy_station():
     # duplicate the raw data as a dummy remote station -> separate fc
     remote = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
                         window_length_s=256, overlap=0.5, window_type="hamming")
-    periods, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+    periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", remote_reference=True,
                              ref_fc=remote, periods_per_octave=8)
     assert periods.size > 1
@@ -361,7 +414,7 @@ def test_remote_reference_uses_duplicated_dummy_station():
     assert np.any(np.abs(Z) > 0)
 
     # the estimator_engine must be honored: robust (not silently OLS)
-    _, Z_ols = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+    _, Z_ols, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                            estimator_engine="Least Squares", periods_per_octave=8)
     assert not np.allclose(Z, Z_ols)
 
@@ -400,7 +453,7 @@ def test_multi_level_merge_broadband():
     assert list(per) == [0, 1, 2, 3]
 
     per_level_counts = [len(per[lv]["periods"]) for lv in per]
-    P, Z = merge_tf_levels(per)
+    P, Z, _ = merge_tf_levels(per)
     assert np.all(np.diff(P) > 0)  # strictly ascending, no duplicate periods
     # each level spans [Fs/4, window/4] and overlaps its neighbours, so the
     # merge de-duplicates the shared octave grid to a continuous broadband set.

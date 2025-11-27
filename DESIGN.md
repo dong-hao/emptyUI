@@ -16,8 +16,8 @@ executor on real 1 Hz LEMI-424 and BGS long-period data (Load LEMI → Detrend
 configuration, remote reference end-to-end (Align Runs), run cancellation,
 artifact download, and the headless Playwright regression suite are
 delivered; caching/partial execution, sub-workflows, remote-server docs and
-the plugin packaging guide remain (see §11). The one remaining M2 item is
-the plot-standardization task (see §15).
+the plugin packaging guide remain (see §11). **M2 is now complete** — the
+plot-standardization task (§15) is delivered.
 Processing correctness milestones:
 - **Unit normalization**: magnetic channels converted nT→T→H (B→H) and
   electric mV/km→V/m; missing nT→T factor was the root cause of non-physical
@@ -860,11 +860,11 @@ progress.
   remote-reference RME_RR); TF plots (apparent resistivity/phase).
 - Table viewer component; export coercion nodes for popular formats
   (EDI/ZMM via mt_metadata).
-- **M2 final task — publication-quality plot standardization** (planned
-  2026-09-06, see §15): shared plot style, error bars, TF station metadata,
+- **M2 final task — publication-quality plot standardization** ✅ delivered
+  2026-09-06 (see §15): shared plot style, error bars, TF station metadata,
   MT/USArray display conventions (phase 0–90° fold for off-diagonal,
-  tipper Re/Im, equal per-decade scale, ○ XY / ✕ YX markers). Currently
-  the only open M2 item.
+  tipper Re/Im, equal per-decade scale, ○ XY / ✕ YX markers). **M2 is now
+  complete.**
 
 **M3 — Power features**
 - ⏳ Caching + partial execution; sub-workflows; remote-server mode docs
@@ -939,7 +939,7 @@ Inventory against §11. ~~Struck~~ items are delivered; the gaps:
 | 3 | **MergeTFLevels** (`tf.level` → `tf`) | `merge_tf_levels` + `process.py` | ✅ **done** — per-level estimate + deepest-wins merge of overlapping octave periods (§14) |
 | 4 | **Table viewer** | `mth5.table.selection`/`mth5.table.tf` + `core.display.view_table` + frontend | ✅ **done** — JSON table artifacts rendered inline |
 | 5 | **Calibrate** node | `mth5.calibrate` + `calibrate.py` | ✅ **done** — `ts.run` (+ optional `calibration`) → calibrated `ts.run`; uses mth5 `RunTS.calibrate()` channel responses, or frequency-domain response removal for an explicit filter |
-| 6 | **Publication-quality plot standardization** | `mth5.plot.*`, `core.plot.*` + shared style module | ⏳ **planned** — §15; the only remaining M2 item |
+| 6 | **Publication-quality plot standardization** | `mth5.plot.*`, `core.plot.*` + shared style module | ✅ **done** — §15; M2 complete |
 
 (Export coercion EDI/ZMM/XML/AVG/J is already delivered via `ImportTF`/`ExportTF`.)
 
@@ -1236,14 +1236,19 @@ metadata + EMTF band setup files; mth5 FC layer.
 
 ---
 
-## 15. M2 final task — Publication-quality plot standardization (planned 2026-09-06)
+## 15. M2 final task — Publication-quality plot standardization (delivered 2026-09-06)
 
 **Motivation.** The Display nodes (`mth5.plot.appres_phase`, `mth5.plot.tipper`,
-`core.plot.timeseries`, `core.plot.spectrogram`) are proof-of-concept level:
-no error bars (TF errors are never stored), no MT display conventions (phase is
-plotted raw, can be negative; no y-limits policy), components are distinguished
-by color only (unreadable for color-blind readers), titles carry no site/
-processing metadata, DPI is low (110) and style is inconsistent across nodes.
+`core.plot.timeseries`, `core.plot.spectrogram`) were proof-of-concept level:
+no error bars (TF errors were never stored), no MT display conventions (phase
+plotted raw, no y-limits policy), components distinguished by color only
+(unreadable for color-blind readers), titles carried no site/processing
+metadata, DPI was low (110) and style was inconsistent across nodes.
+
+**Status: delivered.** P1–P3 landed; see §15.2. Conventions implemented as
+decided in §15.4 (USArray markers/axes, tipper Re/Im with ylim [-1, 1],
+diagonal phase signed [-180, 180°], equal per-decade scale, error bars, TF
+station metadata carried for plots *and* exports).
 
 **Reference figures.** `SDG31b_H28coh.png` (USArray convention — the primary
 style reference: log10 Period × log10 ρ_a, linear φ, ○ XY / ✕ YX, error
@@ -1335,7 +1340,12 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
    `tf.station_metadata` (mt_metadata Station: id, latitude, longitude,
    elevation, declination). `EstimateTF` currently has no survey/station
    params — it must read the identity from the fc (inherited from the
-   upstream chain) rather than require re-entry.
+   upstream chain) rather than require re-entry. Note (M3): the future
+   content-addressed **cache** (DESIGN §7) will also be able to restore
+   any intermediate data (including the fc/TF metadata) directly, which
+   mitigates loss of provenance — the cache structure design is deferred,
+   but artifacts/FCs should carry provenance now so the cache can key on
+   it later.
 6. **Title & metadata** — USArray-style: `Site: <station id> [ LON = …;
    LAT = … ]` plus a subtitle/annotation with run id and processing
    provenance (estimator, remote reference on/off, decimation levels,
@@ -1352,33 +1362,41 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
 
 ### 15.2 Phasing (small, independently verifiable)
 
-- **P1 — TF enrichment (enabler).** Spike: inspect aurora estimators for
-  covariance availability per engine (OLS / RME / RME_RR) and
-  `IterControl(return_covariance)`; then extend `_solve_band`/`build_tf` to
-  populate `transfer_function_error` + `tipper_error`; verify EDI export
-  carries the errors (mt_metadata EDI writer emits them). **Also wire the
-  station identity into the TF** (item 5): propagate survey/station/run +
-  lat/lon/elevation from the `ts.run` → fc attrs → `tf.station_metadata` /
-  `tf.survey_metadata`, and verify the EDI/XML export now emits a complete
-  station header.
-- **P2 — TF plot nodes.** Shared style module + refactor `PlotAppResPhase`
-  and `PlotTipper`: error bars (errorbar, capped), off-diagonal phase fold
-  to (0, 90) (diagonal stays signed [-180, 180]), USArray marker/color
-  encoding (○ XY / ✕ YX), equal per-decade scale, labels/units, USArray
-  title with site + processing metadata, dpi ≥ 150. `PlotTipper` switches to
-  **Re/Im panels with ylim [-1, 1]** (replacing the current |T|/phase
-  panels).
-- **P3 — core plot nodes.** `PlotTimeSeries`: absolute datetime x-axis when
-  the run carries an absolute start (relative seconds fallback), channel
-  unit labels from metadata (mV/km, nT, …), run id in title.
-  `PlotSpectrogram`: units/dB label + channel units, title metadata.
-- **P4 — verification & docs.** Extend plot tests: off-diagonal phase ylim
-  == (0, 90) and diagonal ylim == [-180, 180], tipper ylim == [-1, 1],
-  errorbar artists present when the TF carries errors, markers = circle/x
-  (XY/YX), equal per-decade scale (aspect), log10 axes asserted, title
-  contains the station id, dpi ≥ 150; visual review of the BGS NO46+NX37
-  and halfspace outputs against the USArray reference; update this section
-  and README.
+- **P1 — TF enrichment (enabler). ✅ delivered.** aurora's RME/RME_RR
+  populate `cov_ss_inv`/`cov_nn` during estimation
+  (`IterControl(return_covariance=True)`, the default); OLS does not, so the
+  classical covariance `(XᴴX)⁻¹·σ²` from residuals is computed instead.
+  `_solve_band`/`build_tf` now propagate `transfer_function_error` +
+  `tipper_error` (std of each complex element — exactly what mt_metadata's
+  EDI writer expects: it writes the square as `.VAR`). **Station identity is
+  wired end-to-end**: ComputeFC attaches survey/station/run + lat/lon/elev
+  (primitives) to the fc attrs, EstimateTF/MergeTFLevels pass them to
+  `build_tf`, which sets `tf.survey_metadata`/`tf.station_metadata`/
+  `tf.run_metadata` (incl. processing notes) — the single point of truth for
+  plot titles **and** EDI/XML/ZMM export headers (verified: EDI now carries
+  `DATAID`/`LAT`/`LON`/`SURVEY` + `*.VAR` lines). `AlignRuns._crop_to_runts`
+  now carries station/survey/run metadata onto the aligned runs (they were
+  being reset to defaults). `RunContext.workspace` is normalized to `Path`
+  so plot/table nodes work through the executor (which passes a str).
+- **P2 — TF plot nodes. ✅ delivered.** Shared style module
+  (`emptyui-mth5/plotting.py`) + refactored `PlotAppResPhase`/`PlotTipper`:
+  error bars (errorbar, capped), off-diagonal phase fold to (0, 90) with
+  ylim 0–90/15° ticks (diagonal signed [-180, 180]), USArray marker/color
+  encoding (○ XY / ✕ YX + distinct linestyles), equal per-decade scale
+  (`equal_decade_layout`), labels/units, USArray title with site + LON/LAT
+  and processing-provenance footer, dpi 150. `PlotTipper` now renders
+  **Re/Im panels with ylim [-1, 1]** (replacing the |T|/phase panels).
+- **P3 — core plot nodes. ✅ delivered.** `PlotTimeSeries`: absolute
+  datetime x-axis (ConciseDateFormatter; relative seconds fallback), channel
+  unit hints (mV/km electric, nT magnetic via `_plotstyle.channel_unit_hint`),
+  station/run in title. `PlotSpectrogram`: unit-aware power colorbar label,
+  station/run in title. Shared minimal `_plotstyle.py` (core stays mth5-free).
+- **P4 — verification & docs. ✅ delivered.** Tests assert the conventions
+  (off-diagonal ylim (0, 90), diagonal [-180, 180], tipper [-1, 1],
+  errorbar containers present, ○/✕ markers, equal per-decade scale < 5%
+  tolerance, station in title, log scales, dpi ≥ 150); visual review of the
+  BGS NO46+NX37 RR workflow and the LEMI time series against the USArray
+  reference; this section and README updated.
 
 ### 15.3 References
 

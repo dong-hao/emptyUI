@@ -25,6 +25,36 @@ from ._processing import (
 
 _NOMENCLATURE_OPTIONS = ("auto",) + KEYWORDS
 
+
+def _station_location(data):
+    """(latitude, longitude, elevation) of the run's station, or (None,)*3."""
+    try:
+        loc = data.station_metadata.location
+        return float(loc.latitude), float(loc.longitude), float(loc.elevation)
+    except Exception:  # noqa: BLE001 — core TimeSeries carries no location
+        return None, None, None
+
+
+def _station_identity_attrs(data, survey: str, station: str, run: str) -> dict[str, Any]:
+    """Primitive station-identity attrs to carry on an fc (DESIGN.md §15).
+
+    The ts.run payload (mth5 RunTS) exposes survey/station/run metadata and the
+    station location; only primitives are stored (xarray attrs must survive
+    persistence), and missing values are omitted so downstream nodes can tell
+    "unknown" apart from a default.
+    """
+    attrs: dict[str, Any] = {
+        "survey_id": survey,
+        "station_id": station,
+        "run_id": run,
+    }
+    lat, lon, elev = _station_location(data)
+    if lat is not None:
+        attrs["station_latitude"] = lat
+        attrs["station_longitude"] = lon
+        attrs["station_elevation"] = elev
+    return attrs
+
 #: Nomenclature presets (actual channel names, mt_metadata CHANNEL_MAPS).
 #: Each preset includes the vertical magnetic channel (bz/h3) so the tipper is
 #: computed by default; ComputeFC drops it when the data has no vertical
@@ -127,10 +157,16 @@ class ComputeFC(Node):
             e_dipole_length_m=e_dipole_length_m,
             channel_nomenclature=channel_nomenclature,
         )
-        if persist:
-            from emptyui_mth5.persist import persist_fc_level, runts_context
+        from emptyui_mth5.persist import persist_fc_level, runts_context
 
-            surv, stat, run_id = runts_context(data, survey, station, run)
+        # Station identity travels with the fc (attrs) so EstimateTF can attach
+        # it to the TF — the single point of truth for plot titles and export
+        # headers (DESIGN.md §15).
+        surv, stat, run_id = runts_context(data, survey, station, run)
+        identity = _station_identity_attrs(data, surv, stat, run_id)
+        for level, fc in levels.items():
+            fc.attrs.update(identity)
+        if persist:
             for level, fc in levels.items():
                 if "datetime64" in str(fc.time.dtype):
                     persist_fc_level(ctx, fc, level, fc.attrs["sample_rate"],
@@ -215,8 +251,24 @@ class EstimateTF(Node):
             ref_levels=ref_fc,
             channel_nomenclature=kw,
         )
-        periods, Z = merge_tf_levels(per_level)
-        tf = build_tf(periods, Z, ins, outs, channel_nomenclature=kw)
+        periods, Z, Z_err = merge_tf_levels(per_level)
+        notes = (
+            f"estimator={estimator_engine}; remote_reference={remote_reference}; "
+            f"levels={len(levels)}; "
+            f"periods_per_octave={periods_per_octave}; "
+            f"nomenclature={kw or 'auto'}"
+        )
+        tf = build_tf(
+            periods, Z, ins, outs, channel_nomenclature=kw, Z_err=Z_err,
+            survey_id=sample_fc.attrs.get("survey_id"),
+            station_id=sample_fc.attrs.get("station_id"),
+            run_id=sample_fc.attrs.get("run_id"),
+            latitude=sample_fc.attrs.get("station_latitude"),
+            longitude=sample_fc.attrs.get("station_longitude"),
+            elevation=sample_fc.attrs.get("station_elevation"),
+            start_datetime=sample_fc.attrs.get("start_datetime"),
+            processing_notes=notes,
+        )
         ctx.progress(
             1.0,
             f"estimated TF ({estimator_engine}) over {len(levels)} level(s), "
@@ -242,8 +294,17 @@ class MergeTFLevels(Node):
         ins = list(first["input_channels"])
         outs = list(first["output_channels"])
         kw = first.get("channel_nomenclature") or None
-        periods, Z = merge_tf_levels(tf_levels)
-        tf = build_tf(periods, Z, ins, outs, channel_nomenclature=kw)
+        periods, Z, Z_err = merge_tf_levels(tf_levels)
+        tf = build_tf(
+            periods, Z, ins, outs, channel_nomenclature=kw, Z_err=Z_err,
+            survey_id=first.get("survey_id"),
+            station_id=first.get("station_id"),
+            run_id=first.get("run_id"),
+            latitude=first.get("station_latitude"),
+            longitude=first.get("station_longitude"),
+            elevation=first.get("station_elevation"),
+            start_datetime=first.get("start_datetime"),
+        )
         ctx.progress(1.0, f"merged {len(tf_levels)} TF levels -> {len(periods)} periods")
         return {"tf": tf}
 

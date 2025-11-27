@@ -30,7 +30,7 @@ def test_phase_convention_matches_aurora_halfspace(
     # copy of the same time series -> a second fc used as the remote reference
     ref_fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5,
                         "hamming", magnetic_unit="h") if use_dummy else None
-    _, Z = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], estimator_engine=engine,
+    _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], estimator_engine=engine,
                        remote_reference=remote_reference, periods_per_octave=8,
                        ref_fc=ref_fc)
 
@@ -59,7 +59,7 @@ def test_multilevel_merged_phase_convention_matches_aurora_halfspace(test12rr_ru
                                overlap=0.5, window_type="hamming", magnetic_unit="h")
     per = estimate_tf_levels(levels, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", periods_per_octave=8)
-    _, Z = merge_tf_levels(per)
+    _, Z, _ = merge_tf_levels(per)
 
     xy = np.degrees(np.angle(Z[:, 0, 1]))
     yx = np.degrees(np.angle(Z[:, 1, 0]))

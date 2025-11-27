@@ -56,3 +56,42 @@ def test_to_standard_coords_preserves_impedance():
         arr.sel(output="ey", input="hy").values,
         tf.dataset["transfer_function"].sel(output=tf.ey, input=tf.hy).values,
     )
+
+
+def _lemi_tf_with_errors_and_station():
+    periods = np.array([2.0, 4.0, 8.0])
+    Z = np.zeros((3, 2, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j
+    Z[:, 1, 1] = 2 + 0j
+    Zerr = np.zeros((3, 2, 2), dtype=float)
+    Zerr[:, 0, 0] = 0.1
+    Zerr[:, 1, 1] = 0.2
+    return build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
+                    channel_nomenclature="lemi12", Z_err=Zerr,
+                    survey_id="bgs_37", station_id="NO46",
+                    latitude=56.72884, longitude=-2.85449067, elevation=120.0)
+
+
+def test_export_edi_includes_errors_and_station_header(tmp_path: Path):
+    """EDI export carries the TF error (as variance) and the station identity
+    (DATAID/LAT/LON/SURVEY) — required for standalone archival use."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = _lemi_tf_with_errors_and_station()
+    out = tmp_path / "lemi_tf.edi"
+    ExportTF().execute(ctx, tf, path=str(out), file_type="edi")
+    content = out.read_text()
+    assert "DATAID=NO46" in content
+    assert "LAT=" in content and "LON=" in content
+    assert "SURVEY=bgs_37" in content
+    assert ">ZXX.VAR" in content
+    assert "1.000000e-02" in content  # 0.1**2 -> variance
+    assert "4.000000e-02" in content  # 0.2**2 -> variance
+
+
+def test_to_standard_coords_carries_errors(tmp_path: Path):
+    """The ZMM-safe standard-coords copy keeps the error field."""
+    tf = _lemi_tf_with_errors_and_station()
+    std = _to_standard_coords(tf)
+    err = std.impedance_error
+    assert np.allclose(err.sel(output="ex", input="hx").values, [0.1, 0.1, 0.1])
+    assert np.allclose(err.sel(output="ey", input="hy").values, [0.2, 0.2, 0.2])

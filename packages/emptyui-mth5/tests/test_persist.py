@@ -148,8 +148,8 @@ def test_read_back_fc_feeds_estimate_tf(tmp_path: Path):
     assert spectra.attrs["input_channels"] == "hx,hy"
     assert spectra.attrs["output_channels"] == "ex,ey"
 
-    periods, Z = estimate_tf(spectra, ["hx", "hy"], ["ex", "ey"],
-                             estimator_engine="Least Squares",
-                             periods_per_octave=8)
+    periods, Z, _ = estimate_tf(spectra, ["hx", "hy"], ["ex", "ey"],
+                                estimator_engine="Least Squares",
+                                periods_per_octave=8)
     assert periods.size > 1
     assert np.all(np.isfinite(Z))

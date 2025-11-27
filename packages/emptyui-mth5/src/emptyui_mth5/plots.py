@@ -1,17 +1,18 @@
-"""TF analysis plots (Display nodes)."""
+"""TF analysis plots (Display nodes) — publication-quality style (DESIGN.md §15).
+
+The rendering logic lives in :mod:`emptyui_mth5.plotting` (USArray
+conventions: log10 Period × log10 ρ_a, phase 0–90° fold for off-diagonal,
+tipper Re/Im with ylim [-1, 1], error bars, ○ XY / ✕ YX markers, equal
+per-decade scale, site + LON/LAT title).
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 from emptyui import Input, Node, Output, Param
 
-MU0 = 4.0 * np.pi * 1e-7
+from .plotting import plot_impedance_response, plot_tipper
 
 
 class PlotAppResPhase(Node):
@@ -19,7 +20,9 @@ class PlotAppResPhase(Node):
     title = "Plot AppRes & Phase"
     description = (
         "Apparent resistivity (top) and phase (bottom) vs period for the "
-        "four impedance components, derived from a transfer function."
+        "four impedance components, derived from a transfer function. "
+        "USArray-style: log10 period and resistivity, off-diagonal phase "
+        "folded into (0, 90°), error bars, colorblind-safe markers."
     )
     category = "Display"
     inputs = (Input("tf", "tf", label="tf"),)
@@ -31,47 +34,10 @@ class PlotAppResPhase(Node):
     )
 
     def execute(self, ctx, tf, mode: str = "off-diagonal") -> dict[str, Any]:
-
-        Z = tf.dataset["transfer_function"]
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
-
-        # nomenclature-aware accessors: tf.ex/ey/hx/hy are the *actual*
-        # instrument channel names (e.g. e1/e2/bx/by for a LEMI TF)
-        if mode == "off-diagonal":
-            components = [("zxy", tf.ex, tf.hy), ("zyx", tf.ey, tf.hx)]
-        else:
-            components = [("zxx", tf.ex, tf.hx), ("zyy", tf.ey, tf.hy)]
-
-        period = np.asarray(Z.coords["period"], dtype=float)
-        omega = 2.0 * np.pi / period
-
-        fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-        for label, out, inp in components:
-            if out not in Z.coords["output"].values or inp not in Z.coords["input"].values:
-                continue
-            z = Z.sel(output=out, input=inp).values.astype(complex)
-            rho = (np.abs(z) ** 2) / (MU0 * omega)
-            phase = np.angle(z, deg=True)
-            ok = np.isfinite(rho) & (rho > 0) & np.isfinite(phase)
-            if ok.sum() == 0:
-                continue  # skip empty bands instead of a log-scale warning
-            axes[0].loglog(period[ok], rho[ok], ".-", label=label)
-            axes[1].semilogx(period[ok], phase[ok], ".-", label=label)
-
-        axes[0].set_ylabel("Apparent resistivity ($\\Omega\\cdot$m)")
-        axes[0].legend()
-        axes[0].grid(True, which="both", alpha=0.3)
-        axes[1].set_ylabel("Phase (deg)")
-        axes[1].set_xlabel("Period (s)")
-        axes[1].legend()
-        axes[1].grid(True, which="both", alpha=0.3)
-        fig.suptitle(f"MT apparent resistivity & phase — {mode}")
-        fig.tight_layout()
-
         path = ctx.workspace / "plot_appres_phase.png"
-        fig.savefig(path, dpi=110)
-        plt.close(fig)
+        plot_impedance_response(tf, mode, path)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 
@@ -80,11 +46,11 @@ class PlotTipper(Node):
     type = "mth5.plot.tipper"
     title = "Plot Tipper"
     description = (
-        "Geomagnetic transfer function (tipper) magnitude and phase vs period "
-        "for the vertical-field components Tzx and Tzy, derived from a "
-        "transfer function that includes a vertical magnetic output (e.g. "
-        "'e1,e2,bz'). The tipper is dimensionless (Bz/H or Hz/H) and typically "
-        "|T| < 1."
+        "Geomagnetic transfer function (tipper) real and imaginary parts vs "
+        "period for Tzx and Tzy, derived from a transfer function that "
+        "includes a vertical magnetic output (e.g. 'e1,e2,bz'). The tipper is "
+        "dimensionless (Bz/H or Hz/H); normal tipper magnitude does not "
+        "exceed 1, so the y-axis is fixed to [-1, 1]."
     )
     category = "Display"
     inputs = (Input("tf", "tf", label="tf"),)
@@ -97,37 +63,8 @@ class PlotTipper(Node):
                 "transfer function has no tipper data (no vertical magnetic "
                 "output — compute the FC with e.g. 'e1,e2,bz' outputs)"
             )
-
-        # nomenclature-aware accessor: tf.tipper is the (period, hz, [hx, hy])
-        # array with the *actual* instrument channel names
-        t = tf.tipper
-        period = np.asarray(t.coords["period"], dtype=float)
-        tzx = t.sel(**tf.index_tzx).values.astype(complex)
-        tzy = t.sel(**tf.index_tzy).values.astype(complex)
-
-        fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-        for label, comp in (("Tzx", tzx), ("Tzy", tzy)):
-            mag = np.abs(comp)
-            phase = np.angle(comp, deg=True)
-            ok = np.isfinite(mag) & (mag > 0)
-            if ok.sum() == 0:
-                continue  # skip empty bands instead of a log-scale warning
-            axes[0].loglog(period[ok], mag[ok], ".-", label=label)
-            axes[1].semilogx(period[ok], phase[ok], ".-", label=label)
-
-        axes[0].set_ylabel("|Tipper| (dimensionless)")
-        axes[0].legend()
-        axes[0].grid(True, which="both", alpha=0.3)
-        axes[1].set_ylabel("Phase (deg)")
-        axes[1].set_xlabel("Period (s)")
-        axes[1].legend()
-        axes[1].grid(True, which="both", alpha=0.3)
-        fig.suptitle("Geomagnetic transfer function (tipper)")
-        fig.tight_layout()
-
         path = ctx.workspace / "plot_tipper.png"
-        fig.savefig(path, dpi=110)
-        plt.close(fig)
+        plot_tipper(tf, path)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 

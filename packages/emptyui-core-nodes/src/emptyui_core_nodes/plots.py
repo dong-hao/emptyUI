@@ -2,7 +2,11 @@
 
 Display nodes emit a typed `plot` port (rendered-figure reference) consumed
 by `Preview Plot` (inline viewer) and `Save Plot` (export) — ComfyUI's
-Preview/Save Image pattern."""
+Preview/Save Image pattern. Plot conventions follow DESIGN.md §15 (shared
+style module ``_plotstyle.py``): 150 dpi, grid/tick conventions, absolute
+datetime x-axis when the run carries a start time, channel unit hints, and
+run/station identity in titles.
+"""
 
 from __future__ import annotations
 
@@ -11,11 +15,13 @@ from typing import Any
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 from emptyui import Input, Node, Output, Param
 
 from ._channels import auto_channel, resolve_channels
+from ._plotstyle import DPI, apply_style, channel_unit_hint
 from .types import TimeSeries, coerce_run
 
 
@@ -24,6 +30,27 @@ def _select_channels(data: TimeSeries, spec: str) -> list[str]:
     component names (ex/ey/hx/hy/hz) are mapped through the inferred
     nomenclature; matching is case-insensitive."""
     return resolve_channels(list(data.channels), spec)
+
+
+def _time_axis(data: TimeSeries, n: int):
+    """Return (x, label) — datetime axis when an absolute start is known,
+    relative seconds otherwise."""
+    if data.start_datetime:
+        import pandas as pd
+
+        t0 = pd.Timestamp(data.start_datetime)
+        x = t0 + pd.to_timedelta(np.arange(n) / data.sample_rate, unit="s")
+        return x, "Time (UTC)"
+    return data.start + np.arange(n) / data.sample_rate, "Time (s)"
+
+
+def _plot_title(data: TimeSeries, what: str) -> str:
+    parts = [what]
+    if data.station:
+        parts.append(data.station)
+    if data.run:
+        parts.append(f"({data.run})")
+    return " — ".join(parts)
 
 
 class PlotTimeSeriesNode(Node):
@@ -50,19 +77,29 @@ class PlotTimeSeriesNode(Node):
         names = _select_channels(data, channels)
         n = data.n_samples if seconds is None else min(
             data.n_samples, int(seconds * data.sample_rate))
-        t = data.time_axis()[:n]
+        x, xlabel = _time_axis(data, n)
 
         fig, axes = plt.subplots(len(names), 1, figsize=(10, 1.8 * len(names)),
                                  sharex=True, squeeze=False)
         for ax, name in zip(axes[:, 0], names):
-            ax.plot(t, data.channels[name][:n], lw=0.6)
-            ax.set_ylabel(name)
-        axes[-1, 0].set_xlabel("Time (s)")
-        fig.suptitle("Time series")
-        fig.tight_layout()
+            ax.plot(x, data.channels[name][:n], lw=0.6)
+            unit = channel_unit_hint(name)
+            ax.set_ylabel(f"{name} ({unit})" if unit else name)
+        apply_style(fig, axes[:, 0])
+        axes[-1, 0].set_xlabel(xlabel)
+        if data.start_datetime:
+            locator = mdates.AutoDateLocator()
+            axes[-1, 0].xaxis.set_major_locator(locator)
+            axes[-1, 0].xaxis.set_major_formatter(
+                mdates.ConciseDateFormatter(locator))
+            fig.autofmt_xdate()
+        fig.suptitle(_plot_title(data, "Time series"), fontsize=11,
+                     fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
 
         path = ctx.workspace / "plot_timeseries.png"
-        fig.savefig(path, dpi=110)
+        fig.savefig(path, dpi=DPI, bbox_inches="tight",
+                    metadata={"Software": "emptyUI"})
         plt.close(fig)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
@@ -103,14 +140,19 @@ class PlotSpectrogramNode(Node):
 
         fig, ax = plt.subplots(figsize=(10, 4))
         mesh = ax.pcolormesh(t, f, sxx_db, shading="auto", cmap="viridis")
-        fig.colorbar(mesh, label="dB")
+        cbar = fig.colorbar(mesh, ax=ax)
+        unit = channel_unit_hint(channel)
+        cbar.set_label(f"Power (dB{', rel. ' + unit if unit else ''})")
+        apply_style(fig, (ax,))
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Frequency (Hz)")
-        ax.set_title(f"Spectrogram — {channel}")
+        ax.set_title(_plot_title(data, f"Spectrogram — {channel}"),
+                     fontsize=10)
         fig.tight_layout()
 
         path = ctx.workspace / f"plot_spectrogram_{channel}.png"
-        fig.savefig(path, dpi=110)
+        fig.savefig(path, dpi=DPI, bbox_inches="tight",
+                    metadata={"Software": "emptyUI"})
         plt.close(fig)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}

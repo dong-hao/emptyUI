@@ -20,7 +20,7 @@ class RunContext:
         progress_cb=None,
         logger: logging.Logger | None = None,
     ) -> None:
-        self.workspace = workspace
+        self.workspace = Path(workspace) if workspace is not None else None
         self.store = store
         self._progress_cb = progress_cb
         self.logger = logger or logging.getLogger("emptyui")
