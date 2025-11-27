@@ -77,7 +77,8 @@ npm run test:headed         # watch the browser while it runs
   overhaul; LEMI-424 loader (`mth5.io.lemi`), Extract Run, Detrend
   (mean/linear/none), ComputeFC (TS→FC windowed STFT), EstimateTF (FC→TF
   cross-power LSQ), TF export to EDI, Plot AppRes & Phase (diagonal/
-  off-diagonal), Plot Tipper (Tzx/Tzy magnitude + phase). Verified
+  off-diagonal), Plot Tipper (Tzx/Tzy — switching to real & imaginary
+  panels per the §15 standardization plan). Verified
   end-to-end through the executor on real 1 Hz
   LEMI-424 and BGS long-period data, plus the official synthetic halfspace.
   Processing-correctness fixes:
@@ -96,8 +97,9 @@ npm run test:headed         # watch the browser while it runs
   - **Calibrate**: `mth5.calibrate` removes the instrument response from a
     `ts.run` — using the run's own mth5 channel responses, or an explicit
     `calibration` filter via frequency-domain response removal.
-  M2 is now complete (all §11 M2 deliverables delivered).
-- **M2 — Phase 4 polish**:
+  M2 is essentially complete — the only open M2 item is the
+  publication-quality plot standardization task (see "Remaining work").
+- **M2 — Phase 4 polish** (delivered 2026-09-05):
   - **Channel nomenclature**: `Compute FC` (and `Split Channels`, `Load
     LEMI-424`) expose an mt_metadata `channel_nomenclature` select
     (`auto`/`default`/`lemi12`/`lemi34`/`phoenix123`/`musgraves`), driven by
@@ -144,7 +146,7 @@ npm run test:headed         # watch the browser while it runs
     (`BuildConfig`/`FrequencyBands`/`SelectRuns`) and the unused `bands`/
     `selection` input ports on `Compute FC`/`Estimate TF`; the default pipeline
     is `ExtractRun → ComputeFC → EstimateTF (+ MergeTFLevels)`.
-- **M3 — in progress**:
+- **M3 — delivered so far**:
   - **ComputeFC channel auto-configuration**: the tipper is on by default —
     `Compute FC`'s output channels resolve to the electric pair **plus** the
     vertical magnetic channel (bz/h3/hz) when the run contains one
@@ -193,6 +195,31 @@ npm run test:headed         # watch the browser while it runs
     (full-stack — see the Browser end-to-end tests section) cover the app
     boot, nomenclature cascade, the Load CSV → Plot → Preview pipeline,
     artifact download, and run cancellation.
+
+### Remaining work (see DESIGN.md §11/§12)
+
+- **M2 — final task (planned)**: publication-quality plot standardization —
+  shared plot style, error bars (requires TF error propagation from the
+  estimators), MT/USArray display conventions (log10 period & ρ_a, phase
+  0–90° fold for off-diagonal, tipper Re/Im with ylim [-1, 1], equal
+  per-decade scale, USArray markers ○ XY / ✕ YX), TF station metadata
+  (needed for plot titles **and** EDI/XML export headers). See
+  DESIGN.md §15.
+- **M3 — not yet started**:
+  - Content-addressed result caching + partial execution ("execute to
+    here"); the executor currently re-runs the whole DAG every time.
+  - Sub-workflows (nested DAGs) — no implementation, design only.
+  - Remote-server mode docs (same API, deployed elsewhere) — a passing
+    mention in DESIGN only; no deploy guide.
+  - Plugin packaging guide + example template (`docs/` is empty).
+- **M4 — community/advanced**:
+  - Plugin index/publish flow, docs site, batch/queue runner, more
+    visualization nodes (Plot Coherency, Plot Phase Tensor are designed but
+    not implemented).
+  - Aurora-style band config files (exact centre frequencies + bandwidths)
+    instead of the always-auto-derived period table.
+  - Paradigm B: cross-decimation-level FC pooling (see DESIGN §14.5) — a
+    novel extension, not required for the current pipeline.
 
 ### UI conventions (stable)
 
