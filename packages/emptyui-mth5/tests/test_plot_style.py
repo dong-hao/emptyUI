@@ -143,6 +143,31 @@ def test_equal_per_decade_scale(tmp_path: Path):
         plt.close(fig)
 
 
+def test_offdiagonal_phase_panel_half_height(tmp_path: Path):
+    """The off-diagonal phase panel is about half the diagonal one (0-90°
+    vs the full signed range) — DESIGN.md §15 / feedback 2026-09-06."""
+    fig_off, _ = _render(_impedance_tf(), "off-diagonal", tmp_path)
+    ax_off = fig_off.axes[1]
+    fh_off = fig_off.get_size_inches()[1]
+    h_off = ax_off.get_position().height * fh_off
+    plt.close(fig_off)
+
+    periods = np.array([2.0, 4.0, 8.0, 16.0])
+    Z = np.zeros((4, 3, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j
+    Z[:, 1, 1] = 2 + 0j
+    tf_diag = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                       channel_nomenclature="lemi12", station_id="NO46",
+                       survey_id="bgs")
+    fig_diag, _ = _render(tf_diag, "diagonal", tmp_path)
+    ax_diag = fig_diag.axes[1]
+    fh_diag = fig_diag.get_size_inches()[1]
+    h_diag = ax_diag.get_position().height * fh_diag
+    plt.close(fig_diag)
+
+    assert 0.4 <= h_off / h_diag <= 0.6
+
+
 def test_tipper_reim_conventions(tmp_path: Path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     tf = _tipper_tf()

@@ -68,28 +68,38 @@ def run_notes(tf) -> str:
     return value if value else ""
 
 
-def equal_decade_layout(fig, ax, x_min, x_max, y_min, y_max,
-                        inches_per_decade: float = 0.9,
-                        extra_height: float = 0.0) -> None:
-    """Size the figure so one period decade spans the same physical length as
-    one ρ_a decade (MT convention, DESIGN.md §15).
+def impedance_layout(fig, ax_rho, ax_phi, x_min, x_max, y_min, y_max,
+                     phase_inches: float, inches_per_decade: float = 0.9) -> None:
+    """Size the impedance figure: equal per-decade scale for the ρ_a panel
+    (MT convention, one period decade = one Ω·m decade in physical length)
+    and an explicit phase-panel height in inches.
 
-    The axes limits are set explicitly first, then the figure height is
-    corrected once (linear in figure height) so the panel's measured
-    inches-per-decade matches on both axes.
+    The phase panel height is independent of the ρ_a decade span: the
+    off-diagonal phase panel is deliberately half the diagonal one (the
+    off-diagonal range is 0–90° vs 360° for the signed diagonal phases).
     """
     xd = max(1.0, float(np.log10(x_max / x_min)))
     yd = max(1.0, float(np.log10(y_max / y_min)))
     fig.set_size_inches(1.3 + inches_per_decade * xd,
-                        1.0 + inches_per_decade * yd + extra_height)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
+                        1.0 + inches_per_decade * yd + phase_inches)
+    ax_rho.set_xlim(x_min, x_max)
+    ax_rho.set_ylim(y_min, y_max)
     fig.canvas.draw()
-    pos = ax.get_position()
+    pr = ax_rho.get_position()
+    pp = ax_phi.get_position()
     fw, fh = fig.get_size_inches()
-    x_ratio = (pos.width * fw) / xd
-    y_ratio = (pos.height * fh) / yd
-    fig.set_size_inches(fw, fh * (x_ratio / y_ratio))
+    left, right = pr.x0, pr.x1
+    top_margin = (1.0 - pr.y1) * fh
+    bottom_margin = pp.y0 * fh
+    gap = (pr.y0 - pp.y1) * fh
+    w_r = (right - left) * fw
+    h_r = w_r * yd / xd  # equal per-decade scale
+    new_h = top_margin + h_r + gap + phase_inches + bottom_margin
+    fig.set_size_inches(fw, new_h)
+    ax_rho.set_position([left, (bottom_margin + phase_inches + gap) / new_h,
+                         right - left, h_r / new_h])
+    ax_phi.set_position([left, bottom_margin / new_h,
+                         right - left, phase_inches / new_h])
     fig.canvas.draw()
 
 
@@ -198,7 +208,9 @@ def plot_impedance_response(tf, mode: str, path):
 
     x_min, x_max = _decade_limits(period)
     y_min, y_max = _decade_limits(np.concatenate(rho_all))
-    phase_h = 2.6
+    # Off-diagonal phase spans 0-90° -> half-height panel; diagonal spans
+    # the full signed range -> full-height panel (DESIGN.md §15).
+    phase_h = 1.3 if mode == "off-diagonal" else 2.6
     fig = plt.figure(figsize=(6.5, 8.0))
     gs = fig.add_gridspec(2, 1, height_ratios=[3.2, phase_h], hspace=0.18)
     ax_rho = fig.add_subplot(gs[0])
@@ -247,8 +259,8 @@ def plot_impedance_response(tf, mode: str, path):
     if notes:
         fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
                  style="italic", color="0.3")
-    equal_decade_layout(fig, ax_rho, x_min, x_max, y_min, y_max,
-                        extra_height=phase_h)
+    impedance_layout(fig, ax_rho, ax_phi, x_min, x_max, y_min, y_max,
+                     phase_h)
     fig.savefig(path, dpi=DPI, bbox_inches="tight",
                 metadata={"Software": "emptyUI", "Title": station_title(tf)})
     plt.close(fig)
