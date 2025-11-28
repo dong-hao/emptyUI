@@ -1512,18 +1512,81 @@ caching/sub-workflow M3 backlog); each lands separately.
   below the fluxgate noise floor — no recovery), 0.03–0.3 at T=11–30 s
   (transition zone — coherence sorting *can* help), 0.6–0.9 at T>30 s.
   Remote reference is also incoherent at short periods (190 km separation).
+- Grounding for the method: Egbert (1997, EMTF) and Chave & Thomson (2004,
+  BIRRP) use coherence-based identification/downweighting of contaminated
+  samples in robust MT processing; neither is implemented in the pinned
+  aurora, so this is added in emptyUI (pre-regression, external to aurora's
+  residual-based M-estimator).
 
-**Plan.**
-- Per-band coherence diagnostics: a coherence table/plot (E–B local
-  coherence and remote-ref coherence vs period, same USArray plot style)
-  — new `mth5.coherence` display node or extension of the TF table node;
-  surfaces the noise-floor cutoff so users can see which periods are
-  trustworthy.
-- Coherence sorting/weighting in `Estimate TF` (EMTF-style): before the
-  aurora regression, compute per-window E–B coherence within each band and
-  (a) **drop** windows below a `coherence_min` threshold (default off), or
-  (b) **weight** windows by coherence; report the retained fraction.
-  Implemented outside aurora's estimator (which stays residual-based).
-- Optional: band-edge trimming — warn/drop periods whose median coherence
-  falls below the threshold (this directly addresses the noisy short-period
-  bands identified above).
+**Plan (2026-09-07, feature design).**
+
+*Design decision (2026-09-07): a dedicated node, not `Estimate TF` params.*
+Coherence sorting is a distinct FC→FC transformation (Unix philosophy —
+one thing, one node): **`aurora.process.coherence_sort`** ("Coherence
+Sort"), category Processing, placed between `Compute FC` and `Estimate
+TF`. Ports: `fc` in/out (multi-level container, unchanged structure and
+time grid) + optional `table` out (diagnostic: per-period median coh²,
+retained/total windows, applied weight range). It lives in
+`emptyui-aurora` because it reuses the `_period_bands` banding (the same
+band geometry `Estimate TF` uses — `periods_per_octave` is exposed and
+documented to match, default 4).
+
+*Node params (defaults per user decision 2026-09-07):*
+- `coherence_min` (float, default `0.25`): lower bound — windows below are
+  down-weighted (noise-dominated FCs; the BGS short-period bands).
+- `coherence_max` (float, default `0.98`): upper bound — windows at/above
+  are down-weighted: **perfect multiple coherence can be a noise
+  signature** (few degrees of freedom / overfit, or coherent noise driving
+  both E and H), so coh ≈ 1 must not automatically mean "good data".
+- `mode` (`weight` default / `drop` / `off`): `weight` multiplies the FC
+  by √w per (band, window) (weighted-LS semantics; aurora's robust weights
+  act on top, and no `Estimate TF` change is needed — for remote
+  reference, each station's FC gets its own weights, an approximation);
+  `drop` sets excluded samples to NaN.
+- `coherence_trim` (boolean, default `False`): **band-edge trimming** —
+  set frequency bins whose band median coherence is below
+  `coherence_min` to NaN, with a warning listing the affected bands.
+- `periods_per_octave` (default `4`, banding consistency with
+  `Estimate TF`).
+
+*Coherence statistic*: per-window **multiple coherence** between the
+magnetic inputs and each output, computed over the band's frequency-bin
+ensemble (n_bins ≥ n_in + 1; the band design guarantees several
+harmonics at level 0), on the already-normalized samples. Sparse bands
+fall back to the minimum pairwise coherence; all-zero/degenerate windows
+score 0 (conservative). Applied per decimation level (bands differ per
+level).
+
+*`Estimate TF` change (small, generic — not coherence-specific)*: skip
+non-finite FC samples when gathering band rows. This is required by
+`drop`/`coherence_trim`, and gives correct remote-reference semantics for
+free: a row is used only if **both** the local and remote FCs are finite
+(the conservative union — RR pairing stays row-aligned because the time
+grid is never dropped).
+
+*Diagnostics*: the node's `table` output (per-period median coh²,
+retained/total windows, weight range) — the minimal diagnostic; a
+coherence-vs-period plot (USArray style per §15) is a later add-on.
+
+*Implementation locations*:
+- `emptyui-aurora/_processing.py`: `_coherence_scores(...)` (per-window
+  multiple coherence per band/level), `_apply_coherence(...)`
+  (weight/drop/trim), both reusable by the node; non-finite-row skip in
+  the `estimate_tf` band gather loop.
+- `emptyui-aurora/process.py`: `CoherenceSort` node (params, ports,
+  register) + `estimate_tf` non-finite handling.
+- Tests + `mth5.coherence`-style table rendering (reuse `View Table`).
+
+*Verification*:
+- Synthetic FCs with injected low-coherence windows: weights exclude /
+  down-weight them and recover the true impedance; `weight` vs `drop`
+  compared; upper bound tested with an overfit/degenerate band (few
+  windows → coh ≈ 1).
+- Real BGS RR workflow: T=11–30 s should improve (coherence ↑, error
+  bars ↓) while long periods are unchanged; `coherence_trim` removes the
+  noise-floor bands with a warning; remote-reference row pairing intact.
+- Defaults are active (min 0.25 / max 0.98, weight mode) but loose — the
+  BGS long-period results must remain stable, and existing unit tests
+  must still pass (update expectations only where the sorting is
+  demonstrably better).
+
