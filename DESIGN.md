@@ -1524,12 +1524,37 @@ caching/sub-workflow M3 backlog); each lands separately.
 Coherence sorting is a distinct FC→FC transformation (Unix philosophy —
 one thing, one node): **`aurora.process.coherence_sort`** ("Coherence
 Sort"), category Processing, placed between `Compute FC` and `Estimate
-TF`. Ports: `fc` in/out (multi-level container, unchanged structure and
-time grid) + optional `table` out (diagnostic: per-period median coh²,
-retained/total windows, applied weight range). It lives in
-`emptyui-aurora` because it reuses the `_period_bands` banding (the same
-band geometry `Estimate TF` uses — `periods_per_octave` is exposed and
-documented to match, default 4).
+TF`. It lives in `emptyui-aurora` because it reuses the `_period_bands`
+banding (the same band geometry `Estimate TF` uses —
+`periods_per_octave` is exposed and documented to match, default 4).
+
+**Two-FC design (user decision 2026-09-07).** The node accepts **both**
+FCs — `fc` + `ref_fc` inputs, `fc` + `ref_fc` outputs (mirroring
+`Estimate TF`'s port structure) — because remote reference *replaces*
+the local magnetic channels with the remote ones: local E/H coherence is
+not the right quality measure when RME_RR is used. Sorting must use the
+coherence that actually governs the downstream estimate:
+- **single-FC mode** (no `ref_fc`): per-window multiple coherence of the
+  local outputs (E, Bz) on the **local** magnetic inputs (original plan).
+- **two-FC mode**: per-window multiple coherence of the local outputs on
+  the **remote** magnetic inputs (the RR-relevant signal coherence),
+  combined conservatively with the **local↔remote magnetic transfer
+  coherence** (H_local vs H_remote): the reference can only clean the
+  local H to the extent the two magnetic fields are coherent, so both are
+  required for a good RR window. The node uses the **minimum** of the two
+  (and reports both in the diagnostic table so the binding criterion is
+  visible). Either FC alone is not sufficient for RR quality — this is the
+  "local E/H fine but RR bad" (and vice versa) case.
+- The two FCs must share identical **time and frequency grids** — the
+  node validates them itself with the same errors as `Estimate TF`
+  ("runs are not aligned — use Align Runs").
+- **Shared per-row weight**: the single combined weight is baked as √w
+  into **both** output FCs, making remote-reference row weighting exactly
+  correct (one weight per observation row, as weighted LS requires).
+  Running two separate one-FC nodes on the two stations would *not*
+  achieve this (the earlier approximation). Note the remote station's
+  quality now participates in the local sorting — correct for RR, but
+  the diagnostic must make it visible.
 
 *Node params (defaults per user decision 2026-09-07):*
 - `coherence_min` (float, default `0.25`): lower bound — windows below are
@@ -1538,35 +1563,39 @@ documented to match, default 4).
   are down-weighted: **perfect multiple coherence can be a noise
   signature** (few degrees of freedom / overfit, or coherent noise driving
   both E and H), so coh ≈ 1 must not automatically mean "good data".
-- `mode` (`weight` default / `drop` / `off`): `weight` multiplies the FC
-  by √w per (band, window) (weighted-LS semantics; aurora's robust weights
-  act on top, and no `Estimate TF` change is needed — for remote
-  reference, each station's FC gets its own weights, an approximation);
-  `drop` sets excluded samples to NaN.
+- `mode` (`weight` default / `drop` / `off`): `weight` multiplies both
+  FCs by √w per (band, window) with a **single shared weight per row**
+  (weighted-LS semantics; aurora's robust weights act on top; no
+  `Estimate TF` change needed); `drop` sets excluded samples to NaN in
+  both FCs.
 - `coherence_trim` (boolean, default `False`): **band-edge trimming** —
   set frequency bins whose band median coherence is below
-  `coherence_min` to NaN, with a warning listing the affected bands.
+  `coherence_min` to NaN in both FCs, with a warning listing the
+  affected bands.
 - `periods_per_octave` (default `4`, banding consistency with
   `Estimate TF`).
 
-*Coherence statistic*: per-window **multiple coherence** between the
-magnetic inputs and each output, computed over the band's frequency-bin
-ensemble (n_bins ≥ n_in + 1; the band design guarantees several
-harmonics at level 0), on the already-normalized samples. Sparse bands
-fall back to the minimum pairwise coherence; all-zero/degenerate windows
-score 0 (conservative). Applied per decimation level (bands differ per
-level).
+*Coherence statistic*: per-window **multiple coherence** (n_bins ≥ n_in +
+1; the band design guarantees several harmonics at level 0), on the
+already-normalized samples, per decimation level. Reference: local
+magnetic inputs (single-FC mode) or remote magnetic inputs combined with
+the local↔remote magnetic transfer coherence (two-FC mode, min). Sparse
+bands fall back to the minimum pairwise coherence; all-zero/degenerate
+windows score 0 (conservative). Per output channel, the conservative
+minimum across outputs is used.
 
 *`Estimate TF` change (small, generic — not coherence-specific)*: skip
-non-finite FC samples when gathering band rows. This is required by
+non-finite FC samples when gathering band rows. Required by
 `drop`/`coherence_trim`, and gives correct remote-reference semantics for
 free: a row is used only if **both** the local and remote FCs are finite
 (the conservative union — RR pairing stays row-aligned because the time
 grid is never dropped).
 
-*Diagnostics*: the node's `table` output (per-period median coh²,
-retained/total windows, weight range) — the minimal diagnostic; a
-coherence-vs-period plot (USArray style per §15) is a later add-on.
+*Diagnostics*: the node's `table` output — per-period median coherence
+for **each** criterion (E–H_local, E–H_remote, H_local–H_remote when
+applicable), the retained/total window counts and the applied weight
+range, so the binding criterion is visible. A coherence-vs-period plot
+(USArray style per §15) is a later add-on.
 
 *Implementation locations*:
 - `emptyui-aurora/_processing.py`: `_coherence_scores(...)` (per-window
@@ -1582,6 +1611,12 @@ coherence-vs-period plot (USArray style per §15) is a later add-on.
   down-weight them and recover the true impedance; `weight` vs `drop`
   compared; upper bound tested with an overfit/degenerate band (few
   windows → coh ≈ 1).
+- Two-FC mode: synthetic stations with a noisy local H (low E–H_local
+  but high E–H_remote coherence) must be **retained** for RR (the
+  single-FC mode would wrongly drop them) and the RR estimate must
+  recover the true impedance; conversely, a window with low E–H_remote
+  or low H_local–H_remote must be dropped; shared √w baked into both
+  FCs verified.
 - Real BGS RR workflow: T=11–30 s should improve (coherence ↑, error
   bars ↓) while long periods are unchanged; `coherence_trim` removes the
   noise-floor bands with a warning; remote-reference row pairing intact.
