@@ -1542,9 +1542,15 @@ coherence that actually governs the downstream estimate:
   coherence** (H_local vs H_remote): the reference can only clean the
   local H to the extent the two magnetic fields are coherent, so both are
   required for a good RR window. The node uses the **minimum** of the two
-  (and reports both in the diagnostic table so the binding criterion is
-  visible). Either FC alone is not sufficient for RR quality — this is the
-  "local E/H fine but RR bad" (and vice versa) case.
+  — **fixed** (no `coherence_source` param; decision 2026-09-07): when
+  remote reference is in play, the data are *already* facing bad
+  coherence (low or very high), so the local E/H coherence is generally
+  the wrong criterion; the conservative `both` is the only sensible
+  choice, and the single-FC mode already provides the local-only view
+  for single-site workflows. Both criteria are reported in the
+  diagnostic table so the binding one is visible. Either FC alone is not
+  sufficient for RR quality — this is the "local E/H fine but RR bad"
+  (and vice versa) case.
 - The two FCs must share identical **time and frequency grids** — the
   node validates them itself with the same errors as `Estimate TF`
   ("runs are not aligned — use Align Runs").
