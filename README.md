@@ -207,8 +207,19 @@ npm run test:headed         # watch the browser while it runs
     boot, nomenclature cascade, the Load CSV → Plot → Preview pipeline,
     artifact download, and run cancellation.
 
-### Remaining work (see DESIGN.md §11/§12)
+### Remaining work (see DESIGN.md §11/§12/§16)
 
+- **M3 — next tasks (planned, independent)**:
+  - **Instrument calibration framework + LEMI support**: parse the
+    manufacturer LEMI calibration files (`.chn`/`.def` FAP, and the mt_io
+    JSON format) into mt_metadata filters and apply them via the existing
+    Calibrate node — per DESIGN.md §16.1. (Investigation showed the BGS
+    short-period ρ collapse is primarily the LEMI noise floor; calibration
+    is a modest ~×6 ρ / ±30° phase correction near Nyquist.)
+  - **EMTF-style coherence sorting**: filter/downweight low-coherence FC
+    windows before the robust regression, plus a per-band coherence
+    diagnostic (table/plot) — per DESIGN.md §16.2. (aurora 0.6.2 only
+    logs squared coherence; no sample-level sorting exists anywhere.)
 - **M3 — not yet started**:
   - Content-addressed result caching + partial execution ("execute to
     here"); the executor currently re-runs the whole DAG every time.

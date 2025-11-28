@@ -867,6 +867,16 @@ progress.
   complete.**
 
 **M3 — Power features**
+- ⏳ **Instrument calibration framework + coherence sorting** (planned
+  2026-09-07, see §16) — the next M3 tasks:
+  - General calibration framework with LEMI-417/424 support (manufacturer
+    `.chn`/`.def` FAP files → per-channel `FrequencyResponseTableFilter`
+    → `RunTS.calibrate()`); verified on the BGS pair that the short-period
+    collapse is the instrument noise floor, and calibration is a modest
+    (~×6 ρ, ±30° phase) correction near Nyquist.
+  - EMTF-style coherence sorting: filter/downweight low-coherence FC
+    windows before the robust regression (aurora 0.6.2 only *logs* squared
+    coherence; its "coherence sorting" helpers only widen bands).
 - ⏳ Caching + partial execution; sub-workflows; remote-server mode docs
   (same API, deployed elsewhere); plugin packaging guide + example template.
   *Caching is designed in (content-addressed handle keys, §7) but not
@@ -1428,3 +1438,92 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
   distinct linestyles; XX = square / YY = diamond (proposal, not in the
   USArray reference).
 - Open: add `mtpy` as a test-only dev extra for golden-image comparison?
+
+---
+
+## 16. M3 pending tasks — instrument calibration framework & coherence sorting (planned 2026-09-07)
+
+Two independent follow-ups identified while investigating the BGS
+NO46/NX37 short-period results. They are the **next M3 tasks** (before the
+caching/sub-workflow M3 backlog); each lands separately.
+
+### 16.1 General calibration framework + LEMI-417/424 calibration support
+
+**Grounding (researched 2026-09-07).**
+- The LEMI logger internally corrects the recorded signal and outputs
+  physical units (nT, µV/m) **assuming unity gain and zero phase**; the
+  deviation from unity grows near Nyquist (short periods) — per EPIC's
+  `lemi2seed` docs, the calibration file provides the frequency-dependent
+  correction factor (converted FAP → poles/zeros per logger/sensor pair,
+  which is a **matched, individually calibrated pair**).
+- **File formats**: the manufacturer's `.chn` (LEMI-417-era, e.g. `lemi.chn`
+  dated 2009 — the NO46 unit is a LEMI-417) is an FAP file: header
+  `'#FP' 12 5 / NTF,NCH DR-TRANSFORMED (MOD,ARG)` = 12 frequencies
+  (0.25–1000 Hz) × 5 channels (`#HX #HY #HZ #EX #EY`), complex response as
+  modulus + argument (degrees). The first column is **frequency (Hz)**.
+  The LEMI-424-era format is the KMS `.def` file (used by the proprietary
+  KMS-200 software); same FAP-style content, different wrapper.
+- **No public parser exists** for either format: mt_io/mth5 only accept
+  per-channel JSON (`{"Calibration": {"gain", "Freq": [...], "Re": [...],
+  "Im": [...]}}`), and `LEMICollection.get_calibrations` globs only
+  `*.json` — manufacturer files are silently ignored today. EPIC's
+  `lemi2seed` ships a pre-baked PZ pickle instead.
+- **Empirical check on the BGS pair (2026-09-07)**: the short-period ρ_a
+  collapse (T=4–16 s: ρ~0.1 Ω·m, phase→0, E–B coh²=0.01–0.1) is primarily
+  the **instrument noise floor** — B PSD ≈ 0.011 nT/√Hz at T=4 s equals
+  the LEMI-424 fluxgate spec (≤10 pT/√Hz); the LEMI-424 is a long-period
+  system (designed T=20–100,000 s). Applying the `.chn` (frequency
+  interpretation, **flat/clamped below 0.25 Hz** — log-extrapolation makes
+  results worse) scales ρ by ~×6.25 (E/H response ratio 0.012/0.03 at
+  0.25 Hz) and shifts phase ~±30° — a real but modest correction; it cannot
+  recover sub-noise-floor periods.
+
+**Plan.**
+- General calibration framework in `emptyui-mth5`: parse manufacturer FAP
+  files (`.chn`/`.def`, MOD/ARG) **and** the mt_io JSON format into
+  per-channel `mt_metadata FrequencyResponseTableFilter`s, and attach them
+  to the run the way mt_timeseries expects — register in `run.filters` +
+  `dataset[ch].attrs["filter.name"]` (naive `run.by.channel_response = …`
+  is silently lost: `run.by` returns a copy; `RunTS.calibrate()` then
+  applies them). Filters need a non-empty `name` and mt_metadata-compatible
+  units (`nanoTesla`, `mV/km`).
+- Expose as a `calibration` input/param: `Load LEMI-424` auto-pickup of
+  calibration files (data dir / `calibration_path` param), plus an
+  explicit calibration-file node feeding the existing `mth5.calibrate`
+  node. `.chn` values are approximate when they do not match the specific
+  unit — per-pair files are preferred (log/annotation when generic).
+- Decide: interpretation of the FAP `gain` field (static factor) and
+  below-table extrapolation policy (default flat = unity/zero-phase
+  assumption at long periods).
+- Verify against a reference dataset (e.g. an independently processed /
+  EDI-published site) to settle the absolute-gain question.
+
+### 16.2 EMTF-style coherence sorting (filter low-coherence FCs)
+
+**Grounding (researched 2026-09-07).**
+- aurora 0.6.2 has **no sample-level coherence sorting**: the robust
+  M-estimator computes squared coherence (R²) per output channel
+  (`m_estimator.compute_squared_coherence`) but only **logs** it;
+  `get_band_for_coherence_sorting`/`adjust_band_for_coherence_sorting`
+  (`frequency_band_helpers.py`) are **band-widening** helpers ("min3" rule,
+  marked WIP). emptyUI's only coherence logic is the `Align Runs`
+  inter-station guard (magnetic–magnetic, 64–1024 s).
+- **Measured on the BGS pair**: E–B coh² ≈ 0.01–0.1 at T=4–16 s (signal
+  below the fluxgate noise floor — no recovery), 0.03–0.3 at T=11–30 s
+  (transition zone — coherence sorting *can* help), 0.6–0.9 at T>30 s.
+  Remote reference is also incoherent at short periods (190 km separation).
+
+**Plan.**
+- Per-band coherence diagnostics: a coherence table/plot (E–B local
+  coherence and remote-ref coherence vs period, same USArray plot style)
+  — new `mth5.coherence` display node or extension of the TF table node;
+  surfaces the noise-floor cutoff so users can see which periods are
+  trustworthy.
+- Coherence sorting/weighting in `Estimate TF` (EMTF-style): before the
+  aurora regression, compute per-window E–B coherence within each band and
+  (a) **drop** windows below a `coherence_min` threshold (default off), or
+  (b) **weight** windows by coherence; report the retained fraction.
+  Implemented outside aurora's estimator (which stays residual-based).
+- Optional: band-edge trimming — warn/drop periods whose median coherence
+  falls below the threshold (this directly addresses the noisy short-period
+  bands identified above).
