@@ -1,17 +1,11 @@
 import time
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from emptyui import Node
-from emptyui.registry import Registry, build_default_registry
+from emptyui.registry import Registry
 from emptyui.server.app import create_app
-
-
-@pytest.fixture()
-def client():
-    return TestClient(create_app(build_default_registry()))
 
 
 def _wait_status(client: TestClient, run_id: str, timeout: float = 5.0) -> dict:

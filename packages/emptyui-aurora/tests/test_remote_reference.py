@@ -23,10 +23,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from _synthetic import synthetic_runts, synthetic_source
+from _workflow import edge, node
 from emptyui.context import RunContext
 from emptyui.executor import Executor
 from emptyui.registry import build_default_registry
-from emptyui.schema import Edge, Workflow, WorkflowNode
+from emptyui.schema import Workflow
 from emptyui.store import DataStore
 from emptyui_aurora._processing import (
     compute_fc_levels,
@@ -62,21 +64,13 @@ def _synthetic_stations():
     Station B (remote): magnetic-only bx,by, same sampling/setup, starting
     240 s later — the overlap is what Align Runs must find.
     """
-    rng = np.random.default_rng(21)
-    fs = 8.0
-    n = 16384
-    hx_src = rng.standard_normal(n)
-    hy_src = rng.standard_normal(n)
-    local = _Run({
-        "bx": hx_src + 0.1 * rng.standard_normal(n),
-        "by": hy_src + 0.1 * rng.standard_normal(n),
-        "e1": 1.0 * hx_src + 3.0 * hy_src + 0.2 * rng.standard_normal(n),
-        "e2": -1.0 * hx_src + 4.0 * hy_src + 0.2 * rng.standard_normal(n),
-    }, fs, start_datetime="2024-01-01T00:00:00")
-    remote = _Run({
-        "bx": hx_src + 0.1 * rng.standard_normal(n),
-        "by": hy_src + 0.1 * rng.standard_normal(n),
-    }, fs, start_datetime="2024-01-01T00:04:00")
+    source = synthetic_source(21, n=16384, kind="white")
+    local = synthetic_runts(source, magnetic=("bx", "by"),
+                            electric=("e1", "e2"), z=(1.0, 3.0, -1.0, 4.0),
+                            e_noise=0.2,
+                            start_datetime="2024-01-01T00:00:00", seed=21)
+    remote = synthetic_runts(source, magnetic=("bx", "by"), with_e=False,
+                             start_datetime="2024-01-01T00:04:00", seed=22)
     return local, remote
 
 
@@ -157,10 +151,10 @@ def test_remote_reference_unaligned_time_grid_errors(tmp_path):
     fail with a clear error — the runs were not aligned."""
     local, _ = _synthetic_stations()
     shifted = _Run({
-        "bx": local.channels["bx"][:-320],
-        "by": local.channels["by"][:-320],
-        "e1": local.channels["e1"][:-320],
-        "e2": local.channels["e2"][:-320],
+        "bx": local.dataset["bx"].values[:-320],
+        "by": local.dataset["by"].values[:-320],
+        "e1": local.dataset["e1"].values[:-320],
+        "e2": local.dataset["e2"].values[:-320],
     }, local.sample_rate, start_datetime="2024-01-01T00:00:40")
     fc = compute_fc_levels(local, ["bx", "by"], ["e1", "e2"],
                            num_samples_window=256, overlap=0.5,
@@ -172,14 +166,6 @@ def test_remote_reference_unaligned_time_grid_errors(tmp_path):
         estimate_tf(fc, ["bx", "by"], ["e1", "e2"],
                     estimator_engine="Robust", remote_reference=True,
                     ref_fc=ref, periods_per_octave=4)
-
-
-def _node(nid, typ, params):
-    return WorkflowNode(id=nid, type=typ, params=params)
-
-
-def _edge(eid, s, sp, t, tp):
-    return Edge(id=eid, source=s, source_port=sp, target=t, target_port=tp)
 
 
 @pytest.mark.skipif(
@@ -232,40 +218,40 @@ def test_remote_reference_real_data_workflow(tmp_path):
     out_dir.mkdir()
     workflow = Workflow(
         nodes=[
-            _node("l1", "mth5.io.lemi", {
+            node("l1", "mth5.io.lemi", {
                 "data_path": str(NO46_DIR), "survey_id": "bgs",
                 "station_id": "NO46", "mth5_filename": "no46.mth5",
                 "save_path": str(out_dir), "channel_nomenclature": "lemi12"}),
-            _node("x1", "mth5.io.extract_run", {"survey": "bgs", "station": "NO46"}),
-            _node("l2", "mth5.io.lemi", {
+            node("x1", "mth5.io.extract_run", {"survey": "bgs", "station": "NO46"}),
+            node("l2", "mth5.io.lemi", {
                 "data_path": str(NX37_DIR), "survey_id": "bgs",
                 "station_id": "NX37", "mth5_filename": "nx37.mth5",
                 "save_path": str(out_dir), "channel_nomenclature": "lemi12"}),
-            _node("x2", "mth5.io.extract_run", {"survey": "bgs", "station": "NX37"}),
-            _node("al", "mth5.runs.align", {}),
-            _node("c1", "aurora.process.compute_fc", {
+            node("x2", "mth5.io.extract_run", {"survey": "bgs", "station": "NX37"}),
+            node("al", "mth5.runs.align", {}),
+            node("c1", "aurora.process.compute_fc", {
                 "input_channels": "bx,by", "output_channels": "e1,e2,bz",
                 "channel_nomenclature": "lemi12", "window_samples": 256,
                 "decimation_levels": 2}),
-            _node("c2", "aurora.process.compute_fc", {
+            node("c2", "aurora.process.compute_fc", {
                 "input_channels": "bx,by", "output_channels": "e1,e2,bz",
                 "channel_nomenclature": "lemi12", "window_samples": 256,
                 "decimation_levels": 2}),
-            _node("t", "aurora.process.estimate_tf", {
+            node("t", "aurora.process.estimate_tf", {
                 "estimator_engine": "Robust", "remote_reference": True}),
-            _node("e", "mth5.tf.export", {
+            node("e", "mth5.tf.export", {
                 "path": str(out_dir / "rr_tf"), "file_type": "edi"}),
         ],
         edges=[
-            _edge("e1", "l1", "mth5", "x1", "mth5"),
-            _edge("e2", "l2", "mth5", "x2", "mth5"),
-            _edge("e3", "x1", "data", "al", "data1"),
-            _edge("e4", "x2", "data", "al", "data2"),
-            _edge("e5", "al", "data1", "c1", "data"),
-            _edge("e6", "al", "data2", "c2", "data"),
-            _edge("e7", "c1", "fc", "t", "fc"),
-            _edge("e8", "c2", "fc", "t", "ref_fc"),
-            _edge("e9", "t", "tf", "e", "tf"),
+            edge("e1", "l1", "mth5", "x1", "mth5"),
+            edge("e2", "l2", "mth5", "x2", "mth5"),
+            edge("e3", "x1", "data", "al", "data1"),
+            edge("e4", "x2", "data", "al", "data2"),
+            edge("e5", "al", "data1", "c1", "data"),
+            edge("e6", "al", "data2", "c2", "data"),
+            edge("e7", "c1", "fc", "t", "fc"),
+            edge("e8", "c2", "fc", "t", "ref_fc"),
+            edge("e9", "t", "tf", "e", "tf"),
         ],
     )
     summary = Executor(build_default_registry()).run(

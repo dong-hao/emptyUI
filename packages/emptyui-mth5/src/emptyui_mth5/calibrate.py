@@ -7,19 +7,7 @@ from typing import Any
 import numpy as np
 from emptyui import Input, Node, Output, Param
 
-
-def _channels_and_rate(data):
-    """Return (channels: dict[str, np.ndarray], sample_rate) from a ts.run."""
-    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
-        ds = data.dataset
-        sr = float(data.sample_rate)
-        ch = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
-        return ch, sr
-    if hasattr(data, "channels") and hasattr(data, "sample_rate"):  # core TimeSeries
-        sr = float(data.sample_rate)
-        ch = {str(k): np.asarray(v, dtype=float) for k, v in data.channels.items()}
-        return ch, sr
-    raise TypeError(f"cannot interpret ts.run of type {type(data).__name__}")
+from .runs import _payload
 
 
 def _response_fn(calibration):
@@ -108,7 +96,7 @@ class Calibrate(Node):
             return {"data": out}
 
         # Explicit calibration path: frequency-domain response removal.
-        channels, sample_rate = _channels_and_rate(data)
+        channels, sample_rate = _payload(data)
         calibrated = {}
         for ch, x in channels.items():
             if isinstance(calibration, dict):

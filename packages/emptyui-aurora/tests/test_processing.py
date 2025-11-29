@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _synthetic import synthetic_runts, synthetic_source
 from emptyui_aurora._processing import (
     build_tf,
     compute_fc,
@@ -14,30 +15,7 @@ from emptyui_aurora._processing import (
 
 def _synthetic_runts():
     """A fake ts.run-like object (duck-typed like an mth5 RunTS dataset)."""
-    import xarray as xr
-
-    sr = 8.0
-    n = 8192
-    t = np.arange(n) / sr
-    rng = np.random.default_rng(0)
-    # input magnetic signals + noise, outputs are linear combos + noise
-    hx = 50.0 * np.sin(2 * np.pi * 0.5 * t) + 5 * rng.standard_normal(n)
-    hy = 40.0 * np.sin(2 * np.pi * 1.3 * t) + 5 * rng.standard_normal(n)
-    # impedance: zxx=1+2j, zxy=3-1j, zyx=2+0j, zyy=1+1j applied in time
-    ex = 1.0 * hx + 3.0 * hy + rng.standard_normal(n) * 8
-    ey = 2.0 * hx + 1.0 * hy + rng.standard_normal(n) * 8
-
-    class FakeRunTS:
-        sample_rate = sr
-
-        def __init__(self):
-            self.dataset = xr.Dataset(
-                {"ex": ("time", ex), "ey": ("time", ey),
-                 "hx": ("time", hx), "hy": ("time", hy)},
-                coords={"time": t},
-            )
-
-    return FakeRunTS()
+    return synthetic_runts(synthetic_source(0))
 
 
 def test_compute_fc_and_estimate_tf():

@@ -1,8 +1,12 @@
-"""Shared fixtures.
+"""Shared fixtures for aurora tests.
 
-test12rr_runts generates the official synthetic halfspace dataset on the fly
-(offline, ~seconds) so the MT tests run in CI without any gitignored raw
+``test12rr_runts`` generates the official synthetic halfspace dataset on the
+fly (offline, ~seconds) so the MT tests run in CI without any gitignored raw
 instrument data on disk.
+
+The ``synthetic_source`` / ``synthetic_runts`` / ``synthetic_fc`` helpers
+live in ``_synthetic.py`` (a uniquely-named module — importing from
+``conftest`` is ambiguous when several test directories are on the path).
 """
 
 from __future__ import annotations

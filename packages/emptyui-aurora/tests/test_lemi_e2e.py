@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from _workflow import edge, node
 from emptyui.executor import Executor
 from emptyui.registry import build_default_registry
 from emptyui.schema import Workflow
@@ -17,36 +18,28 @@ from emptyui.schema import Workflow
 LEMI_DIR = Path(__file__).resolve().parents[3] / "examples" / "data" / "lemi-424-test"
 
 
-def _node(nid, typ, params):
-    return {"id": nid, "type": typ, "params": params}
-
-
-def _edge(eid, s, sp, t, tp):
-    return {"id": eid, "source": s, "source_port": sp, "target": t, "target_port": tp}
-
-
 def _lemi_workflow(lemi_path, out_dir):
     return {
         "nodes": [
-            _node("l", "mth5.io.lemi", {
+            node("l", "mth5.io.lemi", {
                 "data_path": lemi_path, "survey_id": "test", "station_id": "mt001",
                 "mth5_filename": "lemi_e2e.mth5", "save_path": str(out_dir)}),
-            _node("x", "mth5.io.extract_run",
+            node("x", "mth5.io.extract_run",
                   {"survey": "test", "station": "mt001", "run": "sr1_0001"}),
-            _node("d", "core.filter.detrend", {"method": "mean"}),
-            _node("c", "aurora.process.compute_fc",
+            node("d", "core.filter.detrend", {"method": "mean"}),
+            node("c", "aurora.process.compute_fc",
                   {"input_channels": "bx,by", "output_channels": "e1,e2",
                    "channel_nomenclature": "lemi12", "window_samples": 4096}),
-            _node("t", "aurora.process.estimate_tf", {}),
-            _node("e", "mth5.tf.export",
+            node("t", "aurora.process.estimate_tf", {}),
+            node("e", "mth5.tf.export",
                   {"path": str(out_dir / "lemi_tf"), "file_type": "edi"}),
         ],
         "edges": [
-            _edge("e1", "l", "mth5", "x", "mth5"),
-            _edge("e2", "x", "data", "d", "data"),
-            _edge("e3", "d", "data", "c", "data"),
-            _edge("e4", "c", "fc", "t", "fc"),
-            _edge("e5", "t", "tf", "e", "tf"),
+            edge("e1", "l", "mth5", "x", "mth5"),
+            edge("e2", "x", "data", "d", "data"),
+            edge("e3", "d", "data", "c", "data"),
+            edge("e4", "c", "fc", "t", "fc"),
+            edge("e5", "t", "tf", "e", "tf"),
         ],
     }
 

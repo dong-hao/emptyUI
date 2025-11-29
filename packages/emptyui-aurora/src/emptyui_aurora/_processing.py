@@ -503,6 +503,26 @@ def _normalize_fc_layout(fc):
     return fc
 
 
+def _check_remote_grid(ref_freq, local_freq, ref_time, local_time):
+    """Shared remote-reference FC grid validation (coherence sort + estimate).
+
+    RME_RR pairs local/remote samples by row, so the FCs must share identical
+    frequency and window (time) grids — the runs have to be cropped to their
+    common acquisition overlap (Align Runs) before computing FCs.
+    """
+    if not np.array_equal(ref_freq, local_freq):
+        raise ValueError(
+            "remote-reference fc has a different frequency grid than the "
+            "local fc — compute both with the same window settings"
+        )
+    if not np.array_equal(ref_time, local_time):
+        raise ValueError(
+            "remote-reference fc has a different time grid than the local "
+            "fc — the runs are not aligned; crop both to their common "
+            "acquisition overlap (Align Runs) before computing FCs"
+        )
+
+
 def _simple_coherence(x, y):
     """Pairwise coherence² between two complex series (band ensemble)."""
     denom = np.sum(np.abs(x) ** 2) * np.sum(np.abs(y) ** 2)
@@ -581,17 +601,10 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
     if ref is not None:
-        if not np.array_equal(ref["frequency"].values, local["frequency"].values):
-            raise ValueError(
-                "remote-reference fc has a different frequency grid than the "
-                "local fc — compute both with the same window settings"
-            )
-        if not np.array_equal(ref["time"].values, local["time"].values):
-            raise ValueError(
-                "remote-reference fc has a different time grid than the local "
-                "fc — the runs are not aligned; crop both to their common "
-                "acquisition overlap (Align Runs) before computing FCs"
-            )
+        _check_remote_grid(
+            ref["frequency"].values, local["frequency"].values,
+            ref["time"].values, local["time"].values,
+        )
     ins = [c for c in input_channels if c in local.data_vars]
     outs = [c for c in output_channels if c in local.data_vars]
     if not ins or not outs:
@@ -758,20 +771,10 @@ def estimate_tf(
     if ref_fc is not None:
         ref_fc = _normalize_fc_layout(ref_fc)
         ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
-        if not np.array_equal(ref_fc["frequency"].values, freq):
-            raise ValueError(
-                "remote-reference fc has a different frequency grid than the "
-                "local fc — compute both with the same window settings"
-            )
-        # RME_RR pairs local/remote samples by row, so the FCs must share the
-        # same window (time) grid — the runs have to be cropped to their
-        # common acquisition overlap (Align Runs) before computing FCs.
-        if not np.array_equal(ref_fc["time"].values, fc["time"].values):
-            raise ValueError(
-                "remote-reference fc has a different time grid than the local "
-                "fc — the runs are not aligned; crop both to their common "
-                "acquisition overlap (Align Runs) before computing FCs"
-            )
+        _check_remote_grid(
+            ref_fc["frequency"].values, freq,
+            ref_fc["time"].values, fc["time"].values,
+        )
 
     # Realistic, octave-aligned period bands for this decimation level.
     periods_out, edges = _period_bands(fc, periods_per_octave)

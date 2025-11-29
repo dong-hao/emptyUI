@@ -8,63 +8,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import (
     _coherence_weight,
     _multiple_coherence,
     coherence_sort_fc,
-    compute_fc,
     estimate_tf,
 )
-
-
-def _source(seed):
-    """Shared source field (hx, hy) so local/remote runs can be paired."""
-    rng = np.random.default_rng(seed)
-    sr = 8.0
-    n = 8192
-    t = np.arange(n) / sr
-    hx = 50.0 * np.sin(2 * np.pi * 0.5 * t) + 5 * rng.standard_normal(n)
-    hy = 40.0 * np.sin(2 * np.pi * 1.3 * t) + 5 * rng.standard_normal(n)
-    return sr, n, t, hx, hy
-
-
-def _run(source, e_noise=8.0, h_noise_segment=None, seed=0, with_e=True):
-    """Fake ts.run built from a shared source; the recorded H carries sensor
-    noise (and optionally a strong noisy segment); E is driven by the clean
-    source field (true physics: the sensor noise does not drive E)."""
-    import xarray as xr
-
-    sr, n, t, hx, hy = source
-    rng = np.random.default_rng(seed)
-    hx_r = hx + 0.1 * rng.standard_normal(n)
-    hy_r = hy + 0.1 * rng.standard_normal(n)
-    if h_noise_segment is not None:
-        s, e = h_noise_segment
-        hx_r[s:e] += 200.0 * rng.standard_normal(e - s)
-        hy_r[s:e] += 200.0 * rng.standard_normal(e - s)
-    ex = 1.0 * hx + 3.0 * hy + e_noise * rng.standard_normal(n)
-    ey = 2.0 * hx + 1.0 * hy + e_noise * rng.standard_normal(n)
-
-    class FakeRunTS:
-        sample_rate = sr
-
-        def __init__(self):
-            vars_ = {"hx": hx_r, "hy": hy_r}
-            if with_e:
-                vars_.update({"ex": ex, "ey": ey})
-            self.dataset = xr.Dataset(
-                {k: ("time", v) for k, v in vars_.items()},
-                coords={"time": t},
-            )
-
-    return FakeRunTS()
-
-
-def _fc(runts, ins, outs, **kw):
-    return compute_fc(runts, ins, outs, window_length_s=256, overlap=0.5,
-                      window_type="hamming", **kw)
 
 
 def test_coherence_weight_bounds():
@@ -100,9 +52,9 @@ def test_multiple_coherence_known_values():
 def test_coherence_sort_drop_removes_noisy_windows():
     """Windows overlapping a noisy H segment are NaN'd (drop) and estimate_tf
     still produces a finite estimate (non-finite rows are skipped)."""
-    source = _source(1)
-    runts = _run(source, h_noise_segment=(2000, 2600), seed=1)
-    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    source = synthetic_source(1)
+    runts = synthetic_runts(source, h_noise_segment=(2000, 2600), seed=1)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.25, coherence_max=1.0,
                                      mode="drop")
@@ -141,11 +93,11 @@ def test_two_fc_mode_uses_remote_reference():
     two-FC mode is at least as strict (min of E-Hremote and Hloc-Hremote is
     bounded by the E noise), while the remote-FC copy carries exactly the
     same per-window treatment as the local copy (shared weight)."""
-    source = _source(5)
-    local_runts = _run(source, e_noise=80.0, seed=5)
-    remote_runts = _run(source, e_noise=1.0, seed=6, with_e=False)
-    local = _fc(local_runts, ["hx", "hy"], ["ex", "ey"])
-    remote = _fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
+    source = synthetic_source(5)
+    local_runts = synthetic_runts(source, e_noise=80.0, seed=5)
+    remote_runts = synthetic_runts(source, e_noise=1.0, seed=6, with_e=False)
+    local = synthetic_fc(local_runts, ["hx", "hy"], ["ex", "ey"])
+    remote = synthetic_fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
 
     # single-FC mode: E-Hloc coherence is low -> windows dropped
     s_out, _, _ = coherence_sort_fc(local, None, ["hx", "hy"], ["ex", "ey"],
@@ -170,11 +122,11 @@ def test_two_fc_mode_conservative_min():
     """Noisy local H: Hloc-Hremote is low, so two-FC mode (min) drops the
     windows even if E-Hremote looks fine — aurora's RME_RR signal covariance
     is unstable without local<->remote magnetic coherence."""
-    source = _source(7)
-    local_runts = _run(source, h_noise_segment=(2000, 2600), seed=7)
-    remote_runts = _run(source, e_noise=1.0, seed=8, with_e=False)
-    local = _fc(local_runts, ["hx", "hy"], ["ex", "ey"])
-    remote = _fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
+    source = synthetic_source(7)
+    local_runts = synthetic_runts(source, h_noise_segment=(2000, 2600), seed=7)
+    remote_runts = synthetic_runts(source, e_noise=1.0, seed=8, with_e=False)
+    local = synthetic_fc(local_runts, ["hx", "hy"], ["ex", "ey"])
+    remote = synthetic_fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
     t_out, r_out, _ = coherence_sort_fc(local, remote, ["hx", "hy"],
                                         ["ex", "ey"], coherence_min=0.25,
                                         coherence_max=0.98, mode="drop")
@@ -193,7 +145,7 @@ def test_two_fc_mode_conservative_min():
 
 
 def test_grid_mismatch_errors():
-    local = _fc(_run(_source(9), seed=9), ["hx", "hy"], ["ex", "ey"])
+    local = synthetic_fc(synthetic_runts(synthetic_source(9), seed=9), ["hx", "hy"], ["ex", "ey"])
     remote = local.isel(time=slice(None, -1))
     with pytest.raises(ValueError, match="different time grid"):
         coherence_sort_fc(local, remote, ["hx", "hy"], ["ex", "ey"])
@@ -202,9 +154,9 @@ def test_grid_mismatch_errors():
 def test_trim_removes_noisy_band():
     """Band-edge trimming NaNs the whole band when its retained-window median
     coherence stays below the lower bound."""
-    source = _source(10)
-    runts = _run(source, h_noise_segment=(0, 8192), seed=10)
-    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    source = synthetic_source(10)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=10)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.5, coherence_max=1.0,
                                      mode="drop", trim=True)
@@ -237,7 +189,7 @@ def test_node_execute_returns_table(tmp_path: Path):
     from emptyui_aurora.process import CoherenceSort
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    fc = _fc(_run(_source(11), seed=11), ["hx", "hy"], ["ex", "ey"])
+    fc = synthetic_fc(synthetic_runts(synthetic_source(11), seed=11), ["hx", "hy"], ["ex", "ey"])
     res = CoherenceSort().execute(ctx, fc, coherence_min=0.25,
                                   coherence_max=0.98, mode="weight")
     assert set(res["fc"].keys()) == {0}
@@ -250,8 +202,8 @@ def test_node_execute_returns_table(tmp_path: Path):
 
 def test_estimate_tf_skips_nonfinite_rows():
     """estimate_tf handles NaN FC rows (generic robustness, DESIGN 16.2)."""
-    runts = _run(_source(12), seed=12)
-    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    runts = synthetic_runts(synthetic_source(12), seed=12)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     fc = fc.copy(deep=True)
     fc["ex"].values[:, 0:5] = np.nan
     _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],

@@ -52,6 +52,16 @@ def _render(tf, mode, tmp_path: Path):
     return fig, path
 
 
+def _diagonal_tf():
+    periods = np.array([2.0, 4.0, 8.0, 16.0])
+    Z = np.zeros((4, 3, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j  # xx
+    Z[:, 1, 1] = 2 + 0j  # yy
+    return build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                    channel_nomenclature="lemi12", station_id="NO46",
+                    survey_id="bgs", latitude=56.72, longitude=-2.85)
+
+
 def _tipper_tf():
     periods = np.array([2.0, 4.0, 8.0])
     Z = np.zeros((3, 3, 2), dtype=complex)
@@ -110,14 +120,7 @@ def test_appres_phase_error_bars_present(tmp_path: Path):
 
 
 def test_appres_phase_diagonal_signed(tmp_path: Path):
-    periods = np.array([2.0, 4.0, 8.0, 16.0])
-    Z = np.zeros((4, 3, 2), dtype=complex)
-    Z[:, 0, 0] = 1 + 0j  # xx
-    Z[:, 1, 1] = 2 + 0j  # yy
-    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
-                  channel_nomenclature="lemi12", station_id="NO46",
-                  survey_id="bgs", latitude=56.72, longitude=-2.85)
-    fig, _ = _render(tf, "diagonal", tmp_path)
+    fig, _ = _render(_diagonal_tf(), "diagonal", tmp_path)
     try:
         ax_phi = fig.axes[1]
         assert ax_phi.get_ylim() == (-180, 180)
@@ -152,14 +155,7 @@ def test_offdiagonal_phase_panel_half_height(tmp_path: Path):
     h_off = ax_off.get_position().height * fh_off
     plt.close(fig_off)
 
-    periods = np.array([2.0, 4.0, 8.0, 16.0])
-    Z = np.zeros((4, 3, 2), dtype=complex)
-    Z[:, 0, 0] = 1 + 0j
-    Z[:, 1, 1] = 2 + 0j
-    tf_diag = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
-                       channel_nomenclature="lemi12", station_id="NO46",
-                       survey_id="bgs")
-    fig_diag, _ = _render(tf_diag, "diagonal", tmp_path)
+    fig_diag, _ = _render(_diagonal_tf(), "diagonal", tmp_path)
     ax_diag = fig_diag.axes[1]
     fh_diag = fig_diag.get_size_inches()[1]
     h_diag = ax_diag.get_position().height * fh_diag
@@ -205,11 +201,24 @@ def test_plot_nodes_render_via_workspace(tmp_path: Path):
     assert Path(out["plot"]["path"]).exists()
 
 
-@pytest.mark.parametrize("dpi", [plotting.DPI])
-def test_high_dpi_saved(tmp_path: Path, dpi: int):
+def test_plot_tipper_requires_tipper(tmp_path: Path):
+    """A 2x2 (impedance-only) TF has no tipper -> clear error."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    periods = np.array([2.0, 4.0])
+    Z = np.zeros((2, 2, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j
+    Z[:, 1, 1] = 2 + 0j
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
+                  channel_nomenclature="lemi12")
+    assert not tf.has_tipper()
+    with pytest.raises(ValueError, match="no tipper"):
+        PlotTipper().execute(ctx, tf)
+
+
+def test_high_dpi_saved(tmp_path: Path):
     tf = _impedance_tf()
     fig, path = _render(tf, "off-diagonal", tmp_path)
     plt.close(fig)
     from PIL import Image
     with Image.open(path) as im:
-        assert round(im.info.get("dpi", (0, 0))[0]) == dpi
+        assert round(im.info.get("dpi", (0, 0))[0]) == plotting.DPI

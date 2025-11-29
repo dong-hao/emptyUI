@@ -131,18 +131,26 @@ class SplitChannels(Node):
         return out
 
 
+def _payload(data):
+    """(channels {name: np.ndarray}, sample_rate) from a ts.run payload.
+
+    Accepts an mth5 RunTS (``.dataset`` + ``.sample_rate``) or a core
+    TimeSeries (``.channels`` dict + ``.sample_rate``). Raises TypeError for
+    anything else — the shared interpretation primitive for the run nodes.
+    """
+    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
+        ds = data.dataset
+        ch = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
+        return ch, float(data.sample_rate)
+    if hasattr(data, "channels") and hasattr(data, "sample_rate"):  # core TimeSeries
+        ch = {str(k): np.asarray(v, dtype=float) for k, v in data.channels.items()}
+        return ch, float(data.sample_rate)
+    raise TypeError(f"cannot interpret ts.run value of type {type(data).__name__}")
+
+
 def _channel_names(data) -> list[str]:
     """Actual channel names of a ts.run payload (RunTS or core TimeSeries)."""
-    if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
-        return [str(c) for c in data.dataset.data_vars]
-    if hasattr(data, "channels"):
-        ch = data.channels
-        if isinstance(ch, dict):
-            return [str(k) for k in ch]
-        return [str(c) for c in ch]
-    raise TypeError(
-        f"cannot interpret ts.run value of type {type(data).__name__}"
-    )
+    return list(_payload(data)[0])
 
 
 def _get_channel(data, name: str):
@@ -153,7 +161,7 @@ def _get_channel(data, name: str):
         return getattr(data, name)
     from mt_timeseries import ChannelTS
 
-    arr = np.asarray(data.channels[name], dtype=float)
+    arr = _payload(data)[0][name]
     ch = ChannelTS("electric" if is_electric_name(name) else "magnetic",
                    data=arr)
     ch.component = name
@@ -200,10 +208,8 @@ def _run_time_info(data):
     ``start_datetime``). mt_timeseries uses the 1980 epoch for unknown starts,
     which is treated as "no absolute time".
     """
+    ch, sr = _payload(data)
     if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
-        ds = data.dataset
-        ch = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
-        sr = float(data.sample_rate)
         abs_start = None
         try:
             ts = pd.Timestamp(str(getattr(data, "start", None)))
@@ -212,14 +218,10 @@ def _run_time_info(data):
         except (TypeError, ValueError):
             pass
         return ch, sr, abs_start, 0.0
-    if hasattr(data, "channels") and hasattr(data, "sample_rate"):  # core TimeSeries
-        ch = {str(k): np.asarray(v, dtype=float) for k, v in data.channels.items()}
-        sr = float(data.sample_rate)
-        rel = float(getattr(data, "start", 0.0) or 0.0)
-        sd = getattr(data, "start_datetime", "") or ""
-        abs_start = pd.Timestamp(sd) if sd else None
-        return ch, sr, abs_start, rel
-    raise TypeError(f"cannot interpret ts.run value of type {type(data).__name__}")
+    rel = float(getattr(data, "start", 0.0) or 0.0)
+    sd = getattr(data, "start_datetime", "") or ""
+    abs_start = pd.Timestamp(sd) if sd else None
+    return ch, sr, abs_start, rel
 
 
 def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso):
