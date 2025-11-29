@@ -1,0 +1,259 @@
+"""Coherence sort (EMTF-style) tests: weighting bounds, multiple coherence,
+single/two-FC semantics, trimming, and estimate_tf non-finite handling."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from emptyui.context import RunContext
+from emptyui.store import DataStore
+from emptyui_aurora._processing import (
+    _coherence_weight,
+    _multiple_coherence,
+    coherence_sort_fc,
+    compute_fc,
+    estimate_tf,
+)
+
+
+def _source(seed):
+    """Shared source field (hx, hy) so local/remote runs can be paired."""
+    rng = np.random.default_rng(seed)
+    sr = 8.0
+    n = 8192
+    t = np.arange(n) / sr
+    hx = 50.0 * np.sin(2 * np.pi * 0.5 * t) + 5 * rng.standard_normal(n)
+    hy = 40.0 * np.sin(2 * np.pi * 1.3 * t) + 5 * rng.standard_normal(n)
+    return sr, n, t, hx, hy
+
+
+def _run(source, e_noise=8.0, h_noise_segment=None, seed=0, with_e=True):
+    """Fake ts.run built from a shared source; the recorded H carries sensor
+    noise (and optionally a strong noisy segment); E is driven by the clean
+    source field (true physics: the sensor noise does not drive E)."""
+    import xarray as xr
+
+    sr, n, t, hx, hy = source
+    rng = np.random.default_rng(seed)
+    hx_r = hx + 0.1 * rng.standard_normal(n)
+    hy_r = hy + 0.1 * rng.standard_normal(n)
+    if h_noise_segment is not None:
+        s, e = h_noise_segment
+        hx_r[s:e] += 200.0 * rng.standard_normal(e - s)
+        hy_r[s:e] += 200.0 * rng.standard_normal(e - s)
+    ex = 1.0 * hx + 3.0 * hy + e_noise * rng.standard_normal(n)
+    ey = 2.0 * hx + 1.0 * hy + e_noise * rng.standard_normal(n)
+
+    class FakeRunTS:
+        sample_rate = sr
+
+        def __init__(self):
+            vars_ = {"hx": hx_r, "hy": hy_r}
+            if with_e:
+                vars_.update({"ex": ex, "ey": ey})
+            self.dataset = xr.Dataset(
+                {k: ("time", v) for k, v in vars_.items()},
+                coords={"time": t},
+            )
+
+    return FakeRunTS()
+
+
+def _fc(runts, ins, outs, **kw):
+    return compute_fc(runts, ins, outs, window_length_s=256, overlap=0.5,
+                      window_type="hamming", **kw)
+
+
+def test_coherence_weight_bounds():
+    """Weights honour the bounds and mode; off mode is always 1."""
+    assert _coherence_weight(0.5, 0.25, 0.98, "weight") == 1.0
+    assert _coherence_weight(0.5, 0.25, 0.98, "drop") == 1.0
+    assert _coherence_weight(0.5, 0.25, 0.98, "off") == 1.0
+    assert _coherence_weight(0.10, 0.25, 0.98, "drop") == 0.0
+    assert _coherence_weight(0.99, 0.25, 0.98, "drop") == 0.0
+    assert 0.0 < _coherence_weight(0.22, 0.25, 0.98, "weight") < 1.0
+    assert 0.0 < _coherence_weight(0.99, 0.25, 0.98, "weight") < 1.0
+    # far outside -> fully down-weighted (coh² is capped at 1, so the upper
+    # ramp only reaches 0 for max + ramp >= 1)
+    assert _coherence_weight(0.0, 0.25, 0.98, "weight") == 0.0
+    assert 0.0 < _coherence_weight(1.0, 0.25, 0.98, "weight") < 1.0
+
+
+def test_multiple_coherence_known_values():
+    """Perfectly coherent E = Z·H scores ≈ 1; adding independent noise lowers it."""
+    rng = np.random.default_rng(3)
+    H = rng.standard_normal((2, 12)) + 1j * rng.standard_normal((2, 12))
+    Z = np.array([[1 + 2j, 0.5 - 1j], [-0.5 + 0.3j, 2 + 0j]])
+    E = Z @ H  # (2, 12)
+    coh = _multiple_coherence(E, H)
+    assert np.all(coh > 0.999)
+    E_noisy = E + 5.0 * (rng.standard_normal((2, 12)) + 1j * rng.standard_normal((2, 12)))
+    coh_noisy = _multiple_coherence(E_noisy, H)
+    assert np.all(coh_noisy < coh)
+    assert np.all(coh_noisy >= 0.0)
+    assert np.all(coh_noisy <= 1.0)
+
+
+def test_coherence_sort_drop_removes_noisy_windows():
+    """Windows overlapping a noisy H segment are NaN'd (drop) and estimate_tf
+    still produces a finite estimate (non-finite rows are skipped)."""
+    source = _source(1)
+    runts = _run(source, h_noise_segment=(2000, 2600), seed=1)
+    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                     coherence_min=0.25, coherence_max=1.0,
+                                     mode="drop")
+    win = out["time"].values
+    # fs = 8 Hz, window = 256 s -> scipy STFT times are window centres at
+    # 128 s spacing; the noisy segment (samples 2000-2600 = 250-325 s) makes
+    # the windows centred at 256/384 s incoherent, later ones are clean
+    bad1 = int(np.argmin(np.abs(win - 256.0)))
+    bad2 = int(np.argmin(np.abs(win - 384.0)))
+    good = int(np.argmin(np.abs(win - 640.0)))
+    assert bad1 != bad2
+    # sorting applies only to the banded frequencies (the band grid's outer
+    # edges); the noisy windows are dropped (NaN) in the bands where the
+    # injected noise dominates the signal (short periods), clean windows stay
+    # finite everywhere
+    from emptyui_aurora._processing import _normalize_fc_layout, _period_bands
+    _, edges = _period_bands(_normalize_fc_layout(out), 4)
+    logf = np.log2(out["frequency"].values)
+    banded = (logf <= edges[0]) & (logf > edges[-1])
+    for ch in ("ex", "ey", "hx", "hy"):
+        vals = out[ch].values
+        assert np.isnan(vals[banded, bad1]).any()
+        assert np.isnan(vals[banded, bad2]).any()
+        assert np.all(np.isfinite(vals[banded, good]))
+        assert np.all(np.isfinite(vals[~banded, bad1]))
+    # estimate_tf skips the NaN rows without error
+    _, Z, _ = estimate_tf(out, ["hx", "hy"], ["ex", "ey"],
+                          periods_per_octave=8)
+    assert np.all(np.isfinite(Z))
+    # diagnostics recorded
+    assert any(r["n_retained"] < r["n_windows"] for r in rows)
+
+
+def test_two_fc_mode_uses_remote_reference():
+    """Local E noisy, magnetics clean: single-FC mode drops (E-Hloc low) and
+    two-FC mode is at least as strict (min of E-Hremote and Hloc-Hremote is
+    bounded by the E noise), while the remote-FC copy carries exactly the
+    same per-window treatment as the local copy (shared weight)."""
+    source = _source(5)
+    local_runts = _run(source, e_noise=80.0, seed=5)
+    remote_runts = _run(source, e_noise=1.0, seed=6, with_e=False)
+    local = _fc(local_runts, ["hx", "hy"], ["ex", "ey"])
+    remote = _fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
+
+    # single-FC mode: E-Hloc coherence is low -> windows dropped
+    s_out, _, _ = coherence_sort_fc(local, None, ["hx", "hy"], ["ex", "ey"],
+                                    coherence_min=0.25, coherence_max=0.98,
+                                    mode="drop")
+    # two-FC mode: the conservative min drops at least the same windows
+    t_out, r_out, rows = coherence_sort_fc(local, remote, ["hx", "hy"],
+                                           ["ex", "ey"], coherence_min=0.25,
+                                           coherence_max=0.98, mode="drop")
+    assert np.isnan(s_out["ex"].values).any()
+    assert np.isnan(t_out["ex"].values).any()
+    assert (np.isnan(t_out["ex"].values).sum()
+            >= np.isnan(s_out["ex"].values).sum())
+    # the shared weight is baked into BOTH FCs: identical NaN masks
+    assert np.array_equal(np.isnan(t_out["ex"].values),
+                          np.isnan(r_out["hx"].values))
+    # diagnostics expose both criteria
+    assert all(r["median_coherence_transfer"] is not None for r in rows)
+
+
+def test_two_fc_mode_conservative_min():
+    """Noisy local H: Hloc-Hremote is low, so two-FC mode (min) drops the
+    windows even if E-Hremote looks fine — aurora's RME_RR signal covariance
+    is unstable without local<->remote magnetic coherence."""
+    source = _source(7)
+    local_runts = _run(source, h_noise_segment=(2000, 2600), seed=7)
+    remote_runts = _run(source, e_noise=1.0, seed=8, with_e=False)
+    local = _fc(local_runts, ["hx", "hy"], ["ex", "ey"])
+    remote = _fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
+    t_out, r_out, _ = coherence_sort_fc(local, remote, ["hx", "hy"],
+                                        ["ex", "ey"], coherence_min=0.25,
+                                        coherence_max=0.98, mode="drop")
+    win = t_out["time"].values
+    bad1 = int(np.argmin(np.abs(win - 256.0)))
+    bad2 = int(np.argmin(np.abs(win - 384.0)))
+    assert bad1 != bad2
+    freqs = t_out["frequency"].values
+    banded = (freqs > 0) & (freqs <= 2.0)
+    # the noisy windows are dropped in the bands where the H noise dominates
+    # and the same treatment is applied to the remote FC (shared weight)
+    assert np.isnan(t_out["hx"].values[banded, bad1]).any()
+    assert np.isnan(t_out["hx"].values[banded, bad2]).any()
+    assert np.array_equal(np.isnan(t_out["hx"].values),
+                          np.isnan(r_out["hx"].values))
+
+
+def test_grid_mismatch_errors():
+    local = _fc(_run(_source(9), seed=9), ["hx", "hy"], ["ex", "ey"])
+    remote = local.isel(time=slice(None, -1))
+    with pytest.raises(ValueError, match="different time grid"):
+        coherence_sort_fc(local, remote, ["hx", "hy"], ["ex", "ey"])
+
+
+def test_trim_removes_noisy_band():
+    """Band-edge trimming NaNs the whole band when its retained-window median
+    coherence stays below the lower bound."""
+    source = _source(10)
+    runts = _run(source, h_noise_segment=(0, 8192), seed=10)
+    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                     coherence_min=0.5, coherence_max=1.0,
+                                     mode="drop", trim=True)
+    assert any(r["trimmed"] for r in rows)
+    # the fully-trimmed bands are NaN across every window; bins outside the
+    # banded range (DC, above the shortest band edge) are never touched
+    assert np.isnan(out["ex"].values).any()
+    from emptyui_aurora._processing import _normalize_fc_layout, _period_bands
+    _, edges = _period_bands(_normalize_fc_layout(out), 4)
+    logf = np.log2(out["frequency"].values)
+    banded = (logf <= edges[0]) & (logf > edges[-1])
+    assert np.all(np.isfinite(out["ex"].values[~banded]))
+    # trimmed rows are all-NaN over their whole band; retained bands are finite
+    from emptyui_aurora._processing import _normalize_fc_layout, _period_bands
+    periods, edges = _period_bands(_normalize_fc_layout(out), 4)
+    logf = np.log2(out["frequency"].values)
+    # map each diagnostic row back to its band and check consistency
+    for r in rows:
+        p = r["period"]
+        b = int(np.argmin(np.abs(np.array(periods) - p)))
+        sel = (logf <= edges[b]) & (logf > edges[b + 1])
+        bins = np.where(sel)[0]
+        if r["trimmed"]:
+            assert np.all(np.isnan(out["ex"].values[bins]))
+        else:
+            assert np.isfinite(out["ex"].values[bins]).any()
+
+
+def test_node_execute_returns_table(tmp_path: Path):
+    from emptyui_aurora.process import CoherenceSort
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = _fc(_run(_source(11), seed=11), ["hx", "hy"], ["ex", "ey"])
+    res = CoherenceSort().execute(ctx, fc, coherence_min=0.25,
+                                  coherence_max=0.98, mode="weight")
+    assert set(res["fc"].keys()) == {0}
+    rows = json.loads(Path(res["table"]["path"]).read_text())
+    assert rows and "period" in rows[0] and "n_retained" in rows[0]
+    # weight mode keeps retained samples finite (fully down-weighted ones
+    # are NaN, exactly like drop) — the good windows must survive
+    assert np.isfinite(res["fc"][0]["ex"].values).any()
+
+
+def test_estimate_tf_skips_nonfinite_rows():
+    """estimate_tf handles NaN FC rows (generic robustness, DESIGN 16.2)."""
+    runts = _run(_source(12), seed=12)
+    fc = _fc(runts, ["hx", "hy"], ["ex", "ey"])
+    fc = fc.copy(deep=True)
+    fc["ex"].values[:, 0:5] = np.nan
+    _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                          periods_per_octave=8)
+    assert np.all(np.isfinite(Z))

@@ -8,10 +8,11 @@ RME_RR) are all aurora-backed.
 
 from __future__ import annotations
 
-from .process import ComputeFC, EstimateTF, MergeTFLevels
+from .process import CoherenceSort, ComputeFC, EstimateTF, MergeTFLevels
 
 
 def register(registry) -> None:
     registry.add(ComputeFC)
+    registry.add(CoherenceSort)
     registry.add(EstimateTF)
     registry.add(MergeTFLevels)

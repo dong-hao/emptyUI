@@ -503,6 +503,202 @@ def _normalize_fc_layout(fc):
     return fc
 
 
+def _simple_coherence(x, y):
+    """Pairwise coherence² between two complex series (band ensemble)."""
+    denom = np.sum(np.abs(x) ** 2) * np.sum(np.abs(y) ** 2)
+    if denom <= 0:
+        return 0.0
+    return float(np.clip(np.abs(np.sum(x * np.conj(y))) ** 2 / denom, 0.0, 1.0))
+
+
+def _multiple_coherence(E, H):
+    """Per-window multiple coherence² of each output (rows of E) on the
+    magnetic inputs (rows of H), over the band's frequency-bin ensemble.
+
+    ``E`` is (n_out, n_bins) and ``H`` is (n_in, n_bins) complex FC samples.
+    Standard multiple coherence: coh²_o = (S_oH S_HH⁻¹ S_Ho) / S_oo from the
+    bin-ensemble cross-spectral matrices. Bands with too few bins (n_bins <
+    n_in + 1) fall back to the minimum pairwise coherence (conservative);
+    degenerate (all-zero) outputs score 0.
+    """
+    n_out, n_bins = E.shape
+    n_in = H.shape[0]
+    out = np.zeros(n_out)
+    if n_bins < n_in + 1:
+        for o in range(n_out):
+            out[o] = min(_simple_coherence(E[o], H[i]) for i in range(n_in))
+        return out
+    S_HH_inv = np.linalg.pinv(H @ H.conj().T)
+    for o in range(n_out):
+        e = E[o]
+        S_oo = float(np.real(e @ e.conj()))
+        if S_oo <= 0:
+            out[o] = 0.0
+            continue
+        S_Ho = H @ e.conj()
+        c = float(np.real(S_Ho.conj() @ (S_HH_inv @ S_Ho)) / S_oo)
+        if not np.isfinite(c):
+            c = min(_simple_coherence(e, H[i]) for i in range(n_in))
+        out[o] = float(np.clip(c, 0.0, 1.0))
+    return out
+
+
+def _coherence_weight(coh2, lo, hi, mode, ramp=0.05):
+    """Weight for a window's coherence² outside [lo, hi].
+
+    ``mode``: ``off`` → 1 always; ``drop`` → 0 outside the range; ``weight``
+    → smooth trapezoid (linear ramp of width ``ramp`` outside the bounds, so
+    borderline windows are down-weighted, not hard-cut). The upper bound
+    matters because perfect (≈1) coherence can be a noise/overfit signature.
+    """
+    if mode == "off":
+        return 1.0
+    if coh2 < lo:
+        if mode == "drop":
+            return 0.0
+        return float(np.clip((coh2 - (lo - ramp)) / ramp, 0.0, 1.0))
+    if coh2 > hi:
+        if mode == "drop":
+            return 0.0
+        return float(np.clip(((hi + ramp) - coh2) / ramp, 0.0, 1.0))
+    return 1.0
+
+
+def coherence_sort_fc(local, ref, input_channels, output_channels,
+                      coherence_min=0.25, coherence_max=0.98, mode="weight",
+                      trim=False, periods_per_octave=4):
+    """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
+
+    Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
+    per-window coherence weights applied (``weight``: multiplied by √w;
+    ``drop``/``trim``: excluded samples set to NaN), plus diagnostic rows.
+    In two-FC mode the criterion is the **conservative minimum** of the
+    E–remote-H signal coherence and the local↔remote magnetic transfer
+    coherence (aurora's RME_RR signal-covariance estimate degrades when the
+    local and remote magnetic fields are uncorrelated), and a single shared
+    weight per row is applied to **both** FCs (exact weighted-LS semantics).
+    """
+    local = _normalize_fc_layout(local)
+    ref = _normalize_fc_layout(ref) if ref is not None else None
+    if ref is not None:
+        if not np.array_equal(ref["frequency"].values, local["frequency"].values):
+            raise ValueError(
+                "remote-reference fc has a different frequency grid than the "
+                "local fc — compute both with the same window settings"
+            )
+        if not np.array_equal(ref["time"].values, local["time"].values):
+            raise ValueError(
+                "remote-reference fc has a different time grid than the local "
+                "fc — the runs are not aligned; crop both to their common "
+                "acquisition overlap (Align Runs) before computing FCs"
+            )
+    ins = [c for c in input_channels if c in local.data_vars]
+    outs = [c for c in output_channels if c in local.data_vars]
+    if not ins or not outs:
+        raise ValueError(
+            f"could not determine input/output channels from the fc — "
+            f"data_vars: {list(local.data_vars)}"
+        )
+
+    local_out = local.copy(deep=True)
+    ref_out = ref.copy(deep=True) if ref is not None else None
+
+    periods, edges = _period_bands(local, periods_per_octave)
+    with np.errstate(divide="ignore"):
+        logf = np.log2(local["frequency"].values)
+    rows = []
+    for b in range(len(periods)):
+        sel = (logf <= edges[b]) & (logf > edges[b + 1])
+        band_bins = np.where(sel)[0]
+        if band_bins.size == 0:
+            continue
+        E = np.stack([local[oc].values[band_bins, :] for oc in outs], axis=0)
+        H = np.stack([local[ic].values[band_bins, :] for ic in ins], axis=0)
+        n_win = E.shape[2]
+        coh_e = np.zeros(n_win)  # E on the (local or remote) magnetic inputs
+        coh_x = np.full(n_win, 1.0)  # local↔remote magnetic transfer
+        for w in range(n_win):
+            ce = _multiple_coherence(E[:, :, w], H[:, :, w])
+            coh_e[w] = float(ce.min()) if ce.size else 0.0
+            if ref is not None:
+                R = np.stack([ref[ic].values[band_bins, w] for ic in ins], axis=0)
+                cx = _multiple_coherence(H[:, :, w], R)
+                coh_x[w] = float(cx.min()) if cx.size else 0.0
+        coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
+        # degenerate bands (fewer bins than inputs+1) fit the regression
+        # exactly, so their coherence is trivially 1.0 — the "coh ≈ 1 is
+        # suspicious" rule must not apply there
+        if band_bins.size < len(ins) + 1:
+            coh = np.minimum(coh, coherence_max - 1e-9)
+        weights = np.array([_coherence_weight(c, coherence_min, coherence_max, mode)
+                            for c in coh])
+        trimmed = False
+        if trim:
+            keep = weights > 0
+            if keep.sum() == 0:
+                trimmed = True  # nothing retained in this band
+            elif float(np.median(coh[keep])) < coherence_min:
+                trimmed = True
+        if mode != "off" and not trimmed:
+            scale = np.sqrt(weights)
+            # fully down-weighted samples are excluded (NaN) rather than
+            # zeroed — zero rows would inflate the regression degrees of
+            # freedom; estimate_tf skips non-finite rows.
+            scale[scale <= 0.0] = np.nan
+            for oc in outs + ins:
+                vals = local_out[oc].values
+                vals[band_bins, :] = vals[band_bins, :] * scale[None, :]
+            if ref_out is not None:
+                for ic in ins:
+                    vals = ref_out[ic].values
+                    vals[band_bins, :] = vals[band_bins, :] * scale[None, :]
+        if trimmed:
+            for oc in outs + ins:
+                local_out[oc].values[band_bins, :] = np.nan
+            if ref_out is not None:
+                for ic in ins:
+                    ref_out[ic].values[band_bins, :] = np.nan
+        rows.append({
+            "period": float(periods[b]),
+            "n_windows": int(n_win),
+            "n_retained": int(np.count_nonzero(weights > 0)) if mode != "off" else int(n_win),
+            "median_coherence_e": float(np.median(coh_e)),
+            "median_coherence_transfer": float(np.median(coh_x)) if ref is not None else None,
+            "median_coherence": float(np.median(coh)),
+            "trimmed": trimmed,
+        })
+    return local_out, ref_out, rows
+
+
+def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
+                       coherence_min=0.25, coherence_max=0.98, mode="weight",
+                       trim=False, periods_per_octave=4):
+    """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
+
+    ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
+    same-shaped container (or a single fc) for the remote station. Returns
+    ``(levels_out, ref_levels_out, rows)`` where the rows carry the
+    decimation level for the diagnostics table.
+    """
+    out_levels: dict[int, object] = {}
+    out_ref: dict[int, object] = {} if ref_levels is not None else None
+    rows: list[dict] = []
+    for level, fc in sorted(levels.items()):
+        ref = ref_levels.get(level) if isinstance(ref_levels, dict) else ref_levels
+        l_out, r_out, level_rows = coherence_sort_fc(
+            fc, ref, input_channels, output_channels,
+            coherence_min=coherence_min, coherence_max=coherence_max,
+            mode=mode, trim=trim, periods_per_octave=periods_per_octave,
+        )
+        out_levels[int(level)] = l_out
+        if ref_levels is not None:
+            out_ref[int(level)] = r_out
+        for r in level_rows:
+            r["decimation_level"] = int(level)
+            rows.append(r)
+    return out_levels, out_ref, rows
+
+
 def estimate_tf(
     fc,
     input_channels,
@@ -609,9 +805,23 @@ def estimate_tf(
                         [fc[ic].values[f_idx, :] for ic in input_channels], axis=-1))
         H = np.concatenate(H, axis=0)
         E = np.concatenate(E, axis=0)
-        if H.shape[0] < 2:  # too few observations for a stable estimate
+        if engine == "RME_RR":
+            R_band = np.concatenate(R, axis=0)
+        else:
+            R_band = None
+        # skip non-finite FC samples (coherence-sort drop/trim sets NaN);
+        # for remote reference the union of local/remote rows is dropped so
+        # the row pairing stays aligned (aurora RME_RR rejects NaN).
+        ok = np.all(np.isfinite(H), axis=1) & np.all(np.isfinite(E), axis=1)
+        if R_band is not None:
+            ok = ok & np.all(np.isfinite(R_band), axis=1)
+        if not np.all(ok):
+            H = H[ok]
+            E = E[ok]
+            if R_band is not None:
+                R_band = R_band[ok]
+        if H.shape[0] <= len(input_channels):
             continue
-        R_band = np.concatenate(R, axis=0) if engine == "RME_RR" else None
         Zout[b], Zerr[b] = _solve_band(H, E, R_band, input_channels, output_channels, engine)
 
     # All estimators now come from aurora and share aurora's impedance

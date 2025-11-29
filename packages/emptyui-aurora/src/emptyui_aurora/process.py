@@ -18,6 +18,7 @@ from emptyui_mth5.nomenclature import (
 
 from ._processing import (
     build_tf,
+    coherence_sort_fcs,
     compute_fc_levels,
     estimate_tf_levels,
     merge_tf_levels,
@@ -184,6 +185,107 @@ class ComputeFC(Node):
         return {"fc": levels}
 
 
+def _fc_io_channels(fc):
+    """(input_channels, output_channels, keyword) from an fc's attrs.
+
+    Falls back to classifying the channel names through the nomenclature when
+    the attrs are absent (e.g. an fc read back from an mth5 archive).
+    """
+    kw = fc.attrs.get("channel_nomenclature") or None
+    ins_raw = fc.attrs.get("input_channels")
+    outs_raw = fc.attrs.get("output_channels")
+    if ins_raw and outs_raw:
+        ins = [c.strip() for c in ins_raw.split(",") if c.strip()]
+        outs = [c.strip() for c in outs_raw.split(",") if c.strip()]
+    else:
+        ins, outs, _ = classify_channels([str(c) for c in fc.data_vars], kw)
+    return ins, outs, kw
+
+
+class CoherenceSort(Node):
+    type = "aurora.process.coherence_sort"
+    title = "Coherence Sort"
+    description = (
+        "EMTF-style coherence sort: down-weight (or drop) Fourier-coefficient "
+        "windows whose per-window multiple coherence falls outside "
+        "[coherence_min, coherence_max] — low coherence = noise-dominated "
+        "windows; coherence ≈ 1 can be an overfit/coherent-noise signature. "
+        "With a remote 'ref fc', the criterion is the conservative minimum of "
+        "the E–remote-H signal coherence and the local↔remote magnetic "
+        "transfer coherence (remote reference replaces the local magnetic "
+        "channels, so local E/H coherence is the wrong measure), and the "
+        "single shared weight is applied to both FCs (exact weighted-LS "
+        "semantics for RME_RR). Optional band-edge trimming removes bands "
+        "whose retained windows are still below the lower bound."
+    )
+    category = "Processing"
+    inputs = (
+        Input("fc", "fc"),
+        Input("ref_fc", "fc", label="ref fc (remote)", required=False),
+    )
+    outputs = (
+        Output("fc", "fc"),
+        Output("ref_fc", "fc", label="ref fc (remote)"),
+        Output("table", "table", label="coherence diagnostics"),
+    )
+    params = (
+        Param("coherence_min", "number", label="Coherence min",
+              default=0.25, min=0.0, max=1.0,
+              description="Lower coherence bound (per-window coherence²). "
+                          "Windows below are down-weighted/dropped."),
+        Param("coherence_max", "number", label="Coherence max",
+              default=0.98, min=0.0, max=1.0,
+              description="Upper coherence bound; coherence ≈ 1 can be an "
+                          "overfit/coherent-noise signature."),
+        Param("mode", "select", label="Mode",
+              options=("weight", "drop", "off"), default="weight",
+              description="weight = smooth down-weighting outside the bounds "
+                          "(rows scaled by √w); drop = exclude windows "
+                          "outside the bounds (NaN); off = no sorting."),
+        Param("coherence_trim", "boolean", label="Band-edge trimming",
+              default=False,
+              description="Remove bands whose retained-window median "
+                          "coherence is below the lower bound (NaN)."),
+        Param("periods_per_octave", "integer", label="Periods per octave",
+              default=4, min=1,
+              description="Band geometry — must match the 'Estimate TF' "
+                          "setting for the same banding."),
+    )
+
+    def execute(self, ctx, fc, ref_fc=None,
+                coherence_min: float = 0.25, coherence_max: float = 0.98,
+                mode: str = "weight", coherence_trim: bool = False,
+                periods_per_octave: int = 4) -> dict[str, Any]:
+        import json
+
+        levels = fc if isinstance(fc, dict) else {0: fc}
+        sample = next(iter(levels.values()))
+        ins, outs, _ = _fc_io_channels(sample)
+        ref_levels = ref_fc if isinstance(ref_fc, dict) else (
+            {0: ref_fc} if ref_fc is not None else None)
+        out_levels, out_ref, rows = coherence_sort_fcs(
+            levels, ref_levels, ins, outs,
+            coherence_min=coherence_min, coherence_max=coherence_max,
+            mode=mode, trim=coherence_trim,
+            periods_per_octave=periods_per_octave,
+        )
+        path = ctx.workspace / "coherence_sort.json"
+        path.write_text(json.dumps(rows))
+        artifact = ctx.publish_artifact(path, kind="table")
+        retained = sum(r["n_retained"] for r in rows)
+        total = sum(r["n_windows"] for r in rows)
+        trimmed = sum(1 for r in rows if r["trimmed"])
+        ctx.progress(
+            1.0,
+            f"coherence sort: {retained}/{total} windows kept, "
+            f"{trimmed} band(s) trimmed",
+        )
+        result: dict[str, Any] = {"fc": out_levels, "table": artifact}
+        if ref_fc is not None:
+            result["ref_fc"] = out_ref
+        return result
+
+
 class EstimateTF(Node):
     type = "aurora.process.estimate_tf"
     title = "Estimate TF"
@@ -311,5 +413,6 @@ class MergeTFLevels(Node):
 
 def register(registry) -> None:
     registry.add(ComputeFC)
+    registry.add(CoherenceSort)
     registry.add(EstimateTF)
     registry.add(MergeTFLevels)

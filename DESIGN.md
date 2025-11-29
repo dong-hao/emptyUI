@@ -1588,7 +1588,11 @@ magnetic inputs (single-FC mode) or remote magnetic inputs combined with
 the local↔remote magnetic transfer coherence (two-FC mode, min). Sparse
 bands fall back to the minimum pairwise coherence; all-zero/degenerate
 windows score 0 (conservative). Per output channel, the conservative
-minimum across outputs is used.
+minimum across outputs is used. Degenerate bands (n_bins < n_in + 1) fit
+the regression exactly, so their coherence is trivially 1.0 — the
+`coherence_max` suspicion rule is **not** applied there (implemented
+2026-09-07), otherwise the longest-period bands would be dropped
+unconditionally.
 
 *`Estimate TF` change (small, generic — not coherence-specific)*: skip
 non-finite FC samples when gathering band rows. Required by
@@ -1604,12 +1608,14 @@ range, so the binding criterion is visible. A coherence-vs-period plot
 (USArray style per §15) is a later add-on.
 
 *Implementation locations*:
-- `emptyui-aurora/_processing.py`: `_coherence_scores(...)` (per-window
-  multiple coherence per band/level), `_apply_coherence(...)`
-  (weight/drop/trim), both reusable by the node; non-finite-row skip in
-  the `estimate_tf` band gather loop.
+- `emptyui-aurora/_processing.py`: `_simple_coherence`, `_multiple_coherence`,
+  `_coherence_weight`, `coherence_sort_fc` / `coherence_sort_fcs`
+  (per-window multiple coherence per band/level + weight/drop/trim, both
+  reusable by the node); non-finite-row skip in the `estimate_tf` band
+  gather loop.
 - `emptyui-aurora/process.py`: `CoherenceSort` node (params, ports,
-  register) + `estimate_tf` non-finite handling.
+  register) + `_fc_io_channels` helper (channel recovery from fc attrs /
+  nomenclature fallback).
 - Tests + `mth5.coherence`-style table rendering (reuse `View Table`).
 
 *Verification*:
