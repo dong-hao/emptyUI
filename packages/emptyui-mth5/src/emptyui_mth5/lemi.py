@@ -31,12 +31,23 @@ class LoadLemi(Node):
               options=("lemi12", "lemi34"), default="lemi12",
               description="mt_metadata CHANNEL_MAPS keyword: lemi12 = electric "
                           "pair e1/e2 (default), lemi34 = pair e3/e4"),
+        Param("calibration_path", "string", label="Calibration file/dir",
+              default="", optional=True,
+              description="Manufacturer calibration (.chn/.def FAP or mt_io "
+                          ".json). A directory is searched for a matching "
+                          "file; empty auto-pickups *.chn/*.def/*.json in the "
+                          "data directory (station-pair files preferred)."),
+        Param("extend_flat", "boolean", label="Flat below table", default=True,
+              description="Treat the FAP response as constant (first row, "
+                          "zero phase) below the measured frequency range."),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "survey",
                 station_id: str = "station", mth5_filename: str = "from_lemi424.mth5",
                 save_path: str = "",
-                channel_nomenclature: str = "lemi12") -> dict[str, Any]:
+                channel_nomenclature: str = "lemi12",
+                calibration_path: str = "",
+                extend_flat: bool = True) -> dict[str, Any]:
         from mth5 import read_file
         from mth5.clients.lemi424 import LEMI424Client
         from mth5.mth5 import MTH5
@@ -67,6 +78,37 @@ class LoadLemi(Node):
         )
         client.collection.survey_id = survey_id
         client.collection.station_id = station_id
+        # Manufacturer calibration (DESIGN §16.1): explicit file/dir wins,
+        # otherwise auto-pickup in the data directory; the filters are
+        # attached to each run BEFORE it is written, so the association is
+        # archived and survives Extract Run / MTH5 round trips.
+        from .calibration import (
+            attach_filters,
+            find_calibration_file,
+            load_calibration,
+        )
+
+        cal_filters = None
+        cal_src = calibration_path.strip()
+        if not cal_src:
+            found = find_calibration_file(data_path, station_id=station_id)
+            if found is not None:
+                cal_src = str(found)
+        if cal_src:
+            cal_path = Path(cal_src).expanduser().resolve()
+            if cal_path.is_dir():
+                found = find_calibration_file(cal_path, station_id=station_id)
+                if found is None:
+                    ctx.logger.warning(
+                        "no calibration file (.chn/.def/.json) in %s", cal_path)
+                else:
+                    cal_path = found
+            if cal_path.is_file():
+                cal_filters = load_calibration(cal_path, extend_flat=extend_flat)
+                ctx.logger.info(
+                    "using calibration %s for %s channels",
+                    cal_path.name, sorted(cal_filters))
+
         runs = client.get_run_dict()
 
         with MTH5(**client.h5_kwargs) as m:
@@ -81,6 +123,8 @@ class LoadLemi(Node):
                         e_channels=e_channels,
                         calibration_dict=client.collection.calibration_dict,
                     )
+                    if cal_filters is not None:
+                        attach_filters(run_ts, cal_filters)
                     run_ts.run_metadata.id = run_id
                     run_group.from_runts(run_ts)
                 station_group.metadata.update(run_ts.station_metadata)

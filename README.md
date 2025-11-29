@@ -210,16 +210,19 @@ npm run test:headed         # watch the browser while it runs
 ### Remaining work (see DESIGN.md §11/§12/§16)
 
 - **M3 — next tasks (planned, independent)**:
-  - **Instrument calibration framework + LEMI support**: parse the
-    manufacturer LEMI calibration files (`.chn`/`.def` FAP, and the mt_io
-    JSON format) into mt_metadata filters and apply them via the existing
-    Calibrate node — per DESIGN.md §16.1. (Investigation showed the BGS
-    short-period ρ collapse is primarily the LEMI noise floor; calibration
-    is a modest ~×6 ρ / ±30° phase correction near Nyquist.)
-  - **EMTF-style coherence sorting**: filter/downweight low-coherence FC
-    windows before the robust regression, plus a per-band coherence
-    diagnostic (table/plot) — per DESIGN.md §16.2. (aurora 0.6.2 only
-    logs squared coherence; no sample-level sorting exists anywhere.)
+  - **Instrument calibration framework + LEMI support** — **done** (DESIGN.md
+    §16.1): `emptyui-mth5/calibration.py` parses manufacturer FAP files
+    (`.chn`/`.def` MOD/ARG, and the mt_io JSON format) into mt_metadata
+    filters; `Load LEMI-424` gains `calibration_path`/auto-pickup (filters
+    archived with the run, surviving `Extract Run`), and the new
+    `mth5.calibration.load` node feeds the existing `Calibrate` node.
+    Verified on the BGS pair: ρ ×≈6.25, phase ≈5–15° — a modest real
+    correction; the short-period collapse is the LEMI noise floor. Open:
+    absolute-gain check against an independently processed reference site.
+  - **EMTF-style coherence sorting** — **done** (DESIGN.md §16.2): the
+    `aurora.process.coherence_sort` node down-weights/drops low-coherence FC
+    windows (and supports remote-reference two-FC mode) before the robust
+    regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
   - Content-addressed result caching + partial execution ("execute to
     here"); the executor currently re-runs the whole DAG every time.

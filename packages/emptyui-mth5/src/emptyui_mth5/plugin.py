@@ -10,6 +10,7 @@ mt.selection payload.
 from __future__ import annotations
 
 from .calibrate import Calibrate
+from .calibration import LoadCalibration
 from .fc import FCGroupToSpectra, SpectraToFCGroup
 from .io import LoadMth5, SaveMth5
 from .lemi import LoadLemi
@@ -24,6 +25,7 @@ def register(registry) -> None:
     registry.add(LoadMth5)
     registry.add(SaveMth5)
     registry.add(LoadLemi)
+    registry.add(LoadCalibration)
     registry.add(ExtractRun)
     registry.add(SplitChannels)
     registry.add(MergeChannels)

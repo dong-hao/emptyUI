@@ -1498,6 +1498,39 @@ caching/sub-workflow M3 backlog); each lands separately.
 - Verify against a reference dataset (e.g. an independently processed /
   EDI-published site) to settle the absolute-gain question.
 
+**Implemented (2026-09-07).**
+- `emptyui-mth5/calibration.py`: `parse_fap` (`.chn` LEMI-417 FAP and the
+  KMS-200 `.def` wrapper — same FAP block, leading wrapper lines skipped;
+  `#FP <NTF> <NCH>` header, MOD/ARG rows, first column = Hz), `parse_json_calibration`
+  (mt_io `{"Calibration": {"Freq", "Re", "Im"}}`), `build_fap_filters`
+  (per-channel `FrequencyResponseTableFilter`, units nanoTesla / mV·km by
+  channel prefix, `gain=1.0`, `sequence_number=1`), `attach_filters`
+  (mt_timeseries style: `run.filters` + per-channel `attrs["filters"]`
+  AppliedFilter format — the modern format that survives an MTH5
+  round trip; channels without a filter get a unity coefficient filter so
+  `RunTS.calibrate()` passes temperature channels through warning-free),
+  `find_calibration_file` (auto-pickup, station-pair files preferred),
+  `load_calibration` (dispatch by extension).
+- `Load LEMI-424`: `calibration_path` param (file or directory; empty =
+  auto-pickup in the data directory) + `extend_flat` param; filters are
+  attached **before** `from_runts`, so the calibration is archived with the
+  run and survives `Extract Run`.
+- New `mth5.calibration.load` node ("Load Calibration"): parses a
+  calibration file into a `calibration` payload for the `mth5.calibrate`
+  node's explicit path.
+- Below-table policy implemented as **flat clamp** (first-row modulus, zero
+  phase, extended to 0.001·f_min) — log-extrapolation was found to be
+  worse (default `extend_flat=True`).
+- Verified on the BGS NO46 LEMI-417 pair: `lemi.chn` attached through the
+  archive, `RunTS.calibrate()` applies it, TF ρ_a increases by ≈×6.25
+  (the E/H response ratio squared, as measured) and phase shifts ≈5–15° —
+  consistent with the earlier empirical check; the noise-floor short
+  periods remain below the spec (calibration is a modest, real correction,
+  not a recovery).
+- Open: absolute-gain verification against an independently processed
+  reference site; `.def` wrapper parsing is heuristic (no sample in the
+  repo — raise a clear error if the FAP block is not found).
+
 ### 16.2 EMTF-style coherence sorting (filter low-coherence FCs)
 
 **Grounding (researched 2026-09-07).**
