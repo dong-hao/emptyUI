@@ -7,11 +7,14 @@ license = { text = "MIT" }
 dependencies = [
     "emptyui",
     "emptyui-core-nodes",
+    "matplotlib>=3.8",
     "mth5==0.6.8",
     "mt_metadata==1.0.10",
     "mt_timeseries==0.0.2",
     "numpy>=1.26",
     "pandas>=2.0",
+    "scipy>=1.11",
+    "xarray>=2024.1",
 ]
 
 [project.optional-dependencies]

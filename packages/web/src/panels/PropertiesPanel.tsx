@@ -58,13 +58,13 @@ export function PropertiesPanel() {
       <ul className="ports">
         {manifest.inputs.map((i) => (
           <li key={`in-${i.name}`}>
-            <span className="dot" style={{ background: portColor(i.type, catalog) }} /> in{" "}
+            <span className="dot" style={{ background: portColor(i.type) }} /> in{" "}
             {i.label ?? i.name}: <code>{i.type}</code>
           </li>
         ))}
         {manifest.outputs.map((o) => (
           <li key={`out-${o.name}`}>
-            <span className="dot" style={{ background: portColor(o.type, catalog) }} /> out{" "}
+            <span className="dot" style={{ background: portColor(o.type) }} /> out{" "}
             {o.label ?? o.name}: <code>{o.type}</code>
           </li>
         ))}

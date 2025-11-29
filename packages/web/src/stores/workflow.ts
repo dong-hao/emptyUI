@@ -67,7 +67,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       (inPort.accepts ?? []).includes(srcType);
     if (!compatible) return; // silent reject (DESIGN.md §3)
 
-    const color = portColor(srcType, catalog);
+    const color = portColor(srcType);
     set((s) => {
       // one-to-one inputs: a new edge to an occupied input replaces the old one
       const without = s.edges.filter(
@@ -179,7 +179,7 @@ export function deserializeWorkflow(
       sourceHandle: e.source_port,
       target: e.target,
       targetHandle: e.target_port,
-      style: { stroke: portColor(portType, catalog), strokeWidth: 2.5 },
+      style: { stroke: portColor(portType), strokeWidth: 2.5 },
       data: { portType },
     };
   });

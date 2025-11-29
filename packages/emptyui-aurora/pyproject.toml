@@ -12,6 +12,8 @@ dependencies = [
     "mt_metadata==1.0.10",
     "numpy>=1.26",
     "pandas>=2.0",
+    "scipy>=1.11",
+    "xarray>=2024.1",
 ]
 
 [project.optional-dependencies]

@@ -31,10 +31,6 @@ class Executor:
 
     def __init__(self, registry) -> None:
         self.registry = registry
-        self._cancel_event = threading.Event()
-
-    def cancel(self) -> None:
-        self._cancel_event.set()
 
     def _topo_order(self, workflow: Workflow) -> list[str]:
         indegree = {n.id: 0 for n in workflow.nodes}
@@ -63,12 +59,11 @@ class Executor:
         """Execute the workflow; returns a run summary.
 
         `cancel_event` is polled between nodes: when set, the run stops
-        early and returns ``{"status": "cancelled", ...}``. When omitted,
-        the legacy ``cancel()`` token is used (and cleared on entry).
+        early and returns ``{"status": "cancelled", ...}``. When omitted a
+        fresh (never-set) event is used.
         """
         if cancel_event is None:
-            cancel_event = self._cancel_event
-            cancel_event.clear()
+            cancel_event = threading.Event()
         store = DataStore()
         started = time.monotonic()
         if workspace is not None:

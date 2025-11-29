@@ -43,7 +43,6 @@ export interface NodeManifest {
 
 export interface Catalog {
   nodes: NodeManifest[];
-  types: Record<string, { color?: string; label?: string }>;
 }
 
 const BASE = "/api";

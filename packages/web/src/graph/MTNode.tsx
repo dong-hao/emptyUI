@@ -180,7 +180,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         type="target"
                         position={Position.Left}
                         className="mt-port"
-                        style={{ background: portColor(input.type, catalog) }}
+                        style={{ background: portColor(input.type) }}
                         title={`${input.label ?? input.name}: ${input.type}`}
                       />
                       <span title={`${input.label ?? input.name}: ${input.type}`}>
@@ -203,7 +203,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         type="source"
                         position={Position.Right}
                         className="mt-port"
-                        style={{ background: portColor(output.type, catalog) }}
+                        style={{ background: portColor(output.type) }}
                         title={`${output.label ?? output.name}: ${output.type}`}
                       />
                     </>
@@ -271,7 +271,7 @@ function HandleInPlot() {
       type="target"
       position={Position.Left}
       className="mt-port"
-      style={{ background: portColor("plot", catalog) }}
+      style={{ background: portColor("plot") }}
       title="plot: plot"
     />
   );
@@ -285,7 +285,7 @@ function HandleOutPlot() {
       type="source"
       position={Position.Right}
       className="mt-port"
-      style={{ background: portColor("plot", catalog) }}
+      style={{ background: portColor("plot") }}
       title="plot: plot"
     />
   );
@@ -390,7 +390,7 @@ function HandleInTable() {
       type="target"
       position={Position.Left}
       className="mt-port"
-      style={{ background: portColor("table", catalog) }}
+      style={{ background: portColor("table") }}
       title="table: table"
     />
   );
@@ -404,7 +404,7 @@ function HandleOutTable() {
       type="source"
       position={Position.Right}
       className="mt-port"
-      style={{ background: portColor("table", catalog) }}
+      style={{ background: portColor("table") }}
       title="table: table"
     />
   );

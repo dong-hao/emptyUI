@@ -15,7 +15,6 @@ class Registry:
 
     def __init__(self) -> None:
         self._nodes: dict[str, Node] = {}
-        self.type_metadata: dict[str, dict[str, Any]] = {}
 
     def add(self, node_cls: type[Node]) -> None:
         node = node_cls()
@@ -32,13 +31,7 @@ class Registry:
         return sorted(self._nodes)
 
     def manifests(self) -> dict[str, Any]:
-        return {
-            "nodes": [node.manifest() for node in self._nodes.values()],
-            "types": self.type_metadata,
-        }
-
-    def set_type_metadata(self, metadata: dict[str, dict[str, Any]]) -> None:
-        self.type_metadata = metadata
+        return {"nodes": [node.manifest() for node in self._nodes.values()]}
 
 
 def find_plugins(registry: Registry) -> list[str]:

@@ -35,9 +35,6 @@ class TimeSeries:
     def n_samples(self) -> int:
         return max((len(v) for v in self.channels.values()), default=0)
 
-    def time_axis(self) -> np.ndarray:
-        return self.start + np.arange(self.n_samples) / self.sample_rate
-
     def copy(self) -> TimeSeries:
         return TimeSeries(
             channels={k: v.copy() for k, v in self.channels.items()},

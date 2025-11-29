@@ -13,8 +13,7 @@ export const useCatalog = create<CatalogState>((set) => ({
 
 /** Port-type colors (ComfyUI-style socket coloring), following the
  *  DESIGN.md §3 guide: blue=timeseries, dark green=FC, red=transfer
- *  functions, purple=metadata/config, gray/yellow=generic.
- *  Server-provided metadata overrides these via catalog.types. */
+ *  functions, purple=metadata/config, gray/yellow=generic. */
 export const PORT_COLORS: Record<string, string> = {
   any: "#95a5a6",
   table: "#f39c12",
@@ -32,6 +31,6 @@ export const PORT_COLORS: Record<string, string> = {
   tf: "#c0392b",
 };
 
-export function portColor(type: string, catalog: Catalog | null): string {
-  return catalog?.types?.[type]?.color ?? PORT_COLORS[type] ?? "#95a5a6";
+export function portColor(type: string): string {
+  return PORT_COLORS[type] ?? "#95a5a6";
 }
