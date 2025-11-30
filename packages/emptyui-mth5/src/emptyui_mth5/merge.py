@@ -11,6 +11,8 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
+from .runs import _resolve_run, _resolve_station, _resolve_survey
+
 
 class MergeRuns(Node):
     type = "mth5.runs.merge"
@@ -19,7 +21,9 @@ class MergeRuns(Node):
         "Combine multiple runs for a single TF estimate. FC-level mode keeps "
         "multiple rows in the KernelDataset so aurora concatenates STFTs (no "
         "sample fabrication); physical mode concatenates raw time series "
-        "(interpolates gaps — opt-in)."
+        "(interpolates gaps — opt-in). Note: the FC-level 'selection' mode "
+        "currently has no producer node in the default pipeline "
+        "(superseded by Extract Run → Compute FC; plugin-tier/M4)."
     )
     category = "Processing"
     inputs = (
@@ -56,12 +60,11 @@ class MergeRuns(Node):
             return {"selection": selection}
 
         # physical mode: concat raw series across rows
-
         run_ts_list = []
         for _, row in selection.iterrows():
-            m = mth5.get_survey(row["survey"])
-            st = m.stations_group.get_station(row["station"])
-            run_obj = st.runs_group.get_run(row["run"])
+            survey_obj = _resolve_survey(mth5, str(row.get("survey", "")))
+            station_obj = _resolve_station(survey_obj, str(row.get("station", "")))
+            run_obj = _resolve_run(station_obj, str(row.get("run", "")))
             run_ts_list.append(
                 run_obj.to_runts(
                     start=row.get("start"), end=row.get("end"),

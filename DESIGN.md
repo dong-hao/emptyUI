@@ -789,8 +789,10 @@ End-to-end testing:
 - **Playwright MCP** (`@playwright/mcp` via opencode `mcp` config) is the
   interactive/exploratory counterpart for agent-driven browser debugging.
 
-Connection rules (port types, cycle prevention) enforced client-side for UX,
-re-validated server-side before every run.
+Connection rules (port types, one edge per input port, cycle prevention)
+enforced client-side for UX, re-validated server-side before every run
+(duplicate edges into one input port are a validation error — the executor
+must not silently overwrite).
 
 ---
 
@@ -867,23 +869,43 @@ progress.
   complete.**
 
 **M3 — Power features**
-- ⏳ **Robustness batch ("Batch B")** — validation & data-quality guards
-  (planned; no design changes):
-  - Fan-in duplicates: multiple edges into one input port currently silently
-    overwrite (last wins, executor) — reject in `validate_workflow` (§9
-    server-side re-validation).
-  - Legacy mth5 API: `SpectraToFCGroup`/`MergeRuns` use
-    `mth5.get_survey`/`survey_group` directly — route through
-    `runs._resolve_survey` (dual modern/legacy layout support).
+- ✅ **Robustness batch ("Batch B")** — delivered 2026-09-07; validation &
+  data-quality guards (no design changes):
+  - Fan-in duplicates: multiple edges into one input port are rejected in
+    `validate_workflow` (§9 server-side re-validation) — the executor's
+    last-wins overwrite is no longer reachable from the server.
+  - Legacy mth5 API: `SpectraToFCGroup`/`MergeRuns` now resolve
+    survey/station/run through `runs._resolve_survey`/
+    `_resolve_station`/`_resolve_run` (dual modern/legacy layout support;
+    regression: `StationGroup.runs_group` does not exist in mth5 0.6.x).
   - `Load CSV`: time-column-only files error cleanly; ISO datetime time
-    columns set `start_datetime` + derive the rate; NaN guard with a clear
-    error at `Compute FC`/`Bandpass` entry (NaN propagates silently through
-    scipy `decimate`/`stft` today).
+    columns set `start_datetime` + derive the rate (lazy pandas import);
+    predominantly non-monotonic time columns error (median-based detection
+    stays robust to single strays); NaN/Inf guard with a clear error at
+    `Compute FC` (via `to_channels`), `Bandpass Filter` and `Detrend`
+    entry (`ensure_finite` in core-nodes types) — NaN propagates silently
+    through scipy `decimate`/`stft` otherwise.
   - Tipper plot ylim [-1, 1] auto-expands when data legitimately exceeds it.
   - Doc note (§16.2): the coherence sort is a per-window broadband
     (bin-ensemble) coherence heuristic, not EMTF's window-ensemble per
     frequency; a true EMTF-style variant is an M4 item.
   - Completed earlier in the same spirit (2026-09-07, "Batch A"):
+    remote-reference partial-ref-container now errors instead of silently
+    self-referencing; JSON calibrations keep per-channel frequency grids and
+    unmatched channels warn instead of passing through silently; artifact
+    filenames are node-instance-unique (`RunContext.artifact_path`); the
+    `Calibrate` explicit-filter path delegates to `RunTS.calibrate` (proper
+    detrend/zero-pad/windowing instead of bare FFT division).
+  - **Test suite reorganization (2026-09-07)**: error-surface tests grouped
+    into one `pytest.mark.errors` file per package (`test_errors.py`,
+    `test_core_errors.py`, `test_mth5_errors.py`, `test_aurora_errors.py`;
+    marker registered in the root `pytest.ini`) so `-m "not errors"` gives a
+    fast feature/physics pass and `-m errors` runs the edge suite (~5 s).
+    Default invocation and CI are unchanged (full suite). Rule: a test moves
+    iff its primary assertion is `pytest.raises`/error-status/degenerate
+    input; feature, physics-convention and value-recovery tests stay in the
+    feature files (backward-compat estimator names stay with the estimator
+    tests).
     remote-reference partial-ref-container now errors instead of silently
     self-referencing; JSON calibrations keep per-channel frequency grids and
     unmatched channels warn instead of passing through silently; artifact
@@ -1649,6 +1671,17 @@ the regression exactly, so their coherence is trivially 1.0 — the
 `coherence_max` suspicion rule is **not** applied there (implemented
 2026-09-07), otherwise the longest-period bands would be dropped
 unconditionally.
+
+> **Semantics note (Batch B, 2026-09-07).** The statistic is a per-window
+> multiple coherence over the **frequency-bin ensemble inside one STFT
+> window** — a conservative broadband QC heuristic measuring how
+> predictable a window's outputs are across the band's harmonics. It is
+> **not** EMTF/BIRRP's window-ensemble coherence computed *at each
+> frequency* (ensemble across windows). The two agree qualitatively
+> (noise-dominated windows score low) but not numerically; a true
+> EMTF-style per-frequency window-ensemble variant remains an M4 item.
+> The node description states this so users don't equate the diagnostics
+> table with EMTF's coherence plots.
 
 *`Estimate TF` change (small, generic — not coherence-specific)*: skip
 non-finite FC samples when gathering band rows. Required by

@@ -291,7 +291,11 @@ def plot_tipper(tf, path):
                         capsize=2.5, markersize=4, linewidth=1.0, elinewidth=0.8)
         ax.set_xscale("log")
         ax.set_ylabel(f"{p['label']} (dimensionless)")
-        ax.set_ylim(-1, 1)
+        # USArray default [-1, 1], but auto-expand when data legitimately
+        # exceeds it (|T| > 1 occurs near 2D/3D conductivity contrasts)
+        finite = np.abs(np.concatenate([z.real[ok], z.imag[ok]])) if np.any(ok) else np.array([])
+        bound = max(1.0, 1.1 * float(finite.max())) if finite.size else 1.0
+        ax.set_ylim(-bound, bound)
         ax.legend(loc="best", frameon=True, framealpha=0.9, fontsize=8,
                   borderpad=0.3)
     apply_style(fig, axes)

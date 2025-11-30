@@ -192,6 +192,28 @@ def test_tipper_reim_conventions(tmp_path: Path):
         plt.close(fig)
 
 
+def test_tipper_ylim_auto_expands_beyond_one(tmp_path: Path):
+    """|T| > 1 is legitimate near 2D/3D conductivity contrasts — the y-axis
+    must expand instead of clipping the display (default stays [-1, 1])."""
+    periods = np.array([2.0, 4.0, 8.0])
+    Z = np.zeros((3, 3, 2), dtype=complex)
+    Z[:, 2, 0] = 1.4 + 0.2j  # Tzx exceeding 1
+    Z[:, 2, 1] = -0.2 + 0.05j
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                  channel_nomenclature="lemi12", station_id="NO46",
+                  survey_id="bgs")
+    path = tmp_path / "tip.png"
+    with patch.object(plotting.plt, "close", lambda *a, **k: None):
+        plotting.plot_tipper(tf, path)
+    fig = plt.gcf()
+    try:
+        ax1, _ = fig.axes
+        lo, hi = ax1.get_ylim()
+        assert lo == pytest.approx(-1.1 * 1.4, abs=0.15) and hi == pytest.approx(1.1 * 1.4, abs=0.15)
+    finally:
+        plt.close(fig)
+
+
 def test_plot_nodes_render_via_workspace(tmp_path: Path):
     """The plot nodes write into the workspace even when it is a str path
     (the executor passes a str) — RunContext normalizes to Path."""
@@ -202,7 +224,8 @@ def test_plot_nodes_render_via_workspace(tmp_path: Path):
 
 
 def test_plot_tipper_requires_tipper(tmp_path: Path):
-    """A 2x2 (impedance-only) TF has no tipper -> clear error."""
+    """A 2x2 (impedance-only) TF has no tipper -> clear error. (Error
+    surface — moved to test_mth5_errors.py by the test reorg.)"""
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     periods = np.array([2.0, 4.0])
     Z = np.zeros((2, 2, 2), dtype=complex)

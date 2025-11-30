@@ -77,6 +77,25 @@ def _iso_start(value) -> str:
     return ""
 
 
+def ensure_finite(channels, where: str) -> None:
+    """Raise a clear error when channels contain NaN/Inf.
+
+    scipy's ``decimate``/``filtfilt``/``stft`` propagate a single NaN into
+    every downstream sample, which would silently corrupt FCs/TFs — fail at
+    the processing entry point instead, naming the offending channels.
+    """
+    bad = []
+    for name, x in channels.items():
+        idx = np.flatnonzero(~np.isfinite(np.asarray(x, dtype=float)))
+        if idx.size:
+            bad.append(f"{name} (first at sample {int(idx[0])})")
+    if bad:
+        raise ValueError(
+            f"{where}: channels contain NaN/Inf — fill or remove missing "
+            f"samples first (e.g. interpolate gaps): {', '.join(bad)}"
+        )
+
+
 def coerce_run(value):
     """Normalize any ts.run payload to a core :class:`TimeSeries`.
 

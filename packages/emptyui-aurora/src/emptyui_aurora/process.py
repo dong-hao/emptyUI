@@ -215,8 +215,12 @@ class CoherenceSort(Node):
         "transfer coherence (remote reference replaces the local magnetic "
         "channels, so local E/H coherence is the wrong measure), and the "
         "single shared weight is applied to both FCs (exact weighted-LS "
-        "semantics for RME_RR). Optional band-edge trimming removes bands "
-        "whose retained windows are still below the lower bound."
+        "semantics for RME_RR). Semantics note: the criterion is a "
+        "per-window multiple coherence over the band's frequency-bin "
+        "ensemble (a conservative broadband QC heuristic), not EMTF's "
+        "window-ensemble coherence at each frequency — a true EMTF-style "
+        "variant is a planned M4 item. Optional band-edge trimming removes "
+        "bands whose retained windows are still below the lower bound."
     )
     category = "Processing"
     inputs = (

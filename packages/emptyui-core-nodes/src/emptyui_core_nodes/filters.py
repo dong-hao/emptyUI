@@ -6,7 +6,7 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
-from .types import TimeSeries, coerce_run
+from .types import TimeSeries, coerce_run, ensure_finite
 
 
 class Bandpass(Node):
@@ -27,6 +27,7 @@ class Bandpass(Node):
     def execute(self, ctx, data, low_freq=None, high_freq=None,
                 order: int = 4) -> dict[str, Any]:
         data = coerce_run(data)
+        ensure_finite(data.channels, "Bandpass Filter")
         from scipy.signal import butter, filtfilt
 
         fs = data.sample_rate
@@ -86,6 +87,8 @@ class Detrend(Node):
 
     def execute(self, ctx, data, method: str = "linear") -> dict[str, Any]:
         data = coerce_run(data)
+        if method != "none":
+            ensure_finite(data.channels, "Detrend")
 
         out = {}
         for k, v in data.channels.items():

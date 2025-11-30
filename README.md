@@ -25,6 +25,10 @@ uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]"
 # Run tests
 .venv/bin/python -m pytest packages -q
 
+# Fast development passes (tests are grouped by role, see below)
+.venv/bin/python -m pytest packages -q -m "not errors"   # happy path
+.venv/bin/python -m pytest packages -q -m errors         # edge cases (~5 s)
+
 # Start API server on http://127.0.0.1:8000
 ./scripts/dev-backend.sh
 
@@ -219,21 +223,36 @@ npm run test:headed         # watch the browser while it runs
 ### Remaining work (see DESIGN.md §11/§12/§16)
 
 - **M3 — next tasks (planned, independent)**:
-  - **Robustness batch ("Batch B", planned)** — validation & data-quality
-    guards, no design changes:
-    - Reject fan-in duplicates: multiple edges into one input port currently
-      silently overwrite (last wins) — add a `validate_workflow` error.
-    - Legacy mth5 API: route `SpectraToFCGroup`/`MergeRuns` through
-      `_resolve_survey` (modern `surveys_group` + legacy layouts) like
-      `ExtractRun` does; note `Merge Runs`' `selection` mode has no live
-      producer (M4-deferred).
-    - `Load CSV` edge cases: time-column-only file errors cleanly, ISO
-      datetime time columns derive `start_datetime` + rate, NaN check with a
-      clear error at `Compute FC`/`Bandpass` entry.
-    - Tipper plot ylim: auto-expand above [-1, 1] when data exceeds it
-      (strong 2D/3D contrasts produce |T| > 1 legitimately).
-    - Doc note: the coherence sort is a per-window broadband (bin-ensemble)
-      coherence heuristic, not EMTF's window-ensemble per frequency (M4 item).
+  - **Robustness batch ("Batch B")** — **delivered (2026-09-07)**:
+    validation & data-quality guards, no design changes:
+    - Fan-in duplicates rejected: multiple edges into one input port are now
+      a `validate_workflow` error (previously silently overwritten, last wins).
+    - Legacy mth5 API removed: `SpectraToFCGroup`/`MergeRuns` resolve ids via
+      the dual-layout `_resolve_survey`/`_resolve_station`/`_resolve_run`
+      helpers (regression: `StationGroup.runs_group` does not exist in mth5
+      0.6.x — the old physical-merge path crashed with AttributeError);
+      `Merge Runs`' dormant `selection` mode is documented as such.
+    - `Load CSV` robustness: time-column-only files error cleanly; ISO
+      datetime time columns set `start_datetime` and derive the rate (via
+      pandas, lazy import); predominantly non-monotonic time columns error;
+      NaN/Inf in any channel now raise a clear error (naming channel + first
+      bad sample) at `Compute FC`, `Bandpass Filter` and `Detrend` entry
+      instead of propagating silently through scipy `decimate`/`filtfilt`/
+      `stft` (`Detrend method=none` stays a passthrough).
+    - Tipper plot ylim auto-expands above [-1, 1] when |T| legitimately
+      exceeds 1 (strong 2D/3D conductivity contrasts); default unchanged.
+    - Coherence-sort semantics documented: per-window broadband
+      (bin-ensemble) coherence heuristic, not EMTF's window-ensemble per
+      frequency (DESIGN §16.2 note; true EMTF-style variant is M4).
+  - **Test suite reorganization (2026-09-07)**: edge-case/error-surface tests
+    (primary assertion is `pytest.raises` / error status / degenerate input)
+    are grouped into one marked file per package (`test_errors.py` for the
+    framework, `test_core_errors.py`, `test_mth5_errors.py`,
+    `test_aurora_errors.py`; marker registered in the root `pytest.ini`).
+    `pytest -m "not errors"` runs the feature/physics suite;
+    `pytest -m errors` runs the error surfaces in ~5 s. CI still runs the
+    full suite by default; shared fixtures (`archive`, `fake_runts`) moved
+    to the mth5 `conftest.py`.
   - **Instrument calibration framework + LEMI support** — **done** (DESIGN.md
     §16.1): `emptyui-mth5/calibration.py` parses manufacturer FAP files
     (`.chn`/`.def` MOD/ARG, and the mt_io JSON format) into mt_metadata

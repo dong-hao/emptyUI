@@ -12,6 +12,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from emptyui_core_nodes.types import ensure_finite
 from emptyui_mth5.nomenclature import (
     STANDARD_INPUTS,
     STANDARD_OUTPUTS,
@@ -162,6 +163,7 @@ def to_channels(value):
         start_s = 0.0
         start_dt = _start_datetime(getattr(value, "start", None))
         channels = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
+        ensure_finite(channels, "Compute FC")
         return channels, sample_rate, start_s, start_dt
     # core-nodes TimeSeries
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
@@ -171,6 +173,7 @@ def to_channels(value):
             getattr(value, "start_datetime", None) or getattr(value, "start", None)
         )
         channels = {str(k): np.asarray(v, dtype=float) for k, v in value.channels.items()}
+        ensure_finite(channels, "Compute FC")
         return channels, sample_rate, start_s, start_dt
     raise TypeError(f"cannot normalize ts.run value of type {type(value).__name__}")
 

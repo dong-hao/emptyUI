@@ -120,6 +120,19 @@ def validate_workflow(workflow: Workflow, registry) -> None:
                 f"input '{tgt.id}.{edge.target_port}:{in_port.type}'"
             )
 
+    # fan-in duplicates: an input port receives exactly one payload — multiple
+    # edges into the same port would silently overwrite (executor last-wins)
+    seen_targets: set[tuple[str, str]] = set()
+    for edge in workflow.edges:
+        key = (edge.target, edge.target_port)
+        if key in seen_targets:
+            errors.append(
+                f"edge '{edge.id}': input port '{edge.target_port}' of node "
+                f"'{edge.target}' already has an incoming connection — an "
+                "input port accepts exactly one edge"
+            )
+        seen_targets.add(key)
+
     # cycle detection via Kahn's algorithm
     indegree = {n.id: 0 for n in workflow.nodes}
     adj: dict[str, list[str]] = {n.id: [] for n in workflow.nodes}

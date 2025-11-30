@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 from emptyui import Input, Node, Output, Param
 
 from .nomenclature import classify_channels, infer_keyword
-from .runs import _resolve_station, _resolve_survey
+from .runs import _resolve_run, _resolve_station, _resolve_survey
 
 
 class FCGroupToSpectra(Node):
@@ -93,8 +93,10 @@ class SpectraToFCGroup(Node):
                 station: str = "", run: str = "", sample_rate: float = 1.0) -> dict[str, Any]:
         if mth5 is None:
             raise ValueError("Spectra → FC requires an archive to write into")
-        survey_obj = mth5.get_survey(survey) if survey else mth5.survey_group
-        station_obj = survey_obj.stations_group.get_station(station)
+        # dual-layout resolution (modern surveys_group + legacy single-survey)
+        survey_obj = _resolve_survey(mth5, survey)
+        station_obj = _resolve_station(survey_obj, station)
+        run = _resolve_run(station_obj, run).metadata.id if not run else run
         fc_group = station_obj.fourier_coefficients_group.add_fc_group(run)
         dec = fc_group.add_decimation_level("0")
         dec.from_xarray(fc, sample_rate_decimation_level=sample_rate)
