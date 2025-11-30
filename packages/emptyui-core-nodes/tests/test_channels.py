@@ -72,10 +72,10 @@ def test_spectrogram_auto_channel_and_standard_name(tmp_path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
 
     out = PlotSpectrogramNode().execute(ctx, ts, channel="", window_s=1.0)
-    assert out["plot"]["path"].endswith("plot_spectrogram_e1.png")
+    assert out["plot"]["path"].endswith("plot_spectrogram_e1_node.png")
 
     out2 = PlotSpectrogramNode().execute(ctx, ts, channel="ey", window_s=1.0)
-    assert out2["plot"]["path"].endswith("plot_spectrogram_e2.png")
+    assert out2["plot"]["path"].endswith("plot_spectrogram_e2_node.png")
 
 
 def test_timeseries_standard_names_resolve(tmp_path):
@@ -86,4 +86,4 @@ def test_timeseries_standard_names_resolve(tmp_path):
              sr=8.0)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     out = PlotTimeSeriesNode().execute(ctx, ts, channels="ex,ey", seconds=10)
-    assert out["plot"]["path"].endswith("plot_timeseries.png")
+    assert out["plot"]["path"].endswith("plot_timeseries_node.png")

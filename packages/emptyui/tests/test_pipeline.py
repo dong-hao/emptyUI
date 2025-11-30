@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -69,6 +71,33 @@ def test_full_pipeline_produces_artifacts(client, synthetic_csv):
         assert img.status_code == 200
         assert img.headers["content-type"] == "image/png"
         assert len(img.content) > 1000
+
+
+def test_two_plot_nodes_get_distinct_artifact_files(client, synthetic_csv):
+    """Two instances of the same display node must not share one fixed
+    filename — artifacts reference paths, so a collision would make the
+    earlier viewer silently show the later figure."""
+    workflow = {
+        "nodes": [
+            {"id": "n1", "type": "core.io.load_csv",
+             "params": {"path": synthetic_csv, "sample_rate": 150.0}},
+            {"id": "p1", "type": "core.plot.timeseries", "params": {"seconds": 1.0}},
+            {"id": "p2", "type": "core.plot.timeseries", "params": {"seconds": 2.0}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "n1", "source_port": "data",
+             "target": "p1", "target_port": "data"},
+            {"id": "e2", "source": "n1", "source_port": "data",
+             "target": "p2", "target_port": "data"},
+        ],
+    }
+    body = _run(client, workflow)
+    assert body["status"] == "completed", body.get("error")
+    artifacts = [e for e in body["events"] if e["event"] == "artifact"]
+    assert len(artifacts) == 2
+    paths = [a["path"] for a in artifacts]
+    assert len(set(paths)) == 2, f"artifact files collided: {paths}"
+    assert all(Path(p).exists() for p in paths)
 
 
 def test_bandpass_attenuates_low_frequency(client, synthetic_csv):

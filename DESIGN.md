@@ -867,6 +867,29 @@ progress.
   complete.**
 
 **M3 — Power features**
+- ⏳ **Robustness batch ("Batch B")** — validation & data-quality guards
+  (planned; no design changes):
+  - Fan-in duplicates: multiple edges into one input port currently silently
+    overwrite (last wins, executor) — reject in `validate_workflow` (§9
+    server-side re-validation).
+  - Legacy mth5 API: `SpectraToFCGroup`/`MergeRuns` use
+    `mth5.get_survey`/`survey_group` directly — route through
+    `runs._resolve_survey` (dual modern/legacy layout support).
+  - `Load CSV`: time-column-only files error cleanly; ISO datetime time
+    columns set `start_datetime` + derive the rate; NaN guard with a clear
+    error at `Compute FC`/`Bandpass` entry (NaN propagates silently through
+    scipy `decimate`/`stft` today).
+  - Tipper plot ylim [-1, 1] auto-expands when data legitimately exceeds it.
+  - Doc note (§16.2): the coherence sort is a per-window broadband
+    (bin-ensemble) coherence heuristic, not EMTF's window-ensemble per
+    frequency; a true EMTF-style variant is an M4 item.
+  - Completed earlier in the same spirit (2026-09-07, "Batch A"):
+    remote-reference partial-ref-container now errors instead of silently
+    self-referencing; JSON calibrations keep per-channel frequency grids and
+    unmatched channels warn instead of passing through silently; artifact
+    filenames are node-instance-unique (`RunContext.artifact_path`); the
+    `Calibrate` explicit-filter path delegates to `RunTS.calibrate` (proper
+    detrend/zero-pad/windowing instead of bare FFT division).
 - ⏳ **Instrument calibration framework + coherence sorting** (planned
   2026-09-07, see §16) — the next M3 tasks:
   - General calibration framework with LEMI-417/424 support (manufacturer

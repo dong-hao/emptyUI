@@ -21,16 +21,16 @@ REAL_CHN = Path(__file__).resolve().parents[3] / "examples" / "data" / "bgs-lemi
 def test_parse_fap_real_file():
     """The LEMI-417 .chn sample parses: 12 freqs x 5 channels, MOD/ARG."""
     rows = parse_fap(REAL_CHN)
-    freqs = rows["frequencies"]
+    assert set(rows["channels"]) == {"bx", "by", "bz", "e1", "e2"}
+    table = rows["channels"]["hx"] if "hx" in rows["channels"] else rows["channels"]["bx"]
+    freqs = table["frequencies"]
     assert len(freqs) == 12
     assert freqs[0] == 0.25 and freqs[-1] == 1000.0
-    assert set(rows["channels"]) == {"bx", "by", "bz", "e1", "e2"}
-    mods, args = rows["channels"]["hx"] if "hx" in rows["channels"] else rows["channels"]["bx"]
-    np.testing.assert_allclose(mods[:2], [0.030, 0.160], rtol=1e-3)
-    np.testing.assert_allclose(args[:2], [211.6, 158.5], rtol=1e-3)
+    np.testing.assert_allclose(table["amplitudes"][:2], [0.030, 0.160], rtol=1e-3)
+    np.testing.assert_allclose(table["phases_deg"][:2], [211.6, 158.5], rtol=1e-3)
     # electric and magnetic rows are distinct in this file
-    e_mods, _ = rows["channels"]["e1"]
-    np.testing.assert_allclose(e_mods[:2], [0.012, 0.087], rtol=1e-3)
+    e_table = rows["channels"]["e1"]
+    np.testing.assert_allclose(e_table["amplitudes"][:2], [0.012, 0.087], rtol=1e-3)
 
 
 def test_parse_fap_rejects_garbage(tmp_path: Path):
@@ -80,10 +80,34 @@ def test_parse_json_calibration(tmp_path: Path):
         '"Re": [1.0, 2.0], "Im": [0.0, 0.0]}}}'
     )
     rows = parse_json_calibration(p)
-    np.testing.assert_allclose(rows["frequencies"], [0.25, 1.0])
-    mods, args = rows["channels"]["bx"]
-    np.testing.assert_allclose(mods, [1.0, 2.0], rtol=1e-9)
-    np.testing.assert_allclose(args, [0.0, 0.0], atol=1e-9)
+    table = rows["channels"]["bx"]
+    np.testing.assert_allclose(table["frequencies"], [0.25, 1.0])
+    np.testing.assert_allclose(table["amplitudes"], [1.0, 2.0], rtol=1e-9)
+    np.testing.assert_allclose(table["phases_deg"], [0.0, 0.0], atol=1e-9)
+
+
+def test_parse_json_calibration_per_channel_grids(tmp_path: Path):
+    """Channels tabulated on different frequency grids each keep their own
+    grid (previously every channel silently reused the first grid)."""
+    p = tmp_path / "cal.json"
+    p.write_text(
+        '{"bx": {"Calibration": {"Freq": [0.25, 1.0], "Re": [1.0, 2.0], "Im": [0.0, 0.0]}},'
+        '"e1": {"Calibration": {"Freq": [0.5, 2.0, 8.0], "Re": [1.0, 1.0, 1.0], "Im": [0.1, 0.0, -0.1]}}}'
+    )
+    rows = parse_json_calibration(p)
+    np.testing.assert_allclose(rows["channels"]["bx"]["frequencies"], [0.25, 1.0])
+    np.testing.assert_allclose(rows["channels"]["e1"]["frequencies"], [0.5, 2.0, 8.0])
+    filters = build_fap_filters(rows, extend_flat=False)
+    assert filters["bx"].frequencies.size == 2
+    assert filters["e1"].frequencies.size == 3
+
+
+def test_build_fap_filters_size_mismatch_rejected():
+    rows = {"channels": {"bx": {"frequencies": [0.25, 1.0],
+                                "amplitudes": [1.0],
+                                "phases_deg": [0.0, 5.0]}}}
+    with pytest.raises(ValueError, match="size mismatch"):
+        build_fap_filters(rows)
 
 
 def test_attach_filters_and_calibrate_round_trip():
@@ -131,3 +155,27 @@ def test_attach_filters_missing_channel():
     filters = build_fap_filters(parse_fap(REAL_CHN), extend_flat=True)
     with pytest.raises(ValueError, match="not present in the run"):
         attach_filters(run, filters)
+
+
+def test_attach_filters_lenient_mode_skips_and_warns(caplog):
+    """strict=False (Calibrate node path): a filter for an absent channel is
+    skipped with a warning instead of raising."""
+    import logging
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from mt_timeseries import ChannelTS, RunTS
+
+    c = ChannelTS("magnetic")
+    c.sample_rate = 1.0
+    c.ts = np.zeros(64)
+    c.component = "bx"
+    run = RunTS(array_list=[c])
+    filters = {"bx": object(), "nope": object()}
+    # use real FAP filters for the matching entry
+    real = build_fap_filters(parse_fap(REAL_CHN), extend_flat=True)
+    filters = {"bx": real["bx"], "nope": real["by"]}
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        attach_filters(run, filters, strict=False)
+    assert any("nope" in r.message for r in caplog.records)
+    assert run.dataset["bx"].attrs["filters"][0]["applied_filter"]["name"] == "cal_bx"

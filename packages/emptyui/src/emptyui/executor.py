@@ -104,6 +104,7 @@ class Executor:
             ctx = RunContext(
                 workspace=workspace,
                 store=store,
+                node_id=node_id,
                 progress_cb=lambda frac, msg, _nid=node_id: emit(
                     {"event": "node_progress", "node": _nid, "frac": frac, "msg": msg}
                 ),

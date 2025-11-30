@@ -36,7 +36,7 @@ class ViewSelection(Node):
     def execute(self, ctx, selection) -> dict[str, Any]:
         df = _as_dataframe(selection)
         records = df.to_dict(orient="records")
-        path = ctx.workspace / "selection_table.json"
+        path = ctx.artifact_path("selection_table", ".json")
         path.write_text(json.dumps(records))
         artifact = ctx.publish_artifact(path, kind="table")
         ctx.progress(1.0, f"selection table: {len(records)} rows")
@@ -80,7 +80,7 @@ class ViewTF(Node):
             }
             for p, rx, ry, px, py in zip(period, rho_xy, ph_xy, rho_yx, ph_yx)
         ]
-        path = ctx.workspace / "tf_table.json"
+        path = ctx.artifact_path("tf_table", ".json")
         path.write_text(json.dumps(records))
         artifact = ctx.publish_artifact(path, kind="table")
         ctx.progress(1.0, f"TF table: {len(records)} periods")

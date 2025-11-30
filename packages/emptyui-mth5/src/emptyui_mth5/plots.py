@@ -36,7 +36,7 @@ class PlotAppResPhase(Node):
     def execute(self, ctx, tf, mode: str = "off-diagonal") -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
-        path = ctx.workspace / "plot_appres_phase.png"
+        path = ctx.artifact_path("plot_appres_phase", ".png")
         plot_impedance_response(tf, mode, path)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
@@ -63,7 +63,7 @@ class PlotTipper(Node):
                 "transfer function has no tipper data (no vertical magnetic "
                 "output — compute the FC with e.g. 'e1,e2,bz' outputs)"
             )
-        path = ctx.workspace / "plot_tipper.png"
+        path = ctx.artifact_path("plot_tipper", ".png")
         plot_tipper(tf, path)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}

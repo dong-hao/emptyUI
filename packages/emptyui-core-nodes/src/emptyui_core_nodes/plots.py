@@ -97,7 +97,7 @@ class PlotTimeSeriesNode(Node):
                      fontweight="bold")
         fig.tight_layout(rect=(0, 0, 1, 0.96))
 
-        path = ctx.workspace / "plot_timeseries.png"
+        path = ctx.artifact_path("plot_timeseries", ".png")
         fig.savefig(path, dpi=DPI, bbox_inches="tight",
                     metadata={"Software": "emptyUI"})
         plt.close(fig)
@@ -150,7 +150,7 @@ class PlotSpectrogramNode(Node):
                      fontsize=10)
         fig.tight_layout()
 
-        path = ctx.workspace / f"plot_spectrogram_{channel}.png"
+        path = ctx.artifact_path(f"plot_spectrogram_{channel}", ".png")
         fig.savefig(path, dpi=DPI, bbox_inches="tight",
                     metadata={"Software": "emptyUI"})
         plt.close(fig)

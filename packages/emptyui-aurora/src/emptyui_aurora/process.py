@@ -269,7 +269,7 @@ class CoherenceSort(Node):
             mode=mode, trim=coherence_trim,
             periods_per_octave=periods_per_octave,
         )
-        path = ctx.workspace / "coherence_sort.json"
+        path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
         artifact = ctx.publish_artifact(path, kind="table")
         retained = sum(r["n_retained"] for r in rows)

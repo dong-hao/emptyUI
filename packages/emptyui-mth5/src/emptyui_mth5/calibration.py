@@ -37,14 +37,16 @@ def _default_unit(channel: str) -> str:
 def parse_fap(path) -> dict:
     """Parse a manufacturer FAP calibration file (``.chn`` / ``.def``).
 
-    Returns ``{"frequencies": np.ndarray, "channels": {name: (amplitudes,
-    phases_deg)}}``. The LEMI-417-era layout is a header line
-    ``'#FP' <NTF> <NCH> / NTF,NCH DR-TRANSFORMED (MOD,ARG)``, a channel-label
-    line (``#HX #HY #HZ #EX #EY``), then ``NTF`` rows of
-    ``freq mod arg mod arg ...`` (modulus, argument in degrees, per channel;
-    the first column is the frequency in Hz). The KMS-200 ``.def`` wrapper
-    carries the same FAP block — leading wrapper/comment lines are skipped.
-    Raises :class:`ValueError` when the FAP block cannot be located.
+    Returns ``{"channels": {name: {"frequencies": np.ndarray,
+    "amplitudes": np.ndarray, "phases_deg": np.ndarray}}}`` — one table per
+    channel (they share the frequency grid in the FAP layout, but each channel
+    carries its own copy so downstream code never mixes grids). The LEMI-417-era
+    layout is a header line ``'#FP' <NTF> <NCH> / NTF,NCH DR-TRANSFORMED
+    (MOD,ARG)``, a channel-label line (``#HX #HY #HZ #EX #EY``), then ``NTF``
+    rows of ``freq mod arg mod arg ...`` (modulus, argument in degrees, per
+    channel; the first column is the frequency in Hz). The KMS-200 ``.def``
+    wrapper carries the same FAP block — leading wrapper/comment lines are
+    skipped. Raises :class:`ValueError` when the FAP block cannot be located.
     """
     text = Path(path).read_text(encoding="utf-8", errors="replace")
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -92,12 +94,16 @@ def parse_fap(path) -> dict:
         )
 
     frequencies = np.asarray(freqs, dtype=float)
-    channels: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    channels: dict[str, dict[str, np.ndarray]] = {}
     for j, name in enumerate(labels):
         mods = np.asarray([r[1 + 2 * j] for r in rows], dtype=float)
         args = np.asarray([r[2 + 2 * j] for r in rows], dtype=float)
-        channels[name] = (mods, args)
-    return {"frequencies": frequencies, "channels": channels}
+        channels[name] = {
+            "frequencies": frequencies.copy(),
+            "amplitudes": mods,
+            "phases_deg": args,
+        }
+    return {"channels": channels}
 
 
 def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
@@ -113,14 +119,20 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
     """
     from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
 
-    freqs = np.asarray(rows["frequencies"], dtype=float)
     out: dict[str, object] = {}
-    for ch, (mods, args) in rows["channels"].items():
-        f, a, p = freqs, mods, args
+    for ch, table in rows["channels"].items():
+        f = np.asarray(table["frequencies"], dtype=float)
+        a = np.asarray(table["amplitudes"], dtype=float)
+        p = np.asarray(table["phases_deg"], dtype=float)
+        if not (f.size == a.size == p.size):
+            raise ValueError(
+                f"calibration channel '{ch}': frequencies/amplitudes/phases "
+                f"size mismatch ({f.size}/{a.size}/{p.size})"
+            )
         if extend_flat:
-            f = np.concatenate([[freqs[0] / 1e3], freqs])
-            a = np.concatenate([[mods[0]], mods])
-            p = np.concatenate([[0.0], args])
+            f = np.concatenate([[f[0] / 1e3], f])
+            a = np.concatenate([[a[0]], a])
+            p = np.concatenate([[0.0], p])
         unit = (units or {}).get(ch) or _default_unit(ch)
         fap = FrequencyResponseTableFilter(
             frequencies=f, amplitudes=a, phases=p,
@@ -134,25 +146,27 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
 
 
 def parse_json_calibration(path) -> dict:
-    """Parse an mt_io per-channel JSON calibration into FAP-style rows.
+    """Parse an mt_io per-channel JSON calibration into FAP-style tables.
 
     The mt_io JSON layout is ``{"Calibration": {"gain", "Freq": [...],
-    "Re": [...], "Im": [...]}}`` per channel key. Returns the same structure
+    "Re": [...], "Im": [...]}}`` per channel key. Each channel keeps its **own**
+    frequency grid (channels in one file may be tabulated on different grids —
+    sharing one grid silently corrupts the others). Returns the same structure
     as :func:`parse_fap` (phases in degrees, amplitude = |Re + i·Im|).
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    channels: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    freqs = None
+    channels: dict[str, dict[str, np.ndarray]] = {}
     for ch, payload in data.items():
         cal = payload.get("Calibration", payload)
         freq = np.asarray(cal["Freq"], dtype=float)
         re_ = np.asarray(cal["Re"], dtype=float)
         im_ = np.asarray(cal["Im"], dtype=float)
-        mods = np.hypot(re_, im_)
-        args = np.degrees(np.arctan2(im_, re_))
-        channels[ch] = (mods, args)
-        freqs = freq if freqs is None else freqs
-    return {"frequencies": freqs, "channels": channels}
+        channels[ch] = {
+            "frequencies": freq,
+            "amplitudes": np.hypot(re_, im_),
+            "phases_deg": np.degrees(np.arctan2(im_, re_)),
+        }
+    return {"channels": channels}
 
 
 def load_calibration(path, prefix: str = "cal",
@@ -195,7 +209,7 @@ def find_calibration_file(directory, station_id: str = "") -> Path | None:
     return candidates[0]
 
 
-def attach_filters(run, filters) -> object:
+def attach_filters(run, filters, strict: bool = True) -> object:
     """Attach per-channel filters to an mt_timeseries run.
 
     Registers the filter objects in ``run.filters`` and marks each channel's
@@ -203,19 +217,32 @@ def attach_filters(run, filters) -> object:
     ``RunTS.calibrate()`` applies them and the association survives an MTH5
     round trip (``from_runts`` / ``to_runts``). Returns the run.
 
+    With ``strict=True`` (default, used when archiving a run) a filter whose
+    channel is absent from the run is an error; with ``strict=False`` (used by
+    the Calibrate node at estimation time) it is skipped with a warning.
+
     Channels without a calibration filter (e.g. LEMI temperature channels)
     get a unity coefficient filter so ``RunTS.calibrate()`` passes them
     through without the "no filters / corrupt units" warnings.
     """
+    import logging
+
     from mt_metadata.timeseries.filters import CoefficientFilter
 
+    log = logging.getLogger("emptyui")
     run_filters = dict(run.filters)
     for ch, fap in filters.items():
         if ch not in run.dataset.data_vars:
-            raise ValueError(
-                f"calibration channel '{ch}' not present in the run "
-                f"(available: {list(run.dataset.data_vars)})"
+            if strict:
+                raise ValueError(
+                    f"calibration channel '{ch}' not present in the run "
+                    f"(available: {list(run.dataset.data_vars)})"
+                )
+            log.warning(
+                "calibration channel '%s' not present in the run %s — skipped",
+                ch, list(run.dataset.data_vars),
             )
+            continue
         run_filters[fap.name] = fap
         run.dataset[ch].attrs["filters"] = [
             {"applied_filter": {"name": fap.name, "applied": True}}]

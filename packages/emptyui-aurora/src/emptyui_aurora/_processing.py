@@ -523,6 +523,28 @@ def _check_remote_grid(ref_freq, local_freq, ref_time, local_time):
         )
 
 
+def _level_ref(ref_levels, level):
+    """Remote fc for one decimation level, failing loudly on a partial match.
+
+    ``ref_levels is None`` (nothing connected) is the documented self-reference
+    case and is passed through; but a multi-level remote container that lacks
+    the local fc's level would silently degrade those levels to a self-reference
+    (≈RME) — that is almost always a window/decimation mismatch between the
+    two Compute FC nodes, so it must be an error instead.
+    """
+    if ref_levels is None:
+        return None
+    if isinstance(ref_levels, dict):
+        if level not in ref_levels:
+            raise ValueError(
+                f"remote-reference fc has no decimation level {level} "
+                f"(has {sorted(ref_levels)}) — compute both stations' FCs "
+                "with the same decimation/window settings"
+            )
+        return ref_levels[level]
+    return ref_levels
+
+
 def _simple_coherence(x, y):
     """Pairwise coherence² between two complex series (band ensemble)."""
     denom = np.sum(np.abs(x) ** 2) * np.sum(np.abs(y) ** 2)
@@ -697,7 +719,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
     out_ref: dict[int, object] = {} if ref_levels is not None else None
     rows: list[dict] = []
     for level, fc in sorted(levels.items()):
-        ref = ref_levels.get(level) if isinstance(ref_levels, dict) else ref_levels
+        ref = _level_ref(ref_levels, level)
         l_out, r_out, level_rows = coherence_sort_fc(
             fc, ref, input_channels, output_channels,
             coherence_min=coherence_min, coherence_max=coherence_max,
@@ -1137,7 +1159,7 @@ def estimate_tf_levels(
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
     result = {}
     for level, fc in sorted(levels.items()):
-        ref_fc = ref_levels.get(level) if isinstance(ref_levels, dict) else ref_levels
+        ref_fc = _level_ref(ref_levels, level)
         periods, Z, Z_err = estimate_tf(
             fc, input_channels, output_channels,
             estimator_engine=estimator_engine,

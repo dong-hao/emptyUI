@@ -13,7 +13,14 @@ from emptyui_mth5.calibrate import Calibrate
 
 
 def test_calibrate_explicit_coefficient_filter(tmp_path: Path):
-    """A constant (coefficient) response is divided out of the signal."""
+    """A constant (coefficient) response is divided out of the signal —
+    via the RunTS.calibrate delegation (detrend/zero-pad handled internally,
+    exact for integer-cycle tones).
+
+    Tolerance note: mt_timeseries' recipe replaces the DC FFT bin with the
+    neighboring bin's magnitude (upstream FIXME), which injects a tiny DC
+    offset (~|X[1]|/n here); 3% covers that library convention.
+    """
     sr = 8.0
     n = 1024
     t = np.arange(n) / sr
@@ -26,9 +33,45 @@ def test_calibrate_explicit_coefficient_filter(tmp_path: Path):
     out = Calibrate().execute(ctx, ts, calibration=CoefficientFilter(gain=2.0))["data"]
 
     # measured = 2.0 * true -> removing the response recovers true = measured/2
-    np.testing.assert_allclose(out.channels["ex"], x / 2.0, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(out.channels["hx"], ts.channels["hx"] / 2.0, rtol=1e-6, atol=1e-6)
+    # (the explicit path now returns a RunTS for any input payload type)
+    np.testing.assert_allclose(out.ex.ts, x / 2.0, rtol=0.03, atol=0.03)
+    np.testing.assert_allclose(out.hx.ts, ts.channels["hx"] / 2.0, rtol=0.03, atol=0.03)
     assert out.sample_rate == sr
+
+
+def test_calibrate_dict_channel_match(tmp_path: Path, caplog):
+    """A per-channel dict payload: matched case-insensitively; keys matching
+    no channel are skipped with a warning and that channel passes through."""
+    import logging
+
+    sr = 8.0
+    n = 1024
+    t = np.arange(n) / sr
+    x = 3.0 * np.sin(2 * np.pi * 1.0 * t)
+    ts = TimeSeries(channels={"ex": x, "hx": x.copy()}, sample_rate=sr)
+
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        out = Calibrate().execute(
+            ctx, ts, calibration={"EX": CoefficientFilter(gain=2.0),
+                                  "hy": CoefficientFilter(gain=5.0)})["data"]
+    # EX (case-insensitive) was divided by 2 on ex; "hy" matched no channel
+    # (tolerance covers mt_timeseries' DC-bin convention, see above)
+    np.testing.assert_allclose(out.ex.ts, x / 2.0, rtol=0.03, atol=0.03)
+    np.testing.assert_allclose(out.hx.ts, x, rtol=0.03, atol=0.03)
+    assert any("hy" in r.message for r in caplog.records)
+
+
+def test_calibrate_dict_all_unmatched_raises(tmp_path: Path):
+    """No filter key matches any run channel -> clear error, not silence."""
+    ts = TimeSeries(channels={"ex": np.zeros(64)}, sample_rate=8.0)
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with pytest.raises(ValueError, match="no calibration filter matched"):
+        Calibrate().execute(ctx, ts, calibration={"bz": CoefficientFilter(gain=1.0)})
 
 
 def test_calibrate_requires_something(tmp_path: Path):

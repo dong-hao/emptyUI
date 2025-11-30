@@ -19,12 +19,26 @@ class RunContext:
         store: DataStore,
         progress_cb=None,
         logger: logging.Logger | None = None,
+        node_id: str = "",
     ) -> None:
         self.workspace = Path(workspace) if workspace is not None else None
         self.store = store
+        self.node_id = node_id or "node"
         self._progress_cb = progress_cb
         self.logger = logger or logging.getLogger("emptyui")
         self.published: list[dict[str, Any]] = []
+
+    def artifact_path(self, stem: str, suffix: str) -> Path:
+        """Workspace artifact filename unique per node instance.
+
+        Display/diagnostic nodes must not share fixed filenames: two
+        instances of the same node type in one run would otherwise overwrite
+        each other's files (artifacts reference paths, so earlier viewers
+        would silently show the later figure).
+        """
+        return (self.workspace / f"{stem}_{self.node_id}{suffix}"
+                if self.workspace is not None
+                else Path(f"{stem}_{self.node_id}{suffix}"))
 
     def progress(self, frac: float, message: str = "") -> None:
         frac = max(0.0, min(1.0, frac))

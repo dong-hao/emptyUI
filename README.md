@@ -206,10 +206,34 @@ npm run test:headed         # watch the browser while it runs
     (full-stack — see the Browser end-to-end tests section) cover the app
     boot, nomenclature cascade, the Load CSV → Plot → Preview pipeline,
     artifact download, and run cancellation.
+  - **Correctness batch ("Batch A", delivered 2026-09-07)**: remote-reference
+    fc containers missing a decimation level now error instead of silently
+    degrading to a self-reference; JSON calibrations keep per-channel
+    frequency grids and unmatched filter keys warn (case-insensitive channel
+    match) instead of silently passing through; artifact/diagnostic filenames
+    are node-instance-unique (`ctx.artifact_path`) so same-type display nodes
+    no longer overwrite each other's figures; `Calibrate` with explicit
+    filters delegates to `RunTS.calibrate` (proper detrend/zero-mean/
+    zero-pad/windowing, no bare-FFT circular-convolution artifacts).
 
 ### Remaining work (see DESIGN.md §11/§12/§16)
 
 - **M3 — next tasks (planned, independent)**:
+  - **Robustness batch ("Batch B", planned)** — validation & data-quality
+    guards, no design changes:
+    - Reject fan-in duplicates: multiple edges into one input port currently
+      silently overwrite (last wins) — add a `validate_workflow` error.
+    - Legacy mth5 API: route `SpectraToFCGroup`/`MergeRuns` through
+      `_resolve_survey` (modern `surveys_group` + legacy layouts) like
+      `ExtractRun` does; note `Merge Runs`' `selection` mode has no live
+      producer (M4-deferred).
+    - `Load CSV` edge cases: time-column-only file errors cleanly, ISO
+      datetime time columns derive `start_datetime` + rate, NaN check with a
+      clear error at `Compute FC`/`Bandpass` entry.
+    - Tipper plot ylim: auto-expand above [-1, 1] when data exceeds it
+      (strong 2D/3D contrasts produce |T| > 1 legitimately).
+    - Doc note: the coherence sort is a per-window broadband (bin-ensemble)
+      coherence heuristic, not EMTF's window-ensemble per frequency (M4 item).
   - **Instrument calibration framework + LEMI support** — **done** (DESIGN.md
     §16.1): `emptyui-mth5/calibration.py` parses manufacturer FAP files
     (`.chn`/`.def` MOD/ARG, and the mt_io JSON format) into mt_metadata
