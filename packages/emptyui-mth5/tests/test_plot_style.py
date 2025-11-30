@@ -223,21 +223,6 @@ def test_plot_nodes_render_via_workspace(tmp_path: Path):
     assert Path(out["plot"]["path"]).exists()
 
 
-def test_plot_tipper_requires_tipper(tmp_path: Path):
-    """A 2x2 (impedance-only) TF has no tipper -> clear error. (Error
-    surface — moved to test_mth5_errors.py by the test reorg.)"""
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    periods = np.array([2.0, 4.0])
-    Z = np.zeros((2, 2, 2), dtype=complex)
-    Z[:, 0, 0] = 1 + 0j
-    Z[:, 1, 1] = 2 + 0j
-    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
-                  channel_nomenclature="lemi12")
-    assert not tf.has_tipper()
-    with pytest.raises(ValueError, match="no tipper"):
-        PlotTipper().execute(ctx, tf)
-
-
 def test_high_dpi_saved(tmp_path: Path):
     tf = _impedance_tf()
     fig, path = _render(tf, "off-diagonal", tmp_path)

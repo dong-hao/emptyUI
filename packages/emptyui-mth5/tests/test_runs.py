@@ -1,10 +1,10 @@
-"""Extract Run node: id resolution + fallbacks."""
+"""Extract Run node: id resolution + fallbacks. Error surfaces live in
+test_errors.py."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_mth5.runs import (
@@ -13,18 +13,6 @@ from emptyui_mth5.runs import (
     _resolve_station,
     _resolve_survey,
 )
-from mth5.mth5 import MTH5
-
-
-@pytest.fixture()
-def archive(test12rr_path: Path):
-    import warnings
-
-    warnings.filterwarnings("ignore")
-    m = MTH5()
-    m.open_mth5(str(test12rr_path), "r")
-    yield m
-    m.close_mth5()
 
 
 def test_empty_params_fall_back_to_first_run(archive, tmp_path: Path):
@@ -42,17 +30,6 @@ def test_explicit_ids(archive):
     st = _resolve_station(s, s.stations_group.groups_list[0])
     r = _resolve_run(st, st.run_summary.iloc[0]["id"])
     assert r.metadata.id
-
-
-def test_bad_ids_raise_clear_errors(archive):
-    with pytest.raises(ValueError, match="not in archive"):
-        _resolve_survey(archive, "no_such_survey")
-    s = _resolve_survey(archive, "")
-    with pytest.raises(ValueError, match="not in survey"):
-        _resolve_station(s, "no_such_station")
-    st = _resolve_station(s, "")
-    with pytest.raises(ValueError, match="not in station"):
-        _resolve_run(st, "no_such_run")
 
 
 def _lemi_runts(comps=("bx", "by", "bz", "e1", "e2")):

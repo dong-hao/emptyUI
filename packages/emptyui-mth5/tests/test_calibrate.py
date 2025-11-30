@@ -1,11 +1,11 @@
-"""Tests for the Calibrate node (instrument response removal)."""
+"""Tests for the Calibrate node (instrument response removal). Error
+surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
-import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_core_nodes.types import TimeSeries
@@ -62,24 +62,6 @@ def test_calibrate_dict_channel_match(tmp_path: Path, caplog):
     np.testing.assert_allclose(out.ex.ts, x / 2.0, rtol=0.03, atol=0.03)
     np.testing.assert_allclose(out.hx.ts, x, rtol=0.03, atol=0.03)
     assert any("hy" in r.message for r in caplog.records)
-
-
-def test_calibrate_dict_all_unmatched_raises(tmp_path: Path):
-    """No filter key matches any run channel -> clear error, not silence."""
-    ts = TimeSeries(channels={"ex": np.zeros(64)}, sample_rate=8.0)
-    from mt_metadata.timeseries.filters import CoefficientFilter
-
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    with pytest.raises(ValueError, match="no calibration filter matched"):
-        Calibrate().execute(ctx, ts, calibration={"bz": CoefficientFilter(gain=1.0)})
-
-
-def test_calibrate_requires_something(tmp_path: Path):
-    """A core TimeSeries with no calibration input cannot be calibrated."""
-    ts = TimeSeries(channels={"ex": np.zeros(64)}, sample_rate=8.0)
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    with pytest.raises(TypeError):
-        Calibrate().execute(ctx, ts, calibration=None)
 
 
 def test_calibrate_mth5_runts_path(test12rr_path: Path, tmp_path: Path):

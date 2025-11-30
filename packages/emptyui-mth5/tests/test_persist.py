@@ -1,12 +1,11 @@
-"""FC persistence round-trip through the workspace MTH5 (DESIGN.md §14 Phase 1)."""
+"""FC persistence round-trip through the workspace MTH5 (DESIGN.md §14
+Phase 1). Error surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
-import xarray as xr
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import compute_fc
@@ -18,38 +17,9 @@ from emptyui_mth5.persist import (
 )
 
 
-class _Meta:
-    def __init__(self, id: str):
-        self.id = id
-
-
-class _FakeRunTS:
-    """Duck-typed like an mth5 RunTS, with a datetime start + metadata ids."""
-
-    sample_rate = 8.0
-
-    def __init__(self):
-        n = 8192
-        t = np.arange(n) / self.sample_rate
-        rng = np.random.default_rng(0)
-        self.start = pd.Timestamp("2023-01-01T00:00:00")
-        self.survey_metadata = _Meta("ws")
-        self.station_metadata = _Meta("local")
-        self.run_metadata = _Meta("run1")
-        self.dataset = xr.Dataset(
-            {
-                "ex": ("time", rng.standard_normal(n)),
-                "ey": ("time", rng.standard_normal(n)),
-                "hx": ("time", rng.standard_normal(n)),
-                "hy": ("time", rng.standard_normal(n)),
-            },
-            coords={"time": t},
-        )
-
-
-def test_fc_persist_roundtrip(tmp_path: Path):
+def test_fc_persist_roundtrip(tmp_path: Path, fake_runts):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    runts = _FakeRunTS()
+    runts = fake_runts
 
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
@@ -74,28 +44,12 @@ def test_fc_persist_roundtrip(tmp_path: Path):
     )
 
 
-def test_persist_requires_datetime_time(tmp_path: Path):
-    """Persisting an fc with a float (relative) time axis must fail clearly."""
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    runts = _FakeRunTS()
-    # drop the datetime start so compute_fc produces a float time axis
-    runts.start = 0.0
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
-    assert "datetime64" not in str(fc.time.dtype)
-
-    import pytest
-
-    with pytest.raises(ValueError):
-        persist_fc_level(ctx, fc, 0, fc.attrs["sample_rate"])
-
-
-def test_persist_multiple_decimation_levels(tmp_path: Path):
+def test_persist_multiple_decimation_levels(tmp_path: Path, fake_runts):
     """ComputeFC's multi-level fc container persists each level separately."""
     from emptyui_aurora._processing import compute_fc_levels
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    runts = _FakeRunTS()
+    runts = fake_runts
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=1, factor=4, num_samples_window=128,
                                overlap=0.5, window_type="hamming")
@@ -115,7 +69,7 @@ def test_persist_multiple_decimation_levels(tmp_path: Path):
         )
 
 
-def test_read_back_fc_feeds_estimate_tf(tmp_path: Path):
+def test_read_back_fc_feeds_estimate_tf(tmp_path: Path, fake_runts):
     """The full FC round-trip through an mth5 archive must produce an fc that
     EstimateTF can consume: attrs enriched (sample_rate, channel roles via the
     nomenclature) and the (time, frequency) layout normalized."""
@@ -124,7 +78,7 @@ def test_read_back_fc_feeds_estimate_tf(tmp_path: Path):
     from mth5.mth5 import MTH5
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    runts = _FakeRunTS()
+    runts = fake_runts
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
 

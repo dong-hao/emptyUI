@@ -1,3 +1,5 @@
+"""Server API — happy path (error surfaces in test_errors.py)."""
+
 import time
 from pathlib import Path
 
@@ -45,15 +47,6 @@ def test_run_echo_workflow(client):
     assert statuses == {"n1": "done"}
 
 
-def test_invalid_workflow_returns_422(client):
-    workflow = {
-        "nodes": [{"id": "n1", "type": "core.util.nope"}],
-        "edges": [],
-    }
-    resp = client.post("/api/runs", json={"workflow": workflow})
-    assert resp.status_code == 422
-
-
 def test_cancel_run():
     class Slow(Node):
         type = "test.slow"
@@ -78,10 +71,6 @@ def test_cancel_run():
     assert detail["status"] == "cancelled"
     finished = [e for e in detail["events"] if e["event"] == "run_finished"]
     assert finished and finished[-1]["status"] == "cancelled"
-
-
-def test_cancel_unknown_run_404(client):
-    assert client.post("/api/runs/nope/cancel").status_code == 404
 
 
 def test_artifact_download_and_preview():

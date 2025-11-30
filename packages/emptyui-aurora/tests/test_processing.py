@@ -1,4 +1,5 @@
-"""Synthetic unit tests for the aurora processing core (no external data)."""
+"""Synthetic unit tests for the aurora processing core (no external data).
+Error surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
@@ -266,57 +267,6 @@ def test_build_tf_phoenix123_nomenclature():
     assert np.any(np.abs(arr.sel(output=tf.ey, input=tf.hy).values) > 0)
 
 
-def test_estimate_tf_accepts_mth5_read_fc_layout():
-    """FCs read back from an mth5 archive have a (time, frequency) layout and
-    no attrs; the band loop must transpose them and still estimate."""
-    import xarray as xr
-    from emptyui_aurora._processing import estimate_tf
-
-    sr = 8.0
-    n = 8192
-    t = np.arange(n) / sr
-    rng = np.random.default_rng(3)
-    hx = rng.standard_normal(n)
-    hy = rng.standard_normal(n)
-    ex = 1.0 * hx + 3.0 * hy + 0.1 * rng.standard_normal(n)
-    ey = -1.0 * hx + 4.0 * hy + 0.1 * rng.standard_normal(n)
-
-    class FakeRunTS:
-        sample_rate = sr
-
-        def __init__(self):
-            self.dataset = xr.Dataset(
-                {"ex": ("time", ex), "ey": ("time", ey),
-                 "hx": ("time", hx), "hy": ("time", hy)},
-                coords={"time": t},
-            )
-
-    fc = compute_fc(FakeRunTS(), ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=128, overlap=0.5, window_type="hamming")
-    # mth5 stores (time, frequency); emulate the read-back layout + bare attrs
-    mth5_layout = fc.transpose("time", "frequency").copy()
-    mth5_layout.attrs = {}
-    periods, Z, _ = estimate_tf(mth5_layout, ["hx", "hy"], ["ex", "ey"],
-                             estimator_engine="Least Squares", periods_per_octave=8)
-    assert periods.size > 1
-    assert np.all(np.isfinite(Z))
-    assert np.any(np.abs(Z) > 0)
-
-
-def test_remote_reference_grid_mismatch_raises_clear_error():
-    """A remote-reference fc with a different window (frequency grid) must fail
-    with a clear message instead of aurora's bare Exception."""
-    runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
-    ref = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
-                     window_length_s=512, overlap=0.5, window_type="hamming")
-    with pytest.raises(ValueError, match="frequency grid"):
-        estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
-                    estimator_engine="Robust", remote_reference=True,
-                    ref_fc=ref, periods_per_octave=8)
-
-
 def test_build_tf_returns_mt_metadata_tf():
     runts = _synthetic_runts()
     fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
@@ -358,16 +308,6 @@ def test_legacy_estimator_engine_names_still_accepted():
                            estimator_engine=engine, remote_reference=rr,
                            periods_per_octave=8)
         assert np.all(np.isfinite(Z))
-
-
-def test_ls_remote_reference_rejected():
-    """There is no least-squares + remote-reference path by design."""
-    runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
-    with pytest.raises(ValueError):
-        estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
-                    estimator_engine="Least Squares", remote_reference=True)
 
 
 def test_remote_reference_uses_duplicated_dummy_station():
@@ -539,34 +479,6 @@ def test_compute_fc_auto_standard_names():
     assert fc.attrs["channel_nomenclature"] == "default"
 
 
-def test_compute_fc_explicit_missing_output_dropped_with_warning():
-    """An explicitly requested output channel missing from the data is dropped
-    (best-effort tipper extension), not an error."""
-    rng = np.random.default_rng(7)
-    n = 4096
-    runts = _runts_with_channels({
-        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
-        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
-    })
-    fc = compute_fc(runts, "bx,by", "e1,e2,bz",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
-    assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
-    assert fc.attrs["output_channels"] == "e1,e2"
-
-
-def test_compute_fc_explicit_missing_input_errors():
-    """A missing INPUT channel stays a hard error."""
-    rng = np.random.default_rng(8)
-    n = 4096
-    runts = _runts_with_channels({
-        "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
-        "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
-    })
-    with pytest.raises(ValueError, match="input"):
-        compute_fc(runts, "hx,hy", "e1,e2",
-                   window_length_s=128, overlap=0.5, window_type="hamming")
-
-
 def test_compute_fc_auto_case_insensitive_channel_names():
     """CSV-style uppercase channel names (Ex,Ey,Hx,Hy) resolve case-
     insensitively; the fc uses the exact names present in the data."""
@@ -582,3 +494,4 @@ def test_compute_fc_auto_case_insensitive_channel_names():
     assert fc.attrs["input_channels"] == "Hx,Hy"
     assert fc.attrs["output_channels"] == "Ex,Ey"
     assert fc.attrs["channel_nomenclature"] == "default"
+

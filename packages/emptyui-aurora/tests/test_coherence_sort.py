@@ -1,5 +1,5 @@
-"""Coherence sort (EMTF-style) tests: weighting bounds, multiple coherence,
-single/two-FC semantics, trimming, and estimate_tf non-finite handling."""
+"""Coherence sort (EMTF-style) tests: single/two-FC semantics, trimming and
+diagnostics. Error/boundary surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
@@ -7,31 +7,14 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import (
-    _coherence_weight,
     _multiple_coherence,
     coherence_sort_fc,
     estimate_tf,
 )
-
-
-def test_coherence_weight_bounds():
-    """Weights honour the bounds and mode; off mode is always 1."""
-    assert _coherence_weight(0.5, 0.25, 0.98, "weight") == 1.0
-    assert _coherence_weight(0.5, 0.25, 0.98, "drop") == 1.0
-    assert _coherence_weight(0.5, 0.25, 0.98, "off") == 1.0
-    assert _coherence_weight(0.10, 0.25, 0.98, "drop") == 0.0
-    assert _coherence_weight(0.99, 0.25, 0.98, "drop") == 0.0
-    assert 0.0 < _coherence_weight(0.22, 0.25, 0.98, "weight") < 1.0
-    assert 0.0 < _coherence_weight(0.99, 0.25, 0.98, "weight") < 1.0
-    # far outside -> fully down-weighted (coh² is capped at 1, so the upper
-    # ramp only reaches 0 for max + ramp >= 1)
-    assert _coherence_weight(0.0, 0.25, 0.98, "weight") == 0.0
-    assert 0.0 < _coherence_weight(1.0, 0.25, 0.98, "weight") < 1.0
 
 
 def test_multiple_coherence_known_values():
@@ -144,13 +127,6 @@ def test_two_fc_mode_conservative_min():
                           np.isnan(r_out["hx"].values))
 
 
-def test_grid_mismatch_errors():
-    local = synthetic_fc(synthetic_runts(synthetic_source(9), seed=9), ["hx", "hy"], ["ex", "ey"])
-    remote = local.isel(time=slice(None, -1))
-    with pytest.raises(ValueError, match="different time grid"):
-        coherence_sort_fc(local, remote, ["hx", "hy"], ["ex", "ey"])
-
-
 def test_trim_removes_noisy_band():
     """Band-edge trimming NaNs the whole band when its retained-window median
     coherence stays below the lower bound."""
@@ -199,13 +175,3 @@ def test_node_execute_returns_table(tmp_path: Path):
     # are NaN, exactly like drop) — the good windows must survive
     assert np.isfinite(res["fc"][0]["ex"].values).any()
 
-
-def test_estimate_tf_skips_nonfinite_rows():
-    """estimate_tf handles NaN FC rows (generic robustness, DESIGN 16.2)."""
-    runts = synthetic_runts(synthetic_source(12), seed=12)
-    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
-    fc = fc.copy(deep=True)
-    fc["ex"].values[:, 0:5] = np.nan
-    _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
-                          periods_per_octave=8)
-    assert np.all(np.isfinite(Z))

@@ -1,4 +1,5 @@
 """End-to-end remote reference: two-station alignment + decimated RME_RR.
+Error surfaces live in test_errors.py.
 
 Two parts:
 - Synthetic two-station test (always runs, CI-safe): a common source field
@@ -32,7 +33,6 @@ from emptyui.schema import Workflow
 from emptyui.store import DataStore
 from emptyui_aurora._processing import (
     compute_fc_levels,
-    estimate_tf,
     estimate_tf_levels,
     merge_tf_levels,
 )
@@ -90,20 +90,6 @@ def test_align_runs_finds_overlap_and_normalizes(tmp_path):
     assert list(b.dataset.data_vars) == ["bx", "by"]
 
 
-def test_align_runs_no_overlap_errors(tmp_path):
-    a = _Run({"bx": np.zeros(64)}, 8.0, start_datetime="2024-01-01T00:00:00")
-    b = _Run({"bx": np.zeros(64)}, 8.0, start_datetime="2024-01-02T00:00:00")
-    with pytest.raises(ValueError, match="do not overlap"):
-        AlignRuns().execute(_ctx(tmp_path), a, b)
-
-
-def test_align_runs_sample_rate_mismatch_errors(tmp_path):
-    a = _Run({"bx": np.zeros(64)}, 8.0, start_datetime="2024-01-01T00:00:00")
-    b = _Run({"bx": np.zeros(64)}, 1.0, start_datetime="2024-01-01T00:00:00")
-    with pytest.raises(ValueError, match="sample rates"):
-        AlignRuns().execute(_ctx(tmp_path), a, b)
-
-
 def test_remote_reference_end_to_end_decimated(tmp_path):
     """Align -> multi-level (decimated) FCs on both stations -> RME_RR
     recovers the true impedance. This is the gap being closed: a decimated
@@ -144,66 +130,6 @@ def test_remote_reference_end_to_end_decimated(tmp_path):
     assert np.median(Z[ok, 0, 1].real) == pytest.approx(3.0, abs=0.5)
     assert np.median(Z[ok, 1, 0].real) == pytest.approx(-1.0, abs=0.5)
     assert np.median(Z[ok, 1, 1].real) == pytest.approx(4.0, abs=0.5)
-
-
-def test_remote_reference_partial_ref_container_errors(tmp_path):
-    """A remote fc container missing a decimation level must error, not
-    silently degrade that level to a self-reference (≈RME)."""
-    local, remote = _synthetic_stations()
-    ins, outs = ["bx", "by"], ["e1", "e2"]
-    # align first so the time grids match (same as the end-to-end test); the
-    # point here is the *level* mismatch, not misalignment
-    aligned = AlignRuns().execute(_ctx(tmp_path), local, remote)
-    a, b = aligned["data1"], aligned["data2"]
-    fc_kwargs = {"num_decimations": 1, "num_samples_window": 256,
-                 "overlap": 0.5, "window_type": "hamming", "magnetic_unit": "h"}
-    levels_a = compute_fc_levels(a, ins, outs, **fc_kwargs)
-    levels_b = compute_fc_levels(b, ins, "", **fc_kwargs)
-    del levels_b[1]  # simulate a Compute FC with fewer decimation levels
-    with pytest.raises(ValueError, match="no decimation level 1"):
-        estimate_tf_levels(levels_a, ins, outs, estimator_engine="Robust",
-                           remote_reference=True, ref_levels=levels_b)
-    # nothing connected at all keeps the documented self-reference behavior
-    per = estimate_tf_levels(levels_a, ins, outs, estimator_engine="Robust",
-                             remote_reference=True, ref_levels=None)
-    assert np.all(np.isfinite(per[0]["Z"]))
-
-
-def test_coherence_sort_partial_ref_container_errors(tmp_path):
-    """Same rule for the coherence-sort two-FC mode."""
-    from emptyui_aurora._processing import coherence_sort_fcs
-    local, _ = _synthetic_stations()
-    ins, outs = ["bx", "by"], ["e1", "e2"]
-    fc_kwargs = {"num_decimations": 1, "num_samples_window": 256,
-                 "overlap": 0.5, "window_type": "hamming", "magnetic_unit": "h"}
-    levels_a = compute_fc_levels(local, ins, outs, **fc_kwargs)
-    # dummy remote: duplicated data -> identical grids per level
-    levels_b = compute_fc_levels(local, ins, "", **fc_kwargs)
-    del levels_b[1]
-    with pytest.raises(ValueError, match="no decimation level 1"):
-        coherence_sort_fcs(levels_a, levels_b, ins, outs)
-
-
-def test_remote_reference_unaligned_time_grid_errors(tmp_path):
-    """FCs with identical frequencies but different window (time) grids must
-    fail with a clear error — the runs were not aligned."""
-    local, _ = _synthetic_stations()
-    shifted = _Run({
-        "bx": local.dataset["bx"].values[:-320],
-        "by": local.dataset["by"].values[:-320],
-        "e1": local.dataset["e1"].values[:-320],
-        "e2": local.dataset["e2"].values[:-320],
-    }, local.sample_rate, start_datetime="2024-01-01T00:00:40")
-    fc = compute_fc_levels(local, ["bx", "by"], ["e1", "e2"],
-                           num_samples_window=256, overlap=0.5,
-                           window_type="hamming")[0]
-    ref = compute_fc_levels(shifted, ["bx", "by"], ["e1", "e2"],
-                            num_samples_window=256, overlap=0.5,
-                            window_type="hamming")[0]
-    with pytest.raises(ValueError, match="time grid"):
-        estimate_tf(fc, ["bx", "by"], ["e1", "e2"],
-                    estimator_engine="Robust", remote_reference=True,
-                    ref_fc=ref, periods_per_octave=4)
 
 
 @pytest.mark.skipif(

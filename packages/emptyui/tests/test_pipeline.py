@@ -1,4 +1,5 @@
-"""End-to-end pipeline tests: load_csv → bandpass → plots (M1)."""
+"""End-to-end pipeline tests: load_csv → bandpass → plots (M1). Error
+surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
@@ -120,15 +121,3 @@ def test_bandpass_attenuates_low_frequency(client, synthetic_csv):
     assert abs(filt.mean()) < abs(raw.mean()) / 10
     assert filt.shape == raw.shape
 
-
-def test_load_csv_missing_file_fails_cleanly(client):
-    workflow = {
-        "nodes": [{"id": "n1", "type": "core.io.load_csv",
-                   "params": {"path": "/nonexistent.csv"}}],
-        "edges": [],
-    }
-    body = _run(client, workflow)
-    assert body["status"] == "failed"
-    err = next(e for e in body["events"]
-               if e["event"] == "node_status" and e["status"] == "error")
-    assert "CSV not found" in err["error"]

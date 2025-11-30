@@ -1,9 +1,11 @@
+"""Executor — happy path + cancellation feature (error surfaces in test_errors.py)."""
+
 from __future__ import annotations
 
 import threading
 import time
 
-from emptyui.executor import ExecutionError, Executor
+from emptyui.executor import Executor
 from emptyui.registry import Registry
 from emptyui.schema import Edge, Workflow, WorkflowNode
 
@@ -54,57 +56,6 @@ def test_execution_data_flows_through():
     assert final_statuses == {"n1": "done", "n2": "done"}
     finished = next(e for e in events if e["event"] == "run_finished")
     assert finished["status"] == "completed"
-
-
-def test_execution_error_surfaced():
-    from emptyui import Input, Node
-
-    class Boom(Node):
-        type = "test.boom"
-        inputs = (Input("data", "ts.run"),)
-
-        def execute(self, ctx, data):
-            raise ValueError("boom")
-
-    reg = _registry()
-    reg.add(Boom)
-    wf = Workflow(
-        nodes=[
-            WorkflowNode(id="n1", type="test.source"),
-            WorkflowNode(id="n2", type="test.boom"),
-        ],
-        edges=[Edge(id="e1", source="n1", source_port="data", target="n2", target_port="data")],
-    )
-    try:
-        Executor(reg).run(wf, emit=lambda e: None)
-        raised = False
-    except ExecutionError as exc:
-        raised = True
-        assert exc.node_id == "n2"
-        assert isinstance(exc.original, ValueError)
-    assert raised
-
-
-def test_execution_cancelled_before_start():
-    reg = _registry()
-    ev = threading.Event()
-    ev.set()
-    events = []
-    wf = Workflow(
-        nodes=[
-            WorkflowNode(id="n1", type="test.source"),
-            WorkflowNode(id="n2", type="test.scale", params={"factor": 10.0}),
-        ],
-        edges=[Edge(id="e1", source="n1", source_port="data", target="n2", target_port="data")],
-    )
-    summary = Executor(reg).run(wf, emit=events.append, cancel_event=ev)
-    assert summary["status"] == "cancelled"
-    finished = next(e for e in events if e["event"] == "run_finished")
-    assert finished["status"] == "cancelled"
-    # no node ran
-    assert not any(
-        e["event"] == "node_status" and e["status"] == "running" for e in events
-    )
 
 
 def test_execution_cancelled_mid_run():

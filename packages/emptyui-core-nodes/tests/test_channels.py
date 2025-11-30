@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_core_nodes._channels import (
@@ -43,12 +42,6 @@ def test_resolve_standard_names_through_phoenix_nomenclature():
     assert infer_keyword(list(ts.channels)) == "phoenix123"
     assert resolve_channels(list(ts.channels), "hx,hy") == ["h1", "h2"]
     assert resolve_channels(list(ts.channels), "ex,ey,hz") == ["e1", "e2", "h3"]
-
-
-def test_resolve_unknown_channel_raises():
-    ts = _ts({"Ex": np.zeros(16), "Ey": np.zeros(16)})
-    with pytest.raises(ValueError, match="not in data"):
-        resolve_channels(list(ts.channels), "nope")
 
 
 def test_auto_channel_prefers_electric():
