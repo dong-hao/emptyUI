@@ -12,6 +12,7 @@ from .types import TimeSeries, coerce_run, ensure_finite
 class Bandpass(Node):
     type = "core.filter.bandpass"
     title = "Bandpass Filter"
+    tooltip = "Zero-phase Butterworth low/high/band-pass filter on all channels."
     description = "Zero-phase Butterworth bandpass (filtfilt) on all channels."
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series"),)
@@ -70,6 +71,7 @@ class Bandpass(Node):
 class Detrend(Node):
     type = "core.filter.detrend"
     title = "Detrend"
+    tooltip = "Remove the DC mean or a linear trend from each channel."
     description = (
         "Remove the DC baseline / trend from each channel. 'mean' subtracts "
         "the channel mean (removes the absolute-field DC offset of fluxgate "

@@ -18,6 +18,7 @@ from .plotting import plot_impedance_response, plot_tipper
 class PlotAppResPhase(Node):
     type = "mth5.plot.appres_phase"
     title = "Plot AppRes & Phase"
+    tooltip = "Plot apparent resistivity and phase vs period from a transfer function."
     description = (
         "Apparent resistivity (top) and phase (bottom) vs period for the "
         "four impedance components, derived from a transfer function. "
@@ -45,6 +46,7 @@ class PlotAppResPhase(Node):
 class PlotTipper(Node):
     type = "mth5.plot.tipper"
     title = "Plot Tipper"
+    tooltip = "Plot the geomagnetic transfer function (tipper) real & imaginary parts vs period."
     description = (
         "Geomagnetic transfer function (tipper) real and imaginary parts vs "
         "period for Tzx and Tzy, derived from a transfer function that "

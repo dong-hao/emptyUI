@@ -72,6 +72,7 @@ _NOMENCLATURE_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
 class ComputeFC(Node):
     type = "aurora.process.compute_fc"
     title = "Compute FC"
+    tooltip = "Windowed STFT: time series to Fourier coefficients over cascading decimation levels."
     description = (
         "Windowed STFT to Fourier coefficients (fc) over N cascading "
         "decimation levels (constant window in samples; sample rate halves by "
@@ -205,6 +206,7 @@ def _fc_io_channels(fc):
 class CoherenceSort(Node):
     type = "aurora.process.coherence_sort"
     title = "Coherence Sort"
+    tooltip = "Down-weight or drop low-coherence FC windows before TF estimation."
     description = (
         "EMTF-style coherence sort: down-weight (or drop) Fourier-coefficient "
         "windows whose per-window multiple coherence falls outside "
@@ -293,6 +295,7 @@ class CoherenceSort(Node):
 class EstimateTF(Node):
     type = "aurora.process.estimate_tf"
     title = "Estimate TF"
+    tooltip = "Estimate the impedance/tipper transfer function from Fourier coefficients (OLS or robust, optional remote reference)."
     description = (
         "Estimate a transfer function from Fourier coefficients, over every "
         "decimation level of the fc, and merge them into one broadband tf. "
@@ -386,6 +389,7 @@ class EstimateTF(Node):
 class MergeTFLevels(Node):
     type = "aurora.process.merge_tf_levels"
     title = "Merge TF Levels"
+    tooltip = "Merge per-decimation-level TFs into one broadband transfer function."
     description = (
         "Merge per-decimation-level TFs (the 'tf levels' output of Estimate TF) "
         "into a single broadband transfer function, resolving duplicate periods."

@@ -17,6 +17,7 @@ from .runs import _resolve_run, _resolve_station, _resolve_survey
 class MergeRuns(Node):
     type = "mth5.runs.merge"
     title = "Merge Runs"
+    tooltip = "Combine several acquisition runs for a single TF estimate."
     description = (
         "Combine multiple runs for a single TF estimate. FC-level mode keeps "
         "multiple rows in the KernelDataset so aurora concatenates STFTs (no "

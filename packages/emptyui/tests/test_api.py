@@ -53,3 +53,43 @@ def test_port_compatibility_rules():
     assert port_type_compatible(
         "ts.channel", Input("a", "ts.run", accepts=("ts.channel",))
     )
+
+
+def test_manifest_tooltip_and_hidden():
+    """Hover protocol (DESIGN.md §4): explicit tooltip wins; else the first
+    sentence of the description; hidden flags utility/test nodes."""
+
+    class Explicit(Node):
+        type = "test.tooltip_explicit"
+        tooltip = "One-sentence tip."
+        description = "One-sentence tip. Long tedious details follow here."
+
+    class Derived(Node):
+        type = "test.tooltip_derived"
+        description = (
+            "First sentence is the tip. Second sentence has the long and "
+            "tedious details that belong in the properties panel."
+        )
+
+    m = Explicit().manifest()
+    assert m["tooltip"] == "One-sentence tip."
+    assert m["hidden"] is False
+
+    m2 = Derived().manifest()
+    assert m2["tooltip"] == "First sentence is the tip."
+
+    class Utility(Node):
+        type = "test.utility"
+        hidden = True
+
+    assert Utility().manifest()["hidden"] is True
+
+
+def test_first_sentence_fallbacks():
+    from emptyui.api import first_sentence
+
+    assert first_sentence("") == ""
+    assert first_sentence("No terminator here") == "No terminator here"
+    long = "word " * 50
+    out = first_sentence(long)
+    assert out.endswith("…") and len(out) <= 140

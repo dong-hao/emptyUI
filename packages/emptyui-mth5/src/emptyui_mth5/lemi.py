@@ -11,6 +11,7 @@ from emptyui import Node, Output, Param
 class LoadLemi(Node):
     type = "mth5.io.lemi"
     title = "Load LEMI-424"
+    tooltip = "Convert raw LEMI-424 .INF/.TXT data into an MTH5 archive and open it."
     description = (
         "Convert raw LEMI-424 long-period data (.INF/.TXT) into an MTH5 "
         "archive and open it as the data source. The channel nomenclature "

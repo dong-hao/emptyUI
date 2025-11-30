@@ -56,6 +56,7 @@ def _plot_title(data: TimeSeries, what: str) -> str:
 class PlotTimeSeriesNode(Node):
     type = "core.plot.timeseries"
     title = "Plot Time Series"
+    tooltip = "Plot the (stacked) channel time series as a PNG figure."
     description = "Stacked channel time-domain plot."
     category = "Display"
     inputs = (Input("data", "ts.run", label="time series"),)
@@ -108,6 +109,7 @@ class PlotTimeSeriesNode(Node):
 class PlotSpectrogramNode(Node):
     type = "core.plot.spectrogram"
     title = "Plot Spectrogram"
+    tooltip = "Plot an STFT spectrogram of one channel as a PNG figure."
     description = "STFT spectrogram of one channel."
     category = "Display"
     inputs = (Input("data", "ts.run", label="time series"),)

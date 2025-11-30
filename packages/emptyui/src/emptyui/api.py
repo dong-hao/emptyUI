@@ -102,6 +102,22 @@ class Param:
         }
 
 
+def first_sentence(text: str, limit: int = 140) -> str:
+    """First sentence of a description (tooltip fallback, DESIGN.md §4).
+
+    Whitespace-normalized, cut at the first sentence terminator; a sentence
+    with no terminator is hard-capped at ``limit`` chars.
+    """
+    text = " ".join((text or "").split())
+    if not text:
+        return ""
+    for sep in (". ", "! ", "? "):
+        i = text.find(sep)
+        if i > 0:
+            return text[: i + 1]
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 class Node:
     """Base class for all node types.
 
@@ -110,7 +126,14 @@ class Node:
 
     type: ClassVar[str]
     title: ClassVar[str] = ""
+    #: One-sentence hover tip (hover protocol, DESIGN.md §4): what the node
+    #: does, in a single sentence. Empty = derived from ``description``.
+    tooltip: ClassVar[str] = ""
+    #: Full details for the right-hand properties panel (shown on click).
     description: ClassVar[str] = ""
+    #: Utility/test nodes are excluded from the palette by default (still
+    #: executable when present in a saved workflow).
+    hidden: ClassVar[bool] = False
     category: ClassVar[str] = "Processing"
     version: ClassVar[str] = "0.1.0"
     inputs: ClassVar[tuple[Input, ...]] = ()
@@ -134,8 +157,12 @@ class Node:
             "type": self.type,
             "version": self.version,
             "title": self.title or self.type.rsplit(".", 1)[-1],
+            # hover protocol: one sentence — explicit tooltip wins, else the
+            # first sentence of the description (old plugins stay consistent)
+            "tooltip": self.tooltip or first_sentence(self.description),
             "description": self.description,
             "category": self.category,
+            "hidden": self.hidden,
             "inputs": [p.to_dict() for p in self.inputs],
             "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params],

@@ -17,6 +17,7 @@ from .runs import _resolve_run, _resolve_station, _resolve_survey
 class FCGroupToSpectra(Node):
     type = "mth5.fc.read"
     title = "Read FC"
+    tooltip = "Read Fourier coefficients from an mth5 FC group into an fc handle."
     description = "Read Fourier coefficients from an mth5 FC group into an fc handle."
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
@@ -72,6 +73,7 @@ def _enrich_fc_attrs(spectra, dec, decimation_level: int) -> None:
 class SpectraToFCGroup(Node):
     type = "mth5.fc.write"
     title = "Write FC"
+    tooltip = "Persist an fc handle into an mth5 FC group."
     description = "Persist an fc handle into an mth5 FC group."
     category = "Data I/O"
     inputs = (

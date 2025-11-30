@@ -15,6 +15,7 @@ from .types import TimeSeries
 class LoadCsv(Node):
     type = "core.io.load_csv"
     title = "Load CSV"
+    tooltip = "Load a multi-channel CSV time series with automatic channel and time-column detection."
     description = (
         "Load a multi-channel CSV time series. Auto-detects channel columns "
         "(Ex, Ey, Hx, Hy, ...); an optional time column is used to derive the "

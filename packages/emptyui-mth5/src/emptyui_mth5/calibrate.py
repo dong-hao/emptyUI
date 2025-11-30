@@ -104,6 +104,7 @@ def _channel_filters(calibration, runts) -> dict:
 class Calibrate(Node):
     type = "mth5.calibrate"
     title = "Calibrate"
+    tooltip = "Remove the instrument response (calibration) from a time series."
     description = (
         "Remove the instrument response from a time series (calibration). With "
         "no 'calibration' input, uses the run's own mth5 channel responses "

@@ -266,6 +266,7 @@ def register(registry) -> None:
 class LoadCalibration(Node):
     type = "mth5.calibration.load"
     title = "Load Calibration"
+    tooltip = "Parse a manufacturer calibration file into per-channel instrument-response filters."
     description = (
         "Parse a manufacturer calibration file (LEMI-417 .chn / KMS-200 .def "
         "FAP, or mt_io JSON) into per-channel filters and expose them as a "

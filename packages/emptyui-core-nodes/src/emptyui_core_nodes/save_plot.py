@@ -15,12 +15,15 @@ SUPPORTED_FORMATS = ("png", "svg", "pdf")
 class SavePlotNode(Node):
     type = "core.io.save_plot"
     title = "Save Plot"
+    tooltip = "Export an incoming plot to a numbered PNG/SVG/PDF file."
     description = (
         "Export an incoming plot to the output directory. The file name is "
         "generated from the name prefix with an auto-incrementing counter "
         "(e.g. timeseries_001.png)."
     )
-    category = "Data I/O"
+    # plots are figures, not data — Display category (ComfyUI's Save Image
+    # pattern sits with the preview viewers, DESIGN.md §3 Display nodes)
+    category = "Display"
     inputs = (Input("plot", "plot"),)
     outputs = ()
     params = (

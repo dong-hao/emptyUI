@@ -71,6 +71,7 @@ def _resolve_run(station_obj, run: str):
 class ExtractRun(Node):
     type = "mth5.io.extract_run"
     title = "Extract Run"
+    tooltip = "Extract one run's time series from an MTH5 archive."
     description = "Extract a run's time series as a RunTS."
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
@@ -102,6 +103,7 @@ class ExtractRun(Node):
 class SplitChannels(Node):
     type = "mth5.runs.split_channels"
     title = "Split Channels"
+    tooltip = "Split a run into standard ex/ey/hx/hy/hz channel outputs."
     description = (
         "Split a run time series into individual channels. Channel names are "
         "resolved through the mt_metadata channel nomenclature (LEMI e1/e2 or "
@@ -171,6 +173,7 @@ def _get_channel(data, name: str):
 class MergeChannels(Node):
     type = "mth5.runs.merge_channels"
     title = "Merge Channels"
+    tooltip = "Combine channel time series back into one run time series."
     description = "Combine channel time series into a run time series."
     category = "Processing"
     inputs = (
@@ -256,6 +259,7 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
 class AlignRuns(Node):
     type = "mth5.runs.align"
     title = "Align Runs"
+    tooltip = "Crop two time series to their common acquisition overlap (remote-reference prerequisite)."
     description = (
         "Crop two time series to their common acquisition overlap so their "
         "Fourier coefficients can be paired — the first step of remote-"

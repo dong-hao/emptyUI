@@ -287,7 +287,10 @@ npm run test:headed         # watch the browser while it runs
 - **ComfyUI paradigm**: node parameters render inline on the node body; the
   right-hand panel shows metadata (node id, version, ports, description, deps)
   and a Delete action. Path widgets include a server-side file browser ("…"
-  button).
+  button). Hover protocol: one-sentence tooltips on palette buttons and node
+  headers (full details on click in the panel); the palette shows categories
+  in fixed order (Data I/O, Processing, Display) with nodes alphabetized,
+  and hides utility/test nodes by default (see DESIGN.md §4 protocol).
 - **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
   nodes render figures inline (drag-resizable) and `Save Plot` exports them —
   ComfyUI's Preview/Save Image pattern. There is no run-level gallery; the

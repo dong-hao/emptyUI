@@ -479,6 +479,36 @@ dedicated controls for `boolean`/`select`/`radio`/`number`/`integer`/
 `file`/`directory`; the remaining string-like widgets (`string`/`text`/`code`/
 `list`) fall back to a single-line text input.
 
+#### Tooltip / description / palette protocol (for new nodes & plugins)
+
+Manifests carry two audience-separated text fields plus a visibility flag;
+the frontend is purely generic about them:
+
+- **`tooltip`** — the hover tip on palette buttons and node headers. Exactly
+  **one sentence** saying what the node *does* (imperative, ≤ ~100 chars,
+  no parameter lists, no semantics discussion). Example:
+  `"Down-weight or drop low-coherence FC windows before TF estimation."`
+- **`description`** — the full details, shown in the right-hand properties
+  panel when the user clicks the node. Anything beyond the one sentence
+  belongs here (parameters, conventions, caveats, provenance).
+- **Fallback**: when `tooltip` is empty, the backend manifest resolves it to
+  the **first sentence of `description`** (`emptyui.api.first_sentence`) —
+  so plugins that don't set a tooltip stay consistent automatically. To make
+  that fallback readable, write every `description` so its first sentence
+  works as a standalone tip.
+- **`hidden`** — utility/test nodes (e.g. the `core.util.echo` smoke test)
+  set `hidden = True`: they are excluded from the palette by default but
+  remain registered — saved workflows containing them still load, validate
+  and execute.
+- **Palette ordering protocol**: categories display in fixed order
+  (`Data I/O`, `Processing`, `Display`, then any custom categories
+  alphabetically); nodes are sorted alphabetically by title within each
+  category. Category assignment follows the §3 table — figures are not
+  data, so plot-export nodes (`Save Plot`) are **Display**, not Data I/O.
+
+Plugins that follow these four rules need zero frontend changes — the
+palette, tooltips and properties panel are generated from the manifests.
+
 ### Param auto-change (`cascade`) & upstream auto-fill (`inherit`)
 
 Two manifest-driven UI conveniences keep the frontend schema-agnostic:

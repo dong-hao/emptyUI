@@ -85,6 +85,7 @@ def _to_standard_coords(tf):
 class ImportTF(Node):
     type = "mth5.tf.import"
     title = "Import TF"
+    tooltip = "Read a transfer function from file (edi/xml/zmm/avg/j)."
     description = "Read a transfer function from file (edi/xml/zmm/avg/j)."
     category = "Data I/O"
     inputs = ()
@@ -105,6 +106,7 @@ class ImportTF(Node):
 class ExportTF(Node):
     type = "mth5.tf.export"
     title = "Export TF"
+    tooltip = "Write a transfer function to file (edi/xml/zmm/avg/j)."
     description = "Write a transfer function to file (edi/xml/zmm/avg/j)."
     category = "Data I/O"
     inputs = (Input("tf", "tf"),)

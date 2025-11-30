@@ -10,6 +10,7 @@ from emptyui import Input, Node, Output
 class ViewTableNode(Node):
     type = "core.display.view_table"
     title = "View Table"
+    tooltip = "Render an incoming table artifact inline in the node body."
     description = (
         "Renders an incoming table inside this node. Drag the node corners "
         "to resize."

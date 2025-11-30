@@ -11,6 +11,7 @@ from emptyui import Input, Node, Output, Param
 class LoadMth5(Node):
     type = "mth5.io.load"
     title = "Load MTH5"
+    tooltip = "Open an MTH5 HDF5 archive as the data source."
     description = "Open an MTH5 HDF5 archive as the data source."
     category = "Data I/O"
     inputs = ()
@@ -36,6 +37,7 @@ class LoadMth5(Node):
 class SaveMth5(Node):
     type = "mth5.io.save"
     title = "Save MTH5"
+    tooltip = "Close (flush) the open MTH5 archive to disk."
     description = "Persist the archive (close/flush) and record its path."
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)

@@ -24,6 +24,7 @@ def _as_dataframe(value):
 class ViewSelection(Node):
     type = "mth5.table.selection"
     title = "View Selection"
+    tooltip = "Render the run selection (mth5 KernelDataset) as a table."
     description = (
         "Render the run selection (mth5 KernelDataset) as a table inside a "
         "View Table node."
@@ -46,6 +47,7 @@ class ViewSelection(Node):
 class ViewTF(Node):
     type = "mth5.table.tf"
     title = "View TF"
+    tooltip = "Render a transfer function's apparent resistivity/phase values as a table."
     description = (
         "Render a transfer function as a table: period, apparent resistivity "
         "and phase for the off-diagonal (zxy, zyx) components."
