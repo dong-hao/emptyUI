@@ -41,6 +41,41 @@ export default function App() {
     ensureSocket();
   }, []);
 
+  // Copy/paste of the selected subgraph (DESIGN.md §9, ComfyUI parity):
+  // Ctrl/Cmd+C copies the selected nodes + their internal edges, Ctrl/Cmd+V
+  // pastes with fresh ids and a fan-out offset, Ctrl/Cmd+D duplicates in
+  // place. Keystrokes originating in form controls (param editing!) are
+  // ignored so text copy/paste works normally inside widgets.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      const wf = useWorkflow.getState();
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        wf.copySelection();
+        e.preventDefault();
+      } else if (key === "v") {
+        wf.pasteSelection();
+        e.preventDefault();
+      } else if (key === "d") {
+        wf.duplicateSelection();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Live connection rule (DESIGN.md §3 + §9): self-loops, type mismatches
   // and cycles are rejected during the drag — React Flow greys out invalid
   // drop targets. The same rule re-validates in onConnect and server-side.
@@ -250,7 +285,11 @@ export default function App() {
         <span className="spacer" />
         <button
           className="danger"
-          disabled={!selectedNodeId}
+          disabled={
+            !nodes.some((n) => n.selected) &&
+            !edges.some((e) => e.selected) &&
+            !selectedNodeId
+          }
           onClick={() => useWorkflow.getState().deleteSelected()}
         >
           Delete selected

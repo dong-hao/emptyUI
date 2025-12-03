@@ -19,6 +19,18 @@ export interface MTNodeData extends Record<string, unknown> {
   params: Record<string, unknown>;
 }
 
+/** Internal clipboard for copy/paste (DESIGN.md §9): a subgraph snapshot of
+ *  selected nodes + the edges among them (external edges are not copied —
+ *  the pasted copy is independent, ComfyUI parity). */
+interface NodeClipboard {
+  nodes: Node<MTNodeData>[];
+  edges: Edge[];
+  /** repeated pastes fan out by 24 px per paste */
+  pasteCount: number;
+}
+
+const PASTE_STEP = 24;
+
 /** Port-type connection rule (DESIGN.md §3): equal tags, declared accepts, any. */
 export function portTypesCompatible(
   srcType: string,
@@ -91,6 +103,7 @@ interface WorkflowState {
   nodes: Node<MTNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
+  clipboard: NodeClipboard | null;
   onNodesChange: (changes: NodeChange<Node<MTNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -106,6 +119,10 @@ interface WorkflowState {
     patch: Partial<MTNodeData> | ((d: MTNodeData) => Partial<MTNodeData>),
   ) => void;
   deleteSelected: () => void;
+  /** Copy/paste of the selected subgraph (Ctrl+C/Ctrl+V/Ctrl+D, DESIGN §9). */
+  copySelection: () => void;
+  pasteSelection: () => void;
+  duplicateSelection: () => void;
   loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[]) => void;
 }
 
@@ -114,6 +131,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  clipboard: null,
   onNodesChange: (changes) =>
     set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
   onEdgesChange: (changes) =>
@@ -166,10 +184,10 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   },
   addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
   selectNode: (id) =>
-    set((s) => ({
-      selectedNodeId: id,
-      nodes: s.nodes.map((n) => ({ ...n, selected: n.id === id })),
-    })),
+    // only the properties-panel selection; the RF-native node/edge `selected`
+    // flags are maintained through onNodesChange/onEdgesChange (so
+    // shift-click multi-select and box selection keep working)
+    set({ selectedNodeId: id }),
   updateNodeData: (id, patch) =>
     set((s) => ({
       nodes: s.nodes.map((n) =>
@@ -182,13 +200,76 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       ),
     })),
   deleteSelected: () =>
+    set((s) => {
+      // full RF selection: multi-selected nodes AND selected edges (the
+      // single-node fallback covers workflows restored before RF selection)
+      const nodeIds = new Set(
+        s.nodes.filter((n) => n.selected || n.id === s.selectedNodeId).map((n) => n.id),
+      );
+      return {
+        nodes: s.nodes.filter((n) => !nodeIds.has(n.id)),
+        edges: s.edges.filter(
+          (e) => !nodeIds.has(e.source) && !nodeIds.has(e.target) && !e.selected,
+        ),
+        selectedNodeId: null,
+      };
+    }),
+  copySelection: () => {
+    const selected = get().nodes.filter((n) => n.selected);
+    if (!selected.length) return;
+    const ids = new Set(selected.map((n) => n.id));
+    // only edges WITHIN the selection are copied (external wiring is not)
+    const internal = get().edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+    set({
+      clipboard: {
+        nodes: selected.map((n) => ({
+          ...n,
+          selected: false,
+          position: { ...n.position },
+          data: { ...n.data, params: { ...n.data.params } },
+        })),
+        edges: internal.map((e) => ({ ...e, selected: false })),
+        pasteCount: 0,
+      },
+    });
+  },
+  pasteSelection: () => {
+    const clip = get().clipboard;
+    if (!clip || !clip.nodes.length) return;
+    const pasteCount = clip.pasteCount + 1;
+    const dx = PASTE_STEP * pasteCount;
+    const dy = PASTE_STEP * pasteCount;
+    const idMap = new Map<string, string>();
+    const newNodes = clip.nodes.map((n) => {
+      const id = `n${crypto.randomUUID().slice(0, 6)}`;
+      idMap.set(n.id, id);
+      return {
+        ...n,
+        id,
+        position: { x: n.position.x + dx, y: n.position.y + dy },
+        data: { ...n.data, params: { ...n.data.params } },
+      };
+    });
+    const newEdges = clip.edges.map((e) => ({
+      ...e,
+      id: `e${crypto.randomUUID()}`,
+      source: idMap.get(e.source)!,
+      target: idMap.get(e.target)!,
+    }));
+    const newNodeIds = new Set(newNodes.map((n) => n.id));
+    const newEdgeIds = new Set(newEdges.map((e) => e.id));
     set((s) => ({
-      nodes: s.nodes.filter((n) => n.id !== s.selectedNodeId),
-      edges: s.edges.filter(
-        (e) => e.source !== s.selectedNodeId && e.target !== s.selectedNodeId,
-      ),
-      selectedNodeId: null,
-    })),
+      // the pasted subgraph becomes the selection (ComfyUI parity)
+      nodes: [...s.nodes, ...newNodes].map((n) => ({ ...n, selected: newNodeIds.has(n.id) })),
+      edges: [...s.edges, ...newEdges].map((e) => ({ ...e, selected: newEdgeIds.has(e.id) })),
+      selectedNodeId: newNodes[0].id,
+      clipboard: { ...clip, pasteCount },
+    }));
+  },
+  duplicateSelection: () => {
+    get().copySelection();
+    get().pasteSelection();
+  },
   loadDocument: (nodes, edges) =>
     set({ nodes, edges, selectedNodeId: null }),
 }));

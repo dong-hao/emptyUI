@@ -173,3 +173,63 @@ test("click an edge and press Delete removes it", async ({ page }) => {
   await page.keyboard.press("Delete");
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 });
+
+function paramField(node: ReturnType<Page["locator"]>, label: string) {
+  return node.locator(".param-field", { hasText: label });
+}
+
+test("copy-paste duplicates the selected subgraph with fresh ids and params", async ({ page }) => {
+  await page.goto("/");
+  await addSpreadNodes(page, 2);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  // a non-default param proves params are deep-copied (not defaulted)
+  await paramField(page.locator(".mt-node").nth(0), "Coherence min")
+    .locator("input")
+    .fill("0.5");
+
+  // box-select both nodes deterministically: Shift + drag a selection
+  // rectangle spanning the whole canvas (RF's selectionKeyCode is Shift;
+  // selectionMode=Full requires nodes fully inside the box)
+  const pane = await page.locator(".react-flow__pane").boundingBox();
+  await page.keyboard.down("Shift");
+  await page.mouse.move(pane.x + 2, pane.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(pane.x + pane.width - 2, pane.y + pane.height - 2, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await page.waitForTimeout(200);
+  await expect(page.locator(".mt-node.selected")).toHaveCount(2);
+
+  await page.keyboard.press("ControlOrMeta+c");
+  await page.keyboard.press("ControlOrMeta+v");
+  await page.waitForTimeout(300);
+
+  // the full subgraph is duplicated: 4 nodes, 2 edges (both internal —
+  // nothing connects the copy to the original)
+  await expect(page.locator(".mt-node")).toHaveCount(4);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  // params were deep-copied: two nodes show 0.5 now
+  await expect(page.locator('.param-field input[value="0.5"]')).toHaveCount(2);
+
+  // the pasted subgraph is the selection → Delete removes it (the ORIGINAL
+  // nodes + edge remain)
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".mt-node")).toHaveCount(2);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+});
+
+test("Ctrl+D duplicates a node and Delete-key removes the duplicate", async ({ page }) => {
+  await page.goto("/");
+  await addSpreadNodes(page, 1);
+  await page.locator(".mt-node").nth(0).locator(".mt-node-header").click();
+
+  await page.keyboard.press("ControlOrMeta+d");
+  await expect(page.locator(".mt-node")).toHaveCount(2);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+
+  // the duplicate is selected → Delete removes only it
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".mt-node")).toHaveCount(1);
+});
