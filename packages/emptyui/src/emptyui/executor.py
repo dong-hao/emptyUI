@@ -73,6 +73,17 @@ class Executor:
         outputs_by_node: dict[str, dict[str, str]] = {}
         order = self._topo_order(workflow)
         by_id = {n.id: n for n in workflow.nodes}
+        if len(order) != len(by_id):
+            # direct executor.run callers may skip validate_workflow; a cycle
+            # (incl. a self-loop) must fail loudly, not silently skip nodes
+            missing = sorted(set(by_id) - set(order))
+            emit({"event": "run_finished", "status": "failed"})
+            raise ExecutionError(
+                missing[0],
+                ValueError(
+                    f"workflow contains a cycle involving nodes: {missing}"
+                ),
+            )
 
         for node_id in order:
             if cancel_event.is_set():

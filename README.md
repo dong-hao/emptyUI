@@ -249,10 +249,14 @@ npm run test:headed         # watch the browser while it runs
     are grouped into one marked file per package (`test_errors.py` for the
     framework, `test_core_errors.py`, `test_mth5_errors.py`,
     `test_aurora_errors.py`; marker registered in the root `pytest.ini`).
-    `pytest -m "not errors"` runs the feature/physics suite;
     `pytest -m errors` runs the error surfaces in ~5 s. CI still runs the
     full suite by default; shared fixtures (`archive`, `fake_runts`) moved
     to the mth5 `conftest.py`.
+  - **Graph interaction hardening (2026-09-07, F1)**: self-loops and cycles
+    are rejected live during the drag (`isValidConnection`, ComfyUI-style
+    feedback), re-checked in `onConnect`, and reported explicitly server-side
+    ("cannot connect to itself"); the executor fails loudly on cycles even
+    when called without validation. E2E: `packages/web/e2e/interactions.spec.ts`.
   - **Instrument calibration framework + LEMI support** — **done** (DESIGN.md
     §16.1): `emptyui-mth5/calibration.py` parses manufacturer FAP files
     (`.chn`/`.def` MOD/ARG, and the mt_io JSON format) into mt_metadata

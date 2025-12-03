@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
+import type { Connection, Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
@@ -12,6 +13,7 @@ import {
   deserializeWorkflow,
   serializeWorkflow,
   useWorkflow,
+  validateConnection,
   type MTNodeData,
 } from "./stores/workflow";
 import type { NodeManifest } from "./api/client";
@@ -39,6 +41,22 @@ export default function App() {
   useEffect(() => {
     ensureSocket();
   }, []);
+
+  // Live connection rule (DESIGN.md §3 + §9): self-loops, type mismatches
+  // and cycles are rejected during the drag — React Flow greys out invalid
+  // drop targets. The same rule re-validates in onConnect and server-side.
+  const isValidConnection = useCallback(
+    (conn: Connection | Edge) => {
+      const state = useWorkflow.getState();
+      return validateConnection(
+        conn as Connection,
+        state.nodes,
+        state.edges,
+        catalog?.nodes ?? [],
+      );
+    },
+    [catalog],
+  );
 
   const handleAdd = (manifest: NodeManifest) => {
     addNode({
@@ -191,6 +209,7 @@ export default function App() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
             onNodeClick={(_, node) => useWorkflow.getState().selectNode(node.id)}
             onPaneClick={() => useWorkflow.getState().selectNode(null)}
             deleteKeyCode={["Backspace", "Delete"]}

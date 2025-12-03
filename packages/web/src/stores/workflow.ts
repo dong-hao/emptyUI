@@ -10,11 +10,80 @@ import {
   type EdgeChange,
 } from "@xyflow/react";
 import { useCatalog, portColor } from "./catalog";
+import type { NodeManifest } from "../api/client";
 
 export interface MTNodeData extends Record<string, unknown> {
   label: string;
   nodeType: string;
   params: Record<string, unknown>;
+}
+
+/** Port-type connection rule (DESIGN.md §3): equal tags, declared accepts, any. */
+export function portTypesCompatible(
+  srcType: string,
+  tgtType: string,
+  accepts?: string[],
+): boolean {
+  return (
+    srcType === tgtType ||
+    srcType === "any" ||
+    tgtType === "any" ||
+    (accepts ?? []).includes(srcType)
+  );
+}
+
+/** Would adding a source→target edge close a directed cycle (target ⇝ source)? */
+export function connectionCreatesCycle(
+  edges: Edge[],
+  source: string,
+  target: string,
+): boolean {
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    adj.get(e.source)!.push(e.target);
+  }
+  const stack = [target];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === source) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const nxt of adj.get(cur) ?? []) stack.push(nxt);
+  }
+  return false;
+}
+
+/**
+ * Full client-side connection rule (DESIGN.md §3 + §9): known ports, type
+ * compatibility, no self-loop, no cycle. Used by the live
+ * `isValidConnection` (drag feedback) and as defense-in-depth in
+ * `onConnect`; the server re-validates before every run.
+ */
+export function validateConnection(
+  connection: Connection,
+  nodes: Node<MTNodeData>[],
+  edges: Edge[],
+  manifests: NodeManifest[],
+): boolean {
+  if (!connection.source || !connection.target) return false;
+  if (connection.source === connection.target) return false; // self-loop
+  const source = nodes.find((n) => n.id === connection.source);
+  const target = nodes.find((n) => n.id === connection.target);
+  if (!source || !target) return false;
+  const srcManifest = manifests.find(
+    (m) => m.type === (source.data as MTNodeData).nodeType,
+  );
+  const tgtManifest = manifests.find(
+    (m) => m.type === (target.data as MTNodeData).nodeType,
+  );
+  const outPort = srcManifest?.outputs.find((o) => o.name === connection.sourceHandle);
+  const inPort = tgtManifest?.inputs.find((i) => i.name === connection.targetHandle);
+  if (!outPort || !inPort) return false; // unknown ports — reject
+  if (!portTypesCompatible(outPort.type, inPort.type, inPort.accepts)) return false;
+  if (connectionCreatesCycle(edges, connection.source, connection.target)) return false;
+  return true;
 }
 
 interface WorkflowState {
@@ -44,30 +113,18 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   onEdgesChange: (changes) =>
     set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
   onConnect: (connection) => {
+    const { nodes, edges } = get();
     const { catalog } = useCatalog.getState();
-    const source = get().nodes.find((n) => n.id === connection.source);
-    const target = get().nodes.find((n) => n.id === connection.target);
+    // defense-in-depth: the full connection rule (the live isValidConnection
+    // already rejects invalid drags — this catches programmatic adds)
+    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [])) return;
+
+    const source = nodes.find((n) => n.id === connection.source);
     const srcManifest = catalog?.nodes.find(
       (m) => m.type === (source?.data as MTNodeData | undefined)?.nodeType,
     );
-    const tgtManifest = catalog?.nodes.find(
-      (m) => m.type === (target?.data as MTNodeData | undefined)?.nodeType,
-    );
     const outPort = srcManifest?.outputs.find((o) => o.name === connection.sourceHandle);
-    const inPort = tgtManifest?.inputs.find((i) => i.name === connection.targetHandle);
-    if (!outPort || !inPort) return; // unknown ports — silent reject
-
-    // Silent reject mismatched types (equal, declared accepts, or any)
-    const srcType = outPort.type;
-    const tgtType = inPort.type;
-    const compatible =
-      srcType === tgtType ||
-      srcType === "any" ||
-      tgtType === "any" ||
-      (inPort.accepts ?? []).includes(srcType);
-    if (!compatible) return; // silent reject (DESIGN.md §3)
-
-    const color = portColor(srcType);
+    const color = portColor(outPort?.type ?? "any");
     set((s) => {
       // one-to-one inputs: a new edge to an occupied input replaces the old one
       const without = s.edges.filter(
@@ -83,7 +140,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
             ...connection,
             id: `e${crypto.randomUUID()}`,
             style: { stroke: color, strokeWidth: 2.5 },
-            data: { portType: srcType },
+            data: { portType: outPort?.type ?? "any" },
           },
           without,
         ),

@@ -96,6 +96,12 @@ def validate_workflow(workflow: Workflow, registry) -> None:
         if src is None or tgt is None:
             errors.append(f"edge '{edge.id}' references missing node")
             continue
+        if edge.source == edge.target:
+            errors.append(
+                f"edge '{edge.id}': node '{edge.source}' cannot connect to "
+                "itself (self-loop)"
+            )
+            continue
 
         src_manifest, tgt_manifest = registry.get(src.type), registry.get(tgt.type)
         if src_manifest is None or tgt_manifest is None:
@@ -133,11 +139,12 @@ def validate_workflow(workflow: Workflow, registry) -> None:
             )
         seen_targets.add(key)
 
-    # cycle detection via Kahn's algorithm
+    # cycle detection via Kahn's algorithm (self-loops reported above —
+    # excluded here so one problem produces one error)
     indegree = {n.id: 0 for n in workflow.nodes}
     adj: dict[str, list[str]] = {n.id: [] for n in workflow.nodes}
     for e in workflow.edges:
-        if e.source in indegree and e.target in indegree:
+        if e.source in indegree and e.target in indegree and e.source != e.target:
             adj[e.source].append(e.target)
             indegree[e.target] += 1
     queue = [nid for nid, d in indegree.items() if d == 0]

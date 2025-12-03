@@ -146,6 +146,41 @@ def test_fan_in_duplicate_reported():
     assert any("already has an incoming connection" in e for e in exc.value.errors)
 
 
+def test_self_loop_reported():
+    """A node's output connected to its own input gets an explicit message
+    (not the generic cycle listing)."""
+    wf = Workflow(
+        nodes=[WorkflowNode(id="a", type="test.passthru")],
+        edges=[Edge(id="e1", source="a", source_port="data", target="a", target_port="data")],
+    )
+    with pytest.raises(ValidationError_) as exc:
+        validate_workflow(wf, _registry())
+    assert any("cannot connect to itself" in e for e in exc.value.errors)
+    # one problem -> one error (no duplicate generic cycle report)
+    assert len(exc.value.errors) == 1
+
+
+def test_executor_cycle_fails_loudly():
+    """Direct executor.run (no validate_workflow) must fail on a cycle
+    instead of silently skipping the cyclic nodes."""
+    wf = Workflow(
+        nodes=[
+            WorkflowNode(id="a", type="test.passthru"),
+            WorkflowNode(id="b", type="test.passthru"),
+        ],
+        edges=[
+            Edge(id="e1", source="a", source_port="data", target="b", target_port="data"),
+            Edge(id="e2", source="b", source_port="data", target="a", target_port="data"),
+        ],
+    )
+    events = []
+    with pytest.raises(ExecutionError, match="cycle"):
+        Executor(_registry()).run(wf, emit=events.append)
+    assert any(
+        e["event"] == "run_finished" and e["status"] == "failed" for e in events
+    )
+
+
 # --- executor error surfaces (from test_executor.py) --------------------
 
 def test_execution_error_surfaced():

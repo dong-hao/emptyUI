@@ -819,10 +819,12 @@ End-to-end testing:
 - **Playwright MCP** (`@playwright/mcp` via opencode `mcp` config) is the
   interactive/exploratory counterpart for agent-driven browser debugging.
 
-Connection rules (port types, one edge per input port, cycle prevention)
-enforced client-side for UX, re-validated server-side before every run
-(duplicate edges into one input port are a validation error — the executor
-must not silently overwrite).
+Connection rules (port types, one edge per input port, no self-loops, no
+cycles) enforced client-side for UX — live during the drag via
+`isValidConnection` and re-checked in `onConnect` — and re-validated
+server-side before every run (duplicate edges into one input port and
+self-loops are explicit validation errors; the executor fails loudly on
+cycles even when called without validation).
 
 ---
 
