@@ -130,7 +130,9 @@ export function MTNode({ id, data, selected }: NodeProps) {
         lineClassName="mt-resize-line"
         handleClassName="mt-resize-handle"
       />
-      <div className="mt-node-header">{manifest?.title ?? d.label}</div>
+      <div className="mt-node-header" title={manifest?.tooltip || undefined}>
+        {manifest?.title ?? d.label}
+      </div>
       {runState?.status === "running" && (
         <div className="mt-progress" style={{ width: `${(runState.progress ?? 0) * 100}%` }} />
       )}

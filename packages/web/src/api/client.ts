@@ -31,8 +31,13 @@ export interface NodeManifest {
   type: string;
   version: string;
   title: string;
+  /** one-sentence hover tip (hover protocol, DESIGN.md §4) */
+  tooltip: string;
+  /** full details for the properties panel (shown on click) */
   description: string;
   category: string;
+  /** utility/test nodes: excluded from the palette by default */
+  hidden?: boolean;
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];
