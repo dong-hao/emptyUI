@@ -3,6 +3,7 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  reconnectEdge,
   type Connection,
   type Edge,
   type Node,
@@ -93,6 +94,11 @@ interface WorkflowState {
   onNodesChange: (changes: NodeChange<Node<MTNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
+  /** Disconnect gestures (DESIGN.md §9): remove edges by id (drag-handle-
+   *  away unlink, edge-endpoint drop on the pane) and re-route an existing
+   *  edge to a new connection (validated with the full connection rule). */
+  detachEdges: (edgeIds: string[]) => void;
+  reconnect: (oldEdge: Edge, connection: Connection) => void;
   addNode: (node: Node<MTNodeData>) => void;
   selectNode: (id: string | null) => void;
   updateNodeData: (
@@ -146,6 +152,17 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
         ),
       };
     });
+  },
+  detachEdges: (edgeIds) =>
+    set((s) => ({
+      edges: s.edges.filter((e) => !edgeIds.includes(e.id)),
+    })),
+  reconnect: (oldEdge, connection) => {
+    // re-routing an edge endpoint must satisfy the full connection rule
+    const { nodes, edges } = get();
+    const { catalog } = useCatalog.getState();
+    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [])) return;
+    set((s) => ({ edges: reconnectEdge(oldEdge, connection, s.edges) }));
   },
   addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
   selectNode: (id) =>

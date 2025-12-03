@@ -257,6 +257,15 @@ npm run test:headed         # watch the browser while it runs
     feedback), re-checked in `onConnect`, and reported explicitly server-side
     ("cannot connect to itself"); the executor fails loudly on cycles even
     when called without validation. E2E: `packages/web/e2e/interactions.spec.ts`.
+  - **Disconnect + copy/paste (2026-09-07, F2/F3)**: ComfyUI-parity canvas
+    gestures — drag a connected handle to the pane to unlink, drag edge
+    endpoints to re-route (validated) or drop on the pane to delete,
+    `Ctrl/Cmd+C/V/D` for subgraph copy/paste/duplicate (fresh ids,
+    deep-copied params, remapped internal edges, pasted copy independent of
+    the original), full-selection delete (multi-node + selected edges), and
+    edge hover/selected styling. Initial `fitView` capped at 100% zoom.
+    Interaction protocol documented in DESIGN.md §9; 11 e2e tests cover all
+    gestures.
   - **Instrument calibration framework + LEMI support** — **done** (DESIGN.md
     §16.1): `emptyui-mth5/calibration.py` parses manufacturer FAP files
     (`.chn`/`.def` MOD/ARG, and the mt_io JSON format) into mt_metadata

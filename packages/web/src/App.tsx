@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
 import type { Connection, Edge } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { useQuery } from "@tanstack/react-query";
+import "@xyflow/react/dist/style.css";import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
 import { ensureSocket } from "./api/ws";
 import { useCatalog } from "./stores/catalog";
@@ -57,6 +56,64 @@ export default function App() {
     },
     [catalog],
   );
+
+  // --- Disconnect gestures (DESIGN.md §9, ComfyUI parity) -----------------
+  // 1. Drag a connected handle to the empty pane -> unlink. onConnectStart
+  //    records the edge(s) on the starting handle; onConnectEnd detaches
+  //    them when no valid new connection was made. Input handles hold one
+  //    edge (one-to-one rule); an output handle with several edges is left
+  //    alone (ambiguous — use click+Delete or edge-endpoint drag instead).
+  const connectStartRef = useRef<{ edgeIds: string[] } | null>(null);
+  const handleConnectStart = useCallback(
+    (_event: unknown, { nodeId, handleId, handleType }: {
+      nodeId: string | null;
+      handleId: string | null;
+      handleType: "source" | "target" | null;
+    }) => {
+      if (!nodeId || !handleId || !handleType) {
+        connectStartRef.current = null;
+        return;
+      }
+      const { edges } = useWorkflow.getState();
+      const onHandle = edges.filter((e) =>
+        handleType === "target"
+          ? e.target === nodeId && e.targetHandle === handleId
+          : e.source === nodeId && e.sourceHandle === handleId,
+      );
+      if (onHandle.length === 1) {
+        connectStartRef.current = { edgeIds: onHandle.map((e) => e.id) };
+      } else {
+        connectStartRef.current = null;
+      }
+    },
+    [],
+  );
+  const handleConnectEnd = useCallback(
+    (_event: unknown, state: { isValid: boolean | null }) => {
+      const started = connectStartRef.current;
+      connectStartRef.current = null;
+      if (!started || state?.isValid === true) return;
+      // drag ended without a valid connection -> unlink (dropping the link
+      // on an invalid target also detaches, matching ComfyUI)
+      useWorkflow.getState().detachEdges(started.edgeIds);
+    },
+    [],
+  );
+
+  // 2. Drag either endpoint of an existing edge: drop on another compatible
+  //    handle to re-route, drop on the pane to delete (RF "delete edge on
+  //    drop" + reconnectEdge pattern).
+  const reconnectSuccessful = useRef(false);
+  const handleReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
+    reconnectSuccessful.current = true;
+    useWorkflow.getState().reconnect(oldEdge, newConnection);
+  }, []);
+  const handleReconnectStart = useCallback(() => {
+    reconnectSuccessful.current = false;
+  }, []);
+  const handleReconnectEnd = useCallback((_event: unknown, edge: Edge) => {
+    if (!reconnectSuccessful.current) useWorkflow.getState().detachEdges([edge.id]);
+  }, []);
 
   const handleAdd = (manifest: NodeManifest) => {
     addNode({
@@ -210,10 +267,20 @@ export default function App() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             isValidConnection={isValidConnection}
+            onConnectStart={handleConnectStart}
+            onConnectEnd={handleConnectEnd}
+            edgesReconnectable
+            onReconnect={handleReconnect}
+            onReconnectStart={handleReconnectStart}
+            onReconnectEnd={handleReconnectEnd}
             onNodeClick={(_, node) => useWorkflow.getState().selectNode(node.id)}
             onPaneClick={() => useWorkflow.getState().selectNode(null)}
             deleteKeyCode={["Backspace", "Delete"]}
             fitView
+            // cap the initial zoom: fitting 1-2 nodes must not zoom to 200%
+            // (fitView's default maxZoom); padding is in px (a fraction like
+            // 0.15 is interpreted as ~0 px), ComfyUI keeps overview at 100%
+            fitViewOptions={{ maxZoom: 1, padding: 40 }}
           >
             <Background />
             <Controls />

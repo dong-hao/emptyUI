@@ -612,3 +612,17 @@ button.primary {
 .react-flow__minimap {
   background: #f5f5f5;
 }
+
+/* --- Edge interactions (DESIGN.md §9 disconnect gestures) ----------------
+ * Edges are clickable/selectable (click + Delete removes the link); make
+ * the thin stroke discoverable: hover highlight + dashed selection. */
+.react-flow__edge {
+  cursor: pointer;
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 3.5;
+  filter: brightness(1.25);
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-dasharray: 7 4;
+}

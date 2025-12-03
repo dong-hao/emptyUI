@@ -826,6 +826,35 @@ server-side before every run (duplicate edges into one input port and
 self-loops are explicit validation errors; the executor fails loudly on
 cycles even when called without validation).
 
+### Canvas interaction protocol (ComfyUI parity, §9)
+
+Graph-editing conventions implemented in the web frontend; the workflow
+document and the executor are unaffected (the UI is sugar over the DAG):
+
+- **Connection rules** (above): invalid drags are rejected live
+  (`isValidConnection` — self-loops, type mismatches, closing edges) and
+  re-checked in `onConnect`; the server re-validates before every run.
+- **Disconnect gestures**: (1) drag a connected handle to the empty pane →
+  unlink (input handles hold one edge; multi-edge output handles are left
+  to click+Delete); (2) drag either endpoint anchor of an edge — drop on
+  another compatible handle re-routes (validated with the full connection
+  rule), drop on the pane deletes; (3) click an edge + `Delete`/`Backspace`.
+  Edges highlight on hover and render dashed when selected.
+- **Copy/paste**: `Ctrl/Cmd+C` snapshots the selected subgraph (nodes +
+  internal edges) into a store clipboard; `Ctrl/Cmd+V` pastes with fresh
+  ids, deep-copied params, remapped internal edges and a 24 px-per-paste
+  fan-out offset — external edges are *not* rewired (the pasted copy is
+  independent, ComfyUI parity), and the pasted subgraph becomes the
+  selection. `Ctrl/Cmd+D` duplicates in place. Keystrokes originating in
+  form controls (param widgets) are ignored so text copy/paste works
+  normally inside them.
+- **Selection**: click = exclusive, `Ctrl/Cmd+click` = additive toggle,
+  `Shift+drag` on the pane = box selection (`selectionMode: Full` — nodes
+  must be fully inside the box); `Delete`/`Backspace` and the toolbar
+  button delete the full selection (nodes + selected edges).
+- **Initial view**: `fitView` capped at `maxZoom: 1` with 40 px padding —
+  fitting 1–2 nodes must not zoom to 200% (fitView's default).
+
 ---
 
 ## 10. Repository Layout (monorepo)

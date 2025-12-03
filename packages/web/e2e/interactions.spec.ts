@@ -1,11 +1,30 @@
 import { expect, test, type Page } from "@playwright/test";
 
+/** Deterministic geometry: room for three spread-out nodes on the canvas. */
+test.use({ viewport: { width: 1600, height: 1000 } });
+
 /** Palette buttons are grouped by category; click by exact visible name. */
 async function addNode(page: Page, name: string) {
   await page.getByRole("button", { name, exact: true }).click();
 }
 
-/** Drag from one port handle to another. */
+/** Let React Flow's fitView settle before measuring element boxes. */
+async function settle(page: Page) {
+  await page.waitForTimeout(700);
+}
+
+/** Drag a node (by its header) so its top-left lands at (x, y). */
+async function moveNodeTo(page: Page, idx: number, x: number, y: number) {
+  const h = page.locator(".mt-node").nth(idx).locator(".mt-node-header");
+  const b = await h.boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x + b.width / 2, y + b.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+}
+
+/** Drag from one port handle to another (boxes measured fresh). */
 async function dragPortToPort(
   page: Page,
   fromNode: number,
@@ -32,9 +51,23 @@ async function dragPortToPort(
   await page.waitForTimeout(200);
 }
 
+/** Add n Coherence Sort nodes at deterministic, non-overlapping positions
+ *  (palette placement is random and nodes occlude each other's handles). */
+async function addSpreadNodes(page: Page, n: number) {
+  for (let i = 0; i < n; i++) await addNode(page, "Coherence Sort");
+  await settle(page);
+  const spots = [
+    [120, 60],
+    [400, 300],
+    [660, 540],
+  ];
+  for (let i = 0; i < n; i++) await moveNodeTo(page, i, spots[i][0], spots[i][1]);
+  await settle(page);
+}
+
 test("self-connections are rejected live during the drag", async ({ page }) => {
   await page.goto("/");
-  await addNode(page, "Coherence Sort");
+  await addSpreadNodes(page, 1);
 
   // fc output -> fc input of the SAME node must not create an edge
   await dragPortToPort(page, 0, "right", 0, "left");
@@ -43,8 +76,7 @@ test("self-connections are rejected live during the drag", async ({ page }) => {
 
 test("cross-node cycles are rejected, valid chains accepted", async ({ page }) => {
   await page.goto("/");
-  await addNode(page, "Coherence Sort");
-  await addNode(page, "Coherence Sort");
+  await addSpreadNodes(page, 2);
 
   // valid: node1 fc -> node2 fc
   await dragPortToPort(page, 0, "right", 1, "left");
@@ -58,4 +90,86 @@ test("cross-node cycles are rejected, valid chains accepted", async ({ page }) =
   // (n1 -> n2 exists), so it is rejected
   await dragPortToPort(page, 1, "right", 0, "left");
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+});
+
+test("drag a connected handle to the pane unlinks it (ComfyUI gesture)", async ({ page }) => {
+  await page.goto("/");
+  await addSpreadNodes(page, 2);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  // drag node2's connected input handle to the empty pane -> unlink
+  const inp = await page
+    .locator(".mt-node")
+    .nth(1)
+    .locator('.mt-port[data-handlepos="left"]')
+    .first()
+    .boundingBox();
+  const pane = await page.locator(".react-flow__pane").boundingBox();
+  await page.mouse.move(inp.x + inp.width / 2, inp.y + inp.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pane.x + pane.width - 60, pane.y + pane.height - 40, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+});
+
+test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-routes", async ({ page }) => {
+  await page.goto("/");
+  await addSpreadNodes(page, 3);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  // hover an exact point ON the path (the <g> bbox center is unreliable for
+  // bezier edges) to reveal the endpoint anchors
+  const hoverPath = async () => {
+    const pt = await page.evaluate(() => {
+      const p = document.querySelector(".react-flow__edge-path");
+      const q = p.getPointAtLength(p.getTotalLength() * 0.3);
+      const s = new DOMPoint(q.x, q.y).matrixTransform(p.getScreenCTM());
+      return { x: s.x, y: s.y };
+    });
+    await page.mouse.move(pt.x, pt.y, { steps: 3 });
+    await page.waitForTimeout(250);
+  };
+
+  // drag the target-end anchor onto node3's input handle -> re-route
+  await hoverPath();
+  const dst = await page
+    .locator(".mt-node")
+    .nth(2)
+    .locator('.mt-port[data-handlepos="left"]')
+    .first()
+    .boundingBox();
+  const ta = await page.locator(".react-flow__edgeupdater-target").first().boundingBox();
+  await page.mouse.move(ta.x + ta.width / 2, ta.y + ta.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dst.x + dst.width / 2, dst.y + dst.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  // fresh hover, then drag the target-end anchor onto the empty pane -> delete
+  await hoverPath();
+  const anchor = page.locator(".react-flow__edgeupdater-target").first();
+  await expect(anchor).toBeVisible();
+  const ta2 = await anchor.boundingBox();
+  const pane = await page.locator(".react-flow__pane").boundingBox();
+  await page.mouse.move(ta2.x + ta2.width / 2, ta2.y + ta2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+});
+
+test("click an edge and press Delete removes it", async ({ page }) => {
+  await page.goto("/");
+  await addSpreadNodes(page, 2);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  const eb = await page.locator(".react-flow__edge").first().boundingBox();
+  await page.mouse.click(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 });
