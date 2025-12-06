@@ -32,6 +32,12 @@ def test_nodes_catalog_includes_core_plugin(client):
     assert "core.util.echo" in types
 
 
+def test_clear_cache_endpoint(client):
+    resp = client.delete("/api/cache")
+    assert resp.status_code == 200
+    assert "cleared" in resp.json()
+
+
 def test_run_echo_workflow(client):
     workflow = {
         "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],

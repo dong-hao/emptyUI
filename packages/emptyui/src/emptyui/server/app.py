@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from emptyui.cache import NodeCache
 from emptyui.executor import Executor
 from emptyui.registry import Registry, build_default_registry
 from emptyui.schema import ValidationError_, Workflow, validate_workflow
@@ -22,6 +23,9 @@ from emptyui.schema import ValidationError_, Workflow, validate_workflow
 
 class RunRequest(BaseModel):
     workflow: dict
+    # partial execution ("execute to here"): run only these nodes plus their
+    # ancestors; omitted/empty = run everything
+    targets: list[str] | None = None
 
 
 class EventHub:
@@ -87,6 +91,7 @@ def create_app(registry: Registry | None = None) -> FastAPI:
     hub = EventHub()
     runs: dict[str, dict] = {}
     artifacts: dict[str, dict] = {}  # artifact id -> {path, kind, run_id}
+    node_cache = NodeCache()  # cross-run result cache (§7), server-lifetime
     state = {"run_counter": 0}
     lock = threading.Lock()
 
@@ -110,6 +115,16 @@ def create_app(registry: Registry | None = None) -> FastAPI:
             validate_workflow(workflow, registry)
         except ValidationError_ as exc:
             raise HTTPException(status_code=422, detail=exc.errors) from exc
+
+        if req.targets:
+            node_ids = {n["id"] if isinstance(n, dict) else n.id
+                        for n in req.workflow.get("nodes", [])}
+            unknown = sorted(set(req.targets) - node_ids)
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"unknown target node(s): {unknown}",
+                )
 
         with lock:
             state["run_counter"] += 1
@@ -141,6 +156,8 @@ def create_app(registry: Registry | None = None) -> FastAPI:
                     emit=emit,
                     workspace=workspace,
                     cancel_event=cancel_event,
+                    cache=node_cache,
+                    targets=req.targets,
                 )
                 with lock:
                     runs[run_id]["summary"] = summary
@@ -174,6 +191,11 @@ def create_app(registry: Registry | None = None) -> FastAPI:
                 info["summary"]["status"] = "cancelled"
             status = info["summary"]["status"]
         return {"run_id": run_id, "status": status}
+
+    @app.delete("/api/cache")
+    def clear_cache() -> dict:
+        """Drop all cached node results (also cleared by a server restart)."""
+        return {"cleared": node_cache.clear()}
 
     @app.get("/api/files")
     def list_files(path: str = "") -> dict:

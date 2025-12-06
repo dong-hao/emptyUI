@@ -723,17 +723,40 @@ Design notes:
 - **Scheduler**: Kahn topological sort. The current executor runs branches
   **sequentially** (M0); concurrent execution in a thread pool is future work
   (nodes would declare `cpu_bound=True/False` to hint threads vs process pool).
-- **Caching**: each node result is content-addressed by `(node_type, version,
-  params, input_handles)`; unchanged upstream ⇒ cached downstream skip.
-  MVP: in-memory LRU + optional disk cache.
+- **Caching** (M3, implemented 2026-09-08): each node's result is cached
+  across runs in a server-lifetime, in-memory LRU (`NodeCache`, 256 entries).
+  The cache key is a **structural signature** computed in topological order:
+  `sha256(type, manifest version, effective params (defaults filled), per-
+  input upstream signatures)` — node ids are excluded, so structurally
+  identical nodes (copy/paste duplicates) share entries. Signatures recurse
+  through the DAG: any upstream change changes every downstream key, so
+  invalidation propagates automatically. Data payloads are **never hashed**
+  (xarray/RunTS/FC containers are impractical to digest); this follows
+  ComfyUI, whose execution cache is likewise structural, and Nextflow's
+  practice of hashing file inputs by `(path, size, mtime_ns)` — applied here
+  to string params that point at existing files, so externally modified
+  input files invalidate the nodes reading them. On a cache hit the executor
+  re-registers the cached outputs in the run's store and **copies the
+  published artifact files into the new run's workspace** (renamed for the
+  restoring node instance); if a recorded artifact file has vanished the
+  node is re-executed instead of serving a half-restored result. Cached
+  nodes emit `node_status` with `"cached": true` and no progress events.
+  **Immutability contract** (ComfyUI model): cached payloads are handed on
+  as the same object instances — nodes must be functional (never mutate
+  inputs or previously returned outputs). Disk persistence across restarts
+  is deliberately deferred; `DELETE /api/cache` drops all entries.
+- **Partial runs** (M3, implemented 2026-09-08): `POST /api/runs` accepts
+  `targets: [node_id, …]` — "execute to here" runs the target nodes plus
+  their ancestral closure; other nodes emit no events and stay idle in the
+  UI. Unknown targets are rejected with 422. Combined with caching, only the
+  stale part of the ancestry recomputes. The web UI exposes this as a
+  "Run to here" button in the properties panel for the selected node.
 - **Progress**: nodes call `ctx.progress(frac, message)`; executor forwards to
   all connected WebSocket clients.
 - **Failure**: *design* — a failed node halts its dependents only; other
   branches continue. *Current executor (M1/M2)*: a node failure aborts the
   whole run (error event + `run_finished: failed`); per-branch continuation is
   future work.
-- **Partial runs**: user can run a single node ("execute to here"), enabled by
-  the caching scheme.
 - **Cancellation**: *design* — client sends a cancel message; executor checks a
   token between node steps. *Current*: implemented — `POST /api/runs/{id}/cancel`
   sets a per-run `threading.Event` that the executor polls between nodes
@@ -766,11 +789,12 @@ edge, even when one node publishes several figures.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET  | `/api/nodes` | Catalog of node manifests (drives sidebar + panels) |
-| POST | `/api/runs` | Validate + start a workflow run |
+| POST | `/api/runs` | Validate + start a workflow run (`targets` restricts to "execute to here") |
 | GET  | `/api/runs/{id}` | Run status/outputs |
 | GET  | `/api/artifacts/{id}/preview` | Inline preview (PNG/JSON table) |
 | GET  | `/api/artifacts/{id}` | Full artifact download (`Content-Disposition: attachment`) |
 | POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
+| DELETE | `/api/cache` | Drop all cached node results |
 | WS   | `/api/ws` | Run events stream |
 
 > Cancellation and artifact download are implemented (see rows above). A
@@ -983,11 +1007,15 @@ progress.
   - EMTF-style coherence sorting: filter/downweight low-coherence FC
     windows before the robust regression (aurora 0.6.2 only *logs* squared
     coherence; its "coherence sorting" helpers only widen bands).
-- ⏳ Caching + partial execution; sub-workflows; remote-server mode docs
-  (same API, deployed elsewhere); plugin packaging guide + example template.
-  *Caching is designed in (content-addressed handle keys, §7) but not
-  implemented — the executor re-runs the whole DAG every time. Sub-workflows
-  and the plugin guide/template have no implementation; `docs/` is empty.*
+- ✅ **Content-addressed caching + partial execution** (2026-09-08, see §7):
+  structural cache signatures in a cross-run in-memory LRU (ComfyUI-style
+  invalidation, Nextflow-style file-stat signatures), artifact restore into
+  the new run's workspace, `targets` "execute to here" with ancestor
+  closure, `DELETE /api/cache`. The web UI (cached badge, "Run to here" in
+  the properties panel) lands in the follow-up commit (§9).
+  Sub-workflows; remote-server mode docs
+  (same API, deployed elsewhere); plugin packaging guide + example template
+  are the remaining M3 items.
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally
   sketched `options_from`/`POST /api/options` design: `Compute FC`'s

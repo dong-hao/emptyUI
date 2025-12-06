@@ -237,6 +237,34 @@ def test_cancel_unknown_run_404(client):
     assert client.post("/api/runs/nope/cancel").status_code == 404
 
 
+def test_unknown_execution_target_returns_422(client):
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.util.echo"}],
+        "edges": [],
+    }
+    resp = client.post("/api/runs", json={"workflow": workflow, "targets": ["n9"]})
+    assert resp.status_code == 422
+
+
+def test_executor_rejects_unknown_target():
+    reg = Registry()
+    from emptyui import Node
+
+    class N(Node):
+        type = "test.n"
+
+        def execute(self, ctx):
+            return {}
+
+    reg.add(N)
+    with pytest.raises(ValueError, match="unknown target"):
+        Executor(reg).run(
+            Workflow(nodes=[WorkflowNode(id="n1", type="test.n")]),
+            emit=lambda e: None,
+            targets=["ghost"],
+        )
+
+
 # --- pipeline error surfaces (from test_pipeline.py) --------------------
 
 def test_load_csv_missing_file_fails_cleanly(client):
