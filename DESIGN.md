@@ -1013,8 +1013,9 @@ progress.
   the new run's workspace, `targets` "execute to here" with ancestor
   closure, `DELETE /api/cache`. The web UI (cached badge, "Run to here" in
   the properties panel) lands in the follow-up commit (§9).
-  Sub-workflows; remote-server mode docs
-  (same API, deployed elsewhere); plugin packaging guide + example template
+  Sub-workflows; remote-server mode docs (design done 2026-09-08, §17 —
+  implementation checklist §17.6 pending); plugin packaging guide + example
+  template
   are the remaining M3 items.
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally
@@ -1060,8 +1061,9 @@ progress.
 - How do ML plugins request GPU availability? (`ctx.resources.gpu_count`?)
 - Sub-workflow semantics (nested DAGs) — still open; no implementation
   (M3 roadmap item).
-- Authentication model for remote deployments (defer; design API so middleware
-  can be inserted).
+- Authentication model for remote deployments — resolved by design (not
+  implementation): emptyUI stays identity-blind behind the platform gateway;
+  see §17 (remote deployment — embedded mode).
 
 ---
 
@@ -1815,3 +1817,111 @@ range, so the binding criterion is visible. A coherence-vs-period plot
   must still pass (update expectations only where the sorting is
   demonstrably better).
 
+
+---
+
+## 17. Remote deployment — embedded mode (design, 2026-09-08; not yet implemented)
+
+emptyUI is **not** a standalone multi-user app. The target remote scenario is
+emptyUI's FastAPI backend (+ built web frontend) embedded **as a module**
+into a platform that already provides authentication (certificates, SSO,
+session management) — one backend instance **per user or team**, mounted
+under a sub-path of the platform's URL space. The design goal is a small
+**compatibility contract**, not an auth subsystem: keep the core
+identity-blind and proxy-friendly, confine what must be confined, and leave
+everything user-related to the platform.
+
+### 17.1 Trust model & division of responsibility
+
+| Concern | Owner |
+|---|---|
+| Authentication (certs, SSO, session cookies), TLS termination | platform gateway |
+| User/team management, authorization, routing, rate limiting | platform |
+| Data provisioning (original time series, archives — system of record, likely a database) | platform |
+| emptyUI process lifecycle (one per user/team) | platform |
+| Identity-blind execution, confined file access, proxy-compatible API/WS, retention & limits | emptyUI |
+
+**Identity-blindness contract** — emptyUI contains no auth code and never
+enforces identity. The gateway authenticates every request (including
+WebSocket upgrades — browsers cannot set `Authorization` headers on WS, so
+gateway-side cookie/cert auth is the natural fit; same-origin serving below
+makes this seamless). Identity headers forwarded by the gateway
+(`X-Forwarded-User` or similar) may be logged but are not interpreted.
+Per-user isolation is achieved by construction (one process per user/team):
+process-global state — runs, artifacts, the cross-run cache (§7) — is
+therefore per-user without any ownership metadata inside emptyUI.
+
+### 17.2 Storage realms (read-only inputs vs writable outputs)
+
+Two disjoint realms replace today's "trust the local filesystem" model:
+
+- **Data root (read-only)**: the platform provisions original data
+  (time-series CSVs, MTH5 archives, calibration FAP files) into a configured
+  directory (or mounts the system-of-record export). Input path params
+  (`Load CSV`, `Load MTH5`, `calibration_path`, …) and the `/api/files`
+  picker resolve **only inside** the data root; nodes never write here.
+- **Output workspace (writable)**: per-run workspaces (§3) hold artifacts,
+  plots, and TF/export files (EDI/ZMM/Save MTH5) — exactly the TF download /
+  export surface users may take away. These are served through the artifact
+  endpoints; nothing outside the output workspace is writable.
+
+Local development keeps today's behavior (data root defaults to
+unrestricted/cwd); confinement activates only in remote mode. Implementation
+note for later: manifests mark path-kind params as `in`/`out` so a single
+resolver can confine inputs to the data root and force outputs into the
+workspace, rejecting anything else with an actionable error.
+
+### 17.3 Serving, mounting, proxies
+
+- **Single origin**: `create_app` optionally serves the built `dist/`
+  bundle — the platform mounts one URL; no CORS in remote mode (the
+  `allow_origins=["*"]` dev middleware is replaced by a locked-down /
+  disabled configuration), and session cookies flow naturally to REST and
+  WS alike.
+- **Sub-path mount**: the app must be mountable under e.g.
+  `/tools/emptyui/` — FastAPI `root_path` plus a configurable frontend API
+  base (build-time env or a tiny runtime config endpoint); the WS URL
+  derives from that base instead of `location.host` alone.
+- **Proxy compatibility**: standard `X-Forwarded-*` header handling; WS
+  upgrade proxying with generous idle timeouts (runs are long-lived); the
+  existing polling fallback (§9) is a deliberate asset — the UI keeps
+  working when WS connections are dropped by intermediate proxies.
+
+### 17.4 Operational policy (config knobs for the embedded process)
+
+Long-lived remote services need hygiene that local dev does not:
+
+- **Workspace retention**: per-run tempdirs are never cleaned today; remote
+  mode adds a TTL + periodic cleanup, coupled with artifact GC (artifact
+  endpoints reference workspace paths — an expired workspace invalidates its
+  artifacts, which must be reflected, not served as dangling files).
+- **Max concurrent runs** per instance (queued or rejected with an
+  actionable error), bounding memory/CPU in a shared platform.
+- **Cache bounds**: the cross-run cache (§7) is already count-capped; per
+  user/team instance that is sufficient.
+- **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`,
+  `EMPTYUI_SERVE_DIST`, `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`,
+  `EMPTYUI_MAX_CONCURRENT_RUNS`) mirrored as `create_app(...)` keyword
+  arguments so the platform can embed the app as a module without env
+  coupling.
+
+### 17.5 Explicit non-goals
+
+- Authentication/user management inside emptyUI (the gateway's job).
+- Multi-user shared process / horizontal scaling / sticky-session routing —
+  scale out is "more instances", not "a bigger instance".
+- File-upload API — data is provisioned by the platform; uploads are a
+  possible follow-up, not part of the contract.
+- Database persistence for runs/artifacts — the file-based workspace (§3)
+  stands until run history demands more.
+
+### 17.6 Compatibility checklist (future implementation, each lands separately)
+
+1. Data-root confinement: `/api/files` sandbox + path-param resolution
+   (manifest `in`/`out` path kinds).
+2. `dist/` serving + CORS lockdown configuration.
+3. Sub-path support: `root_path` plumbing + frontend API-base configurator.
+4. Workspace TTL cleanup + artifact GC.
+5. Max-concurrent-runs guard.
+6. Config plumbing (env + `create_app` kwargs) + a deployment guide
+   (`docs/deployment.md`) covering the gateway contract of §17.1.

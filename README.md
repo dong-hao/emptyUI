@@ -300,8 +300,10 @@ npm run test:headed         # watch the browser while it runs
     regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
   - Sub-workflows (nested DAGs) — no implementation, design only.
-  - Remote-server mode docs (same API, deployed elsewhere) — a passing
-    mention in DESIGN only; no deploy guide.
+  - Remote-server mode — **design done** (DESIGN §17, embedded module behind
+    the platform's auth: identity-blind core, read-only data root, single-
+    origin serving, sub-path mount, retention/limits); implementation per
+    the §17.6 checklist pending.
   - Plugin packaging guide + example template (`docs/` is empty).
   - Disk-persisted result cache (the cross-run cache is in-memory only and
     cleared on restart).
