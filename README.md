@@ -299,7 +299,6 @@ npm run test:headed         # watch the browser while it runs
     windows (and supports remote-reference two-FC mode) before the robust
     regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
-  - Sub-workflows (nested DAGs) — no implementation, design only.
   - Remote-server mode — **design done** (DESIGN §17, embedded module behind
     the platform's auth: identity-blind core, read-only data root, single-
     origin serving, sub-path mount, retention/limits); implementation per
@@ -307,10 +306,16 @@ npm run test:headed         # watch the browser while it runs
   - Plugin packaging guide + example template (`docs/` is empty).
   - Disk-persisted result cache (the cross-run cache is in-memory only and
     cleared on restart).
+  - Sub-workflows — **deferred to M4**: comparable systems (ComfyUI
+    subgraphs, n8n sub-workflows, Node-RED subflows, KNIME metanodes) earn
+    their complexity at decluttering/sharing scale that typical 5–10 node MT
+    pipelines don't have; copy/paste + example-workflow templates + an M4
+    batch runner cover the real repetition patterns (DESIGN §12).
 - **M4 — community/advanced**:
   - Plugin index/publish flow, docs site, batch/queue runner, more
     visualization nodes (Plot Coherency, Plot Phase Tensor are designed but
     not implemented).
+  - Sub-workflows (nested DAGs) — deferred from M3; rationale in DESIGN §12.
   - Aurora-style band config files (exact centre frequencies + bandwidths)
     instead of the always-auto-derived period table.
   - Paradigm B: cross-decimation-level FC pooling (see DESIGN §14.5) — a

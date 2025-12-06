@@ -15,8 +15,9 @@ executor on real 1 Hz LEMI-424 and BGS long-period data (Load LEMI → Detrend
 **M3 partial (2026-09-05/06)** — nomenclature-aware automatic channel
 configuration, remote reference end-to-end (Align Runs), run cancellation,
 artifact download, and the headless Playwright regression suite are
-delivered; caching/partial execution, sub-workflows, remote-server docs and
-the plugin packaging guide remain (see §11). **M2 is now complete** — the
+delivered; caching/partial execution and remote-server docs (design, §17)
+are delivered/drafted; the plugin packaging guide remains (see §11), and
+sub-workflows are deferred to M4 (§12). **M2 is now complete** — the
 plot-standardization task (§15) is delivered.
 Processing correctness milestones:
 - **Unit normalization**: magnetic channels converted nT→T→H (B→H) and
@@ -1013,10 +1014,9 @@ progress.
   the new run's workspace, `targets` "execute to here" with ancestor
   closure, `DELETE /api/cache`. The web UI (cached badge, "Run to here" in
   the properties panel) lands in the follow-up commit (§9).
-  Sub-workflows; remote-server mode docs (design done 2026-09-08, §17 —
-  implementation checklist §17.6 pending); plugin packaging guide + example
-  template
-  are the remaining M3 items.
+  Remote-server mode docs (design done 2026-09-08, §17 — implementation
+  checklist §17.6 pending) and the plugin packaging guide + example template
+  are the remaining M3 items. Sub-workflows are **deferred to M4** (see §12).
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally
   sketched `options_from`/`POST /api/options` design: `Compute FC`'s
@@ -1037,6 +1037,10 @@ progress.
 **M4 — Community**
 - Plugin index/publish flow, docs site, more visualization nodes,
   batch/queue runner.
+- **Sub-workflows (nested DAGs)** — deferred from M3 (2026-09-08, rationale
+  in §12): only revisit if workflows outgrow the lighter alternatives
+  (example-workflow templates, visual grouping) or a batch runner covers
+  multi-station repetition more directly.
 - **Band config files**: load an aurora-style band config (exact centre
   frequencies + bandwidths) or auto-default when none given, replacing/augmenting
   the auto-derived Fs/4→window/4 period table (§14 deferred task).
@@ -1059,8 +1063,18 @@ progress.
 - FC→TS inverse node: deferred; plugin coercion node when needed
   (e.g. frequency-domain denoising demos).
 - How do ML plugins request GPU availability? (`ctx.resources.gpu_count`?)
-- Sub-workflow semantics (nested DAGs) — still open; no implementation
-  (M3 roadmap item).
+- Sub-workflow semantics (nested DAGs) — **deferred to M4** (2026-09-08):
+  after delivering caching + partial execution (§7), the remaining M3 items,
+  and a survey of comparable systems (ComfyUI subgraphs, n8n sub-workflows,
+  Node-RED subflows, KNIME metanodes), sub-workflows were judged not worth
+  their complexity for now: typical MT pipelines are 5–10 mostly-linear
+  nodes (no ComfyUI-scale decluttering need), the one genuine repetition
+  pattern (multi-station blocks) is covered by copy/paste (§9 F2/F3) and,
+  more directly, an M4 batch runner, and a stabilized pattern is better
+  expressed as a purpose-built plugin node. The lighter 80% alternatives —
+  example-workflow templates and purely visual grouping — are the preferred
+  decluttering/sharing mechanisms. Revisit only if real usage produces
+  >20-node workflows or a repeated block that copy/paste cannot maintain.
 - Authentication model for remote deployments — resolved by design (not
   implementation): emptyUI stays identity-blind behind the platform gateway;
   see §17 (remote deployment — embedded mode).
