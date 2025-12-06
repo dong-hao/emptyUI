@@ -136,6 +136,11 @@ export function MTNode({ id, data, selected }: NodeProps) {
       {runState?.status === "running" && (
         <div className="mt-progress" style={{ width: `${(runState.progress ?? 0) * 100}%` }} />
       )}
+      {runState?.cached && (
+        <div className="mt-cached" title="Result reused from cache — inputs unchanged">
+          cached
+        </div>
+      )}
       {runState?.status === "error" && (
         <div className="mt-error" title={runState.error}>
           error: {runState.error}

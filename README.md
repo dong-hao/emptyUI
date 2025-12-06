@@ -257,6 +257,25 @@ npm run test:headed         # watch the browser while it runs
     feedback), re-checked in `onConnect`, and reported explicitly server-side
     ("cannot connect to itself"); the executor fails loudly on cycles even
     when called without validation. E2E: `packages/web/e2e/interactions.spec.ts`.
+  - **Correctness batch ("Batch A", delivered 2026-09-07)**: remote-reference
+    fc containers missing a decimation level now error instead of silently
+    degrading to a self-reference; JSON calibrations keep per-channel
+    frequency grids and unmatched filter keys warn (case-insensitive channel
+    match) instead of silently passing through; artifact/diagnostic filenames
+    are node-instance-unique (`ctx.artifact_path`) so same-type display nodes
+    no longer overwrite each other's figures; `Calibrate` with explicit
+    filters delegates to `RunTS.calibrate` (proper detrend/zero-mean/
+    zero-pad/windowing, no bare-FFT circular-convolution artifacts).
+  - **Content-addressed caching + partial execution** (2026-09-08): node
+    results are cached across runs in a server-lifetime in-memory LRU keyed
+    by structural signatures (`type, version, params, upstream signatures` —
+    ComfyUI-style recursive invalidation; file params hashed by
+    path/size/mtime, Nextflow-style; data payloads never hashed). Unchanged
+    nodes skip execution and report **cached** (green chip on the node);
+    published artifacts are restored into the new run's workspace so viewers
+    keep working. `POST /api/runs` accepts `targets` ("execute to here": the
+    selected node plus its ancestry only) exposed as **▶ Run to here** in the
+    properties panel; `DELETE /api/cache` drops all entries (DESIGN §7).
   - **Disconnect + copy/paste (2026-09-07, F2/F3)**: ComfyUI-parity canvas
     gestures — drag a connected handle to the pane to unlink, drag edge
     endpoints to re-route (validated) or drop on the pane to delete,
@@ -280,12 +299,12 @@ npm run test:headed         # watch the browser while it runs
     windows (and supports remote-reference two-FC mode) before the robust
     regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
-  - Content-addressed result caching + partial execution ("execute to
-    here"); the executor currently re-runs the whole DAG every time.
   - Sub-workflows (nested DAGs) — no implementation, design only.
   - Remote-server mode docs (same API, deployed elsewhere) — a passing
     mention in DESIGN only; no deploy guide.
   - Plugin packaging guide + example template (`docs/` is empty).
+  - Disk-persisted result cache (the cross-run cache is in-memory only and
+    cleared on restart).
 - **M4 — community/advanced**:
   - Plugin index/publish flow, docs site, batch/queue runner, more
     visualization nodes (Plot Coherency, Plot Phase Tensor are designed but

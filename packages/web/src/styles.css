@@ -417,6 +417,20 @@ button.primary {
   cursor: help;
 }
 
+/* result reused from the cross-run cache (§7) */
+.mt-cached {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #1e8449;
+  background: #eafaf1;
+  border: 1px solid #27ae60;
+  border-radius: 3px;
+  padding: 0 0.4rem;
+  margin: 0.15rem 0.5rem 0;
+  align-self: flex-start;
+  cursor: help;
+}
+
 /* ---- toolbar run controls ---- */
 
 .toolbar button {

@@ -172,7 +172,7 @@ export default function App() {
     });
   };
 
-  const handleRun = async () => {
+  const startRun = async (targets?: string[]) => {
     try {
       setMessage(null);
       // Reminder: without a Display/output node the run produces nothing visible
@@ -191,7 +191,7 @@ export default function App() {
       }
       useRun.getState().reset();
       const doc = serializeWorkflow(nodes, edges);
-      const { run_id } = await api.runWorkflow(doc);
+      const { run_id } = await api.runWorkflow(doc, targets);
       useRun.getState().setRunId(run_id);
 
       // Polling fallback: works even if the WebSocket is unavailable.
@@ -221,6 +221,8 @@ export default function App() {
       setMessage(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const handleRun = () => startRun();
 
   const handleCancel = async () => {
     const runId = useRun.getState().runId;
@@ -326,7 +328,7 @@ export default function App() {
             <MiniMap pannable zoomable />
           </ReactFlow>
         </div>
-        <PropertiesPanel />
+        <PropertiesPanel onRunToHere={(nodeId) => startRun([nodeId])} />
       </div>
     </div>
   );

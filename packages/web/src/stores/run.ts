@@ -13,6 +13,8 @@ export interface NodeRunState {
   error?: string;
   progress?: number;
   msg?: string;
+  /** result reused from the cross-run cache (executor emitted cached: true) */
+  cached?: boolean;
 }
 
 interface RunState {
@@ -47,6 +49,7 @@ export const useRun = create<RunState>((set) => ({
             [event.node as string]: {
               status: event.status as NodeRunState["status"],
               error: event.error as string | undefined,
+              cached: event.cached === true ? true : undefined,
             },
           },
         }));

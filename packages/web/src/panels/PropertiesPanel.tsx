@@ -4,8 +4,14 @@ import { useWorkflow } from "../stores/workflow";
 /**
  * Metadata panel (DESIGN.md §9, ComfyUI paradigm): node identity, ports and
  * description live here — parameters are edited inline on the node itself.
+ * Partial execution: "Run to here" runs the selected node plus its upstream
+ * ancestry only (DESIGN.md §7); unchanged nodes are reused from the cache.
  */
-export function PropertiesPanel() {
+export function PropertiesPanel({
+  onRunToHere,
+}: {
+  onRunToHere?: (nodeId: string) => void;
+}) {
   const catalog = useCatalog((s) => s.catalog);
   const nodes = useWorkflow((s) => s.nodes);
   const selectedNodeId = useWorkflow((s) => s.selectedNodeId);
@@ -69,6 +75,15 @@ export function PropertiesPanel() {
           </li>
         ))}
       </ul>
+
+      {onRunToHere && (
+        <button
+          onClick={() => onRunToHere(node.id)}
+          title="Run this node and everything upstream; unchanged nodes are reused from cache"
+        >
+          ▶ Run to here
+        </button>
+      )}
 
       <button className="danger" onClick={() => useWorkflow.getState().deleteSelected()}>
         Delete node

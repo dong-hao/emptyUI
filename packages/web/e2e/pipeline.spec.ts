@@ -250,6 +250,9 @@ test("runs a Load CSV -> Plot Time Series -> Preview pipeline end-to-end", async
 
 test("cancelling a running run stops the pipeline", async ({ page }) => {
   await buildPipeline(page);
+  // Cold run: the cross-run cache (§7) would otherwise complete the whole
+  // pipeline before the cancel request can land.
+  await page.request.delete("/api/cache");
 
   await page.getByRole("button", { name: "▶ Run" }).click();
   // Cancel is available as soon as the run is queued; clicking immediately
@@ -261,4 +264,39 @@ test("cancelling a running run stops the pipeline", async ({ page }) => {
   });
   // A cancelled run frees the Run button for another attempt.
   await expect(page.getByRole("button", { name: "▶ Run" })).toBeEnabled();
+});
+
+test("unchanged rerun reports cached nodes; Run to here executes the ancestry only", async ({
+  page,
+}) => {
+  await buildPipeline(page);
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(page.locator(".mt-preview img")).toBeVisible({ timeout: 30_000 });
+
+  // Nothing changed ⇒ the structural signatures all match ⇒ every node
+  // reports "cached" on the second run (and the artifact is restored into
+  // the new run's workspace, so the preview still renders).
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(page.locator(".mt-cached")).toHaveCount(3);
+  await expect(page.locator(".mt-preview img")).toBeVisible({ timeout: 30_000 });
+
+  // Select the middle node and run only it plus its ancestry: Load CSV and
+  // Plot Time Series execute (cache hits here), Preview Plot is not in the
+  // execution set — no chip for it. The restored plot artifact from Plot
+  // Time Series still flows to the viewer via the edge, so the preview keeps
+  // rendering the (still valid) figure.
+  await node(page, "Plot Time Series").locator(".mt-node-header").click();
+  await page.getByRole("button", { name: "▶ Run to here" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(page.locator(".mt-cached")).toHaveCount(2);
+  await expect(page.locator(".mt-preview img")).toBeVisible({ timeout: 30_000 });
 });

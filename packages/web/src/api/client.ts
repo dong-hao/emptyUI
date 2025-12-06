@@ -60,11 +60,13 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   nodes: () => getJson<Catalog>("/nodes"),
-  runWorkflow: async (workflow: unknown): Promise<{ run_id: string }> => {
+  // targets: partial execution — run only these nodes plus their ancestors
+  // ("execute to here", DESIGN.md §7); omitted = run everything
+  runWorkflow: async (workflow: unknown, targets?: string[]): Promise<{ run_id: string }> => {
     const res = await fetch(`${BASE}/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workflow }),
+      body: JSON.stringify(targets?.length ? { workflow, targets } : { workflow }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
