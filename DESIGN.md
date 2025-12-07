@@ -694,6 +694,64 @@ Rules that keep the ecosystem healthy:
 - A future `emptyui plugin publish/index` flow can distribute community
   plugins as ordinary PyPI packages — no custom registry required for MVP.
 
+### 5.1 Plugin enable/disable — design (2026-09-08, not yet implemented)
+
+Users switch third-party plugins on/off from the web UI; bundled plugins
+(`core`, `mth5`, `aurora` — marked via `register.bundled = True` in their
+`plugin.py`, documented in the guide) are always on and shown read-only for
+transparency.
+
+**Contract** (the four user requirements, mapped):
+
+1. **Tick boxes**: a toolbar ⚙ Settings dialog lists every installed
+   third-party plugin (name, version, node count) with an enabled tick box.
+2. **Palette reveal/hide**: the palette is catalog-driven, so hiding/showing
+   a plugin's nodes on the left panel is automatic — toggling refetches
+   `GET /api/nodes`.
+3. **Applies automatically ("backend restart")**: implemented as an
+   **in-process hot reload** — no process respawn. Disabling means "don't
+   register the plugin's nodes"; the `Registry` rebuilds its node table in
+   place (new runs validate against the new catalog immediately), the
+   cross-run cache is cleared, and the UI refetches. A true uvicorn restart
+   is deliberately avoided (fragile to self-trigger; in embedded mode §17
+   the platform owns process lifecycle).
+4. **Silent when nothing to switch**: with no third-party plugin installed
+   the dialog shows an empty state (bundled plugins remain as read-only
+   info rows); config entries naming unknown plugins are ignored without
+   warning — config files may travel between machines.
+
+**Backend API**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET    | `/api/plugins` | installed plugins: `[{name, version, node_count, bundled, enabled}]` |
+| POST   | `/api/plugins/{name}/enable` | hot-reload the registry with the plugin active |
+| POST   | `/api/plugins/{name}/disable` | hot-reload without it; clear the cross-run cache |
+
+**Config & persistence**
+
+- `EMPTYUI_DISABLED_PLUGINS` (comma-separated entry-point names) sets the
+  baseline at startup — the embedded/remote mode knob (§17: the platform
+  decides plugin availability).
+- UI toggles persist to a JSON settings file (default: user config dir,
+  overridable via `EMPTYUI_SETTINGS_PATH`); the file tracks UI changes, env
+  wins for the baseline at startup. Unknown names are silently ignored
+  (requirement 4).
+- `create_app(disabled_plugins=[...])` mirrors the env for module embedding.
+
+**Robustness**
+
+- `find_plugins` records which node types each entry point contributed; the
+  registry exposes `status_of(type)` → `active | disabled | unknown`, so
+  workflow validation distinguishes *"plugin 'mth5' is disabled — enable it
+  in Settings"* from *"plugin not installed?"*.
+- The executor snapshots the manifests it needs at run start, so toggling
+  mid-run cannot yank a node out of an executing workflow; toggling while a
+  run is queued/running is allowed and the run completes under the snapshot.
+- Concurrent toggles are serialized by the existing app lock; discovery
+  itself is re-run on each toggle (module imports are cached by Python —
+  cheap and safe).
+
 ---
 
 ## 6. Workflow JSON Schema
@@ -817,6 +875,7 @@ edge, even when one node publishes several figures.
 | GET  | `/api/artifacts/{id}` | Full artifact download (`Content-Disposition: attachment`) |
 | POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
 | DELETE | `/api/cache` | Drop all cached node results |
+| GET/POST | `/api/plugins[/{name}/enable|disable]` | Plugin listing + enable/disable hot reload (§5.1, planned) |
 | WS   | `/api/ws` | Run events stream |
 
 > Cancellation and artifact download are implemented (see rows above). A
@@ -1037,10 +1096,12 @@ progress.
   the properties panel) lands in the follow-up commit (§9).
   Remote-server mode docs (design done 2026-09-08, §17 — implementation
   checklist §17.6 pending) and the plugin packaging guide + example template
-  (**guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
+  (  **guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
   `examples/plugin-template/`, plus open namespaced port types and manifest
-  model declarations; plugin enable/disable switches are the follow-up)
-  are the remaining M3 items. Sub-workflows are **deferred to M4** (see §12).
+  model declarations; plugin enable/disable switches — **design done**
+  (§5.1: tick-box settings dialog, hot-reload registry, settings-file
+  persistence, third-party plugins only) — are the remaining M3
+  implementation items. Sub-workflows are **deferred to M4** (see §12).
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally
   sketched `options_from`/`POST /api/options` design: `Compute FC`'s

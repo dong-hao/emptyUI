@@ -235,13 +235,18 @@ Rules:
 
 - Publish to PyPI as an ordinary package — entry points make installation
   `pip install emptyui-<yourplugin>` with no registry or index required.
+- Bundled plugins shipped in this repository (`emptyui-core-nodes`,
+  `emptyui-mth5`, `emptyui-aurora`) mark their register function with
+  `register.bundled = True`; third-party plugins never set this — it keeps
+  them toggleable in the Settings dialog (DESIGN.md §5.1) while bundled
+  plugins stay always-on.
 - Pin heavy domain deps exactly (e.g. `mth5==0.6.8`): emptyUI nodes wrap
   third-party APIs that move.
 - A plugin index/publish flow (marketplace-style) is an M4 item; PyPI plus
   the guide's conventions are the MVP distribution path.
 - Embedded/remote deployments (DESIGN.md §17) decide plugin availability at
-  the platform level — plugin enable/disable is config-level
-  (`EMPTYUI_DISABLED_PLUGINS`) with runtime toggling planned.
+  the platform level — `EMPTYUI_DISABLED_PLUGINS` sets the baseline there;
+  runtime toggling persists to the settings file (§5.1).
 
 ## 12. Publishing checklist
 

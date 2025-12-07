@@ -310,8 +310,12 @@ npm run test:headed         # watch the browser while it runs
     windows (and supports remote-reference two-FC mode) before the robust
     regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
-  - Plugin enable/disable switches (config-level `EMPTYUI_DISABLED_PLUGINS` +
-    runtime API + settings-UI toggle) — the plugin guide's follow-up.
+  - Plugin enable/disable switches — **design done** (DESIGN §5.1): tick-box
+    settings dialog (third-party plugins only; bundled `core`/`mth5`/`aurora`
+    always on), palette reveal/hide via catalog refetch, in-process hot
+    reload of the registry ("backend restart" without a process respawn),
+    settings-file persistence + `EMPTYUI_DISABLED_PLUGINS` env baseline,
+    silent ignore when nothing is installed; implementation pending.
   - Remote-server mode — **design done** (DESIGN §17, embedded module behind
     the platform's auth: identity-blind core, read-only data root, single-
     origin serving, sub-path mount, retention/limits); implementation per
