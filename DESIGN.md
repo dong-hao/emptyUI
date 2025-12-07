@@ -668,8 +668,29 @@ Rules that keep the ecosystem healthy:
 - Node types are namespaced by convention: `core.<domain>.<name>` for the
   bundled plugin, `<org>.<domain>.<name>` for external plugins
   (e.g. `simpeg.aurora.compute_fc`).
+- **Open, namespaced port types** (2026-09-08): a port type is an open
+  string tag; plugins may introduce new types but must namespace them
+  (`<org>.<type>`) and declare UI metadata via the node's `port_types`
+  ClassVar — the registry collects these into the catalog and the frontend
+  colors edges with them (undeclared types fall back to gray). Reusing the
+  core tags (`ts.run`, `fc`, `tf`, …) is strongly preferred; consumers
+  duck-type documented payload attributes instead of importing plugin
+  container classes.
+- **Self-tests required**: every plugin ships a pytest suite (registry-,
+  node- and interop-level — see the template); tested packs are the
+  ecosystem's trust contract.
+- **Models declared, not bundled**: nodes needing trained weights declare
+  them in the manifest (`models`: id/filename/sha256/url/license); binaries
+  live in a configured model directory (platform-provisioned in embedded
+  remote mode, §17) — never inside the wheel, never silently downloaded.
+- **Plugin enable/disable**: config-level switches
+  (`EMPTYUI_DISABLED_PLUGINS` / `create_app` kwarg) with a runtime API +
+  settings-UI toggle planned; node-level `hidden` exists independently.
 - Manifests include `version`; workflows record which plugin versions produced
-  results for reproducibility.
+  results for reproducibility. The full authoring contract — including the
+  functional (immutable-input) execute contract, packaging layout and the
+  publishing checklist — is **`docs/plugin-guide.md`** (M3, 2026-09-08),
+  with a working template in `examples/plugin-template/`.
 - A future `emptyui plugin publish/index` flow can distribute community
   plugins as ordinary PyPI packages — no custom registry required for MVP.
 
@@ -1016,6 +1037,9 @@ progress.
   the properties panel) lands in the follow-up commit (§9).
   Remote-server mode docs (design done 2026-09-08, §17 — implementation
   checklist §17.6 pending) and the plugin packaging guide + example template
+  (**guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
+  `examples/plugin-template/`, plus open namespaced port types and manifest
+  model declarations; plugin enable/disable switches are the follow-up)
   are the remaining M3 items. Sub-workflows are **deferred to M4** (see §12).
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally

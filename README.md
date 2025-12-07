@@ -276,6 +276,17 @@ npm run test:headed         # watch the browser while it runs
     keep working. `POST /api/runs` accepts `targets` ("execute to here": the
     selected node plus its ancestry only) exposed as **▶ Run to here** in the
     properties panel; `DELETE /api/cache` drops all entries (DESIGN §7).
+  - **Plugin packaging guide + example template** (2026-09-08): the
+    ecosystem contract in `docs/plugin-guide.md` — entry-point packaging,
+    namespaced node/port types (open type system: plugins may introduce
+    namespaced types with declared UI metadata, collected into the catalog
+    and used to color edges), the §4 manifest/tooltip protocol, the
+    functional (immutable-input) execute contract, **required self-tests**,
+    **models declared not bundled** (id/filename/sha256/license in the
+    manifest; binaries in a configured model directory), versioning and a
+    publishing checklist. A working, installable template lives in
+    `examples/plugin-template/` (`pip install -e` + its nodes appear under
+    the Example category).
   - **Disconnect + copy/paste (2026-09-07, F2/F3)**: ComfyUI-parity canvas
     gestures — drag a connected handle to the pane to unlink, drag edge
     endpoints to re-route (validated) or drop on the pane to delete,
@@ -299,11 +310,12 @@ npm run test:headed         # watch the browser while it runs
     windows (and supports remote-reference two-FC mode) before the robust
     regression, with a per-band coherence diagnostic table.
 - **M3 — not yet started**:
+  - Plugin enable/disable switches (config-level `EMPTYUI_DISABLED_PLUGINS` +
+    runtime API + settings-UI toggle) — the plugin guide's follow-up.
   - Remote-server mode — **design done** (DESIGN §17, embedded module behind
     the platform's auth: identity-blind core, read-only data root, single-
     origin serving, sub-path mount, retention/limits); implementation per
     the §17.6 checklist pending.
-  - Plugin packaging guide + example template (`docs/` is empty).
   - Disk-persisted result cache (the cross-run cache is in-memory only and
     cleared on restart).
   - Sub-workflows — **deferred to M4**: comparable systems (ComfyUI
