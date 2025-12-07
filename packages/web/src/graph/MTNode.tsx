@@ -182,14 +182,14 @@ export function MTNode({ id, data, selected }: NodeProps) {
                 <span className="mt-port-label in">
                   {input && (
                     <>
-                      <Handle
-                        id={input.name}
-                        type="target"
-                        position={Position.Left}
-                        className="mt-port"
-                        style={{ background: portColor(input.type) }}
-                        title={`${input.label ?? input.name}: ${input.type}`}
-                      />
+                        <Handle
+                          id={input.name}
+                          type="target"
+                          position={Position.Left}
+                          className="mt-port"
+                          style={{ background: portColor(input.type, catalog) }}
+                          title={`${input.label ?? input.name}: ${input.type}`}
+                        />
                       <span title={`${input.label ?? input.name}: ${input.type}`}>
                         {input.label ?? input.name}
                       </span>
@@ -210,7 +210,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         type="source"
                         position={Position.Right}
                         className="mt-port"
-                        style={{ background: portColor(output.type) }}
+                        style={{ background: portColor(output.type, catalog) }}
                         title={`${output.label ?? output.name}: ${output.type}`}
                       />
                     </>
@@ -278,7 +278,7 @@ function HandleInPlot() {
       type="target"
       position={Position.Left}
       className="mt-port"
-      style={{ background: portColor("plot") }}
+      style={{ background: portColor("plot", catalog) }}
       title="plot: plot"
     />
   );
@@ -292,7 +292,7 @@ function HandleOutPlot() {
       type="source"
       position={Position.Right}
       className="mt-port"
-      style={{ background: portColor("plot") }}
+      style={{ background: portColor("plot", catalog) }}
       title="plot: plot"
     />
   );
@@ -397,7 +397,7 @@ function HandleInTable() {
       type="target"
       position={Position.Left}
       className="mt-port"
-      style={{ background: portColor("table") }}
+      style={{ background: portColor("table", catalog) }}
       title="table: table"
     />
   );
@@ -411,7 +411,7 @@ function HandleOutTable() {
       type="source"
       position={Position.Right}
       className="mt-port"
-      style={{ background: portColor("table") }}
+      style={{ background: portColor("table", catalog) }}
       title="table: table"
     />
   );

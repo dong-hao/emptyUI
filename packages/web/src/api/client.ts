@@ -48,6 +48,8 @@ export interface NodeManifest {
 
 export interface Catalog {
   nodes: NodeManifest[];
+  /** UI metadata for port types declared by installed nodes (color/label). */
+  port_types?: Record<string, { color?: string; label?: string }>;
 }
 
 const BASE = "/api";

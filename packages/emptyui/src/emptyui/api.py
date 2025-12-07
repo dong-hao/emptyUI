@@ -149,6 +149,21 @@ class Node:
     #: (DESIGN.md §4 "Chain-walking inheritance").
     inherit: ClassVar[dict[str, dict[str, str]]] = {}
 
+    #: New port types introduced by this node (plugin guide §"Port types").
+    #: Core types (``ts.run``, ``fc.container``, ``tf``, …) need no entry;
+    #: genuinely new types must be namespaced (``<org>.<type>``) and declare
+    #: UI metadata so edges render readably:
+    #: ``{"ml.model": {"color": "#8e44ad", "label": "Model"}}``.
+    #: The registry collects these into the catalog for the frontend.
+    port_types: ClassVar[dict[str, dict[str, str]]] = {}
+
+    #: External model weights this node needs (plugin guide §"Models").
+    #: Declare — do not bundle: binaries live in a configured model
+    #: directory, never inside the plugin wheel. Each entry:
+    #: ``{"id": "denoiser-cnn", "filename": "denoiser_v2.onnx", "sha256":
+    #: "<…>", "url": "https://…", "license": "CC-BY-4.0"}``.
+    models: ClassVar[list[dict[str, str]]] = []
+
     #: subclasses override; signature: execute(ctx, **inputs_and_params)
     execute: Callable[..., dict[str, Any]]
 
@@ -168,6 +183,8 @@ class Node:
             "params": [p.to_dict() for p in self.params],
             "deps": list(self.deps),
             "inherit": {k: dict(v) for k, v in self.inherit.items()},
+            # models declared but not bundled (plugin guide §"Models")
+            "models": [dict(m) for m in self.models],
         }
 
 

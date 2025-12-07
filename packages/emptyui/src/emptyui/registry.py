@@ -31,7 +31,15 @@ class Registry:
         return sorted(self._nodes)
 
     def manifests(self) -> dict[str, Any]:
-        return {"nodes": [node.manifest() for node in self._nodes.values()]}
+        # port_types: UI metadata for every port type declared by any node
+        # (plugin guide §"Port types") — the frontend colors edges with it,
+        # falling back to gray for undeclared types
+        port_types: dict[str, dict[str, str]] = {}
+        for node in self._nodes.values():
+            for ptype, meta in getattr(node, "port_types", {}).items():
+                port_types.setdefault(ptype, dict(meta))
+        return {"nodes": [node.manifest() for node in self._nodes.values()],
+                "port_types": port_types}
 
 
 def find_plugins(registry: Registry) -> list[str]:

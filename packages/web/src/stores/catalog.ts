@@ -31,6 +31,10 @@ export const PORT_COLORS: Record<string, string> = {
   tf: "#c0392b",
 };
 
-export function portColor(type: string): string {
+export function portColor(type: string, catalog?: Catalog | null): string {
+  // plugin-declared types win (plugin guide §"Port types"): the catalog
+  // carries UI metadata for every port type declared by an installed node
+  const declared = catalog?.port_types?.[type]?.color;
+  if (declared) return declared;
   return PORT_COLORS[type] ?? "#95a5a6";
 }
