@@ -34,6 +34,9 @@ uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]"
 
 # Frontend — dev server on http://localhost:5173 (proxies /api to :8000)
 cd packages/web && npm install && npm run dev
+
+# …or launch both at once (Ctrl+C stops both cleanly)
+./scripts/dev.sh
 ```
 
 ## Browser end-to-end tests (Playwright)
