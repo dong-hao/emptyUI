@@ -824,7 +824,8 @@ Design notes:
   **Immutability contract** (ComfyUI model): cached payloads are handed on
   as the same object instances — nodes must be functional (never mutate
   inputs or previously returned outputs). Disk persistence across restarts
-  is deliberately deferred; `DELETE /api/cache` drops all entries.
+  is deferred to M4 (2026-09-08 — not essential to running the process);
+  `DELETE /api/cache` drops all entries.
 - **Partial runs** (M3, implemented 2026-09-08): `POST /api/runs` accepts
   `targets: [node_id, …]` — "execute to here" runs the target nodes plus
   their ancestral closure; other nodes emit no events and stay idle in the
@@ -1094,8 +1095,9 @@ progress.
   the new run's workspace, `targets` "execute to here" with ancestor
   closure, `DELETE /api/cache`. The web UI (cached badge, "Run to here" in
   the properties panel) lands in the follow-up commit (§9).
-  Remote-server mode docs (design done 2026-09-08, §17 — implementation
-  checklist §17.6 pending) and the plugin packaging guide + example template
+  Remote-server mode (§17 — contract items 1–3 & 6 delivered 2026-09-08;
+  retention/limits items 4–5 designed, pending) and the plugin packaging
+  guide + example template
   (  **guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
   `examples/plugin-template/`, plus open namespaced port types and manifest
   model declarations; plugin enable/disable switches — **design done**
@@ -1126,6 +1128,9 @@ progress.
   in §12): only revisit if workflows outgrow the lighter alternatives
   (example-workflow templates, visual grouping) or a batch runner covers
   multi-station repetition more directly.
+- **Disk-persisted result cache** — deferred from M3 (2026-09-08): the
+  cross-run cache is in-memory only and clears on restart; persistence is
+  not essential to running the process.
 - **Band config files**: load an aurora-style band config (exact centre
   frequencies + bandwidths) or auto-default when none given, replacing/augmenting
   the auto-derived Fs/4→window/4 period table (§14 deferred task).
@@ -1919,7 +1924,7 @@ range, so the binding criterion is visible. A coherence-vs-period plot
 
 ---
 
-## 17. Remote deployment — embedded mode (design, 2026-09-08; not yet implemented)
+## 17. Remote deployment — embedded mode (designed 2026-09-08; contract items 1–3 & 6 delivered 2026-09-08)
 
 emptyUI is **not** a standalone multi-user app. The target remote scenario is
 emptyUI's FastAPI backend (+ built web frontend) embedded **as a module**
@@ -2014,13 +2019,28 @@ Long-lived remote services need hygiene that local dev does not:
 - Database persistence for runs/artifacts — the file-based workspace (§3)
   stands until run history demands more.
 
-### 17.6 Compatibility checklist (future implementation, each lands separately)
+### 17.6 Compatibility checklist (2026-09-08 — items 1–3 & 6 delivered; 4–5 designed, pending)
 
-1. Data-root confinement: `/api/files` sandbox + path-param resolution
-   (manifest `in`/`out` path kinds).
-2. `dist/` serving + CORS lockdown configuration.
-3. Sub-path support: `root_path` plumbing + frontend API-base configurator.
-4. Workspace TTL cleanup + artifact GC.
-5. Max-concurrent-runs guard.
-6. Config plumbing (env + `create_app` kwargs) + a deployment guide
-   (`docs/deployment.md`) covering the gateway contract of §17.1.
+1. ✅ Data-root confinement: `EMPTYUI_DATA_ROOT` + `create_app(data_root=…)`
+   — `/api/files` is clamped to the root (requests outside resolve to the
+   root, never 404-browse beyond it); input path params carry a manifest
+   `path_kind: "in"` marker and are validated/resolved inside the root
+   (actionable "outside the data root" error); output params
+   (`path_kind: "out"`) resolve into the per-run workspace, empty = the
+   workspace itself. Confinement activates only when a data root is
+   configured — local dev is untouched. Bundled plugins updated (core,
+   mth5 load/save/LEMI/TF/calibration).
+2. ✅ Same-origin serving + CORS: `EMPTYUI_SERVE_DIST` / `create_app(serve_dist=…)`
+   mounts the built frontend (single origin — no CORS needed in remote
+   mode); `EMPTYUI_CORS_ORIGINS` / `create_app(cors_origins=…)` replaces the
+   dev `*` default (empty tuple disables the middleware).
+3. ✅ Sub-path support: the frontend derives its API base at runtime from
+   the document location (one segment below the app root) — works at `/`,
+   under a sub-path mount and in dev with no rebuild or config; `root_path`
+   plumbing for module embedding (`create_app(root_path=…)`; proxies set it
+   via `X-Forwarded-Prefix`/uvicorn `--root-path`).
+4. ⏳ Workspace TTL cleanup + artifact GC — designed (§17.4), pending.
+5. ⏳ Max-concurrent-runs guard — designed (§17.4), pending.
+6. ✅ Config plumbing + deployment guide: `emptyui/config.py` (`Settings`,
+   env-first, kwargs win) + `docs/deployment.md` (gateway contract, nginx
+   sub-path/WS example, data provisioning, module embedding).

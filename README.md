@@ -316,12 +316,11 @@ npm run test:headed         # watch the browser while it runs
     reload of the registry ("backend restart" without a process respawn),
     settings-file persistence + `EMPTYUI_DISABLED_PLUGINS` env baseline,
     silent ignore when nothing is installed; implementation pending.
-  - Remote-server mode — **design done** (DESIGN §17, embedded module behind
-    the platform's auth: identity-blind core, read-only data root, single-
-    origin serving, sub-path mount, retention/limits); implementation per
-    the §17.6 checklist pending.
-  - Disk-persisted result cache (the cross-run cache is in-memory only and
-    cleared on restart).
+  - Remote-server mode — **contract delivered** (DESIGN §17 + §17.6 items
+    1–3 & 6: data-root confinement with path_kind params, same-origin dist
+    serving + configurable CORS, runtime sub-path API base, config module +
+    `docs/deployment.md`); retention/limits (§17.6 items 4–5) still designed,
+    not implemented.
   - Sub-workflows — **deferred to M4**: comparable systems (ComfyUI
     subgraphs, n8n sub-workflows, Node-RED subflows, KNIME metanodes) earn
     their complexity at decluttering/sharing scale that typical 5–10 node MT
@@ -332,6 +331,9 @@ npm run test:headed         # watch the browser while it runs
     visualization nodes (Plot Coherency, Plot Phase Tensor are designed but
     not implemented).
   - Sub-workflows (nested DAGs) — deferred from M3; rationale in DESIGN §12.
+  - Disk-persisted result cache (2026-09-08: deferred from M3 — not
+    essential to running the process; the cross-run cache stays in-memory
+    and clears on restart).
   - Aurora-style band config files (exact centre frequencies + bandwidths)
     instead of the always-auto-derived period table.
   - Paradigm B: cross-decimation-level FC pooling (see DESIGN §14.5) — a
