@@ -52,7 +52,16 @@ export interface Catalog {
   port_types?: Record<string, { color?: string; label?: string }>;
 }
 
-const BASE = "/api";
+/** API base, derived at runtime (DESIGN.md §17.3 single-origin convention):
+ *  the API always lives one segment below the document root — so this works
+ *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
+ *  proxies /api). No build-time env or hardcoded mount is needed. */
+function apiBase(): string {
+  const base = new URL("api", document.baseURI);
+  return base.pathname.replace(/\/$/, "");
+}
+
+const BASE = apiBase();
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
@@ -91,5 +100,5 @@ export const api = {
 
 export function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/api/ws`;
+  return `${proto}://${location.host}${BASE}/ws`;
 }
