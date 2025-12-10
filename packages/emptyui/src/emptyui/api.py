@@ -69,6 +69,10 @@ class Param:
     description: str = ""
     #: Placeholder text for text inputs (e.g. "auto (detect from data)").
     placeholder: str = ""
+    #: Remote-mode path confinement (DESIGN.md §17.2): "" = not a path,
+    #: "in" = read-only input resolved under the data root (validated),
+    #: "out" = writable output resolved into the run workspace.
+    path_kind: str = ""
     #: Auto-change rules driven from the UI: when this param changes to a given
     #: value (key), set the listed (other_param, value) pairs. Keys are
     #: serialized as strings (bool -> "true"/"false") for JSON transport.
@@ -99,6 +103,7 @@ class Param:
             "description": self.description,
             "placeholder": self.placeholder,
             "cascade": self._cascade_dict(),
+            "path_kind": self.path_kind,
         }
 
 

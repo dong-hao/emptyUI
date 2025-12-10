@@ -25,7 +25,7 @@ class LoadCsv(Node):
     inputs = ()
     outputs = (Output("data", "ts.run", label="time series", description="Loaded time series"),)
     params = (
-        Param("path", "file", label="CSV file path"),
+        Param("path", "file", label="CSV file path", path_kind="in"),
         Param("sample_rate", "number", label="Sample rate (Hz)", default=150.0,
               min=0.000001, optional=True,
               description="Used when the file has no time column."),

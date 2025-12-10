@@ -279,7 +279,7 @@ class LoadCalibration(Node):
     inputs = ()
     outputs = (Output("calibration", "calibration"),)
     params = (
-        Param("data_path", "string", label="Calibration file"),
+        Param("data_path", "string", label="Calibration file", path_kind="in"),
         Param("extend_flat", "boolean", label="Flat below table",
               default=True,
               description="Treat the response as constant (first row, zero "

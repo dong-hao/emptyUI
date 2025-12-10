@@ -13,9 +13,11 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from emptyui.cache import NodeCache
+from emptyui.config import Settings
 from emptyui.executor import Executor
 from emptyui.registry import Registry, build_default_registry
 from emptyui.schema import ValidationError_, Workflow, validate_workflow
@@ -78,14 +80,38 @@ def _artifact_media(kind: str, path: str) -> tuple[str, str]:
     return "application/octet-stream", suffix or ".bin"
 
 
-def create_app(registry: Registry | None = None) -> FastAPI:
-    app = FastAPI(title="emptyui", version="0.2.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+def create_app(
+    registry: Registry | None = None,
+    *,
+    settings: Settings | None = None,
+    data_root=None,
+    serve_dist: str | None = None,
+    cors_origins: tuple[str, ...] | None = None,
+    root_path: str | None = None,
+) -> FastAPI:
+    """Build the application (DESIGN.md §8, remote-mode knobs §17/§17.2).
+
+    Explicit keyword arguments win over ``settings``/env: embedding platforms
+    pass what they need without env coupling. ``data_root`` confines input
+    paths (read-only platform data), ``serve_dist`` serves the built web
+    frontend same-origin, ``cors_origins`` replaces the dev default (empty
+    tuple disables the middleware — same-origin serving needs no CORS).
+    """
+    if settings is None:
+        settings = Settings.from_env()
+    data_root = data_root if data_root is not None else settings.data_root
+    serve_dist = serve_dist if serve_dist is not None else settings.serve_dist
+    cors_origins = cors_origins if cors_origins is not None else settings.cors_origins
+    root_path = root_path if root_path is not None else settings.root_path
+
+    app = FastAPI(title="emptyui", version="0.2.0", root_path=root_path or "")
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cors_origins),
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     registry = registry or build_default_registry()
     executor = Executor(registry)
     hub = EventHub()
@@ -158,6 +184,7 @@ def create_app(registry: Registry | None = None) -> FastAPI:
                     cancel_event=cancel_event,
                     cache=node_cache,
                     targets=req.targets,
+                    data_root=data_root,
                 )
                 with lock:
                     runs[run_id]["summary"] = summary
@@ -201,10 +228,25 @@ def create_app(registry: Registry | None = None) -> FastAPI:
     def list_files(path: str = "") -> dict:
         """Server-side directory listing for the file-picker widget.
 
-        MVP/local-mode convenience: no sandboxing yet — a must-have before
-        any remote deployment (see DESIGN.md §12 auth open question).
+        With a data root configured (DESIGN.md §17.2, remote/embedded mode)
+        the listing is confined to that root: requests outside it resolve to
+        the root itself, so users can never browse beyond the
+        platform-provisioned data. Without one (local dev) the whole
+        filesystem is browsable.
         """
-        p = Path(path).expanduser().resolve() if path.strip() else Path.cwd()
+        root = Path(data_root).resolve() if data_root is not None else None
+        raw = Path(path).expanduser() if path.strip() else None
+        if root is not None:
+            if raw is None:
+                p = root
+            else:
+                try:
+                    p = raw.resolve().relative_to(root)
+                    p = root / p
+                except ValueError:
+                    p = root  # requested path is outside the data root → clamp
+        else:
+            p = raw.resolve() if raw is not None else Path.cwd()
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"path not found: {p}")
         if p.is_file():
@@ -249,6 +291,15 @@ def create_app(registry: Registry | None = None) -> FastAPI:
                 await ws.receive_text()  # keepalive / future cancel messages
         except WebSocketDisconnect:
             hub.disconnect(ws)
+
+    # single-origin serving (DESIGN.md §17.3): mount the built frontend
+    # last, so /api/* routes win; html=True serves index.html at the root.
+    # API routes stay on top — a same-origin deployment needs no CORS at all.
+    if serve_dist:
+        dist = Path(serve_dist).expanduser()
+        if not dist.is_dir():
+            raise ValueError(f"EMPTYUI_SERVE_DIST: not a directory: {dist}")
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="web")
 
     return app
 

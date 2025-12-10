@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from emptyui.cache import CacheEntry, NodeCache
 from emptyui.context import RunContext
+from emptyui.paths import PathPolicy
 from emptyui.schema import Workflow, WorkflowNode
 from emptyui.store import DataStore
 
@@ -170,6 +171,7 @@ class Executor:
         cancel_event: threading.Event | None = None,
         cache: NodeCache | None = None,
         targets: list[str] | None = None,
+        data_root=None,
     ) -> dict[str, Any]:
         """Execute the workflow; returns a run summary.
 
@@ -184,6 +186,10 @@ class Executor:
 
         `targets` restricts execution to the given nodes plus their
         ancestors ("execute to here"); other nodes emit no events.
+
+        `data_root` (DESIGN.md §17.2) confines input path params to a
+        read-only root and resolves output path params into the run
+        workspace; None keeps local-dev behavior.
         """
         if cancel_event is None:
             cancel_event = threading.Event()
@@ -308,6 +314,13 @@ class Executor:
                     kwargs[param.name] = wnode.params[param.name]
                 elif param.default is not None:
                     kwargs.setdefault(param.name, param.default)
+
+            # remote-mode path confinement (§17.2): inputs stay inside the
+            # data root, outputs resolve into this run's workspace
+            if data_root is not None:
+                kwargs = PathPolicy(data_root, workspace).resolve_params(
+                    manifest, kwargs
+                )
 
             ctx = RunContext(
                 workspace=workspace,

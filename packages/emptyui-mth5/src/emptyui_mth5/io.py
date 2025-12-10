@@ -17,7 +17,7 @@ class LoadMth5(Node):
     inputs = ()
     outputs = (Output("mth5", "mth5"),)
     params = (
-        Param("path", "file", label="MTH5 file path"),
+        Param("path", "file", label="MTH5 file path", path_kind="in"),
         Param("mode", "select", label="Mode",
               options=("r", "r+", "a", "w"), default="r"),
     )
@@ -43,7 +43,7 @@ class SaveMth5(Node):
     inputs = (Input("mth5", "mth5"),)
     outputs = ()
     params = (
-        Param("path", "file", label="Output MTH5 path", default="", optional=True),
+        Param("path", "file", label="Output MTH5 path", default="", optional=True, path_kind="out"),
     )
 
     def execute(self, ctx, mth5, path: str = "") -> dict[str, Any]:

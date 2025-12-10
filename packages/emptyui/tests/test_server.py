@@ -38,6 +38,31 @@ def test_clear_cache_endpoint(client):
     assert "cleared" in resp.json()
 
 
+def test_files_endpoint_confined_to_data_root(tmp_path):
+    from emptyui.config import Settings
+
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "station.csv").write_text("x")
+    confined = TestClient(create_app(settings=Settings(data_root=root)))
+
+    listing = confined.get("/api/files").json()
+    assert listing["path"] == str(root)
+    assert any(e["name"] == "station.csv" for e in listing["entries"])
+
+    # a path outside the data root clamps back to the root instead of 404
+    resp = confined.get("/api/files", params={"path": str(tmp_path)})
+    assert resp.status_code == 200
+    assert resp.json()["path"] == str(root)
+
+
+def test_files_endpoint_unrestricted_without_data_root(client):
+    from pathlib import Path
+
+    listing = client.get("/api/files").json()
+    assert listing["path"] == str(Path.cwd())
+
+
 def test_run_echo_workflow(client):
     workflow = {
         "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],

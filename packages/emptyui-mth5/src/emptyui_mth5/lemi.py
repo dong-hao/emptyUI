@@ -22,18 +22,18 @@ class LoadLemi(Node):
     inputs = ()
     outputs = (Output("mth5", "mth5"),)
     params = (
-        Param("data_path", "directory", label="LEMI data directory"),
+        Param("data_path", "directory", label="LEMI data directory", path_kind="in"),
         Param("survey_id", "string", default="survey"),
         Param("station_id", "string", default="station"),
         Param("mth5_filename", "string", label="Output file name", default="from_lemi424.mth5"),
         Param("save_path", "directory", label="Output directory", default="",
-              optional=True),
+              optional=True, path_kind="out"),
         Param("channel_nomenclature", "select", label="Channel nomenclature",
               options=("lemi12", "lemi34"), default="lemi12",
               description="mt_metadata CHANNEL_MAPS keyword: lemi12 = electric "
                           "pair e1/e2 (default), lemi34 = pair e3/e4"),
         Param("calibration_path", "string", label="Calibration file/dir",
-              default="", optional=True,
+              default="", optional=True, path_kind="in",
               description="Manufacturer calibration (.chn/.def FAP or mt_io "
                           ".json). A directory is searched for a matching "
                           "file; empty auto-pickups *.chn/*.def/*.json in the "

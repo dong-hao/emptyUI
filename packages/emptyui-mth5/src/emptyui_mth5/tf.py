@@ -90,7 +90,7 @@ class ImportTF(Node):
     category = "Data I/O"
     inputs = ()
     outputs = (Output("tf", "tf"),)
-    params = (Param("path", "file", label="TF file path"),)
+    params = (Param("path", "file", label="TF file path", path_kind="in"),)
 
     def execute(self, ctx, path: str) -> dict[str, Any]:
         from mt_metadata.transfer_functions.core import TF
@@ -112,7 +112,7 @@ class ExportTF(Node):
     inputs = (Input("tf", "tf"),)
     outputs = ()
     params = (
-        Param("path", "file", label="Output path (or basename)", default=""),
+        Param("path", "file", label="Output path (or basename)", default="", path_kind="out"),
         Param("file_type", "select", label="Format",
               options=("edi", "xml", "zmm", "avg", "j"), default="edi"),
     )
