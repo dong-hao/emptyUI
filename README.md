@@ -18,9 +18,17 @@ packages/
 Requires Python ≥3.10 with [uv](https://docs.astral.sh/uv/) and Node ≥20.
 
 ```bash
-# Backend — repo-root venv, both packages installed editable
+# One-shot setup: creates .venv, installs all packages editable (with their
+# [dev] extras) + the example plugin, and runs npm install in packages/web.
+# Add --with-browsers to also download the Playwright Chromium build.
+./scripts/install.sh
+
+# …or do it manually:
 uv venv --python 3.12 .venv
-uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]"
+uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]" \
+               -e "packages/emptyui-mth5[dev]" -e "packages/emptyui-aurora[dev]" \
+               -e "examples/plugin-template[dev]"
+cd packages/web && npm install
 
 # Run tests
 .venv/bin/python -m pytest packages -q
@@ -33,7 +41,7 @@ uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]"
 ./scripts/dev-backend.sh
 
 # Frontend — dev server on http://localhost:5173 (proxies /api to :8000)
-cd packages/web && npm install && npm run dev
+cd packages/web && npm run dev
 
 # …or launch both at once (Ctrl+C stops both cleanly)
 ./scripts/dev.sh
