@@ -6,8 +6,11 @@ M1: runs execute on a worker thread; events stream to WebSocket clients.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import tempfile
 import threading
+import time
+import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -88,6 +91,8 @@ def create_app(
     serve_dist: str | None = None,
     cors_origins: tuple[str, ...] | None = None,
     root_path: str | None = None,
+    workspace_ttl_seconds: float | None = None,
+    max_concurrent_runs: int | None = None,
 ) -> FastAPI:
     """Build the application (DESIGN.md §8, remote-mode knobs §17/§17.2).
 
@@ -103,6 +108,16 @@ def create_app(
     serve_dist = serve_dist if serve_dist is not None else settings.serve_dist
     cors_origins = cors_origins if cors_origins is not None else settings.cors_origins
     root_path = root_path if root_path is not None else settings.root_path
+    workspace_ttl_seconds = (
+        workspace_ttl_seconds
+        if workspace_ttl_seconds is not None
+        else settings.workspace_ttl_seconds
+    )
+    max_concurrent_runs = (
+        max_concurrent_runs
+        if max_concurrent_runs is not None
+        else settings.max_concurrent_runs
+    )
 
     app = FastAPI(title="emptyui", version="0.2.0", root_path=root_path or "")
     if cors_origins:
@@ -118,12 +133,57 @@ def create_app(
     runs: dict[str, dict] = {}
     artifacts: dict[str, dict] = {}  # artifact id -> {path, kind, run_id}
     node_cache = NodeCache()  # cross-run result cache (§7), server-lifetime
-    state = {"run_counter": 0}
+    state = {"run_counter": 0, "active_runs": 0}
     lock = threading.Lock()
 
-    @app.on_event("startup")
-    async def _startup() -> None:
+    def cleanup_expired_runs(now: float | None = None) -> int:
+        """Remove completed run state and workspaces older than the TTL."""
+        ttl = workspace_ttl_seconds
+        if ttl is None or ttl <= 0:
+            return 0
+        cutoff = (time.time() if now is None else now) - ttl
+        expired: list[tuple[str, str]] = []
+        with lock:
+            for run_id, info in list(runs.items()):
+                summary = info["summary"]
+                if (
+                    info.get("worker_done")
+                    and summary.get("status") in {"completed", "failed", "cancelled"}
+                    and info.get("finished_at") is not None
+                    and info["finished_at"] <= cutoff
+                ):
+                    expired.append((run_id, info["workspace"]))
+                    runs.pop(run_id, None)
+                    for artifact_id, artifact in list(artifacts.items()):
+                        if artifact.get("run_id") == run_id:
+                            artifacts.pop(artifact_id, None)
+        for _run_id, workspace in expired:
+            shutil.rmtree(workspace, ignore_errors=True)
+        return len(expired)
+
+    async def cleanup_loop() -> None:
+        ttl = workspace_ttl_seconds
+        if ttl is None or ttl <= 0:
+            return
+        interval = max(0.1, min(ttl / 4.0, 60.0))
+        while True:
+            await asyncio.sleep(interval)
+            cleanup_expired_runs()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
         hub.loop = asyncio.get_running_loop()
+        cleanup_task = asyncio.create_task(cleanup_loop())
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
+            hub.loop = None
+
+    app.router.lifespan_context = lifespan
+    app.state.cleanup_expired_runs = cleanup_expired_runs
 
     @app.get("/api/health")
     def health() -> dict:
@@ -153,26 +213,57 @@ def create_app(
                 )
 
         with lock:
+            limit = max_concurrent_runs or 0
+            if limit > 0 and state["active_runs"] >= limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"maximum concurrent runs reached ({limit}); "
+                        "wait for an active run to finish"
+                    ),
+                )
             state["run_counter"] += 1
+            state["active_runs"] += 1
             run_id = f"r{state['run_counter']}"
-        workspace = Path(tempfile.mkdtemp(prefix=f"emptyui-{run_id}-"))
+        try:
+            workspace = Path(tempfile.mkdtemp(prefix=f"emptyui-{run_id}-"))
+        except Exception:
+            with lock:
+                state["active_runs"] -= 1
+            raise
         cancel_event = threading.Event()
-        runs[run_id] = {
-            "events": [],
-            "summary": {"status": "queued"},
-            "workspace": str(workspace),
-            "cancel_event": cancel_event,
-        }
+        with lock:
+            runs[run_id] = {
+                "events": [],
+                "summary": {"status": "queued"},
+                "workspace": str(workspace),
+                "cancel_event": cancel_event,
+                "worker_done": False,
+                "finished_at": None,
+                "active_slot": True,
+            }
 
         def emit(event: dict) -> None:
             event = {"run_id": run_id, **event}
-            runs[run_id]["events"].append(event)
-            if event["event"] == "artifact":
-                artifacts[event["id"]] = {
-                    "path": event["path"],
-                    "kind": event["kind"],
-                    "run_id": run_id,
-                }
+            with lock:
+                info = runs.get(run_id)
+                if info is None:
+                    return
+                info["events"].append(event)
+                if event["event"] == "run_started":
+                    if info["summary"].get("status") == "queued":
+                        info["summary"]["status"] = "running"
+                        info["started_at"] = time.time()
+                elif event["event"] == "run_finished":
+                    status = event.get("status")
+                    if status in {"completed", "failed", "cancelled"}:
+                        info["summary"]["status"] = status
+                elif event["event"] == "artifact":
+                    artifacts[event["id"]] = {
+                        "path": event["path"],
+                        "kind": event["kind"],
+                        "run_id": run_id,
+                    }
             hub.broadcast_threadsafe(event)
 
         def worker() -> None:
@@ -186,34 +277,56 @@ def create_app(
                     targets=req.targets,
                     data_root=data_root,
                 )
-                with lock:
-                    runs[run_id]["summary"] = summary
             except Exception as exc:  # noqa: BLE001 — reported to clients
+                summary = {"status": "failed", "error": str(exc)}
                 with lock:
-                    runs[run_id]["summary"] = {"status": "failed", "error": str(exc)}
+                    info = runs.get(run_id)
+                    already_finished = bool(
+                        info
+                        and info["summary"].get("status")
+                        in {"completed", "failed", "cancelled"}
+                    )
+                if not already_finished:
+                    emit({
+                        "event": "run_finished",
+                        "status": "failed",
+                        "error": str(exc),
+                    })
+            finally:
+                with lock:
+                    info = runs.get(run_id)
+                    if info is None:
+                        return
+                    info["summary"].update(summary)
+                    info["finished_at"] = time.time()
+                    info["worker_done"] = True
+                    if info["active_slot"]:
+                        info["active_slot"] = False
+                        state["active_runs"] -= 1
 
         threading.Thread(target=worker, daemon=True, name=f"run-{run_id}").start()
         return {"run_id": run_id, "status": "queued"}
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> dict:
-        if run_id not in runs:
-            raise HTTPException(status_code=404, detail="unknown run")
-        return {"run_id": run_id, **runs[run_id]["summary"],
-                "events": runs[run_id]["events"]}
+        with lock:
+            info = runs.get(run_id)
+            if info is None:
+                raise HTTPException(status_code=404, detail="unknown run")
+            return {
+                "run_id": run_id,
+                **info["summary"],
+                "events": list(info["events"]),
+            }
 
     @app.post("/api/runs/{run_id}/cancel")
     def cancel_run(run_id: str) -> dict:
         """Request cancellation; the executor checks the token between nodes."""
-        if run_id not in runs:
-            raise HTTPException(status_code=404, detail="unknown run")
-        info = runs[run_id]
-        info["cancel_event"].set()
-        # A queued run that has not started yet would otherwise wait for the
-        # worker to wake; mark it cancelled immediately (the worker's own
-        # summary, also "cancelled", is written last and wins). The lock
-        # linearizes against the worker's final summary write.
         with lock:
+            info = runs.get(run_id)
+            if info is None:
+                raise HTTPException(status_code=404, detail="unknown run")
+            info["cancel_event"].set()
             if info["summary"]["status"] in ("queued", "running"):
                 info["summary"]["status"] = "cancelled"
             status = info["summary"]["status"]

@@ -55,7 +55,12 @@ class PathPolicy:
             return self.workspace if self.workspace is not None else Path("")
         p = Path(value).expanduser()
         if p.is_absolute():
-            return p  # explicit override is respected
+            # remote-mode confinement: writable outputs stay in the run
+            # workspace; absolute paths are rejected.
+            raise ValueError(
+                f"param '{name}': absolute output paths are not allowed in "
+                "remote mode; use a relative path under the run workspace"
+            )
         if self.workspace is None:
             return p
         return self.workspace / p

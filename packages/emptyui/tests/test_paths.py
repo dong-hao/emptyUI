@@ -48,15 +48,27 @@ def test_settings_from_env(monkeypatch):
     monkeypatch.setenv("EMPTYUI_DATA_ROOT", "~/data")
     monkeypatch.setenv("EMPTYUI_SERVE_DIST", "dist")
     monkeypatch.setenv("EMPTYUI_CORS_ORIGINS", "https://a.example, https://b.example")
+    monkeypatch.setenv("EMPTYUI_WORKSPACE_TTL", "30.5")
+    monkeypatch.setenv("EMPTYUI_MAX_CONCURRENT_RUNS", "2")
     s = Settings.from_env()
     assert s.data_root == Path("~/data").expanduser()
     assert s.serve_dist == "dist"
     assert s.cors_origins == ("https://a.example", "https://b.example")
+    assert s.workspace_ttl_seconds == 30.5
+    assert s.max_concurrent_runs == 2
 
     monkeypatch.delenv("EMPTYUI_DATA_ROOT")
     monkeypatch.setenv("EMPTYUI_CORS_ORIGINS", "")
     assert Settings.from_env().data_root is None
-    assert Settings.from_env().cors_origins == ("*",)  # default stays permissive
+    assert Settings.from_env().cors_origins == ()
+
+    monkeypatch.delenv("EMPTYUI_CORS_ORIGINS")
+    assert Settings.from_env().cors_origins == ("*",)  # unset stays permissive
+    monkeypatch.delenv("EMPTYUI_WORKSPACE_TTL")
+    monkeypatch.delenv("EMPTYUI_MAX_CONCURRENT_RUNS")
+    s = Settings.from_env()
+    assert s.workspace_ttl_seconds is None
+    assert s.max_concurrent_runs is None
 
 
 def test_no_data_root_is_a_noop(tmp_path: Path):
@@ -102,11 +114,11 @@ def test_out_params_resolve_into_workspace(tmp_path: Path):
     assert resolved["output_dir"] == str(ws)
 
 
-def test_out_param_absolute_is_respected(tmp_path: Path):
+def test_out_param_absolute_is_rejected_in_remote_mode(tmp_path: Path):
     outside = tmp_path / "abs"
     policy = PathPolicy(tmp_path / "data", tmp_path / "ws")
-    resolved = policy.resolve_params(_manifest(), {"output_dir": str(outside)})
-    assert resolved["output_dir"] == str(outside)
+    with pytest.raises(ValueError, match="absolute output paths"):
+        policy.resolve_params(_manifest(), {"output_dir": str(outside)})
 
 
 def test_executor_applies_policy_with_data_root(tmp_path: Path):

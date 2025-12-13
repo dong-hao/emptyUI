@@ -2,6 +2,7 @@
 
 import time
 from pathlib import Path
+from threading import Event
 
 from fastapi.testclient import TestClient
 
@@ -63,6 +64,16 @@ def test_files_endpoint_unrestricted_without_data_root(client):
     assert listing["path"] == str(Path.cwd())
 
 
+def test_cors_middleware_toggle_from_settings():
+    from emptyui.config import Settings
+
+    app_default = create_app(settings=Settings())
+    assert any(m.cls.__name__ == "CORSMiddleware" for m in app_default.user_middleware)
+
+    app_no_cors = create_app(settings=Settings(cors_origins=()))
+    assert not any(m.cls.__name__ == "CORSMiddleware" for m in app_no_cors.user_middleware)
+
+
 def test_run_echo_workflow(client):
     workflow = {
         "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],
@@ -102,6 +113,93 @@ def test_cancel_run():
     assert detail["status"] == "cancelled"
     finished = [e for e in detail["events"] if e["event"] == "run_finished"]
     assert finished and finished[-1]["status"] == "cancelled"
+
+
+def test_run_status_transitions_to_running():
+    started = Event()
+    release = Event()
+
+    class Blocking(Node):
+        type = "test.blocking"
+        outputs = ()
+
+        def execute(self, ctx):
+            started.set()
+            release.wait(timeout=5)
+            return {}
+
+    reg = Registry()
+    reg.add(Blocking)
+    client = TestClient(create_app(reg))
+    workflow = {"nodes": [{"id": "n1", "type": "test.blocking"}], "edges": []}
+    run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+    assert started.wait(timeout=2)
+    assert client.get(f"/api/runs/{run_id}").json()["status"] == "running"
+    release.set()
+    assert _wait_status(client, run_id)["status"] == "completed"
+
+
+def test_max_concurrent_runs_rejects_until_slot_released():
+    started = Event()
+    release = Event()
+
+    class Blocking(Node):
+        type = "test.limited"
+        outputs = ()
+
+        def execute(self, ctx):
+            started.set()
+            release.wait(timeout=5)
+            return {}
+
+    reg = Registry()
+    reg.add(Blocking)
+    client = TestClient(create_app(reg, max_concurrent_runs=1))
+    workflow = {"nodes": [{"id": "n1", "type": "test.limited"}], "edges": []}
+    first = client.post("/api/runs", json={"workflow": workflow})
+    assert first.status_code == 200
+    assert started.wait(timeout=2)
+
+    second = client.post("/api/runs", json={"workflow": workflow})
+    assert second.status_code == 429
+    assert "maximum concurrent runs" in second.json()["detail"]
+
+    release.set()
+    assert _wait_status(client, first.json()["run_id"])["status"] == "completed"
+    third = client.post("/api/runs", json={"workflow": workflow})
+    assert third.status_code == 200
+    assert _wait_status(client, third.json()["run_id"])["status"] == "completed"
+
+
+def test_workspace_ttl_cleanup_removes_artifacts(tmp_path):
+    class Snapshot(Node):
+        type = "test.expiring_snapshot"
+        outputs = ()
+
+        def execute(self, ctx):
+            p = Path(ctx.workspace) / "snap.png"
+            p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+            ctx.publish_artifact(p, kind="image")
+            return {}
+
+    reg = Registry()
+    reg.add(Snapshot)
+    with TestClient(create_app(reg, workspace_ttl_seconds=10)) as client:
+        workflow = {"nodes": [{"id": "n1", "type": "test.expiring_snapshot"}], "edges": []}
+        run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+        detail = _wait_status(client, run_id)
+        artifact_id = next(e["id"] for e in detail["events"] if e["event"] == "artifact")
+
+        # The cleanup helper is exposed on app.state so expiry can be tested
+        # without sleeping for a production-sized TTL.
+        app = client.app
+        info = app.state.cleanup_expired_runs
+        assert client.get(f"/api/artifacts/{artifact_id}/preview").status_code == 200
+        # The run's completion timestamp is internal; force expiry through the
+        # helper's injected clock by using a timestamp beyond the TTL.
+        assert info(time.time() + 11) == 1
+        assert client.get(f"/api/runs/{run_id}").status_code == 404
+        assert client.get(f"/api/artifacts/{artifact_id}/preview").status_code == 404
 
 
 def test_artifact_download_and_preview():
