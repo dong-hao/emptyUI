@@ -63,6 +63,55 @@ def test_build_fap_filters_size_mismatch_rejected():
         build_fap_filters(rows)
 
 
+@pytest.mark.parametrize(
+    ("frequencies", "amplitudes", "phases", "message"),
+    [
+        ([], [], [], "empty"),
+        ([0.25, np.nan], [1.0, 1.0], [0.0, 0.0], "finite and strictly positive"),
+        ([0.0, 1.0], [1.0, 1.0], [0.0, 0.0], "finite and strictly positive"),
+        ([1.0, 0.5], [1.0, 1.0], [0.0, 0.0], "strictly increasing"),
+        ([0.5, 0.5], [1.0, 1.0], [0.0, 0.0], "strictly increasing"),
+        ([0.25, 1.0], [-1.0, 1.0], [0.0, 0.0], "non-negative"),
+        ([0.25, 1.0], [1.0, 1.0], [0.0, np.inf], "phases must be finite"),
+    ],
+)
+def test_build_fap_filters_rejects_invalid_frequency_response_tables(
+    frequencies, amplitudes, phases, message,
+):
+    rows = {
+        "channels": {
+            "bx": {
+                "frequencies": frequencies,
+                "amplitudes": amplitudes,
+                "phases_deg": phases,
+            }
+        }
+    }
+    with pytest.raises(ValueError, match=message):
+        build_fap_filters(rows)
+
+
+def test_json_calibration_rejects_unsorted_frequency_grid(tmp_path: Path):
+    p = tmp_path / "invalid.json"
+    p.write_text(
+        '{"bx": {"Calibration": {"Freq": [1.0, 0.5], '
+        '"Re": [1.0, 1.0], "Im": [0.0, 0.0]}}}'
+    )
+    rows = parse_json_calibration(p)
+    with pytest.raises(ValueError, match="strictly increasing"):
+        build_fap_filters(rows, extend_flat=False)
+
+
+def test_json_calibration_rejects_component_size_mismatch(tmp_path: Path):
+    p = tmp_path / "invalid_sizes.json"
+    p.write_text(
+        '{"bx": {"Calibration": {"Freq": [0.25, 1.0], '
+        '"Re": [1.0], "Im": [0.0, 0.0]}}}'
+    )
+    with pytest.raises(ValueError, match="Freq/Re/Im size mismatch"):
+        parse_json_calibration(p)
+
+
 def test_parse_json_calibration_per_channel_grids(tmp_path: Path):
     """Channels tabulated on different frequency grids each keep their own
     grid (previously every channel silently reused the first grid)."""

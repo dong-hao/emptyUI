@@ -34,6 +34,55 @@ def _default_unit(channel: str) -> str:
     return "nanoTesla" if channel.startswith("b") else "mV/km"
 
 
+def _validate_calibration_table(channel: str, frequencies, amplitudes,
+                                phases_deg) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Validate and normalize one frequency-response table.
+
+    Frequency-response interpolation requires a usable one-dimensional grid:
+    frequencies must be finite, positive, and strictly increasing. FAP
+    modulus values must be finite and non-negative, and phase values must be
+    finite. Validation happens before flat extension so malformed or empty
+    tables cannot fail later at ``f[0]`` or be handed to mt_metadata.
+    """
+    f = np.asarray(frequencies, dtype=float)
+    a = np.asarray(amplitudes, dtype=float)
+    p = np.asarray(phases_deg, dtype=float)
+    if not (f.ndim == a.ndim == p.ndim == 1):
+        raise ValueError(
+            f"calibration channel '{channel}': frequency-response arrays "
+            "must be one-dimensional"
+        )
+    if not (f.size == a.size == p.size):
+        raise ValueError(
+            f"calibration channel '{channel}': frequencies/amplitudes/phases "
+            f"size mismatch ({f.size}/{a.size}/{p.size})"
+        )
+    if f.size == 0:
+        raise ValueError(
+            f"calibration channel '{channel}': frequency-response table is empty"
+        )
+    if not np.all(np.isfinite(f)) or np.any(f <= 0):
+        raise ValueError(
+            f"calibration channel '{channel}': frequencies must be finite "
+            "and strictly positive"
+        )
+    if np.any(np.diff(f) <= 0):
+        raise ValueError(
+            f"calibration channel '{channel}': frequencies must be strictly "
+            "increasing with no duplicates"
+        )
+    if not np.all(np.isfinite(a)) or np.any(a < 0):
+        raise ValueError(
+            f"calibration channel '{channel}': amplitudes must be finite "
+            "and non-negative"
+        )
+    if not np.all(np.isfinite(p)):
+        raise ValueError(
+            f"calibration channel '{channel}': phases must be finite"
+        )
+    return f, a, p
+
+
 def parse_fap(path) -> dict:
     """Parse a manufacturer FAP calibration file (``.chn`` / ``.def``).
 
@@ -121,14 +170,12 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
 
     out: dict[str, object] = {}
     for ch, table in rows["channels"].items():
-        f = np.asarray(table["frequencies"], dtype=float)
-        a = np.asarray(table["amplitudes"], dtype=float)
-        p = np.asarray(table["phases_deg"], dtype=float)
-        if not (f.size == a.size == p.size):
-            raise ValueError(
-                f"calibration channel '{ch}': frequencies/amplitudes/phases "
-                f"size mismatch ({f.size}/{a.size}/{p.size})"
-            )
+        f, a, p = _validate_calibration_table(
+            ch,
+            table["frequencies"],
+            table["amplitudes"],
+            table["phases_deg"],
+        )
         if extend_flat:
             f = np.concatenate([[f[0] / 1e3], f])
             a = np.concatenate([[a[0]], a])
@@ -161,6 +208,16 @@ def parse_json_calibration(path) -> dict:
         freq = np.asarray(cal["Freq"], dtype=float)
         re_ = np.asarray(cal["Re"], dtype=float)
         im_ = np.asarray(cal["Im"], dtype=float)
+        if not (freq.ndim == re_.ndim == im_.ndim == 1):
+            raise ValueError(
+                f"calibration channel '{ch}': Freq/Re/Im arrays must be "
+                "one-dimensional"
+            )
+        if not (freq.size == re_.size == im_.size):
+            raise ValueError(
+                f"calibration channel '{ch}': Freq/Re/Im size mismatch "
+                f"({freq.size}/{re_.size}/{im_.size})"
+            )
         channels[ch] = {
             "frequencies": freq,
             "amplitudes": np.hypot(re_, im_),
