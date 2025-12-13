@@ -101,6 +101,41 @@ def test_two_fc_mode_uses_remote_reference():
     assert all(r["median_coherence_transfer"] is not None for r in rows)
 
 
+def test_two_fc_mode_uses_remote_h_for_signal_coherence():
+    """Two-FC mode computes E/H coherence against remote H (not local H).
+
+    Corrupt local magnetic FCs while keeping local E and remote H clean:
+    single-FC mode (E on local H) reports low signal coherence, while
+    two-FC mode (E on remote H) reports clearly higher signal coherence.
+    """
+    source = synthetic_source(12)
+    local_runts = synthetic_runts(source, e_noise=2.0, seed=12)
+    remote_runts = synthetic_runts(source, e_noise=2.0, seed=13, with_e=False)
+    local = synthetic_fc(local_runts, ["hx", "hy"], ["ex", "ey"])
+    remote = synthetic_fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
+
+    # Corrupt only the local magnetic predictors in FC space.
+    rng = np.random.default_rng(123)
+    bad_local = local.copy(deep=True)
+    for ch in ("hx", "hy"):
+        noise = (200.0 * rng.standard_normal(bad_local[ch].shape)
+                 + 1j * 200.0 * rng.standard_normal(bad_local[ch].shape))
+        bad_local[ch].values = bad_local[ch].values + noise
+
+    _, _, rows_single = coherence_sort_fc(
+        bad_local, None, ["hx", "hy"], ["ex", "ey"],
+        coherence_min=0.25, coherence_max=0.98, mode="off",
+    )
+    _, _, rows_two = coherence_sort_fc(
+        bad_local, remote, ["hx", "hy"], ["ex", "ey"],
+        coherence_min=0.25, coherence_max=0.98, mode="off",
+    )
+
+    med_single = float(np.median([r["median_coherence_e"] for r in rows_single]))
+    med_two = float(np.median([r["median_coherence_e"] for r in rows_two]))
+    assert med_two > med_single + 0.2
+
+
 def test_two_fc_mode_conservative_min():
     """Noisy local H: Hloc-Hremote is low, so two-FC mode (min) drops the
     windows even if E-Hremote looks fine — aurora's RME_RR signal covariance

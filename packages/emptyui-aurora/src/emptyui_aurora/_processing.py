@@ -651,16 +651,22 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
         if band_bins.size == 0:
             continue
         E = np.stack([local[oc].values[band_bins, :] for oc in outs], axis=0)
-        H = np.stack([local[ic].values[band_bins, :] for ic in ins], axis=0)
+        H_local = np.stack([local[ic].values[band_bins, :] for ic in ins], axis=0)
         n_win = E.shape[2]
-        coh_e = np.zeros(n_win)  # E on the (local or remote) magnetic inputs
+        coh_e = np.zeros(n_win)  # E on local-H (single-FC) or remote-H (two-FC)
         coh_x = np.full(n_win, 1.0)  # local↔remote magnetic transfer
         for w in range(n_win):
-            ce = _multiple_coherence(E[:, :, w], H[:, :, w])
+            H_local_w = H_local[:, :, w]
+            H_pred_w = H_local_w
+            if ref is not None:
+                H_pred_w = np.stack(
+                    [ref[ic].values[band_bins, w] for ic in ins], axis=0
+                )
+            ce = _multiple_coherence(E[:, :, w], H_pred_w)
             coh_e[w] = float(ce.min()) if ce.size else 0.0
             if ref is not None:
                 R = np.stack([ref[ic].values[band_bins, w] for ic in ins], axis=0)
-                cx = _multiple_coherence(H[:, :, w], R)
+                cx = _multiple_coherence(H_local_w, R)
                 coh_x[w] = float(cx.min()) if cx.size else 0.0
         coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
         # degenerate bands (fewer bins than inputs+1) fit the regression
