@@ -52,6 +52,18 @@ export interface Catalog {
   port_types?: Record<string, { color?: string; label?: string }>;
 }
 
+export interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+export interface FileListing {
+  path: string;
+  parent: string | null;
+  entries: FileEntry[];
+}
+
 /** API base, derived at runtime (DESIGN.md §17.3 single-origin convention):
  *  the API always lives one segment below the document root — so this works
  *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
@@ -71,6 +83,8 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   nodes: () => getJson<Catalog>("/nodes"),
+  files: (path = "") =>
+    getJson<FileListing>(`/files?path=${encodeURIComponent(path)}`),
   // targets: partial execution — run only these nodes plus their ancestors
   // ("execute to here", DESIGN.md §7); omitted = run everything
   runWorkflow: async (workflow: unknown, targets?: string[]): Promise<{ run_id: string }> => {

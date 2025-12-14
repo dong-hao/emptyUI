@@ -27,6 +27,18 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<number | null>(null);
+  const pollGenerationRef = useRef(0);
+
+  const stopPolling = useCallback(() => {
+    pollGenerationRef.current += 1;
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   useQuery({
     queryKey: ["nodes"],
@@ -174,6 +186,7 @@ export default function App() {
 
   const startRun = async (targets?: string[]) => {
     try {
+      stopPolling();
       setMessage(null);
       // Reminder: without a Display/output node the run produces nothing visible
       const hasOutputNode = nodes.some((n) => {
@@ -197,21 +210,38 @@ export default function App() {
       // Polling fallback: works even if the WebSocket is unavailable.
       // WS events and polls are both deduped by the run store.
       const seen = new Set<string>();
-      const poll = window.setInterval(async () => {
+      const generation = pollGenerationRef.current;
+      const eventKey = (event: Record<string, unknown>, index: number) => {
+        if (event.event === "artifact") return `artifact:${event.id ?? index}`;
+        if (event.event === "run_started" || event.event === "run_finished") {
+          return `${event.event}:${event.status ?? ""}`;
+        }
+        return JSON.stringify([
+          event.event,
+          event.node ?? "",
+          event.status ?? "",
+          event.frac ?? "",
+          event.msg ?? "",
+          event.error ?? "",
+        ]);
+      };
+      pollRef.current = window.setInterval(async () => {
+        if (generation !== pollGenerationRef.current) return;
         try {
           const run = (await api.getRun(run_id)) as {
             status: string;
             events: Record<string, unknown>[];
           };
-          for (const e of run.events) {
-            const key = `${e.event}:${e.node ?? e.id ?? ""}:${e.status ?? e.frac ?? ""}`;
+          if (generation !== pollGenerationRef.current) return;
+          for (const [index, e] of run.events.entries()) {
+            const key = eventKey(e, index);
             if (!seen.has(key)) {
               seen.add(key);
               useRun.getState().handleEvent(e);
             }
           }
           if (["completed", "failed", "cancelled"].includes(run.status)) {
-            window.clearInterval(poll);
+            stopPolling();
           }
         } catch {
           // transient poll errors are non-fatal

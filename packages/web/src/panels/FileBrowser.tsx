@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
-
-interface Entry {
-  name: string;
-  path: string;
-  is_dir: boolean;
-}
+import { api, type FileEntry } from "../api/client";
 
 interface Props {
   kind: "file" | "directory";
@@ -17,16 +12,14 @@ interface Props {
 export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
   const [path, setPath] = useState(initialPath ?? "");
   const [parent, setParent] = useState<string | null>(null);
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
-        if (!res.ok) throw new Error((await res.json()).detail ?? res.status);
-        const body = await res.json();
+        const body = await api.files(path);
         if (!cancelled) {
           setPath(body.path);
           setParent(body.parent);
@@ -57,7 +50,7 @@ export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
               ⬆ ..
             </button>
           )}
-          {entries.map((e) => (
+          {entries.map((e: FileEntry) => (
             <button
               key={e.path}
               className="modal-row"
