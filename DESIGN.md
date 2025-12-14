@@ -1095,8 +1095,8 @@ progress.
   the new run's workspace, `targets` "execute to here" with ancestor
   closure, `DELETE /api/cache`. The web UI (cached badge, "Run to here" in
   the properties panel) lands in the follow-up commit (§9).
-  Remote-server mode (§17 — contract items 1–3 & 6 delivered 2026-09-08;
-  retention/limits items 4–5 designed, pending) and the plugin packaging
+  Remote-server mode (§17 — contract items 1–6 delivered 2026-09-08) and the
+  plugin packaging
   guide + example template
   (  **guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
   `examples/plugin-template/`, plus open namespaced port types and manifest
@@ -1995,12 +1995,13 @@ workspace, rejecting anything else with an actionable error.
 
 Long-lived remote services need hygiene that local dev does not:
 
-- **Workspace retention**: per-run tempdirs are never cleaned today; remote
-  mode adds a TTL + periodic cleanup, coupled with artifact GC (artifact
-  endpoints reference workspace paths — an expired workspace invalidates its
-  artifacts, which must be reflected, not served as dangling files).
-- **Max concurrent runs** per instance (queued or rejected with an
-  actionable error), bounding memory/CPU in a shared platform.
+- **Workspace retention**: remote/embedded mode can set a TTL + periodic
+  cleanup, coupled with artifact GC. Expired workspaces invalidate their
+  artifact index entries; cleanup only removes worker-complete terminal runs,
+  never active runs. A disabled TTL preserves local-dev behavior.
+- **Max concurrent runs** per instance (queued or rejected with an actionable
+  HTTP 429 error), bounding memory/CPU in a shared platform. The default is
+  unlimited for local development.
 - **Cache bounds**: the cross-run cache (§7) is already count-capped; per
   user/team instance that is sufficient.
 - **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`,
@@ -2019,7 +2020,7 @@ Long-lived remote services need hygiene that local dev does not:
 - Database persistence for runs/artifacts — the file-based workspace (§3)
   stands until run history demands more.
 
-### 17.6 Compatibility checklist (2026-09-08 — items 1–3 & 6 delivered; 4–5 designed, pending)
+### 17.6 Compatibility checklist (2026-09-08 — items 1–6 delivered)
 
 1. ✅ Data-root confinement: `EMPTYUI_DATA_ROOT` + `create_app(data_root=…)`
    — `/api/files` is clamped to the root (requests outside resolve to the
@@ -2039,8 +2040,11 @@ Long-lived remote services need hygiene that local dev does not:
    under a sub-path mount and in dev with no rebuild or config; `root_path`
    plumbing for module embedding (`create_app(root_path=…)`; proxies set it
    via `X-Forwarded-Prefix`/uvicorn `--root-path`).
-4. ⏳ Workspace TTL cleanup + artifact GC — designed (§17.4), pending.
-5. ⏳ Max-concurrent-runs guard — designed (§17.4), pending.
+4. ✅ Workspace TTL cleanup + artifact GC — `EMPTYUI_WORKSPACE_TTL` or
+  `create_app(workspace_ttl_seconds=...)`; disabled when unset or <= 0.
+5. ✅ Max-concurrent-runs guard — `EMPTYUI_MAX_CONCURRENT_RUNS` or
+  `create_app(max_concurrent_runs=...)`; unlimited when unset or <= 0 and
+  excess submissions receive HTTP 429.
 6. ✅ Config plumbing + deployment guide: `emptyui/config.py` (`Settings`,
    env-first, kwargs win) + `docs/deployment.md` (gateway contract, nginx
    sub-path/WS example, data provisioning, module embedding).

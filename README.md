@@ -330,8 +330,8 @@ npm run test:headed         # watch the browser while it runs
   - Remote-server mode — **contract delivered** (DESIGN §17 + §17.6 items
     1–3 & 6: data-root confinement with path_kind params, same-origin dist
     serving + configurable CORS, runtime sub-path API base, config module +
-    `docs/deployment.md`); retention/limits (§17.6 items 4–5) still designed,
-    not implemented.
+    `docs/deployment.md`); workspace TTL cleanup and max-concurrent-run
+    limits are implemented and configurable for embedded deployments.
   - Sub-workflows — **deferred to M4**: comparable systems (ComfyUI
     subgraphs, n8n sub-workflows, Node-RED subflows, KNIME metanodes) earn
     their complexity at decluttering/sharing scale that typical 5–10 node MT
