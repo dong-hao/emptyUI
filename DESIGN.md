@@ -1554,9 +1554,44 @@ bands), with band width monotonically non-decreasing toward higher frequency
   test are untouched); `"index"` is the new discrete construction. This lets
   users run both on the same data and compare — the recommended way to
   evaluate the new mode before considering it a future default.
-- Cross-decimation-level merge compatibility is preserved for both styles:
-  `_period_bands_indexed` reuses the same Fs/4 / window-length cutoffs, so a
-  decimation factor that is a power of two still lines levels up.
+- **Multi-level merge alignment — zigzag defect found and fixed (2026-09-09,
+  real BGS LEMI data).** The per-level bin-grid walk above is correct for a
+  *single* level, but as a multi-level construction it produced a visible
+  **zigzag** in the merged apparent-resistivity curve (adjacent points
+  alternating between neighbouring decimation levels). Root cause: walking
+  the *bin-index* grid yields the same index sequence at every level, but
+  identical indices sit at frequencies differing by ``factor**level`` — so
+  bands in the level-overlap regions got slightly different period labels
+  per level, and ``merge_tf_levels``' exact ``round(log2(p), 8)`` dedup
+  (which works for the globally anchored ``"log"`` grid) *never fired* for
+  ``"index"``. All levels' overlapping bands survived the merge as
+  interleaved near-duplicates — statistically independent estimates from
+  windows of different length alternating point-to-point (and inflating the
+  merged point count, e.g. 50 instead of ~30). The user-level symptom
+  looked like "too many evaluated frequencies", but ``periods_per_octave``
+  was not the cause — misaligned labels were.
+  **Fix: one GLOBAL boundary grid for the whole container.** For
+  ``band_style="index"``, ``estimate_tf_levels`` / ``coherence_sort_fcs``
+  now derive the band boundaries ONCE
+  (``_container_band_edges`` → ``_index_band_edges``): a frequency-space
+  walk from the native Fs/4 cutoff down to the deepest level's window/4
+  floor (same reliability cutoffs, clamped to the deepest level's lowest
+  present bin) at a target ratio ``2**(1/ppo)``, shared by all levels.
+  Each level (``_period_bands_indexed_global``) estimates every global band
+  lying fully inside its own reliable range (Fs/4 ceiling, window/4 floor);
+  a band straddling a range edge belongs to the neighbouring level. Band
+  labels are the geometric means of the *global* edges — identical across
+  levels — so the exact merge dedup fires again and the deepest level wins
+  each overlap, exactly like ``"log"``. The per-level bin walk
+  (:func:`_period_bands_indexed`) remains for standalone single-level
+  ``estimate_tf`` calls, where no cross-level alignment is needed. Within a
+  level the guarantees are unchanged (no gaps/overlaps/empty bands among
+  the bins it does assign), and the merged grid is the global band grid
+  itself: adjacent periods differ by exactly one nominal band ratio.
+  Verified on the BGS NO46+NX37 remote-reference workflow (window 256,
+  factor 4, 5 levels, ppo 3): the merged curve is now smooth and tracks the
+  ``"log"`` baseline (previously 50 interleaved points, now 36 = one per
+  global band).
 - **Deferred to M4 (item "B" from the same research, see §11):** an optional
   in-band smoothing taper (Parzen/Hann, weighting bins by proximity to the
   band center) on top of the discrete partition — a genuine enhancement

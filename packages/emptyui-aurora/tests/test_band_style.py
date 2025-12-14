@@ -7,16 +7,22 @@ for the pre-existing "log"-style behavior these tests must not regress.
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
 from emptyui_aurora._processing import (
+    _container_band_edges,
     _period_bands,
     _period_bands_indexed,
     _resolve_period_bands,
     coherence_sort_fc,
     compute_fc,
+    compute_fc_levels,
     estimate_tf,
+    estimate_tf_levels,
+    merge_tf_levels,
 )
 
 
@@ -37,7 +43,7 @@ def test_period_bands_indexed_tiles_range_without_gaps_or_overlaps():
     for (lo, hi) in ordered:
         assert lo <= hi
     # contiguous: each band's upper bound + 1 is the next band's lower bound
-    for (lo1, hi1), (lo2, hi2) in zip(ordered, ordered[1:]):
+    for (_, hi1), (lo2, _) in pairwise(ordered):
         assert hi1 + 1 == lo2
     # no bin appears twice, and DC (index 0) is never included
     all_bins = [i for lo, hi in ordered for i in range(lo, hi + 1)]
@@ -55,7 +61,7 @@ def test_period_bands_indexed_width_is_monotonic_non_decreasing():
     _, index_ranges = _period_bands_indexed(fc, periods_per_octave=4)
     ordered = sorted(index_ranges, key=lambda r: r[0])
     widths = [hi - lo + 1 for lo, hi in ordered]
-    assert all(w2 >= w1 for w1, w2 in zip(widths, widths[1:]))
+    assert all(w2 >= w1 for w1, w2 in pairwise(widths))
     # the long-period end is the narrowest band, exactly like the real EMTF
     # table's tail (e.g. "1 5 5" in bs_256_26.cfg) — much narrower than the
     # widest (short-period) band
@@ -167,3 +173,87 @@ def test_node_estimate_tf_and_coherence_sort_accept_band_style(tmp_path):
     cs_fc = synthetic_fc(cs_runts, ["hx", "hy"], ["ex", "ey"])
     cs_result = CoherenceSort().execute(ctx, cs_fc, band_style="index")
     assert 0 in cs_result["fc"]
+
+
+def _multi_level_fc():
+    """Five cascading levels mimicking the reference long-period workflow
+    (window 256, factor 4, ppo 3 — the configuration that exposed the
+    zigzag defect on real BGS LEMI data)."""
+    runts = synthetic_runts(synthetic_source(0, n=131072))
+    return compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
+                             num_decimations=4, factor=4,
+                             num_samples_window=256, overlap=0.5,
+                             window_type="hamming")
+
+
+def test_index_bands_share_one_global_grid_across_levels():
+    """Multi-level 'index' banding must derive band boundaries from ONE
+    global frequency grid: every level's band labels are drawn from the same
+    set, so overlapping bands carry identical labels across levels and
+    merge_tf_levels' exact dedup fires (deepest wins)."""
+    fc = _multi_level_fc()
+    ppo = 3
+    edges = _container_band_edges(fc, ppo)
+    assert edges is not None
+    assert np.all(np.diff(edges) < 0)  # strictly decreasing
+
+    per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                   periods_per_octave=ppo, band_style="index")
+    for entry in per_level.values():
+        # every label is the geometric mean of a consecutive global edge pair
+        label_log = np.log2(1.0 / entry["periods"])
+        edge_log = np.log2(edges)
+        dist = np.abs(label_log[:, None]
+                      - (edge_log[:-1] + edge_log[1:])[None, :] / 2.0)
+        assert np.all(dist.min(axis=1) < 1e-9)
+
+
+def test_index_merge_has_no_interleaved_duplicates():
+    """Regression for the zigzag defect: with per-level bin-grid walks the
+    merge's exact dedup never fired, so adjacent levels' overlapping bands
+    interleaved as near-duplicate periods (adjacent gaps < one nominal band)
+    — visibly alternating apparent resistivity. With the shared global grid
+    the merged grid is the global band grid itself: adjacent periods differ
+    by exactly one nominal band ratio."""
+    fc = _multi_level_fc()
+    ppo = 3
+    per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                   periods_per_octave=ppo, band_style="index")
+    P, _, _ = merge_tf_levels(per_level)
+
+    n_global = len(_container_band_edges(fc, ppo)) - 1
+    n_estimated = sum(int((np.abs(np.asarray(e["Z"])).sum(axis=(1, 2)) > 0).sum())
+                      for e in per_level.values())
+    assert P.size == n_global          # one point per global band, no dups
+    assert P.size < n_estimated        # overlaps were deduped (deepest wins)
+
+    ratio = P[1:] / P[:-1]
+    # merge keys are rounded to 8 log2 decimals — hence rtol 1e-6
+    np.testing.assert_allclose(ratio[:-1], 2.0 ** (1.0 / ppo), rtol=1e-6)
+    assert ratio[-1] <= 2.0 ** (1.0 / ppo)  # clamped final band is narrower
+
+
+def test_index_and_log_merge_to_comparable_band_counts():
+    """Sanity: after the global-grid fix, both styles merge to a similar
+    number of bands (the index mode should no longer inflate the merged
+    grid with interleaved duplicates)."""
+    fc = _multi_level_fc()
+    counts = {}
+    for style in ("log", "index"):
+        per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                       periods_per_octave=3, band_style=style)
+        P, _, _ = merge_tf_levels(per_level)
+        counts[style] = P.size
+    assert abs(counts["log"] - counts["index"]) <= 2
+
+
+def test_container_band_edges_falls_back_on_missing_attrs():
+    """Without sample_rate/window attrs the global grid cannot be derived
+    and the dispatcher must fall back to the per-level walk (no crash)."""
+    fc = _multi_level_fc()
+    for fcl in fc.values():
+        fcl.attrs.pop("sample_rate", None)
+    assert _container_band_edges(fc, 3) is None
+    per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                   periods_per_octave=3, band_style="index")
+    assert per_level
