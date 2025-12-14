@@ -611,7 +611,7 @@ def _coherence_weight(coh2, lo, hi, mode, ramp=0.05):
 
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
-                      trim=False, periods_per_octave=4):
+                      trim=False, periods_per_octave=4, band_style="log"):
     """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
 
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
@@ -622,6 +622,13 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     coherence (aurora's RME_RR signal-covariance estimate degrades when the
     local and remote magnetic fields are uncorrelated), and a single shared
     weight per row is applied to **both** FCs (exact weighted-LS semantics).
+
+    ``band_style`` selects the band-construction mode (DESIGN.md §14.6,
+    shared with :func:`estimate_tf`): ``"log"`` (default) is the legacy
+    continuous log-period edge partition, unchanged from prior releases;
+    ``"index"`` is the new discrete, EMTF-style index-snapped partition. It
+    should match the ``band_style`` used on the corresponding ``Estimate
+    TF`` call for consistent banding, exactly like ``periods_per_octave``.
     """
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
@@ -641,13 +648,10 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     local_out = local.copy(deep=True)
     ref_out = ref.copy(deep=True) if ref is not None else None
 
-    periods, edges = _period_bands(local, periods_per_octave)
-    with np.errstate(divide="ignore"):
-        logf = np.log2(local["frequency"].values)
+    periods, band_bins_list = _resolve_period_bands(local, periods_per_octave, band_style)
     rows = []
     for b in range(len(periods)):
-        sel = (logf <= edges[b]) & (logf > edges[b + 1])
-        band_bins = np.where(sel)[0]
+        band_bins = band_bins_list[b]
         if band_bins.size == 0:
             continue
         E = np.stack([local[oc].values[band_bins, :] for oc in outs], axis=0)
@@ -716,7 +720,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
-                       trim=False, periods_per_octave=4):
+                       trim=False, periods_per_octave=4, band_style="log"):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
@@ -733,6 +737,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
             fc, ref, input_channels, output_channels,
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, trim=trim, periods_per_octave=periods_per_octave,
+            band_style=band_style,
         )
         out_levels[int(level)] = l_out
         if ref_levels is not None:
@@ -751,6 +756,7 @@ def estimate_tf(
     remote_reference=False,
     periods_per_octave=4,
     ref_fc=None,
+    band_style="log",
 ):
     """MT transfer-function estimate -> (periods, Z[n_out x n_in complex], Z_err).
 
@@ -795,20 +801,21 @@ def estimate_tf(
     fc = _normalize_fc_layout(fc)
     freq = fc["frequency"].values
     ok = freq > 0  # exclude DC bin (period would be infinite)
-    freq = freq[ok]
     fc = fc.isel(frequency=ok)
-    logf = np.log2(freq)
 
     if ref_fc is not None:
         ref_fc = _normalize_fc_layout(ref_fc)
         ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
         _check_remote_grid(
-            ref_fc["frequency"].values, freq,
+            ref_fc["frequency"].values, freq[ok],
             ref_fc["time"].values, fc["time"].values,
         )
 
-    # Realistic, octave-aligned period bands for this decimation level.
-    periods_out, edges = _period_bands(fc, periods_per_octave)
+    # Realistic, octave-aligned period bands for this decimation level
+    # (DESIGN.md §14.6: band_style selects the legacy continuous-edge
+    # partition, kept unchanged as a comparison baseline, or the new
+    # discrete index-snapped partition).
+    periods_out, band_bins_list = _resolve_period_bands(fc, periods_per_octave, band_style)
 
     nbands = len(periods_out)
     n_in = len(input_channels)
@@ -820,14 +827,14 @@ def estimate_tf(
     Zerr = np.zeros((nbands, n_out, n_in), dtype=float)
 
     for b in range(nbands):
-        sel = (logf <= edges[b]) & (logf > edges[b + 1])
-        if sel.sum() == 0:
+        band_bins = band_bins_list[b]
+        if band_bins.size == 0:
             continue
         # gather samples across selected frequencies and all windows
         H = []  # inputs  -> [n, n_in]
         E = []  # outputs -> [n, n_out]
         R = []  # reference inputs -> [n, n_in]
-        for f_idx in np.where(sel)[0]:
+        for f_idx in band_bins:
             H.append(np.stack([fc[ic].values[f_idx, :] for ic in input_channels], axis=-1))
             E.append(np.stack([fc[oc].values[f_idx, :] for oc in output_channels], axis=-1))
             if engine == "RME_RR":
@@ -909,6 +916,134 @@ def _period_bands(fc, periods_per_octave=4):
     edges[1:M + 1] = (logf[:-1] + logf[1:]) / 2.0
     edges[M + 1] = logf[-1] - d / 2.0
     return periods_out, edges
+
+
+def _period_bands_indexed(fc, periods_per_octave=4):
+    """Discrete, EMTF-style period bands (DESIGN.md §14.6) — an alternative
+    to :func:`_period_bands` (which is left untouched as the comparison
+    baseline / fallback).
+
+    Classic EMTF (and aurora's own default ``bs_256_26.cfg`` band-setup
+    table) defines bands as explicit, non-overlapping ``index_min``/
+    ``index_max`` integer ranges into the raw FFT-bin grid — hand-tuned once
+    for a specific window length / decimation factor. :func:`_period_bands`
+    instead partitions a *continuous* log2(period) grid and only afterwards
+    tests which raw bins fall in each nominal band; because that grid is
+    agnostic to the actual (linearly spaced) FFT-bin grid, nominal bands
+    near the long-period end of a decimation level can silently collect
+    zero raw bins (dropped after estimation), in an outcome that depends on
+    floating-point edge coincidences rather than being controlled.
+
+    This function instead walks the *integer* FFT-bin index grid directly,
+    from ``index_ceiling`` (the Fs/4 cutoff, same as :func:`_period_bands`'s
+    ``p_short``) down to ``index_floor`` (the window-length reliability cap,
+    same as ``p_long``, clamped to the data's available range and to never
+    include the DC bin), at a target ratio of ``2**(1/periods_per_octave)``
+    per step, snapped to whole bins. This guarantees, by construction: every
+    raw bin in ``[index_floor, index_ceiling]`` is assigned to exactly one
+    band (no gaps, no overlaps, no silently-empty bands), and band width is
+    monotonically non-decreasing toward higher frequency — matching the
+    shape of aurora's bundled ``bs_256_26.cfg`` table, but derived
+    automatically for any sample rate / window length / decimation factor
+    instead of requiring a hand-authored config file tied to one specific
+    configuration.
+
+    Each band's period label is the geometric mean of the frequencies at its
+    *actual* selected ``index_min``/``index_max`` (not a pre-imagined
+    continuous grid point), so the reported period is always self-consistent
+    with the raw data that produced it.
+
+    Returns ``(periods_out, index_ranges)`` — periods shortest→longest, and
+    one ``(index_min, index_max)`` inclusive integer pair per period, into
+    the fc's raw (including-DC) frequency axis.
+    """
+    freq_vals = np.asarray(fc["frequency"].values, dtype=float)
+    n_freq = freq_vals.size
+    positive_mask = freq_vals > 0
+    if not positive_mask.any():
+        raise ValueError("fc has no positive-frequency bins to band")
+    first_positive_idx = int(np.argmax(positive_mask))
+
+    fs = float(fc.attrs.get("sample_rate") or 0.0)
+    if not fs:
+        fs = 2.0 * float(freq_vals[positive_mask].max())
+    ppo = max(1, int(periods_per_octave))
+
+    if n_freq > 1:
+        delta_f = float((freq_vals[-1] - freq_vals[0]) / (n_freq - 1))
+    else:
+        delta_f = fs / 2.0
+
+    def _index_of(frequency: float) -> int:
+        pos = (frequency - freq_vals[0]) / delta_f if delta_f else 0.0
+        return int(np.clip(round(pos), first_positive_idx, n_freq - 1))
+
+    p_short = 4.0 / fs  # Fs/4, same reliability cutoff as _period_bands
+    N = int(fc.attrs.get("num_samples_window") or 0)
+    if not N:
+        wl = fc.attrs.get("window_length_s")
+        if wl:
+            N = round(float(wl) * fs)
+    p_long = N / (4.0 * fs) if N else None
+    longest_present = 1.0 / float(freq_vals[positive_mask].min())
+    if p_long is None or p_long > longest_present:
+        p_long = longest_present
+    if p_long <= p_short:
+        p_long = longest_present
+
+    index_ceiling = _index_of(1.0 / p_short)
+    index_floor = _index_of(1.0 / p_long)
+    if index_ceiling <= index_floor:
+        index_ceiling = min(n_freq - 1, index_floor + 1)
+    if index_ceiling <= index_floor:
+        # only one usable bin in this level's reliable range
+        only = index_floor
+        return np.array([1.0 / freq_vals[only]]), [(only, only)]
+
+    ratio = 2.0 ** (1.0 / ppo)
+    index_ranges: list[tuple[int, int]] = []
+    hi = index_ceiling
+    while hi >= index_floor:
+        lo = int(round(hi / ratio))
+        lo = min(lo, hi - 1)
+        lo = max(lo, index_floor)
+        index_ranges.append((lo, hi))
+        hi = lo - 1
+
+    periods_out = np.array([
+        1.0 / np.sqrt(freq_vals[lo] * freq_vals[hi]) for lo, hi in index_ranges
+    ])
+    return periods_out, index_ranges
+
+
+def _resolve_period_bands(fc, periods_per_octave=4, band_style="log"):
+    """Dispatch to the legacy continuous-edge bands (:func:`_period_bands`,
+    unchanged) or the new discrete index-snapped bands
+    (:func:`_period_bands_indexed`, DESIGN.md §14.6).
+
+    Returns ``(periods_out, band_bins)`` — a representation shared by both
+    styles: ``band_bins[b]`` is an ``np.ndarray`` of integer positions into
+    ``fc``'s frequency axis for band ``b`` (may be empty for the ``"log"``
+    style near a level's long-period end — callers already handle empty
+    bands by skipping them).
+    """
+    style = str(band_style or "log").strip().lower()
+    if style == "index":
+        periods_out, index_ranges = _period_bands_indexed(fc, periods_per_octave)
+        band_bins = [np.arange(lo, hi + 1) for lo, hi in index_ranges]
+        return periods_out, band_bins
+    if style != "log":
+        raise ValueError(
+            f"unknown band_style '{band_style}' (expected 'log' or 'index')"
+        )
+    periods_out, edges = _period_bands(fc, periods_per_octave)
+    with np.errstate(divide="ignore"):
+        logf = np.log2(fc["frequency"].values)
+    band_bins = []
+    for b in range(len(periods_out)):
+        sel = (logf <= edges[b]) & (logf > edges[b + 1])
+        band_bins.append(np.where(sel)[0])
+    return periods_out, band_bins
 
 
 def _band_datasets(H, E, R, input_channels, output_channels):
@@ -1155,6 +1290,7 @@ def estimate_tf_levels(
     periods_per_octave=4,
     ref_levels=None,
     channel_nomenclature=None,
+    band_style="log",
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
@@ -1163,7 +1299,9 @@ def estimate_tf_levels(
     "input_channels": ..., "output_channels": ..., "channel_nomenclature": ...,
     "survey_id"/"station_id"/"run_id"/"station_latitude"/...: ...}}``.
     ``ref_levels`` is an optional same-shaped container (or a single fc) used
-    as the remote reference per level.
+    as the remote reference per level. ``band_style`` selects the band
+    construction mode (DESIGN.md §14.6): ``"log"`` (default, legacy) or
+    ``"index"`` (new discrete/EMTF-style).
     """
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
     result = {}
@@ -1175,6 +1313,7 @@ def estimate_tf_levels(
             remote_reference=remote_reference,
             periods_per_octave=periods_per_octave,
             ref_fc=ref_fc,
+            band_style=band_style,
         )
         entry = {
             "periods": periods,

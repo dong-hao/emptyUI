@@ -256,12 +256,20 @@ class CoherenceSort(Node):
               default=4, min=1,
               description="Band geometry — must match the 'Estimate TF' "
                           "setting for the same banding."),
+        Param("band_style", "select", label="Band style",
+              options=("log", "index"), default="log",
+              description="Band construction mode — must match 'Estimate TF' "
+                          "for consistent banding. 'log' (default) is the "
+                          "legacy continuous log-period edge partition; "
+                          "'index' is the discrete, EMTF-style index-snapped "
+                          "partition (DESIGN.md §14.6)."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 mode: str = "weight", coherence_trim: bool = False,
-                periods_per_octave: int = 4) -> dict[str, Any]:
+                periods_per_octave: int = 4,
+                band_style: str = "log") -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -274,6 +282,7 @@ class CoherenceSort(Node):
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, trim=coherence_trim,
             periods_per_octave=periods_per_octave,
+            band_style=band_style,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
@@ -325,12 +334,24 @@ class EstimateTF(Node):
         Param("periods_per_octave", "integer", label="Periods per octave",
               default=4, min=1,
               description="Log2 period bands per power-of-2 octave."),
+        Param("band_style", "select", label="Band style",
+              options=("log", "index"), default="log",
+              description="Band construction mode (DESIGN.md §14.6). 'log' "
+                          "(default) is the legacy continuous log-period "
+                          "edge partition, kept unchanged as a comparison "
+                          "baseline. 'index' is the new discrete, "
+                          "EMTF-style index-snapped partition: every raw FFT "
+                          "bin in a level's reliable range is assigned to "
+                          "exactly one band (no gaps/overlaps/silently-empty "
+                          "bands), unlike 'log' which can silently drop bins "
+                          "near a level's long-period end."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 estimator_engine: str = "Robust",
                 remote_reference: bool = False,
-                periods_per_octave: int = 4) -> dict[str, Any]:
+                periods_per_octave: int = 4,
+                band_style: str = "log") -> dict[str, Any]:
         # Accept either a single fc (treated as level 0) or a multi-level
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -359,12 +380,13 @@ class EstimateTF(Node):
             periods_per_octave=periods_per_octave,
             ref_levels=ref_fc,
             channel_nomenclature=kw,
+            band_style=band_style,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
         notes = (
             f"estimator={estimator_engine}; remote_reference={remote_reference}; "
             f"levels={len(levels)}; "
-            f"periods_per_octave={periods_per_octave}; "
+            f"periods_per_octave={periods_per_octave}; band_style={band_style}; "
             f"nomenclature={kw or 'auto'}"
         )
         tf = build_tf(

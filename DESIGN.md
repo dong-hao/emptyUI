@@ -1133,7 +1133,21 @@ progress.
   not essential to running the process.
 - **Band config files**: load an aurora-style band config (exact centre
   frequencies + bandwidths) or auto-default when none given, replacing/augmenting
-  the auto-derived Fs/4→window/4 period table (§14 deferred task).
+  the auto-derived Fs/4→window/4 period table (§14 deferred task). A discrete,
+  automatically-derived alternative (the `band_style="index"` switch, §14.6)
+  is delivered as a **comparison mode** alongside the legacy continuous-edge
+  table (`band_style="log"`, unchanged default) — this M4 item remains about
+  optionally loading an exact, hand-authored EMTF band-setup file on top of
+  either mode.
+- **Optional in-band smoothing taper (Parzen/Hann)** — deferred from the
+  §14.6 band-construction research (2026-09-09): weight FC rows within a
+  band by proximity to the band center instead of the current hard-edge,
+  unit-weight cutoff. Neither classic EMTF nor current aurora implement this
+  by default (aurora's own `transfer_function_helpers.py` carries an
+  unresolved TODO for exactly this); it would be a genuine enhancement, not
+  a parity fix, and should bake `√weight` into FC rows before regression —
+  the same mechanism `coherence_sort_fc`'s `_coherence_weight` already uses,
+  so it composes with OLS/RME/RME_RR without touching aurora internals.
 - **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
   (§14.5). At long periods the deepest decimation levels have few STFT windows,
   so per-level TF estimates are statistically weak. Instead of estimating a TF
@@ -1483,6 +1497,74 @@ frequencies the shallow levels already provide abundant samples.
 processing* (EMTF); Chave & Thomson (2004), *Bounded influence magnetotelluric
 response function estimation* (BIRRP); aurora (simpeg, Kappler et al.) — `Band`
 metadata + EMTF band setup files; mth5 FC layer.
+
+### 14.6 Discrete, EMTF-style band construction (`band_style` switch, delivered 2026-09-09)
+
+**Grounding (researched 2026-09-08/09).** Read aurora 0.6.2's actual band
+machinery directly (installed source, not just its docs): `mt_metadata.common.Band`
+always resolves a band to an explicit integer `index_min`/`index_max` pair
+(`Band._indices_from_frequencies`); aurora's *default* production band table
+(`aurora/config/emtf_band_setup/bs_256_26.cfg`, `BANDS_DEFAULT_FILE`) is the
+classic EMTF `decimation_level index_min index_max` format — a hand-authored,
+non-overlapping, gapless integer-bin partition tuned for one specific
+`(window=256, decimation factor)` configuration (e.g. level 1: `47 55`, …,
+`8 9`, `6 7`, `5 5` — band width shrinks to a single bin at the long-period
+end, growing to ~9 bins near Fs/4). **No band-averaging taper (Parzen or
+otherwise) is applied by either classic EMTF or current aurora** — regression
+rows are unweighted per raw bin/window; aurora's own robust re-weighting
+(`aurora/transfer_function/weights/edf_weights.py`) downweights high-leverage
+*residual outliers*, which is a different statistical mechanism than a
+frequency-proximity taper. In fact aurora's own source carries an unresolved
+TODO for per-bin/tapered band weights
+(`aurora/pipelines/transfer_function_helpers.py:348`: "may involve finding the
+nearest frequency bin … and then applying the weights for that bin, or some
+tapered region around it … For now, we will just use the mean of the weights
+for the band. This is a temporary solution…") — confirming this is not solved
+upstream either.
+
+emptyUI's own `_period_bands()` (unchanged — see below) instead partitions a
+*continuous* log2(period) grid and only afterwards tests which raw FFT bins
+fall in each nominal band. Since the raw grid is linear in frequency, this
+continuous partition is agnostic to the actual discrete bin spacing: near the
+long-period end of a decimation level, several nominal bands can silently
+collect **zero** raw bins (dropped after `sel.sum() == 0: continue`, filtered
+out later by `merge_tf_levels`'s all-zero check) in a way that depends on
+floating-point boundary coincidences rather than being deterministically
+controlled — exactly where broadband MT data is scarcest and most valuable.
+
+**Decision (2026-09-09): keep `_period_bands` as-is; add a switch, not a
+replacement.** A single hand-authored table like `bs_256_26.cfg` only applies
+to one window length / decimation factor / periods-per-octave combination —
+different `ComputeFC` settings need a different table, so hard-coding one
+default table is not a general fix. Instead, `_period_bands_indexed()`
+(`emptyui-aurora/_processing.py`) auto-derives the **equivalent of an
+EMTF band-setup table for any configuration**, by walking the *integer* FFT-bin
+index grid directly (ratio `2**(1/periods_per_octave)` per step, snapped to
+whole bins, from the same Fs/4 / window-length-reliability cutoffs
+`_period_bands` already uses) instead of a continuous log-period grid. This
+guarantees, by construction: every raw bin in a level's reliable range is
+assigned to **exactly one** band (no gaps, no overlaps, no silently-empty
+bands), with band width monotonically non-decreasing toward higher frequency
+— matching the shape of aurora's bundled table, but computed automatically.
+
+- **`band_style` param** (`"log"` default / `"index"`) on `estimate_tf`,
+  `estimate_tf_levels`, `coherence_sort_fc(s)`, and the `Estimate TF` /
+  `Coherence Sort` nodes. `"log"` reproduces the pre-existing behavior
+  byte-for-byte (the original `_period_bands` function and its boolean edge
+  test are untouched); `"index"` is the new discrete construction. This lets
+  users run both on the same data and compare — the recommended way to
+  evaluate the new mode before considering it a future default.
+- Cross-decimation-level merge compatibility is preserved for both styles:
+  `_period_bands_indexed` reuses the same Fs/4 / window-length cutoffs, so a
+  decimation factor that is a power of two still lines levels up.
+- **Deferred to M4 (item "B" from the same research, see §11):** an optional
+  in-band smoothing taper (Parzen/Hann, weighting bins by proximity to the
+  band center) on top of the discrete partition — a genuine enhancement
+  beyond what either classic EMTF or current aurora do, not a gap versus
+  them. Implementation sketch: bake `√weight` into the selected FC rows
+  before regression, the same mechanism `coherence_sort_fc`'s `_coherence_weight`
+  already uses, so it composes with OLS/RME/RME_RR without touching aurora
+  internals.
 
 ---
 
