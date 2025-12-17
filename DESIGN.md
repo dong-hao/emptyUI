@@ -1148,6 +1148,78 @@ progress.
   a parity fix, and should bake `√weight` into FC rows before regression —
   the same mechanism `coherence_sort_fc`'s `_coherence_weight` already uses,
   so it composes with OLS/RME/RME_RR without touching aurora internals.
+
+### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"`, delivered 2026-09-09)
+
+**Motivation and philosophy.** The merge-based modes (`"log"` and
+`"index"`, §14.6) deliberately let decimation levels overlap and resolve
+the overlap post-hoc (deepest wins) — smooth boundaries at the cost of
+redundant robust regressions (~half of them discarded at window 256/factor
+4) and an implicit averaging philosophy. Classic EMTF (and aurora's bundled
+`bs_256_26.cfg`) instead assigns every band to **exactly one** decimation
+level — no overlap, nothing to merge, each frequency evaluated exactly once
+— at the cost of small band-boundary discontinuities where handover happens.
+Both are compromises; emptyUI implements all three styles as comparison
+modes and does **not** preset a verdict — the user compares results on real
+data before settling on one (the merge modes remain the default).
+
+**Grounding — what the classic table encodes (researched 2026-09-09,
+`aurora/config/emtf_band_setup/bs_256_26.cfg`, N=256 → 128 bins/level,
+factor 4):**
+- Per-level usable bins ≈ **5..55** of 128 — close to emptyUI's reliability
+  cutoffs [window/4, Fs/4] = bins 4..64, slightly more conservative at both
+  ends.
+- Level 1 (head) is dense: 11 bands over bins 5–55 (~3.2/octave); levels
+  2–3 repeat an **identical 6-band bin template** (`14-17, 11-13, 9-10,
+  7-8, 6-6, 5-5`) with frequencies ÷4 per level (center-bin ratios
+  15.5→12→9.5→7.5→6→5 ≈ 2^(1/3)); level 4 is truncated to 3 bands.
+- Bands shrink from ~9 bins near Fs/4 to a **single bin** at each level's
+  bottom → in log-frequency the tail is *sparser* (adjacent-bin log spacing
+  grows at long periods).
+- Across levels the table is **nearly disjoint** (bin intervals contiguous
+  within a level; handovers leave ~0.75-bin gaps) — but not perfectly: one
+  small real overlap (level 3 bin 5 vs level 4's 18–22) and one
+  near-duplicate center pair (ratio 0.995) exist even in the hand-tuned
+  file.
+- The single rule "walk centers down a ~3/octave geometric ladder snapped to
+  whole bins; band = contiguous bin range between neighbors' midpoints;
+  hand over to the next (deeper) level when the width would drop below ~1
+  bin" reproduces the entire table shape — dense head, jittered middle,
+  single-bin tail — automatically, for any (window, factor, ppo).
+
+**Implementation (delivered 2026-09-09, `emptyui-aurora/_processing.py`).**
+`band_style="emtf"` on `estimate_tf(_levels)` / `coherence_sort_fc(s)` and
+the `Estimate TF` / `Coherence Sort` nodes:
+- `_emtf_band_table(levels, ppo, owner)`: nominal bands from the shared
+  global walk (`_index_band_edges`, same Fs/4 → window/4 reliability
+  cutoffs as the other styles); each nominal band is assigned to **exactly
+  one** level — the deepest (default) or shallowest (classic EMTF) level
+  whose reliable range fully contains it. The two policies embody the
+  shallow-vs-deep compromise: *deepest* averages more raw harmonics per
+  band but has factor-times fewer windows; *shallowest* matches the classic
+  table's ownership (levels own their bottom ~2 octaves, head level its
+  full range, single-bin tails at every level). Both are exposed
+  (`band_owner` param on both nodes) for result comparison.
+- `_bands_from_freq_pairs(fc, pairs)` maps the disjoint frequency intervals
+  to integer bins on each consumer's own frequency axis (searchsorted —
+  layout-agnostic w.r.t. DC bin and axis order). Shared band edges → bin
+  sets are disjoint automatically; a nominal band with no bin of this fc is
+  an empty entry (skipped); band periods are the geometric means of the
+  ACTUAL selected edge bins (self-consistent, and no cross-level label
+  alignment is needed since every band is evaluated once).
+- Each frequency is evaluated exactly once → the merge is a no-op for this
+  style (`merge_tf_levels` still drops degenerate all-zero bands), and the
+  overlapping modes' wasted ~50% robust regressions are saved. Short
+  records degrade naturally: bands whose owner has no complete windows are
+  dropped (sparse tail), matching the classic table's truncated level 4.
+- Deviations from the classic file (deliberate, documented): emptyUI's
+  reliability cutoffs (bins 4..64 vs classic 5..55) extend the covered
+  span, so the auto table has more bands (30 vs 26 for the
+  bs_256_26-equivalent configuration); the strict per-octave nominal walk +
+  integer snapping gives jittered — not rigorously log-even — spacing,
+  within ~half a band width of the classic centers (max nearest-center
+  deviation ≈ 11% at ppo 3). Preset band-setup files remain an M4 item on
+  top of either mode (§11).
 - **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
   (§14.5). At long periods the deepest decimation levels have few STFT windows,
   so per-level TF estimates are statistically weak. Instead of estimating a TF

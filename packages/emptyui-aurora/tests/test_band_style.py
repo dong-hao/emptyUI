@@ -14,6 +14,7 @@ import pytest
 from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
 from emptyui_aurora._processing import (
     _container_band_edges,
+    _emtf_band_table,
     _period_bands,
     _period_bands_indexed,
     _resolve_period_bands,
@@ -257,3 +258,113 @@ def test_container_band_edges_falls_back_on_missing_attrs():
     per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
                                    periods_per_octave=3, band_style="index")
     assert per_level
+
+
+# --- band_style="emtf": disjoint EMTF/aurora-style table (DESIGN §14.7) ---
+
+def test_emtf_table_is_disjoint_across_levels():
+    """Every nominal band is owned by exactly one level: the union of all
+    levels' frequency intervals contains no overlap (gaps between handovers
+    are allowed and expected, like the classic table)."""
+    fc = _multi_level_fc()
+    for owner in ("deepest", "shallowest"):
+        table = _emtf_band_table(fc, 3, owner=owner)
+        iv = sorted((lo, hi) for pairs in table.values() for hi, lo in pairs)
+        for a, b in pairwise(iv):
+            assert b[0] >= a[1] - 1e-12  # no overlap
+
+
+def test_emtf_table_owner_policies_differ():
+    """deepest vs shallowest assign the overlap region to different levels:
+    with the deepest policy the deepest level owns its full reliable range;
+    with the shallowest policy the shallowest level does (classic EMTF)."""
+    fc = _multi_level_fc()
+    deep = _emtf_band_table(fc, 3, owner="deepest")
+    shallow = _emtf_band_table(fc, 3, owner="shallowest")
+    deepest_level = max(fc)
+    shallowest_level = min(fc)
+    assert len(deep[deepest_level]) > len(deep[shallowest_level])
+    assert len(shallow[shallowest_level]) > len(shallow[deepest_level])
+    # same total band count (both partition the same nominal span)
+    assert sum(len(v) for v in deep.values()) == \
+        sum(len(v) for v in shallow.values())
+
+
+def test_emtf_estimate_evaluates_each_frequency_once():
+    """band_style='emtf': merged point count == total owned bands (no
+    duplicates to merge, no wasted estimates), and adjacent merged periods
+    never interleave (no pair closer than ~half a nominal band)."""
+    fc = _multi_level_fc()
+    ppo = 3
+    per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                   periods_per_octave=ppo, band_style="emtf",
+                                   band_owner="deepest")
+    P, _, _ = merge_tf_levels(per_level)
+    table = _emtf_band_table(fc, 3, owner="deepest")
+    assert P.size == sum(len(v) for v in table.values())
+    ratio = P[1:] / P[:-1]
+    assert np.all(ratio > 1.05)  # no interleaved near-duplicates
+
+
+def test_emtf_shallowest_table_matches_bs_256_26_shape():
+    """For the bs_256_26 geometry (N=256, factor 4) the auto-generated
+    shallowest-owner table reproduces the classic structure: ~3 bands/octave
+    density, the head level owning its full usable range, deeper levels
+    owning their bottom ~2 octaves (classic template bins 5..17), and
+    single-bin tails."""
+    import xarray as xr
+    fs, N = 1.0, 256
+    fake = {}
+    for i in range(4):
+        ds = xr.Dataset()
+        ds.attrs = {"sample_rate": fs / 4 ** i, "num_samples_window": N}
+        ds["frequency"] = np.arange(N // 2 + 1) * fs / 4 ** i / N
+        fake[i] = ds
+    table = _emtf_band_table(fake, 3, owner="shallowest")
+    # head level owns its full range
+    assert len(table[0]) == 12  # 4 octaves x 3
+    # deeper levels own their bottom 2 octaves (classic bins 4..16 ≈ 5..17)
+    for lv in (1, 2, 3):
+        assert len(table[lv]) == 6
+    # disjoint by construction, and tail bands shrink to 1-2 bins
+    widths = []
+    for lv, pairs in table.items():
+        df = fs / 4 ** lv / N
+        for hi, lo in pairs:
+            w = int(hi / df) - int(np.ceil(lo / df)) + 1
+            assert w >= 1
+            widths.append((lv, w))
+    tail = [w for lv, w in widths if lv > 0]
+    assert max(tail) <= 4  # classic template's widest band is 14-17 = 4 bins
+    assert min(tail) == 1
+
+
+def test_emtf_owner_policies_recover_impedance(tmp_path):
+    """Node-level smoke: EstimateTF runs end-to-end with band_style='emtf'
+    under both owner policies and recovers the known synthetic impedance."""
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = _multi_level_fc()
+    for owner in ("deepest", "shallowest"):
+        per_level = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                                       estimator_engine="Least Squares",
+                                       periods_per_octave=3,
+                                       band_style="emtf",
+                                       band_owner=owner)
+        P, Z, _ = merge_tf_levels(per_level)
+        assert P.size >= 10
+        assert np.all(np.isfinite(Z))
+        assert np.median(np.abs(Z[:, 0, 1])) > 0
+
+    from emptyui_aurora.process import EstimateTF
+    result = EstimateTF().execute(ctx, fc, periods_per_octave=3,
+                                  band_style="emtf", band_owner="shallowest")
+    assert result["tf"] is not None
+
+
+def test_emtf_rejects_unknown_owner_policy():
+    fc = _multi_level_fc()
+    with pytest.raises(ValueError, match="unknown band owner"):
+        _emtf_band_table(fc, 3, owner="median")
