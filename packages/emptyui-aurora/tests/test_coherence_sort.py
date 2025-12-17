@@ -40,7 +40,7 @@ def test_coherence_sort_drop_removes_noisy_windows():
     fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.25, coherence_max=1.0,
-                                     mode="drop")
+                                     mode="drop", band_style="uniform")
     win = out["time"].values
     # fs = 8 Hz, window = 256 s -> scipy STFT times are window centres at
     # 128 s spacing; the noisy segment (samples 2000-2600 = 250-325 s) makes
@@ -170,7 +170,8 @@ def test_trim_removes_noisy_band():
     fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.5, coherence_max=1.0,
-                                     mode="drop", trim=True)
+                                     mode="drop", trim=True,
+                                     band_style="uniform")
     assert any(r["trimmed"] for r in rows)
     # the fully-trimmed bands are NaN across every window; bins outside the
     # banded range (DC, above the shortest band edge) are never touched

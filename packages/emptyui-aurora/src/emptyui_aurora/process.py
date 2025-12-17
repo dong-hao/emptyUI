@@ -257,30 +257,21 @@ class CoherenceSort(Node):
               description="Band geometry — must match the 'Estimate TF' "
                           "setting for the same banding."),
         Param("band_style", "select", label="Band style",
-              options=("log", "index", "emtf"), default="log",
-              description="Band construction mode — must match 'Estimate TF' "
-                          "for consistent banding. 'log' (default) is the "
-                          "legacy continuous log-period edge partition; "
-                          "'index' is the discrete, index-snapped partition "
-                          "on a shared global grid (DESIGN.md §14.6); "
-                          "'emtf' is the disjoint EMTF-style table — every "
-                          "band assigned to exactly one decimation level "
-                          "(DESIGN.md §14.7)."),
-        Param("band_owner", "select", label="Band owner (emtf)",
-              options=("deepest", "shallowest"), default="deepest",
-              description="Only used with band style 'emtf': which decimation "
-                          "level evaluates a band in the level-overlap "
-                          "region. 'deepest' averages more raw harmonics but "
-                          "has fewer windows; 'shallowest' is the classic "
-                          "EMTF assignment. Must match 'Estimate TF'."),
+              options=("emtf", "uniform"), default="emtf",
+              description="Band construction scheme — must match 'Estimate "
+                          "TF' for consistent banding. 'emtf' (default) is "
+                          "the auto-derived disjoint EMTF-style table: every "
+                          "band assigned to exactly one decimation level, "
+                          "each frequency evaluated exactly once. 'uniform' "
+                          "is the uniform log2-grid partition with "
+                          "merge-based level combination (DESIGN.md §14.8)."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 mode: str = "weight", coherence_trim: bool = False,
                 periods_per_octave: int = 4,
-                band_style: str = "log",
-                band_owner: str = "deepest") -> dict[str, Any]:
+                band_style: str = "emtf") -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -293,7 +284,7 @@ class CoherenceSort(Node):
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, trim=coherence_trim,
             periods_per_octave=periods_per_octave,
-            band_style=band_style, band_owner=band_owner,
+            band_style=band_style,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
@@ -346,36 +337,23 @@ class EstimateTF(Node):
               default=4, min=1,
               description="Log2 period bands per power-of-2 octave."),
         Param("band_style", "select", label="Band style",
-              options=("log", "index", "emtf"), default="log",
-              description="Band construction mode (DESIGN.md §14.6/§14.7). "
-                          "'log' (default) is the legacy continuous "
-                          "log-period edge partition, kept unchanged as a "
-                          "comparison baseline. 'index' is the discrete, "
-                          "index-snapped partition on a shared global grid: "
-                          "every raw FFT bin in a level's reliable range is "
-                          "assigned to exactly one band (no gaps/overlaps/"
-                          "silently-empty bands); overlapping bands are "
-                          "estimated redundantly and the merge keeps the "
-                          "deepest level. 'emtf' is the disjoint EMTF-style "
-                          "table: every band assigned to exactly one level, "
-                          "each frequency evaluated exactly once."),
-        Param("band_owner", "select", label="Band owner (emtf)",
-              options=("deepest", "shallowest"), default="deepest",
-              description="Only used with band style 'emtf': which "
-                          "decimation level evaluates a band in the "
-                          "level-overlap region. 'deepest' (default) "
-                          "averages more raw harmonics per band but has "
-                          "factor-times fewer windows; 'shallowest' is the "
-                          "classic EMTF assignment. Compare both against "
-                          "'log'/'index' before settling on one."),
+              options=("emtf", "uniform"), default="emtf",
+              description="Band construction scheme (DESIGN.md §14.8). "
+                          "'emtf' (default) is the auto-derived disjoint "
+                          "EMTF-style table: every band assigned to exactly "
+                          "one decimation level, each frequency evaluated "
+                          "exactly once (sparse single-bin tail, like "
+                          "aurora's bundled band-setup files). 'uniform' is "
+                          "the uniform log2-grid partition: overlapping "
+                          "levels estimate the same nominal bands and the "
+                          "merge keeps the deepest level."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 estimator_engine: str = "Robust",
                 remote_reference: bool = False,
                 periods_per_octave: int = 4,
-                band_style: str = "log",
-                band_owner: str = "deepest") -> dict[str, Any]:
+                band_style: str = "emtf") -> dict[str, Any]:
         # Accept either a single fc (treated as level 0) or a multi-level
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -405,15 +383,13 @@ class EstimateTF(Node):
             ref_levels=ref_fc,
             channel_nomenclature=kw,
             band_style=band_style,
-            band_owner=band_owner,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
         notes = (
             f"estimator={estimator_engine}; remote_reference={remote_reference}; "
             f"levels={len(levels)}; "
-            f"periods_per_octave={periods_per_octave}; band_style={band_style}"
-            + (f"; band_owner={band_owner}" if band_style == "emtf" else "")
-            + f"; nomenclature={kw or 'auto'}"
+            f"periods_per_octave={periods_per_octave}; band_style={band_style}; "
+            f"nomenclature={kw or 'auto'}"
         )
         tf = build_tf(
             periods, Z, ins, outs, channel_nomenclature=kw, Z_err=Z_err,

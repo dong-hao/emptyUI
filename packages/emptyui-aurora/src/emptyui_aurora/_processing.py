@@ -610,10 +610,29 @@ def _coherence_weight(coh2, lo, hi, mode, ramp=0.05):
     return 1.0
 
 
+def _resolve_band_style(band_style):
+    """Normalize the ``band_style`` value to one of the two supported
+    schemes (DESIGN.md §14.8): ``"uniform"`` (log2-grid bands, merge-based)
+    or ``"emtf"`` (disjoint EMTF-style table, default). The legacy name
+    ``"log"`` is accepted as an alias of ``"uniform"`` (identical behavior,
+    renamed 2026-09-09); the retired ``"index"`` mode and anything unknown
+    raise a clear error.
+    """
+    style = str(band_style or "emtf").strip().lower()
+    if style == "log":  # legacy alias, identical behavior
+        style = "uniform"
+    if style not in ("uniform", "emtf"):
+        raise ValueError(
+            f"unknown band_style '{band_style}' (expected 'uniform' or "
+            "'emtf'; the retired 'index' mode was removed 2026-09-09 — "
+            "use 'emtf' for the discrete EMTF-style partition)")
+    return style
+
+
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
-                      trim=False, periods_per_octave=4, band_style="log",
-                      band_edges=None, bands_override=None):
+                      trim=False, periods_per_octave=4, band_style="emtf",
+                      bands_override=None):
     """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
 
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
@@ -625,17 +644,12 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     local and remote magnetic fields are uncorrelated), and a single shared
     weight per row is applied to **both** FCs (exact weighted-LS semantics).
 
-    ``band_style`` selects the band-construction mode (DESIGN.md §14.6/§14.7,
-    shared with :func:`estimate_tf`): ``"log"`` (default) is the legacy
-    continuous log-period edge partition, unchanged from prior releases;
-    ``"index"`` is the discrete, index-snapped partition; ``"emtf"`` is the
-    disjoint EMTF-style table (bands_override holds this level's frequency
-    pairs). It should match the ``band_style`` used on the corresponding
-    ``Estimate TF`` call for consistent banding, exactly like
-    ``periods_per_octave``. ``band_edges`` supplies the shared GLOBAL
-    boundary grid in multi-level ``"index"`` mode (see
-    :func:`_index_band_edges`); ``bands_override`` supplies precomputed
-    ``(f_hi, f_lo)`` pairs in ``"emtf"`` mode (see :func:`_emtf_band_table`).
+    ``band_style`` selects the band-construction scheme (DESIGN.md §14.6–14.8,
+    shared with :func:`estimate_tf`): ``"emtf"`` (default) uses the disjoint
+    EMTF-style table (``bands_override`` holds this level's ``(f_hi, f_lo)``
+    pairs); ``"uniform"`` is the uniform log2-grid partition. It should match
+    the ``band_style`` used on the corresponding ``Estimate TF`` call for
+    consistent banding, exactly like ``periods_per_octave``.
     """
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
@@ -659,7 +673,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
         periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
     else:
         periods, band_bins_list = _resolve_period_bands(
-            local, periods_per_octave, band_style, band_edges=band_edges)
+            local, periods_per_octave, band_style)
     rows = []
     for b in range(len(periods)):
         band_bins = band_bins_list[b]
@@ -731,27 +745,21 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
-                       trim=False, periods_per_octave=4, band_style="log",
-                       band_owner="deepest"):
+                       trim=False, periods_per_octave=4, band_style="emtf"):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
     same-shaped container (or a single fc) for the remote station. Returns
     ``(levels_out, ref_levels_out, rows)`` where the rows carry the
-    decimation level for the diagnostics table. For ``band_style="index"``
-    the shared GLOBAL boundary grid is derived once for the whole container,
-    and for ``"emtf"`` the disjoint EMTF-style table (``band_owner`` selects
-    the deepest/shallowest owner policy) — in both cases derived once for
-    the container (like :func:`estimate_tf_levels`) so the sort's banding
-    matches the subsequent ``Estimate TF`` call.
+    decimation level for the diagnostics table. For ``band_style="emtf"``
+    the disjoint EMTF-style table is derived once for the whole container
+    (like :func:`estimate_tf_levels`) so the sort's banding matches the
+    subsequent ``Estimate TF`` call.
     """
-    band_edges = None
     bands_override = None
-    style = str(band_style or "log").strip().lower()
-    if style == "index":
-        band_edges = _container_band_edges(levels, periods_per_octave)
-    elif style == "emtf":
-        bands_override = _emtf_band_table(levels, periods_per_octave, owner=band_owner)
+    style = _resolve_band_style(band_style)
+    if style == "emtf":
+        bands_override = _emtf_band_table(levels, periods_per_octave)
     out_levels: dict[int, object] = {}
     out_ref: dict[int, object] = {} if ref_levels is not None else None
     rows: list[dict] = []
@@ -761,7 +769,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
             fc, ref, input_channels, output_channels,
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, trim=trim, periods_per_octave=periods_per_octave,
-            band_style=band_style, band_edges=band_edges,
+            band_style=band_style,
             bands_override=None if bands_override is None
             else bands_override.get(level, []),
         )
@@ -782,8 +790,7 @@ def estimate_tf(
     remote_reference=False,
     periods_per_octave=4,
     ref_fc=None,
-    band_style="log",
-    band_edges=None,
+    band_style="emtf",
     bands_override=None,
 ):
     """MT transfer-function estimate -> (periods, Z[n_out x n_in complex], Z_err).
@@ -806,12 +813,15 @@ def estimate_tf(
     that design (see DESIGN.md §13). For backward compatibility the legacy
     engine values ``OLS`` / ``RME`` / ``RME_RR`` are still accepted.
 
-    Period bands are **octave-aligned** (:func:`_period_bands`): ``periods_per_octave``
-    bands per power-of-2 octave, spanning from the level's Nyquist period up to
-    the shorter of the next level's Nyquist period (an exact octave boundary) or
-    the window-length reliability cap — so the extremes (longest period = window
-    length, mixing with DC) are avoided and adjacent decimation levels share one
-    period for a clean merge.
+    Period bands (DESIGN.md §14.8): ``band_style="emtf"`` (default) uses the
+    auto-derived disjoint EMTF-style table (:func:`_emtf_band_table`) — every
+    band assigned to exactly one decimation level, each frequency evaluated
+    exactly once; ``band_style="uniform"`` uses the uniform log2-grid
+    partition (:func:`_period_bands`, ``periods_per_octave`` bands per
+    octave, merge-based across overlapping levels). Both span from the
+    level's Fs/4 cutoff to the window-length reliability cap, avoiding the
+    noisy extremes. The legacy ``band_style="log"`` value is accepted as an
+    alias of ``"uniform"``.
 
     ``ref_fc`` optionally supplies a *second station's* Fourier coefficients
     used as the remote reference (magnetic channels only). When omitted (and
@@ -840,18 +850,16 @@ def estimate_tf(
         )
 
     # Realistic, octave-aligned period bands for this decimation level
-    # (DESIGN.md §14.6/§14.7: band_style selects the legacy continuous-edge
-    # partition (kept unchanged as a comparison baseline), the discrete
-    # index-snapped partition (band_edges = shared GLOBAL grid in multi-level
-    # mode so band labels match across levels and the merge dedups exactly),
-    # or a precomputed disjoint EMTF-style table (bands_override = frequency
-    # pairs from _emtf_band_table — every band owned by exactly one level,
-    # nothing to merge).
+    # (DESIGN.md §14.8: band_style selects the uniform log2-grid partition
+    # or the disjoint EMTF-style table; bands_override carries a precomputed
+    # table (frequency pairs from _emtf_band_table — every band owned by
+    # exactly one level, nothing to merge) when the container-level
+    # derivation succeeded upstream).
     if bands_override is not None:
         periods_out, band_bins_list = _bands_from_freq_pairs(fc, bands_override)
     else:
         periods_out, band_bins_list = _resolve_period_bands(
-            fc, periods_per_octave, band_style, band_edges=band_edges)
+            fc, periods_per_octave, band_style)
 
     nbands = len(periods_out)
     n_in = len(input_channels)
@@ -907,9 +915,10 @@ def estimate_tf(
 
 
 def _period_bands(fc, periods_per_octave=4):
-    """Realistic, octave-aligned period bands -> (band-center periods, edges).
+    """Uniform log2-grid period bands -> (band-center periods, edges).
 
-    Per the feedback: each level's highest trusted frequency is **Fs/4** (so the
+    The ``"uniform"`` band scheme (formerly named ``"log"``): each level's
+    highest trusted frequency is **Fs/4** (so the
     shortest period is 4/Fs, avoiding the noisy Nyquist-edge bins) and its
     longest period is **window_length/4** (N/(4·Fs)). Band centers sit on a
     global log2 (octave) grid with ``periods_per_octave`` points per octave
@@ -954,24 +963,23 @@ def _period_bands(fc, periods_per_octave=4):
     return periods_out, edges
 
 
-def _index_band_edges(fs_native, num_samples_window, factor, num_levels,
+def _nominal_band_edges(fs_native, num_samples_window, factor, num_levels,
                       periods_per_octave=4, lowest_frequency=None):
-    """Global band-boundary frequencies shared by ALL decimation levels
-    (DESIGN.md §14.6, ``band_style="index"`` multi-level mode).
+    """Nominal global band-boundary walk shared by ALL decimation levels
+    (DESIGN.md §14.7, the basis of :func:`_emtf_band_table`'s nominal bands).
 
-    Walking each level's *bin-index* grid independently produces the same
-    index sequence at every level, but identical indices sit at frequencies
-    differing by ``factor**level`` — so overlapping bands get slightly
-    different period labels per level and ``merge_tf_levels``' exact dedup
-    never fires: adjacent levels' estimates interleave in the merged output
-    (the "zigzag" defect). The fix is to derive the boundaries ONCE on a
-    global frequency grid — from the native Fs/4 cutoff down to the deepest
-    level's window/4 floor (same reliability cutoffs as
-    :func:`_period_bands_indexed`) at a target ratio of
-    ``2**(1/periods_per_octave)`` — and let every level select its bins from
-    that one shared grid (:func:`_period_bands_indexed_global`). Band labels
-    are then identical across levels wherever bands overlap, the merge dedups
-    exactly (deepest level wins), and the merged curve stays smooth.
+    Walking each level's *bin-index* grid independently would produce the
+    same index sequence at every level, but identical indices sit at
+    frequencies differing by ``factor**level`` — so overlapping bands would
+    get slightly different period labels per level and adjacent levels'
+    estimates would interleave in the merged output (the historical
+    "zigzag" defect of the retired ``index`` mode). The boundaries are
+    therefore derived ONCE on a global frequency grid — from the native Fs/4
+    cutoff down to the deepest level's window/4 floor (same reliability
+    cutoffs as :func:`_period_bands_indexed`) at a target ratio of
+    ``2**(1/periods_per_octave)``. The disjoint EMTF-style scheme assigns
+    each nominal band to exactly one level
+    (:func:`_emtf_band_table`), so no cross-level label alignment is needed.
 
     Returns boundaries high→low (strictly decreasing), ``edges[0]`` =
     native Fs/4, ``edges[-1]`` = deepest window/4 floor, clamped up to
@@ -995,83 +1003,6 @@ def _index_band_edges(fs_native, num_samples_window, factor, num_levels,
     edges[-1] = f_bottom  # exact clamp on the deepest reliable floor
     keep = np.concatenate(([True], np.diff(edges) < 0))  # strictly decreasing
     return edges[keep]
-
-
-def _period_bands_indexed_global(fc, edges):
-    """Select one decimation level's bins from the GLOBAL boundary grid
-    (see :func:`_index_band_edges`).
-
-    A level estimates every global band that lies inside its reliable range
-    (Fs/4 ceiling, window/4 floor — the same cutoffs
-    :func:`_period_bands_indexed` applies per level); a band straddling a
-    range edge is left to the neighboring level, so each band is estimated
-    by the deepest level whose range fully contains it. Band labels are
-    the geometric means of the *global* edge frequencies, so they are
-    identical across levels and ``merge_tf_levels`` dedups them exactly.
-
-    Returns ``(periods_out, band_bins)`` — periods shortest→longest, one
-    integer-position array per band (may be empty; callers skip empties).
-    """
-    freq_vals = np.asarray(fc["frequency"].values, dtype=float)
-    fs = float(fc.attrs.get("sample_rate") or 0.0)
-    if not fs:
-        fs = 2.0 * float(freq_vals[freq_vals > 0].max())
-    n = int(fc.attrs.get("num_samples_window") or 0)
-    if not n:
-        wl = fc.attrs.get("window_length_s")
-        if wl:
-            n = round(float(wl) * fs)
-    f_ceil = fs / 4.0                     # Fs/4 ceiling (per level)
-    f_floor = 4.0 * fs / n if n else 0.0  # window/4 floor (per level)
-
-    periods_out = 1.0 / np.sqrt(edges[:-1] * edges[1:])  # shortest → longest
-    band_bins = []
-    for hi, lo in pairwise(edges):
-        if hi > f_ceil * (1 + 1e-9) or lo < f_floor * (1 - 1e-9):
-            band_bins.append(np.empty(0, dtype=int))  # not this level's band
-            continue
-        sel = (freq_vals <= hi) & (freq_vals > lo)
-        band_bins.append(np.where(sel)[0])
-    return periods_out, band_bins
-
-
-def _container_band_edges(levels, periods_per_octave=4):
-    """Global index-style boundary grid for a multi-level fc container, or
-    ``None`` when it cannot be derived (missing attrs, non-uniform level
-    ratios, non-constant window) — callers then fall back to the per-level
-    walk. ``levels`` is ``{level: fc_dataset}``."""
-    items = sorted(levels.items())
-    rates = []
-    window = None
-    for _, fc in items:
-        fs = float(fc.attrs.get("sample_rate") or 0.0)
-        if not fs:
-            return None
-        n = int(fc.attrs.get("num_samples_window") or 0)
-        if not n:
-            wl = fc.attrs.get("window_length_s")
-            if not wl:
-                return None
-            n = round(float(wl) * fs)
-        if window is None:
-            window = n
-        elif n != window:  # windows must be constant across levels (D2)
-            return None
-        rates.append(fs)
-    factor = 1
-    if len(rates) > 1:
-        ratios = [round(r / s) for r, s in pairwise(rates)]
-        if len(set(ratios)) != 1 or ratios[0] < 2:
-            return None
-        factor = ratios[0]
-    deepest = items[-1][1]["frequency"].values
-    deepest = deepest[deepest > 0]
-    lowest_frequency = float(deepest.min()) if deepest.size else None
-    return _index_band_edges(
-        rates[0], window, factor, len(items),
-        periods_per_octave=periods_per_octave,
-        lowest_frequency=lowest_frequency,
-    )
 
 
 def _container_geometry(levels):
@@ -1110,7 +1041,7 @@ def _container_geometry(levels):
             "factor": factor, "window": window}
 
 
-def _emtf_band_table(levels, periods_per_octave=4, owner="deepest"):
+def _emtf_band_table(levels, periods_per_octave=4):
     """EMTF/aurora-style DISJOINT band table, auto-derived (DESIGN.md §14.7).
 
     Classic EMTF (and aurora's bundled ``bs_256_26.cfg``) assigns every band
@@ -1123,16 +1054,17 @@ def _emtf_band_table(levels, periods_per_octave=4, owner="deepest"):
     (not rigorously log-even) middle, single-bin sparse tail.
 
     This function derives the equivalent table for any container: nominal
-    bands come from the shared global walk (:func:`_index_band_edges`), each
-    band is assigned to the deepest or shallowest level whose reliable range
-    (Fs/4 ceiling, window/4 floor) fully contains it (``owner`` policy —
-    a genuine processing-philosophy choice: deepest averages more raw
-    harmonics but has factor-times fewer windows, shallowest is the classic
-    EMTF assignment), and consumers map the bands to integer bins on their
-    own frequency axis (:func:`_bands_from_freq_pairs`). Bands whose owner
-    has no complete windows fall away naturally (sparse tail on short
-    records); every frequency is evaluated exactly once, so the multi-level
-    merge is a no-op for this style.
+    bands come from the shared global walk (:func:`_nominal_band_edges`), each
+    band is assigned to the **shallowest** level whose reliable range
+    (Fs/4 ceiling, window/4 floor) fully contains it — the classic EMTF
+    assignment (the retired deepest-owner variant was removed after the
+    2026-09-09 assessment, DESIGN.md §14.8: it routes window-starved deep
+    levels' estimates into the long-period tail) — and consumers map the
+    bands to integer bins on their own frequency axis
+    (:func:`_bands_from_freq_pairs`). Bands whose owner has no complete
+    windows fall away naturally (sparse tail on short records); every
+    frequency is evaluated exactly once, so the multi-level merge is a
+    no-op for this style.
 
     Returns ``{level: [(f_hi, f_lo), ...]}`` (frequency intervals, high→low,
     shared edges → bin sets are disjoint by construction), or ``None`` when
@@ -1146,16 +1078,11 @@ def _emtf_band_table(levels, periods_per_octave=4, owner="deepest"):
     deepest = np.asarray(deepest_fc["frequency"].values, dtype=float)
     deepest = deepest[deepest > 0]
     lowest_frequency = float(deepest.min()) if deepest.size else None
-    edges = _index_band_edges(
+    edges = _nominal_band_edges(
         infos[0]["fs"], geom["window"], geom["factor"], len(infos),
         periods_per_octave=periods_per_octave,
         lowest_frequency=lowest_frequency,
     )
-    policy = str(owner or "deepest").strip().lower()
-    if policy not in ("deepest", "shallowest"):
-        raise ValueError(
-            f"unknown band owner policy '{owner}' (expected 'deepest' or "
-            "'shallowest')")
     owned: dict[int, list[tuple[float, float]]] = {}
     for hi, lo in pairwise(edges):  # high → low
         contained = [idx for idx, inf in enumerate(infos)
@@ -1163,7 +1090,7 @@ def _emtf_band_table(levels, periods_per_octave=4, owner="deepest"):
                      and lo >= inf["f_floor"] * (1 - 1e-9)]
         if not contained:
             continue  # outside every level's reliable range
-        idx = contained[-1] if policy == "deepest" else contained[0]
+        idx = contained[0]  # shallowest owner = classic EMTF assignment
         owned.setdefault(geom["levels"][idx], []).append((hi, lo))
     return owned
 
@@ -1198,16 +1125,15 @@ def _bands_from_freq_pairs(fc, pairs):
 
 
 def _period_bands_indexed(fc, periods_per_octave=4):
-    """Discrete, EMTF-style period bands (DESIGN.md §14.6) — an alternative
-    to :func:`_period_bands` (which is left untouched as the comparison
-    baseline / fallback).
+    """Discrete, bin-snapped period bands (DESIGN.md §14.6/§14.8) — the
+    per-level fallback of the ``"emtf"`` scheme: used when the
+    container-level table (:func:`_emtf_band_table`) could not be derived
+    (fcs without metadata); each level then walks its own bin grid.
 
-    SINGLE-LEVEL use only (standalone :func:`estimate_tf` calls): each level
-    walks its own bin grid, which gives slightly different band labels per
-    level and interleaved near-duplicates after the multi-level merge. The
-    multi-level path (:func:`estimate_tf_levels` / :func:`coherence_sort_fcs`)
-    therefore derives one GLOBAL boundary grid instead
-    (:func:`_index_band_edges` + :func:`_period_bands_indexed_global`).
+    Note: per-level walks give slightly different band labels per level, so
+    a multi-level merge of these fallback bands can interleave
+    near-duplicates at level overlaps (the historical "zigzag" defect) —
+    only reached in the metadata-less degenerate case.
 
     Classic EMTF (and aurora's own default ``bs_256_26.cfg`` band-setup
     table) defines bands as explicit, non-overlapping ``index_min``/
@@ -1302,35 +1228,24 @@ def _period_bands_indexed(fc, periods_per_octave=4):
     return periods_out, index_ranges
 
 
-def _resolve_period_bands(fc, periods_per_octave=4, band_style="log",
-                          band_edges=None):
-    """Dispatch to the legacy continuous-edge bands (:func:`_period_bands`,
-    unchanged) or the discrete index-snapped bands (:func:`_period_bands_indexed`,
-    DESIGN.md §14.6).
+def _resolve_period_bands(fc, periods_per_octave=4, band_style="emtf"):
+    """Dispatch to the two band-construction schemes (DESIGN.md §14.8):
+    the uniform log2-grid bands (:func:`_period_bands`) or the discrete
+    bin-snapped partition (:func:`_period_bands_indexed` — the per-level
+    fallback used when :func:`_emtf_band_table` could not derive the
+    container-level table, e.g. for fcs without metadata; each level then
+    walks its own bin grid).
 
-    ``band_style="index"`` uses the shared GLOBAL boundary grid when
-    ``band_edges`` is given (multi-level mode — identical band labels across
-    levels so the merge dedups exactly, see :func:`_index_band_edges`);
-    without it, each level walks its own bin-index grid
-    (:func:`_period_bands_indexed`, single-level use).
-
-    Returns ``(periods_out, band_bins)`` — a representation shared by both
-    styles: ``band_bins[b]`` is an ``np.ndarray`` of integer positions into
-    ``fc``'s frequency axis for band ``b`` (may be empty for the ``"log"``
-    style near a level's long-period end — callers already handle empty
-    bands by skipping them).
+    Returns ``(periods_out, band_bins)`` — ``band_bins[b]`` is an
+    ``np.ndarray`` of integer positions into ``fc``'s frequency axis for
+    band ``b`` (may be empty for the uniform style near a level's
+    long-period end — callers already handle empty bands by skipping them).
     """
-    style = str(band_style or "log").strip().lower()
-    if style == "index":
-        if band_edges is not None:
-            return _period_bands_indexed_global(fc, band_edges)
+    style = _resolve_band_style(band_style)
+    if style == "emtf":
         periods_out, index_ranges = _period_bands_indexed(fc, periods_per_octave)
         band_bins = [np.arange(lo, hi + 1) for lo, hi in index_ranges]
         return periods_out, band_bins
-    if style != "log":
-        raise ValueError(
-            f"unknown band_style '{band_style}' (expected 'log' or 'index')"
-        )
     periods_out, edges = _period_bands(fc, periods_per_octave)
     with np.errstate(divide="ignore"):
         logf = np.log2(fc["frequency"].values)
@@ -1585,8 +1500,7 @@ def estimate_tf_levels(
     periods_per_octave=4,
     ref_levels=None,
     channel_nomenclature=None,
-    band_style="log",
-    band_owner="deepest",
+    band_style="emtf",
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
@@ -1596,32 +1510,24 @@ def estimate_tf_levels(
     "survey_id"/"station_id"/"run_id"/"station_latitude"/...: ...}}``.
     ``ref_levels`` is an optional same-shaped container (or a single fc) used
     as the remote reference per level. ``band_style`` selects the band
-    construction mode (DESIGN.md §14.6/§14.7):
+    construction scheme (DESIGN.md §14.8):
 
-    - ``"log"`` (default): legacy continuous-edge partition.
-    - ``"index"``: discrete partition on a shared GLOBAL frequency grid
-      (:func:`_container_band_edges`) — overlapping bands carry identical
-      period labels across levels, so ``merge_tf_levels`` dedups them
-      exactly (deepest wins). Without the shared grid, per-level bin-grid
-      walks interleave near-duplicate estimates in the merged output (the
-      "zigzag" defect).
-    - ``"emtf"``: disjoint EMTF/aurora-style table (:func:`_emtf_band_table`)
-      — every band assigned to exactly ONE level (``band_owner``: deepest or
-      shallowest), nothing to merge, no redundant estimates.
+    - ``"emtf"`` (default): disjoint EMTF/aurora-style table
+      (:func:`_emtf_band_table`) — every band assigned to exactly ONE level,
+      nothing to merge, no redundant estimates.
+    - ``"uniform"``: uniform log2-grid partition (:func:`_period_bands`) —
+      overlapping levels estimate the same nominal bands and
+      ``merge_tf_levels`` keeps the deepest.
 
-    Band construction happens once for the whole container; if the
-    container's metadata is insufficient (missing attrs, non-uniform level
-    ratios), ``"index"``/``"emtf"`` fall back to the per-level bin walk.
+    For ``"emtf"``, band construction happens once for the whole container;
+    if the container's metadata is insufficient (missing attrs, non-uniform
+    level ratios) the per-level bin walk is used as a fallback.
     """
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
-    band_edges = None
     bands_override = None
-    style = str(band_style or "log").strip().lower()
-    if style == "index":
-        band_edges = _container_band_edges(levels, periods_per_octave)
-    elif style == "emtf":
-        bands_override = _emtf_band_table(levels, periods_per_octave,
-                                          owner=band_owner)
+    style = _resolve_band_style(band_style)
+    if style == "emtf":
+        bands_override = _emtf_band_table(levels, periods_per_octave)
     result = {}
     for level, fc in sorted(levels.items()):
         ref_fc = _level_ref(ref_levels, level)
@@ -1632,7 +1538,6 @@ def estimate_tf_levels(
             periods_per_octave=periods_per_octave,
             ref_fc=ref_fc,
             band_style=band_style,
-            band_edges=band_edges,
             bands_override=None if bands_override is None
             else bands_override.get(level, []),
         )

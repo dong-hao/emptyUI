@@ -1151,6 +1151,13 @@ progress.
 
 ### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"`, delivered 2026-09-09)
 
+> **Consolidated (2026-09-09, §14.8):** of the two ownership policies
+> explored here, the **shallowest** (classic EMTF) assignment won the
+> real-data assessment and is now hard-coded; the ``band_owner`` parameter
+> and the deepest-owner variant were removed. This section is retained as
+> the historical record (the deepest-policy results are reproducible from
+> commit 5a1c038).
+
 **Motivation and philosophy.** The merge-based modes (`"log"` and
 `"index"`, §14.6) deliberately let decimation levels overlap and resolve
 the overlap post-hoc (deepest wins) — smooth boundaries at the cost of
@@ -1262,6 +1269,34 @@ similar. Findings that matter for revisiting this part:
   ``band_owner=deepest`` are retained (committed) for revisit — they share
   the deepest-wins philosophy with ``log``'s merge and may still matter on
   other records. All four remain selectable on both nodes.
+
+### 14.8 Consolidation: two band schemes (`"uniform"` + `"emtf"`, 2026-09-09)
+
+Following the assessment above, the band-configuration surface was
+consolidated to the two schemes the user settled on:
+
+- **`band_style="emtf"`** — the new **default**. The auto-derived disjoint
+  EMTF-style table (§14.7) with the **shallowest** (classic EMTF) ownership
+  hard-coded: head level owns its full usable range, deeper levels their
+  bottom ~2 octaves, single-bin sparse tail; every frequency evaluated
+  exactly once, nothing to merge. Renamed from the four-way exploration
+  (``emtf``+``band_owner=shallowest``).
+- **`band_style="uniform"`** — the uniform log2-grid partition (formerly
+  ``"log"``, §14 "Period banding — final spec"): merge-based across
+  overlapping levels, deepest wins. The legacy value ``"log"`` is accepted
+  as an alias of ``"uniform"`` (identical behavior) so saved workflows keep
+  running; the retired ``"index"`` mode raises a clear error (its
+  machinery is gone — history in §14.6, reproducible from commit
+  e2046df/bd75d14).
+- Removed: the ``index`` mode (per-level bin walk + shared global grid
+  dispatch), the deepest-owner variant, and the ``band_owner`` parameter.
+  The per-level bin walk (``_period_bands_indexed``) survives as the
+  ``"emtf"`` fallback for metadata-less fcs.
+- Rationale: the two retained schemes span the design space that matters —
+  merge-based uniform grid vs disjoint classic-EMTF assignment — while the
+  retired variants duplicated one of the two philosophies (§14.7
+  assessment: ``index`` ≈ ``emtf-deepest`` ≈ ``log`` in ownership, and
+  tail quality is ladder-phase-dominated, not method-dominated).
 - **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
   (§14.5). At long periods the deepest decimation levels have few STFT windows,
   so per-level TF estimates are statistically weak. Instead of estimating a TF
@@ -1612,7 +1647,13 @@ processing* (EMTF); Chave & Thomson (2004), *Bounded influence magnetotelluric
 response function estimation* (BIRRP); aurora (simpeg, Kappler et al.) — `Band`
 metadata + EMTF band setup files; mth5 FC layer.
 
-### 14.6 Discrete, EMTF-style band construction (`band_style` switch, delivered 2026-09-09)
+### 14.6 Discrete, EMTF-style band construction (`band_style` switch, delivered 2026-09-09; mode retired 2026-09-09)
+
+> **Superseded (2026-09-09, §14.8):** the ``band_style="index"`` mode
+> described here was retired after the comparative assessment (its per-level
+> fallback role lives on inside the ``"emtf"`` scheme), and the surviving
+> schemes were renamed: ``"log"`` → ``"uniform"`` (legacy value still
+> accepted as an alias). This section is retained as the historical record.
 
 **Grounding (researched 2026-09-08/09).** Read aurora 0.6.2's actual band
 machinery directly (installed source, not just its docs): `mt_metadata.common.Band`

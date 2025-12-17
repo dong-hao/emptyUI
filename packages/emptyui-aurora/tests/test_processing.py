@@ -367,7 +367,8 @@ def test_multi_level_merge_broadband():
                                num_decimations=3, factor=2, num_samples_window=128,
                                overlap=0.5, window_type="hamming")
     per = estimate_tf_levels(levels, ["hx", "hy"], ["ex", "ey"],
-                             estimator_engine="Robust", periods_per_octave=4)
+                             estimator_engine="Robust", periods_per_octave=4,
+                             band_style="uniform")
     assert list(per) == [0, 1, 2, 3]
 
     per_level_counts = [len(per[lv]["periods"]) for lv in per]

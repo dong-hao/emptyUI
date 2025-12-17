@@ -346,7 +346,12 @@ npm run test:headed         # watch the browser while it runs
     essential to running the process; the cross-run cache stays in-memory
     and clears on restart).
   - Aurora-style band config files (exact centre frequencies + bandwidths)
-    instead of the always-auto-derived period table.
+    instead of the always-auto-derived period table. (2026-09-09: the
+    auto-derived **disjoint EMTF-style table** — `band_style="emtf"`, the
+    new default, DESIGN §14.7 — already reproduces the classic band-setup
+    shape for any configuration; hand-authored preset files remain the
+    optional extra on top of either scheme. See DESIGN §14.6–§14.8 for the
+    four-way exploration and consolidation to `emtf` + `uniform`.)
   - Paradigm B: cross-decimation-level FC pooling (see DESIGN §14.5) — a
     novel extension, not required for the current pipeline.
 
