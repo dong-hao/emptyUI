@@ -1220,6 +1220,48 @@ the `Estimate TF` / `Coherence Sort` nodes:
   within ~half a band width of the classic centers (max nearest-center
   deviation ≈ 11% at ppo 3). Preset band-setup files remain an M4 item on
   top of either mode (§11).
+
+**Comparative assessment on real data (2026-09-09, BGS NO46+NX37 remote
+reference, 48 h common window, ppo 3, window 256 & 512).** All four
+configurations (``log``, ``index``, ``emtf-deepest``, ``emtf-shallowest``)
+recover the same physical structure; the full-curve roughness metrics are
+similar. Findings that matter for revisiting this part:
+
+- **Long-period (>3000 s) smoothness is dominated by ladder PHASE, not by
+  the band-construction method.** At window 256 the ``log`` curve *looked*
+  smoother in the tail than the discrete modes. Two controls falsified it
+  as a method property: (a) shifting either discrete ladder by exactly half
+  a band (γ = 2^(1/(2·ppo))) onto ``log``'s phase made the tail ~2.7×
+  smoother than ``log`` itself, while shifting ``log`` onto the discrete
+  phase made it worse; (b) at window 512 the ranking reshuffled and
+  ``log``'s tail smoothness did not replicate. The tail per-bin ρ
+  oscillates quasi-periodically (~2-bin period — window/taper artifact at
+  the window-starved deepest level, 4 windows at window 256, ~2 at 512),
+  and a ladder aligned with the oscillation averages across it (smooth)
+  while a ladder half a band off samples it (jumpy). Do not rank band
+  methods by tail smoothness.
+- **The genuine, replicable effect is ownership policy**: when deep levels
+  are window-poor, ``emtf-shallowest`` routes overlap bands to
+  window-richer shallower levels and wins the tail clearly (window 512:
+  tail mean |Δlog ρ| 0.11 vs 0.36 for the deepest-wins modes; its error
+  bars at 2–3.5 ks are also the best at window 256). This is the
+  more-windows-vs-more-harmonics compromise, decided by the data.
+- **Boundary nit**: the global index/emtf grids bottom exactly at the
+  window/4 cutoff frequency, and the ``(lo, hi]`` membership convention
+  leaves the exact cutoff bin unassigned (log's last band picks it up as an
+  extra, individually unreliable ~16 ks point with ~94% error).
+- **Open question**: isolated narrowband dips at specific frequencies
+  (~4700/4100/3100/16384 s at window 256) — physical (cultural noise
+  lines?) vs sampling artifacts cannot be settled with this 48 h record
+  (single-bin estimates need more windows); a longer record with
+  dip-frequency tracking across window lengths would decide. If physical,
+  designing evaluation periods away from them is an option.
+- **Provisional verdict**: keep ``log`` (legacy default, continuous
+  grid, merge-based) and ``emtf``+``band_owner=shallowest`` (disjoint,
+  classic-EMTF ownership) as the two schemes; ``index`` and
+  ``band_owner=deepest`` are retained (committed) for revisit — they share
+  the deepest-wins philosophy with ``log``'s merge and may still matter on
+  other records. All four remain selectable on both nodes.
 - **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
   (§14.5). At long periods the deepest decimation levels have few STFT windows,
   so per-level TF estimates are statistically weak. Instead of estimating a TF
