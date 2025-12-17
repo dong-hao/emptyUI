@@ -81,6 +81,39 @@ def test_unknown_type_reported():
     assert any("unknown type" in e for e in exc.value.errors)
 
 
+def test_disabled_plugin_reported_as_disabled(monkeypatch):
+    """A node from a disabled plugin gets an actionable message (§5.1) —
+    distinct from "plugin not installed?"."""
+    from types import SimpleNamespace
+
+    from emptyui import Node
+    from emptyui.registry import Registry, discover_plugins
+
+    class Gone(Node):
+        type = "gone.node"
+        outputs = ()
+
+        def execute(self, ctx):
+            return {}
+
+    def register(reg):
+        reg.add(Gone)
+
+    monkeypatch.setattr(
+        "emptyui.registry.entry_points",
+        lambda group=None: [
+            SimpleNamespace(name="gone", load=lambda: register, dist=None)
+        ],
+    )
+    reg = Registry()
+    discover_plugins(reg, disabled={"gone"})
+    wf = Workflow(nodes=[WorkflowNode(id="n1", type="gone.node")], edges=[])
+    with pytest.raises(ValidationError_) as exc:
+        validate_workflow(wf, reg)
+    assert any("disabled" in e and "gone" in e for e in exc.value.errors)
+    assert not any("plugin not installed" in e for e in exc.value.errors)
+
+
 def test_type_mismatch_reported():
     from emptyui import Node, Output
 

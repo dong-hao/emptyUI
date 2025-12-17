@@ -16,3 +16,7 @@ def register(registry) -> None:
     registry.add(CoherenceSort)
     registry.add(EstimateTF)
     registry.add(MergeTFLevels)
+
+
+# bundled plugin: always on, not toggleable in the Settings dialog (§5.1)
+register.bundled = True

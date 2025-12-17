@@ -69,10 +69,19 @@ def validate_workflow(workflow: Workflow, registry) -> None:
 
         manifest = registry.get(wnode.type)
         if manifest is None:
-            errors.append(
-                f"node '{wnode.id}': unknown type '{wnode.type}' "
-                "(plugin not installed?)"
-            )
+            # actionable message (§5.1): a disabled plugin is different from
+            # a plugin that is simply not installed
+            if registry.status_of(wnode.type) == "disabled":
+                plugin = registry.plugin_name_of(wnode.type) or "unknown"
+                errors.append(
+                    f"node '{wnode.id}': type '{wnode.type}' belongs to plugin "
+                    f"'{plugin}', which is disabled — enable it in Settings"
+                )
+            else:
+                errors.append(
+                    f"node '{wnode.id}': unknown type '{wnode.type}' "
+                    "(plugin not installed?)"
+                )
             continue
 
         known_params = {p.name for p in manifest.params}

@@ -8,6 +8,7 @@ import { useCatalog } from "./stores/catalog";
 import { nodeTypes } from "./graph/MTNode";
 import { NodePalette } from "./panels/NodePalette";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
+import { SettingsDialog } from "./panels/SettingsDialog";
 import {
   deserializeWorkflow,
   serializeWorkflow,
@@ -26,6 +27,7 @@ export default function App() {
   const runStatus = useRun((s) => s.runStatus);
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
   const pollGenerationRef = useRef(0);
@@ -311,6 +313,9 @@ export default function App() {
           hidden
           onChange={(e) => e.target.files?.[0] && handleLoad(e.target.files[0])}
         />
+        <button onClick={() => setShowSettings(true)} title="Enable/disable plugins">
+          ⚙ Settings
+        </button>
         <span className={`run-status ${runStatus}`}>{runStatus}</span>
         {notice && <span className="notice-msg">{notice}</span>}
         {message && <span className="error-msg">{message}</span>}
@@ -360,6 +365,7 @@ export default function App() {
         </div>
         <PropertiesPanel onRunToHere={(nodeId) => startRun([nodeId])} />
       </div>
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

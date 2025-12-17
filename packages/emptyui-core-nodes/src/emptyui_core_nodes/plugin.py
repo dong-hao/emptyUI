@@ -26,3 +26,7 @@ def register(registry) -> None:
     registry.add(PreviewPlotNode)
     registry.add(SavePlotNode)
     registry.add(ViewTableNode)
+
+
+# bundled plugin: always on, not toggleable in the Settings dialog (§5.1)
+register.bundled = True

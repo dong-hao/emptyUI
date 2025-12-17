@@ -246,7 +246,8 @@ Rules:
   the guide's conventions are the MVP distribution path.
 - Embedded/remote deployments (DESIGN.md §17) decide plugin availability at
   the platform level — `EMPTYUI_DISABLED_PLUGINS` sets the baseline there;
-  runtime toggling persists to the settings file (§5.1).
+  runtime toggling is in-memory only for now (settings-file persistence is
+  optional behind `EMPTYUI_SETTINGS_PATH`, §5.1).
 
 ## 12. Publishing checklist
 

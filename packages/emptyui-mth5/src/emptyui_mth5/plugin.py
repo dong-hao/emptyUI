@@ -40,3 +40,7 @@ def register(registry) -> None:
     registry.add(ViewSelection)
     registry.add(ViewTF)
     registry.add(Calibrate)
+
+
+# bundled plugin: always on, not toggleable in the Settings dialog (§5.1)
+register.bundled = True

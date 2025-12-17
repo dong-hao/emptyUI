@@ -7,18 +7,21 @@ Status: v0.2 — design frozen for M0/M1 (2026-08-25).
 Changes after v0.1: aurora-informed port type system, node categories,
 TS→FC→TF stage split, MTH5-backed file storage, backend-decided port colors
 and ComfyUI-style port rendering conventions (§3).
-Implementation status: **M0 complete; M1 complete; M2 complete** — mth5/
-aurora plugins delivered; ComputeFC (TS→FC windowed STFT) and EstimateTF
-(FC→TF cross-power LSQ) implemented and verified end-to-end through the
-executor on real 1 Hz LEMI-424 and BGS long-period data (Load LEMI → Detrend
-→ ComputeFC → EstimateTF → Export EDI / Plot AppRes&Phase / Plot Tipper).
-**M3 partial (2026-09-05/06)** — nomenclature-aware automatic channel
-configuration, remote reference end-to-end (Align Runs), run cancellation,
-artifact download, and the headless Playwright regression suite are
-delivered; caching/partial execution and remote-server docs (design, §17)
-are delivered/drafted; the plugin packaging guide remains (see §11), and
-sub-workflows are deferred to M4 (§12). **M2 is now complete** — the
-plot-standardization task (§15) is delivered.
+Implementation status: **M0 complete; M1 complete; M2 complete; M3
+complete (2026-09-09)** — mth5/aurora plugins delivered; ComputeFC (TS→FC
+windowed STFT) and EstimateTF (FC→TF cross-power LSQ) implemented and
+verified end-to-end through the executor on real 1 Hz LEMI-424 and BGS
+long-period data (Load LEMI → Detrend → ComputeFC → EstimateTF → Export EDI
+/ Plot AppRes&Phase / Plot Tipper). M3 delivered (see §11 for the record):
+nomenclature-aware automatic channel configuration, remote reference
+end-to-end (Align Runs), run cancellation, artifact download, the headless
+Playwright regression suite, robustness batches A & B, content-addressed
+caching + partial execution, disconnect/copy-paste canvas gestures, the
+instrument calibration framework + LEMI support, EMTF-style coherence
+sorting, the plugin packaging guide + example template, plugin
+enable/disable (§5.1) and the remote-server contract (§17.6 items 1–6).
+Sub-workflows are deferred to M4 (§12); every remaining item is M4 and is
+ranked by gain/effort in §11.
 Processing correctness milestones:
 - **Unit normalization**: magnetic channels converted nT→T→H (B→H) and
   electric mV/km→V/m; missing nT→T factor was the root cause of non-physical
@@ -694,7 +697,7 @@ Rules that keep the ecosystem healthy:
 - A future `emptyui plugin publish/index` flow can distribute community
   plugins as ordinary PyPI packages — no custom registry required for MVP.
 
-### 5.1 Plugin enable/disable — design (2026-09-08, not yet implemented)
+### 5.1 Plugin enable/disable — implemented (2026-09-09)
 
 Users switch third-party plugins on/off from the web UI; bundled plugins
 (`core`, `mth5`, `aurora` — marked via `register.bundled = True` in their
@@ -733,10 +736,13 @@ transparency.
 - `EMPTYUI_DISABLED_PLUGINS` (comma-separated entry-point names) sets the
   baseline at startup — the embedded/remote mode knob (§17: the platform
   decides plugin availability).
-- UI toggles persist to a JSON settings file (default: user config dir,
-  overridable via `EMPTYUI_SETTINGS_PATH`); the file tracks UI changes, env
-  wins for the baseline at startup. Unknown names are silently ignored
-  (requirement 4).
+- Runtime UI toggles are **in-memory only** for now (2026-09-09): the
+  disabled set lives in the server process for its lifetime and **no
+  settings file is created** by default. Optional JSON-file persistence is
+  already wired and activates only when a path is configured
+  (`EMPTYUI_SETTINGS_PATH` or `create_app(settings_path=...)`); the default
+  user-config-dir settings file (the dedicated configure/env file) is
+  deferred — see §11. Unknown names are silently ignored (requirement 4).
 - `create_app(disabled_plugins=[...])` mirrors the env for module embedding.
 
 **Robustness**
@@ -1100,10 +1106,11 @@ progress.
   guide + example template
   (  **guide + template delivered 2026-09-08** — `docs/plugin-guide.md`,
   `examples/plugin-template/`, plus open namespaced port types and manifest
-  model declarations; plugin enable/disable switches — **design done**
-  (§5.1: tick-box settings dialog, hot-reload registry, settings-file
-  persistence, third-party plugins only) — are the remaining M3
-  implementation items. Sub-workflows are **deferred to M4** (see §12).
+  model declarations; plugin enable/disable switches — **delivered 2026-09-09**
+  (§5.1: tick-box settings dialog, hot-reload registry, in-memory toggles
+  with optional settings-file persistence, third-party plugins only) — the
+  last M3 implementation item. **M3 is now complete (2026-09-09).**
+  Sub-workflows are **deferred to M4** (see §12).
 - ✅ **Dynamic "select from" options**: delivered (2026-09-05) via the
   **chain-walking inheritance** mechanism of §4 instead of the originally
   sketched `options_from`/`POST /api/options` design: `Compute FC`'s
@@ -1121,33 +1128,41 @@ progress.
 - ✅ **Headless E2E regression suite** (2026-09-05): Playwright Test runner
   in `packages/web/e2e/` with a CI workflow (see §9).
 
-**M4 — Community**
-- Plugin index/publish flow, docs site, more visualization nodes,
-  batch/queue runner.
-- **Sub-workflows (nested DAGs)** — deferred from M3 (2026-09-08, rationale
-  in §12): only revisit if workflows outgrow the lighter alternatives
-  (example-workflow templates, visual grouping) or a batch runner covers
-  multi-station repetition more directly.
-- **Disk-persisted result cache** — deferred from M3 (2026-09-08): the
-  cross-run cache is in-memory only and clears on restart; persistence is
-  not essential to running the process.
-- **Band config files**: load an aurora-style band config (exact centre
-  frequencies + bandwidths) or auto-default when none given, replacing/augmenting
-  the auto-derived Fs/4→window/4 period table (§14 deferred task). A discrete,
-  automatically-derived alternative (the `band_style="index"` switch, §14.6)
-  is delivered as a **comparison mode** alongside the legacy continuous-edge
-  table (`band_style="log"`, unchanged default) — this M4 item remains about
-  optionally loading an exact, hand-authored EMTF band-setup file on top of
-  either mode.
-- **Optional in-band smoothing taper (Parzen/Hann)** — deferred from the
-  §14.6 band-construction research (2026-09-09): weight FC rows within a
-  band by proximity to the band center instead of the current hard-edge,
-  unit-weight cutoff. Neither classic EMTF nor current aurora implement this
-  by default (aurora's own `transfer_function_helpers.py` carries an
-  unresolved TODO for exactly this); it would be a genuine enhancement, not
-  a parity fix, and should bake `√weight` into FC rows before regression —
-  the same mechanism `coherence_sort_fc`'s `_coherence_weight` already uses,
-  so it composes with OLS/RME/RME_RR without touching aurora internals.
+**M3 complete (2026-09-09)** — every §11 M3 deliverable is delivered. The
+remaining work is M4.
+
+**M4 — Community & advanced backlog (2026-09-09, ranked by gain/effort)**
+
+All remaining tasks (previously M3 leftovers, M4 items, and documented
+open questions) are consolidated here, ranked by expected **gain per unit
+effort** (descending). Effort is relative to the existing codebase
+(two-column assessment; "gain" = scientific/operational value).
+
+| # | Task | Gain | Effort | Ratio | Notes |
+|---|------|------|--------|-------|-------|
+| 1 | **Plot Coherency + Plot Phase Tensor nodes** | High | Low | ★★★★★ | Standard MT QC/interpretation products; data already flows through `fc`/coherence diagnostics/`tf` — plot code patterns exist (mth5/plotting.py). Designed, not implemented. |
+| 2 | **Merge Runs: remote multi-row warning** | Medium | Trivial | ★★★★★ | §3 open item (aurora TODO): warn when a local run spans multiple remote runs instead of silently mis-pairing; one `ctx.warn`/log guard + test. |
+| 3 | **Batch/queue runner** | High | Medium | ★★★★ | Multi-station processing is the real repetition pattern (the reason sub-workflows were deferred); headless `POST /api/runs` + a small queue UI/CLI reuses the executor as-is. |
+| 4 | **In-band smoothing taper (Parzen/Hann)** | Medium | Low | ★★★★ | §14.8/M4: `√weight` FC rows by band-center proximity before regression — the `_coherence_weight` mechanism already exists; composes with OLS/RME/RME_RR. Genuine enhancement (neither EMTF nor aurora does this). |
+| 5 | **Disk-persisted result cache** | Medium | Medium | ★★★ | Cache keys/restore logic already exist (§7); FC/STFT recomputation across restarts is the expensive part. Needs a payload serialization strategy for xarray/RunTS. |
+| 6 | **Calibration absolute-gain verification** | Medium | Low | ★★★ | §16.1 open item: process one site independently (mtpy/other) and compare ρ/phase — validation, not a feature; high confidence value for the LEMI FAP path. |
+| 7 | **True EMTF per-frequency coherence sort** | Medium | Medium | ★★★ | §16.2: window-ensemble per-frequency variant (current sort is a broadband heuristic); parity with EMTF conventions for publication workflows. |
+| 8 | **mtpy golden-image plot comparison** | Low-Med | Low | ★★ | §15 open item: test-only dev extra; guards plot regressions (dpi 150/USArray conventions) against future style changes. |
+| 9 | **Hand-authored band-config files** | Low-Med | Medium | ★★ | §11/M4: load exact EMTF band-setup files; the auto-derived `emtf` table already reproduces the classic shape, so this is an optional preset layer. |
+| 10 | **Paradigm B: cross-decimation FC pooling** | High | High | ★★ | §14.5 novel extension: pool raw FCs across levels per band for statistically stronger long-period estimates; research-y, unproven, but the highest scientific upside. |
+| 11 | **FC→TS inverse node** | Low | Low-Med | ★★ | §12 open question: inverse STFT/overlap-add for frequency-domain denoising demos; plugin-tier coercion node. |
+| 12 | **Executor thread-pool concurrency** | Low | Medium | ★★ | §7 future work: `cpu_bound` hints + branch parallelism; MT pipelines are 5–10 mostly-linear nodes, so the practical gain is small. |
+| 13 | **Sub-workflows (nested DAGs)** | Medium | High | ★ | §12: defer unless workflows outgrow copy/paste + templates + the batch runner (the stated revisit trigger: >20-node workflows or un-maintainable repeated blocks). |
+| 14 | **Docs site** | Low-Med | Medium-High | ★ | Plugin guide + deployment guide exist; a hosted site is marketing/onboarding, not functionality. |
+| 15 | **Plugin index/publish flow** | Low | High | ★ | PyPI + the §11 checklist already cover distribution; a marketplace adds discovery, not capability. |
+| 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | ★ | §12 open question; only matters once ML noise-suppression plugins exist. |
+
+Deferred-by-design items with rationale: sub-workflows (§12), disk-persisted
+cache (restart survival only), band-config presets (§14.8 — the auto-derived
+`emtf` table already reproduces the classic EMTF band-setup shape for any
+configuration, so hand-authored preset files are an optional extra, not a
+requirement), and the in-band smoothing taper (§14.8 note — a genuine
+enhancement neither classic EMTF nor current aurora implement).
 
 ### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"`, delivered 2026-09-09)
 
@@ -1313,11 +1328,14 @@ consolidated to the two schemes the user settled on:
 
 ## 12. Open Questions
 
+All open questions are now M4 backlog items, ranked in §11 ("M4 —
+Community & advanced backlog", 2026-09-09):
+
 - FC→TS inverse node: deferred; plugin coercion node when needed
   (e.g. frequency-domain denoising demos).
 - How do ML plugins request GPU availability? (`ctx.resources.gpu_count`?)
 - Sub-workflow semantics (nested DAGs) — **deferred to M4** (2026-09-08):
-  after delivering caching + partial execution (§7), the remaining M3 items,
+  after delivering caching + partial execution (§7), completing the M3 items,
   and a survey of comparable systems (ComfyUI subgraphs, n8n sub-workflows,
   Node-RED subflows, KNIME metanodes), sub-workflows were judged not worth
   their complexity for now: typical MT pipelines are 5–10 mostly-linear
@@ -1953,7 +1971,7 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
 
 ---
 
-## 16. M3 pending tasks — instrument calibration framework & coherence sorting (planned 2026-09-07)
+## 16. M3 tasks — instrument calibration framework & coherence sorting (delivered 2026-09-07)
 
 Two independent follow-ups identified while investigating the BGS
 NO46/NX37 short-period results. They are the **next M3 tasks** (before the
@@ -2196,7 +2214,7 @@ range, so the binding criterion is visible. A coherence-vs-period plot
 
 ---
 
-## 17. Remote deployment — embedded mode (designed 2026-09-08; contract items 1–3 & 6 delivered 2026-09-08)
+## 17. Remote deployment — embedded mode (designed 2026-09-08; contract items 1–6 delivered 2026-09-08)
 
 emptyUI is **not** a standalone multi-user app. The target remote scenario is
 emptyUI's FastAPI backend (+ built web frontend) embedded **as a module**

@@ -26,13 +26,13 @@ read it first; this guide is the operational counterpart.
 | `EMPTYUI_CORS_ORIGINS` | Comma-separated allowed origins. Empty value **disables** the CORS middleware (same-origin serving needs none). | `*` |
 | `EMPTYUI_WORKSPACE_TTL` | Retain completed run workspaces and artifacts for this many seconds before cleanup. `0` or unset disables cleanup. | disabled |
 | `EMPTYUI_MAX_CONCURRENT_RUNS` | Maximum queued/running runs per backend process. `0` or unset is unlimited. Excess submissions receive HTTP 429. | unlimited |
-| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime toggles (plugin enable/disable, §5.1). | user config dir |
+| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime toggles (plugin enable/disable, §5.1). **Unset = in-memory only** — no settings file is created (the user-config default is deferred until the configure/env file lands). | unset (memory-only) |
 | `EMPTYUI_DISABLED_PLUGINS` | Comma-separated plugin entry-point names disabled at startup (the platform-level baseline; unknown names are silently ignored). | none |
 
 All knobs are mirrored as `create_app(...)` keyword arguments
 (`data_root=`, `serve_dist=`, `cors_origins=`, `root_path=`,
-`workspace_ttl_seconds=`, `max_concurrent_runs=`, `disabled_plugins=` — the
-plugin-switch follow-up) so a platform can embed the app as a module without
+`workspace_ttl_seconds=`, `max_concurrent_runs=`, `disabled_plugins=`,
+`settings_path=`) so a platform can embed the app as a module without
 env coupling; explicit non-`None` kwargs win over env.
 
 ## Building the frontend

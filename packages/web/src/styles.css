@@ -337,6 +337,59 @@ button.primary {
   cursor: pointer;
 }
 
+/* ---- settings dialog (plugin enable/disable, DESIGN.md §5.1) ---- */
+
+.settings-dialog {
+  width: 560px;
+}
+
+.settings-dialog .modal-list {
+  padding: 0.5rem 0.75rem;
+}
+
+.plugin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.plugin-table td {
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid #eee;
+}
+
+.plugin-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.plugin-name {
+  font-weight: 600;
+}
+
+.plugin-meta {
+  opacity: 0.6;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.plugin-note {
+  opacity: 0.6;
+  font-size: 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.plugin-table tr.bundled .plugin-name {
+  opacity: 0.85;
+}
+
+.plugin-table tr.bundled input {
+  opacity: 0.5;
+}
+
 /* port rows: dots just inside the node edges, aligned with their labels */
 .mt-node-ports {
   flex: 1;

@@ -219,13 +219,19 @@ class Executor:
                 ),
             )
 
+        # Snapshot the manifests this run needs at start (DESIGN.md §5.1):
+        # a plugin enable/disable toggle mid-run must not yank a node out of
+        # an executing workflow — the run completes under the manifests it
+        # started with (toggling is serialized by the app lock).
+        manifests = {nid: self.registry.get(by_id[nid].type) for nid in order}
+
         # Structural signatures for every node, in topo order so each embeds
         # the already-computed signatures of its inputs (§7). Deliberately
         # independent of execution: unchanged structure ⇒ unchanged key.
         keys: dict[str, str] = {}
         for node_id in order:
             wnode = by_id[node_id]
-            manifest = self.registry.get(wnode.type)
+            manifest = manifests[node_id]
             incoming = [
                 {
                     "port": e.target_port,
@@ -251,7 +257,7 @@ class Executor:
                 return {"status": "cancelled", "outputs": outputs_by_node}
 
             wnode = by_id[node_id]
-            manifest = self.registry.get(wnode.type)
+            manifest = manifests[node_id]
 
             # cache hit: reuse the previous run's outputs and artifacts —
             # unless a recorded artifact file has disappeared, in which case

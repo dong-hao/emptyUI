@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shutil
 import tempfile
 import threading
 import time
-import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -24,6 +24,7 @@ from emptyui.config import Settings
 from emptyui.executor import Executor
 from emptyui.registry import Registry, build_default_registry
 from emptyui.schema import ValidationError_, Workflow, validate_workflow
+from emptyui.settings import SettingsStore
 
 
 class RunRequest(BaseModel):
@@ -93,6 +94,8 @@ def create_app(
     root_path: str | None = None,
     workspace_ttl_seconds: float | None = None,
     max_concurrent_runs: int | None = None,
+    disabled_plugins: tuple[str, ...] | None = None,
+    settings_path: Path | str | None = None,
 ) -> FastAPI:
     """Build the application (DESIGN.md §8, remote-mode knobs §17/§17.2).
 
@@ -101,6 +104,8 @@ def create_app(
     paths (read-only platform data), ``serve_dist`` serves the built web
     frontend same-origin, ``cors_origins`` replaces the dev default (empty
     tuple disables the middleware — same-origin serving needs no CORS).
+    ``disabled_plugins`` sets the plugin baseline (§5.1: env/platform wins)
+    and ``settings_path`` overrides where UI plugin toggles persist.
     """
     if settings is None:
         settings = Settings.from_env()
@@ -118,6 +123,14 @@ def create_app(
         if max_concurrent_runs is not None
         else settings.max_concurrent_runs
     )
+    disabled_plugins = (
+        disabled_plugins if disabled_plugins is not None else settings.disabled_plugins
+    )
+    settings_path = (
+        settings_path if settings_path is not None else settings.settings_path
+    )
+    if isinstance(settings_path, str):
+        settings_path = Path(settings_path)
 
     app = FastAPI(title="emptyui", version="0.2.0", root_path=root_path or "")
     if cors_origins:
@@ -127,7 +140,13 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    registry = registry or build_default_registry()
+    # plugin baseline (§5.1): the env/platform-disabled set wins over the
+    # settings file at startup; UI toggles go through the store below
+    plugin_store = SettingsStore(settings_path)
+    env_plugin_baseline = set(disabled_plugins)
+    registry = registry or build_default_registry(
+        disabled_plugins=plugin_store.effective_disabled(env_plugin_baseline)
+    )
     executor = Executor(registry)
     hub = EventHub()
     runs: dict[str, dict] = {}
@@ -193,6 +212,52 @@ def create_app(
     def nodes() -> dict:
         """Node catalog: manifests + port-type UI metadata."""
         return registry.manifests()
+
+    @app.get("/api/plugins")
+    def list_plugins() -> list[dict]:
+        """Installed plugins with enable state (DESIGN.md §5.1).
+
+        Bundled plugins are always enabled; third-party plugins carry the
+        user-toggleable state. The palette is catalog-driven, so hiding/
+        showing a plugin's nodes is automatic on the frontend side.
+        """
+        with lock:
+            return registry.plugins()
+
+    def _toggle_plugin(name: str, disable: bool) -> dict:
+        """Shared enable/disable handler (§5.1): hot-reload the registry in
+        place (no process respawn), persist the UI toggle, clear the
+        cross-run cache on disable. Serialized by the app lock."""
+        with lock:
+            info = registry.plugin(name)
+            if info is None:
+                raise HTTPException(
+                    status_code=404, detail=f"unknown plugin '{name}'"
+                )
+            if info.bundled:
+                # bundled plugins are always on — the toggle is a no-op
+                return {"name": name, "enabled": True, "plugins": registry.plugins()}
+            plugin_store.set_disabled(name, disable)
+            registry.rebuild(plugin_store.effective_disabled(env_plugin_baseline))
+            if disable:
+                # disabled nodes' cached results are unreachable — drop them
+                node_cache.clear()
+            effective = registry.plugin(name).enabled
+            return {
+                "name": name,
+                "enabled": effective,
+                "plugins": registry.plugins(),
+            }
+
+    @app.post("/api/plugins/{name}/enable")
+    def enable_plugin(name: str) -> dict:
+        """Hot-reload the registry with the plugin active (§5.1)."""
+        return _toggle_plugin(name, disable=False)
+
+    @app.post("/api/plugins/{name}/disable")
+    def disable_plugin(name: str) -> dict:
+        """Hot-reload without the plugin; clear the cross-run cache (§5.1)."""
+        return _toggle_plugin(name, disable=True)
 
     @app.post("/api/runs")
     def start_run(req: RunRequest) -> dict:
@@ -295,14 +360,13 @@ def create_app(
             finally:
                 with lock:
                     info = runs.get(run_id)
-                    if info is None:
-                        return
-                    info["summary"].update(summary)
-                    info["finished_at"] = time.time()
-                    info["worker_done"] = True
-                    if info["active_slot"]:
-                        info["active_slot"] = False
-                        state["active_runs"] -= 1
+                    if info is not None:
+                        info["summary"].update(summary)
+                        info["finished_at"] = time.time()
+                        info["worker_done"] = True
+                        if info["active_slot"]:
+                            info["active_slot"] = False
+                            state["active_runs"] -= 1
 
         threading.Thread(target=worker, daemon=True, name=f"run-{run_id}").start()
         return {"run_id": run_id, "status": "queued"}

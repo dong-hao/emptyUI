@@ -64,6 +64,14 @@ export interface FileListing {
   entries: FileEntry[];
 }
 
+export interface PluginInfo {
+  name: string;
+  version: string;
+  node_count: number;
+  bundled: boolean;
+  enabled: boolean;
+}
+
 /** API base, derived at runtime (DESIGN.md §17.3 single-origin convention):
  *  the API always lives one segment below the document root — so this works
  *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
@@ -110,6 +118,21 @@ export const api = {
     return res.json();
   },
   artifactUrl: (artifactId: string) => `${BASE}/artifacts/${artifactId}`,
+  // plugin enable/disable (DESIGN.md §5.1): returns the updated plugin list
+  plugins: () => getJson<PluginInfo[]>("/plugins"),
+  setPlugin: async (name: string, enabled: boolean): Promise<PluginInfo[]> => {
+    const action = enabled ? "enable" : "disable";
+    const res = await fetch(`${BASE}/plugins/${encodeURIComponent(name)}/${action}`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(
+        body?.detail ?? `POST /plugins/${name}/${action}: ${res.status}`,
+      );
+    }
+    return (await res.json()).plugins as PluginInfo[];
+  },
 };
 
 export function wsUrl(): string {

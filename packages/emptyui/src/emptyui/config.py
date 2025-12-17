@@ -8,8 +8,8 @@ code-configurable.
 
 from __future__ import annotations
 
-import os
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +33,15 @@ class Settings:
     workspace_ttl_seconds: float | None = None
     #: Maximum queued/running runs per process. None or <= 0 means unlimited.
     max_concurrent_runs: int | None = None
+    #: Plugin entry-point names disabled at startup (DESIGN.md §5.1) — the
+    #: platform-level baseline; runtime UI toggles are in-memory only (no
+    #: settings file is created by default) and the environment wins for
+    #: the baseline. Unknown names are ignored.
+    disabled_plugins: tuple[str, ...] = ()
+    #: JSON settings file path (UI plugin toggles persist here, §5.1).
+    #: None = memory-only for now — no file is created unless configured
+    #: (config-file persistence is deferred to the configure/env file work).
+    settings_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -60,6 +69,15 @@ class Settings:
             max_concurrent_runs = int(raw_max_runs) if raw_max_runs else None
         except ValueError as exc:
             raise ValueError("EMPTYUI_MAX_CONCURRENT_RUNS must be an integer") from exc
+
+        raw_disabled = os.environ.get("EMPTYUI_DISABLED_PLUGINS", "").strip()
+        disabled_plugins = (
+            tuple(p.strip() for p in raw_disabled.split(",") if p.strip())
+            if raw_disabled
+            else ()
+        )
+        raw_settings = os.environ.get("EMPTYUI_SETTINGS_PATH", "").strip()
+        settings_path = Path(raw_settings).expanduser() if raw_settings else None
         return cls(
             data_root=Path(data_root).expanduser() if data_root else None,
             serve_dist=serve_dist or None,
@@ -67,4 +85,6 @@ class Settings:
             root_path=None,
             workspace_ttl_seconds=workspace_ttl_seconds,
             max_concurrent_runs=max_concurrent_runs,
+            disabled_plugins=disabled_plugins,
+            settings_path=settings_path,
         )

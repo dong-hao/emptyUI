@@ -113,6 +113,8 @@ npm run test:headed         # watch the browser while it runs
     `calibration` filter via frequency-domain response removal.
   M2 is now complete — all §11 M2 deliverables delivered (see also the
   plot standardization item below).
+- **M3 — complete (2026-09-09)**: every §11 M3 deliverable is delivered;
+  remaining work is M4 (see the ranked backlog below). Highlights:
 - **M2 — Phase 4 polish** (delivered 2026-09-05):
   - **Channel nomenclature**: `Compute FC` (and `Split Channels`, `Load
     LEMI-424`) expose an mt_metadata `channel_nomenclature` select
@@ -231,10 +233,11 @@ npm run test:headed         # watch the browser while it runs
     filters delegates to `RunTS.calibrate` (proper detrend/zero-mean/
     zero-pad/windowing, no bare-FFT circular-convolution artifacts).
 
-### Remaining work (see DESIGN.md §11/§12/§16)
+### M3 — delivered record & M4 backlog (see DESIGN.md §11/§12/§16)
 
-- **M3 — next tasks (planned, independent)**:
-  - **Robustness batch ("Batch B")** — **delivered (2026-09-07)**:
+**M3 — delivered (2026-09-09, record):**
+
+- **Robustness batch ("Batch B")** — **delivered (2026-09-07)**:
     validation & data-quality guards, no design changes:
     - Fan-in duplicates rejected: multiple edges into one input port are now
       a `validate_workflow` error (previously silently overwritten, last wins).
@@ -320,40 +323,65 @@ npm run test:headed         # watch the browser while it runs
     `aurora.process.coherence_sort` node down-weights/drops low-coherence FC
     windows (and supports remote-reference two-FC mode) before the robust
     regression, with a per-band coherence diagnostic table.
-- **M3 — not yet started**:
-  - Plugin enable/disable switches — **design done** (DESIGN §5.1): tick-box
-    settings dialog (third-party plugins only; bundled `core`/`mth5`/`aurora`
-    always on), palette reveal/hide via catalog refetch, in-process hot
-    reload of the registry ("backend restart" without a process respawn),
-    settings-file persistence + `EMPTYUI_DISABLED_PLUGINS` env baseline,
-    silent ignore when nothing is installed; implementation pending.
-  - Remote-server mode — **contract delivered** (DESIGN §17 + §17.6 items
-    1–3 & 6: data-root confinement with path_kind params, same-origin dist
-    serving + configurable CORS, runtime sub-path API base, config module +
-    `docs/deployment.md`); workspace TTL cleanup and max-concurrent-run
-    limits are implemented and configurable for embedded deployments.
-  - Sub-workflows — **deferred to M4**: comparable systems (ComfyUI
-    subgraphs, n8n sub-workflows, Node-RED subflows, KNIME metanodes) earn
-    their complexity at decluttering/sharing scale that typical 5–10 node MT
-    pipelines don't have; copy/paste + example-workflow templates + an M4
-    batch runner cover the real repetition patterns (DESIGN §12).
-- **M4 — community/advanced**:
-  - Plugin index/publish flow, docs site, batch/queue runner, more
-    visualization nodes (Plot Coherency, Plot Phase Tensor are designed but
-    not implemented).
-  - Sub-workflows (nested DAGs) — deferred from M3; rationale in DESIGN §12.
-  - Disk-persisted result cache (2026-09-08: deferred from M3 — not
-    essential to running the process; the cross-run cache stays in-memory
-    and clears on restart).
-  - Aurora-style band config files (exact centre frequencies + bandwidths)
-    instead of the always-auto-derived period table. (2026-09-09: the
-    auto-derived **disjoint EMTF-style table** — `band_style="emtf"`, the
-    new default, DESIGN §14.7 — already reproduces the classic band-setup
-    shape for any configuration; hand-authored preset files remain the
-    optional extra on top of either scheme. See DESIGN §14.6–§14.8 for the
-    four-way exploration and consolidation to `emtf` + `uniform`.)
-  - Paradigm B: cross-decimation-level FC pooling (see DESIGN §14.5) — a
-    novel extension, not required for the current pipeline.
+  - **Plugin enable/disable switches** — **delivered** (DESIGN §5.1: `GET
+    /api/plugins` + `POST /api/plugins/{name}/enable|disable`, in-place
+    registry hot reload, `EMPTYUI_DISABLED_PLUGINS` env baseline, cross-run
+    cache cleared on disable, executor manifest snapshot so mid-run toggles
+    are safe, actionable "plugin disabled — enable it in Settings"
+    validation errors; ⚙ Settings dialog with tick boxes for third-party
+    plugins, bundled plugins read-only, live palette update via catalog
+    refetch); **runtime toggles are in-memory only** — no settings file is
+    created by default (optional JSON-file persistence is wired behind
+    `EMPTYUI_SETTINGS_PATH`; the user-config settings file is deferred to
+    the configure/env-file work). E2E: `packages/web/e2e/settings.spec.ts`.
+  - **Remote-server mode** — **contract delivered** (DESIGN §17 + §17.6
+    items 1–6: data-root confinement with path_kind params, same-origin dist
+    serving + configurable CORS, runtime sub-path API base, workspace TTL
+    cleanup + artifact GC, max-concurrent-run guard with HTTP 429, config
+    module + `docs/deployment.md`).
+
+**M4 — community/advanced backlog (ranked by gain/effort, 2026-09-09)**
+
+All remaining tasks are consolidated here (M3 leftovers, M4 items and
+documented open questions), ranked by expected **gain per unit effort**
+(descending; full assessment in DESIGN.md §11):
+
+1. **Plot Coherency + Plot Phase Tensor nodes** — high gain, low effort:
+   standard MT QC/interpretation products; data and plot patterns already
+   exist. Designed, not implemented.
+2. **Merge Runs: remote multi-row warning** — medium gain, trivial effort
+   (§3 open item): warn when a local run spans multiple remote runs.
+3. **Batch/queue runner** — high gain, medium effort: multi-station
+   processing is the real repetition pattern (the reason sub-workflows were
+   deferred); reuses the executor as-is.
+4. **In-band smoothing taper (Parzen/Hann)** — medium gain, low effort
+   (§14.8): `√weight` FC rows by band-center proximity — the
+   `_coherence_weight` mechanism already exists; composes with OLS/RME/RME_RR.
+5. **Disk-persisted result cache** — medium gain, medium effort (§7):
+   cache keys/restore exist; avoids FC/STFT recomputation across restarts.
+6. **Calibration absolute-gain verification** — medium gain, low effort
+   (§16.1 open item): process one site independently (mtpy/other) and compare.
+7. **True EMTF per-frequency coherence sort** — medium gain, medium effort
+   (§16.2): window-ensemble per-frequency variant for EMTF parity.
+8. **mtpy golden-image plot comparison** — low-medium gain, low effort
+   (§15 open item): test-only regression guard for plot conventions.
+9. **Hand-authored band-config files** — low-medium gain, medium effort
+   (§14.8): optional EMTF band-setup presets on top of the auto-derived
+   `emtf` table (which already reproduces the classic shape).
+10. **Paradigm B: cross-decimation FC pooling** — high gain, high effort
+    (§14.5): novel, research-y, unproven — the highest scientific upside.
+11. **FC→TS inverse node** — low gain, low-medium effort (§12): inverse
+    STFT/overlap-add for denoising demos.
+12. **Executor thread-pool concurrency** — low gain, medium effort (§7):
+    pipelines are 5–10 mostly-linear nodes.
+13. **Sub-workflows (nested DAGs)** — medium gain, high effort (§12):
+    revisit only if workflows outgrow copy/paste + templates + the batch
+    runner (>20 nodes or un-maintainable repeated blocks).
+14. **Docs site** — low-medium gain, medium-high effort.
+15. **Plugin index/publish flow** — low gain, high effort: PyPI + the
+    plugin-guide checklist already cover distribution.
+16. **ML plugin GPU querying** (`ctx.resources.gpu_count`) — low gain,
+    trivial effort (§12): only matters once ML plugins exist.
 
 ### UI conventions (stable)
 
