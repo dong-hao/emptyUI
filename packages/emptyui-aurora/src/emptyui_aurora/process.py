@@ -116,7 +116,11 @@ class ComputeFC(Node):
               default="auto", options=("auto", "h", "b"),
               description="auto (default) = derived from the channel "
                           "nomenclature / names (bx/by → fluxgate B, hx/hy → "
-                          "coil H); h/b override for legacy workflows"),
+                          "coil H); both are archived in nT and converted to "
+                          "A/m (the fc always carries H — impedance in "
+                          "ohm). An explicit 'h' means the data are already "
+                          "in A/m (legacy/synthetic); 'b' forces the nT→A/m "
+                          "conversion."),
         Param("e_dipole_length_m", "number", label="E dipole length (m)", default=None,
               optional=True,
               description="LEMI stores E as mV potential; divide by dipole length to get V/m"),

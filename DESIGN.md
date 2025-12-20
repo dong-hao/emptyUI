@@ -23,9 +23,10 @@ enable/disable (§5.1) and the remote-server contract (§17.6 items 1–6).
 Sub-workflows are deferred to M4 (§12); every remaining item is M4 and is
 ranked by gain/effort in §11.
 Processing correctness milestones:
-- **Unit normalization**: magnetic channels converted nT→T→H (B→H) and
-  electric mV/km→V/m; missing nT→T factor was the root cause of non-physical
-  apparent resistivity (now ~10–10³ Ω·m).
+- **Unit normalization**: magnetic channels converted nT→A/m (B→H; both
+  fluxgate and coil archives are nT — verified against the USArray EDI,
+  §16.3) and electric mV/km→V/m; missing nT→T factor was the root cause of
+  non-physical apparent resistivity (now ~10–10³ Ω·m).
 - **Impedance phase convention**: verified against aurora on the official
   synthetic halfspace (`test12rr`); all three estimators (OLS/RME/RME_RR) are
   aurora-backed and share aurora's convention (Zxy≈+45°, Zyx≈−135°).
@@ -258,7 +259,8 @@ estimation) and aurora v0.3.x's own ability to persist and reuse FCs:
   electric pair and/or a vertical magnetic channel (e.g. `e1,e2,bz`) to also
   produce the vertical-field geomagnetic transfer function (tipper). The
   magnetic B/H mode is **derived automatically** from the nomenclature /
-  channel names (bx/by → fluxgate B→H; hx/hy → coil H) — the `magnetic_unit`
+  channel names (bx/by → fluxgate B→H; hx/hy → coil H — archived in nT like
+  fluxgate B, so also converted to A/m; §16.3) — the `magnetic_unit`
   select defaults to `auto` and exists only for legacy saved workflows.
   **Channel auto-configuration**: empty input/output channel fields resolve
   from the data and its nomenclature — inputs = the horizontal magnetic pair,
@@ -328,7 +330,7 @@ keeps `e1`/`bx`/... names; the nomenclature keyword is carried as metadata
 
 - **Unit normalization** (B vs H) is derived from the nomenclature/channel
   names, not a manual switch: `bx/by/bz` → fluxgate B→H conversion; `hx/hy/hz`
-  → coil H (unchanged).
+  → coil H — archived in nT too, so converted to A/m as well (§16.3).
 - **`Load LEMI-424`** exposes a `channel_nomenclature` select (lemi12/lemi34):
   LEMI instruments can carry four E channels (e1..e4); the keyword selects
   which electric pair is read into the MTH5 (mt_io `e_channels`).
@@ -538,7 +540,8 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
 
   The magnetic B/H mode is **not** a manual choice: it is derived from the
   channel nomenclature / actual channel names (`bx/by` → fluxgate B→H;
-  `hx/hy` → coil H) — the `magnetic_unit` select defaults to `auto` and exists
+  `hx/hy` → coil H, archived in nT like fluxgate B and converted to A/m;
+  §16.3) — the `magnetic_unit` select defaults to `auto` and exists
   only for legacy saved workflows.
 
 - **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
@@ -1886,10 +1889,12 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
    mitigates loss of provenance — the cache structure design is deferred,
    but artifacts/FCs should carry provenance now so the cache can key on
    it later.
-6. **Title & metadata** — USArray-style: `Site: <station id> [ LON = …;
-   LAT = … ]` plus a subtitle/annotation with run id and processing
-   provenance (estimator, remote reference on/off, decimation levels,
-   periods per octave, nomenclature). Built from the TF station metadata of
+6. **Title & metadata** — EMTF/USArray-style, matching the reference figure
+   (`SDG31b_H28coh.png`): `<station id><run id> [ LON = …; LAT = … ]` (run
+   tag appended when the TF carries one; no "Site:" prefix) plus a
+   subtitle/annotation with processing provenance (estimator, remote
+   reference on/off, decimation levels, periods per octave,
+   nomenclature). Built from the TF station metadata of
    item 5 (lat/lon are not available today). Figure metadata (`Software:
    emptyUI`, `Title`, `CreationDate`) via `fig.savefig(metadata=…)`.
 7. **Legend** — component labels (XY/YX, Tzx/Tzy), not raw channel names;
@@ -1921,10 +1926,12 @@ Coherency, Plot Phase Tensor — M4), multi-station overlays, interactive plots.
 - **P2 — TF plot nodes. ✅ delivered.** Shared style module
   (`emptyui-mth5/plotting.py`) + refactored `PlotAppResPhase`/`PlotTipper`:
   error bars (errorbar, capped), off-diagonal phase fold to (0, 90) with
-  ylim 0–90/15° ticks (diagonal signed [-180, 180]), USArray marker/color
-  encoding (○ XY / ✕ YX + distinct linestyles), equal per-decade scale
-  (`equal_decade_layout`), labels/units, USArray title with site + LON/LAT
-  and processing-provenance footer, dpi 150. `PlotTipper` now renders
+  ylim 0–90/20° ticks (EMTF reference; diagonal signed [-180, 180]),
+  USArray marker/color encoding (○ XY / ✕ YX — markers only, no
+  connecting lines, per the `SDG31b_H28coh.png` reference), equal
+  per-decade scale (`equal_decade_layout`), labels/units, EMTF-style title
+  `<station><run> [ LON = …; LAT = … ]` with processing-provenance footer,
+  boxed marker-only legend in the ρ_a panel, dpi 150. `PlotTipper` now renders
   **Re/Im panels with ylim [-1, 1]** (replacing the |T|/phase panels).
 - **P3 — core plot nodes. ✅ delivered.** `PlotTimeSeries`: absolute
   datetime x-axis (ConciseDateFormatter; relative seconds fallback), channel
@@ -2210,6 +2217,158 @@ range, so the binding criterion is visible. A coherence-vs-period plot
   BGS long-period results must remain stable, and existing unit tests
   must still pass (update expectations only where the sorting is
   demonstrably better).
+
+
+### 16.3 USArray verification: SDG31 vs the official EMTF (SPUD) TF (2026-09-10)
+
+**Goal.** Pin the emptyUI MT processing chain (TS → FC → TF) against a
+ground-truth transfer function before relying on it: process a USArray
+station with emptyUI and compare with the official EMTF result for the
+same site. Chose **4P.SDG31** (Stratford Slough, SD; the official
+`USArray.SDG31.2017.edi` is in `examples/data/lims-usarray-test/`) with
+**4P.SDH28** as the remote reference (the official processing used
+`REMOTESITE=SDH28`).
+
+**Data (aurora operate-aurora recipe, `build_mth5.py`).** 1 Hz only
+channels LQE/LQN (100 m dipoles, 40 960 counts/mV/km) + LFE/LFN/LFZ (NIMS,
+100.9048 counts/nT), 2017-10-16→10-26 (SDG31, runs a+b) and
+2017-10-12→10-31 (SDH28). mth5 stores them as standard-named
+ex/ey/hx/hy/hz (x≈north, y≈east — matching the EDI layout) in **raw
+counts**; the archived responses (FDSN `response_level="response"`) turn
+them into mV/km and nT via `Calibrate` (units verified: E std 6–23
+mV/km — natural telluric variation; H std 11–22 nT).
+
+**Processing parameters inferred from the official EDI grid.** The 30
+official frequencies decode exactly to the classic EMTF setup: **factor 4,
+6 decimation levels (0–5), ~3 bands/octave head, coarser tail**; the band
+centers are exact dyadic FFT-bin values and the L1–L3 template is exactly
+**2× the classic `bs_256_26` level-2/3 index template** (k =
+31/24/19/15/12/10 vs 15.4/12.0/9.5/7.5/6/5) — a doubled-index
+(window-512-equivalent) variant of the classic table; the exact window is
+not uniquely decodable from the EDI centers alone, and our **window 128
+grid still reproduces the centers to ≤0.05%** (via 2-bin bands), which is
+why the exact-grid comparison works. For the grid-consistent comparison
+the band table is reconstructed **exactly** from the official band-center
+frequencies (`exact_official_bands` in `verify_sdg31.py` — 6,6,6,6,4,2
+bands per level, edges at the geometric midpoints): the evaluated periods
+then coincide with the official ones (30/30). The §14.9 default `l2u`
+scheme reproduces the official strategy automatically (per-level counts
+6/6/6/6/4/2 at window 256; rotated metrics 0.020/0.071/93% vs the exact
+table's 0.019/0.045/98%) — the official tail is intentionally coarser
+(single-bin bands with few windows); use the exact table for
+apples-to-apples comparisons. Window 256 was tried first and is **wrong**
+for this site: it dilutes the intermittent short-period signal beyond
+recovery. See §14.9 for the delivered **automatic** grid determination
+(the `l2u` scheme: fixed reference template + log-uniform
+window-starvation coarsening + optional head clip).
+
+**Result (verified 2026-09-10, `verify_sdg31.py`).** For the reliable
+band **T ≥ 15 s** (27 matched periods; exact official grid, robust RR):
+- median |Δlog₁₀ρ| = 0.06 (ρ within 15%), p90 = 0.11, 83% within the
+  26% gate; median |Δφ| = 1.6°, p90 = 3.6°, 98% within 10°;
+  coherence sorting (drop, trim) improves pass_rho to 91%.
+- **Coordinate-frame rotation (the xy-down / yx-up offset).** MT
+  acquisition is done in the **geomagnetic framework** (x along magnetic
+  N, y along magnetic E, z down); transfer functions must be **rotated
+  back to true north before inversion** (inversion grids are mostly
+  N-S/E-W oriented). The USArray data are recorded in the geomagnetic
+  frame, and the official EMTF product was **rotated −5.7° to true
+  north** — the EarthScope EMTF page for this station records
+  "Declination: 5.7 degree" and "Angle To GG North: 0.00" (GG =
+  geographic grid north; the product's axes are at grid north, i.e.
+  already geographic). The IGRF model value (4.26°, stored in the mth5
+  archive) is **not** the relevant declination here — both the EDI and
+  the EarthScope product page record 5.7°.
+- Comparing our (un-rotated, geomagnetic-frame) result with the official
+  shows exactly the expected signature: our ρ_xy ≈ 10–20% low, ρ_yx ≈
+  5–15% high from ~100 s on, with a **consistent best-fit frame
+  rotation of −5.85°** (median; std 1.7°, stable across periods; the
+  opposite sign is 1.9× worse; a 90° swap is 100× worse; diagonal
+  ratios ≈ 1 so no gain error). The fitted −5.85° agrees with the
+  documented **−5.7°** rotation (residual 0.15° is banding noise).
+- **To compare with the official, rotate our TF by −5.7°** using the
+  standard MT convention: `Z' = R(angle) · Z · R(angle)ᵀ` with
+  `R(angle) = [[cos α, sin α], [−sin α, cos α]]`, `angle` in degrees,
+  **positive = clockwise from true north** (matches mt_metadata's
+  `rotation_angle = −declination`); magnetic→true-north with positive
+  declination D ⇒ `angle = −D`. After the rotation the residual offset
+  disappears: median |Δlog₁₀ρ| = **0.019** (ρ within ~4.5%), p90 = 0.045,
+  98% within gate; median |Δφ| = 0.69°, p90 = 2.95°, 100% within 10°
+  (`sdg31_plot_remote_ref_vs_official.png` — the RAW comparison: no
+  period matching, each dataset at its own evaluated periods). (2026-09-10
+  correction: a script bug had mislabeled a later variant as this
+  "rotation-corrected" comparison; the numbers above are the genuine
+  exact-grid results.)
+- **New node needed: TF rotation** (`mth5.tf.rotate`, planned — see the
+  M4 note in §11): rotate a transfer function by an arbitrary angle (or
+  to true north using the recorded declination) before comparison/
+  inversion — the verify script currently does this inline
+  (`fit_rotation`/`rotate_tensor`), the node will expose it in the
+  workflow (params: `angle` [deg, positive = clockwise from true north],
+  `use_declination` [use the TF station declination, angle =
+  −declination]; the tipper rotates as a vector `T' = R(angle) · T`;
+  impedance errors rotate with the same matrix).
+- **T < 15 s is noise-limited in the 1 Hz archive**: E/H multiple
+  coherence² drops to 0.001–0.05 (the telluric signal at 7–12 s is
+  intermittent — only ~2% of windows are coherent) and ρ collapses
+  (median |Δlog₁₀ρ| ≈ 1.5 with the 128 s window). A **64-sample window
+  + coherence sorting recovers 9–15 s to within ~40%** (median
+  |Δlog₁₀ρ| = 0.15, trim removes the degenerate bands) — the
+  intermittent signal is diluted by 128 s windows; 7.3 s stays
+  degenerate. The official's own variance is 40× larger there (ZXY.VAR
+  0.32 at 7.3 s vs 0.007 at 11.6 s), and the short-period data (40 Hz
+  channels) are not in the EarthScope FDSN archive — the 1 Hz E noise
+  floor is the physical limit. Verdict: the short-period end is not a
+  processing error; pin the 15 s–18.7 ks band (or the 64 s-window
+  short-period recovery).
+  **Paper confirmation (Kelbert et al. 2026, Rev. Geophys.,
+  10.1029/2024RG000850 — the USMTArray processing paper):** the SS
+  low-amplitude bias below 10–20 s is documented ("SS impedance
+  estimates that can be biased to very low amplitudes… removed by
+  subsequent RR processing, which generally yielded reliable estimates
+  down to ∼7 s") — matching our finding that RR is unbiased where SS is
+  biased low (ρ ratio 7.3 s: 0.042 RR vs 0.000 SS; 15.1 s: 0.686 vs
+  0.006). Their short-period products additionally used **MMT
+  (multi-station MT)** — "sometimes resulted in clean estimates at
+  shorter periods… best short-period MMT response" over automated
+  remote-reference combinations — which explains why the official grid
+  is clean at 7–15 s while our **single** remote (SDH28, itself a 1 Hz
+  NIMS site) cannot be. MMT is **not supported** by aurora 0.6.2
+  (OLS/RME/RME_RR — single remote only) or emptyUI; it is a **long-term
+  M4 nice-to-have** (§11 #18, Egbert 1997 / Smirnov & Egbert 2012) —
+  pin the basic processing chain first.
+
+**Bugs found & fixed by this verification (the point of the exercise).**
+1. **Magnetic nT→A/m conversion was skipped for coil channels**
+   (`magnetic_unit='h'`): mth5 coil archives are in nT (like fluxgate
+   B), but only the fluxgate path (`'b'`) divided by μ0 — so impedance
+   came out in V/m per nT instead of V/m per A/m (Z off by μ0·1e9 ≈
+   1.26e3, ρ off by ~1.6e6). Fixed in `compute_fc(_levels)` /
+   `_normalize_channels` via units-aware conversion
+   (`_magnetic_to_h`): nT units → convert; explicit A/m (or unknown,
+   legacy synthetic) → leave. Regression tests in
+   `test_magnetic_units.py`.
+2. **`Align Runs` dropped channel units**: the aligned RunTS rebuilt
+   ChannelTS pieces without the units metadata, so a downstream
+   Compute FC saw unknown units and skipped the conversion (same 1.6e6
+   error, now silently through the RR path). Fixed: `_crop_to_runts`
+   preserves per-channel units; the inter-station coherence guard now
+   checks the horizontal magnetic channels (the vertical field is
+   naturally incoherent between stations — the old check false-alarmed
+   on `hz`).
+
+**Follow-up (M4).** Expose the exact band table as a node-level option
+(`Estimate TF` band-table param, M4 #9) instead of the script-level
+`bands_override`; **automatic grid determination delivered 2026-09-10**
+(§14.9 — `Estimate TF` node now exposes `Min windows per band` +
+`Shortest period (s)`: window-count-adaptive bandwidth doubling + head
+clip; the SDG31 comparison shows the adaptive grid reproduces the official
+strategy and, **after the documented −5.7° true-north rotation, is
+statistically equivalent to the exact table** — the rotation is a frame
+property that applies to every geomagnetic-frame estimate, adaptive or
+exact); TF-rotation node (`mth5.tf.rotate`, §11 note); MMT
+multi-station estimator as a long-term item (§11 #18); short-period
+verification needs the 40 Hz data (outside EarthScope FDSN).
 
 
 ---

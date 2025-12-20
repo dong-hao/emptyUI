@@ -44,6 +44,11 @@ def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
     """Resolve the magnetic-unit mode: explicit 'h'/'b' wins; otherwise derive
     it from the nomenclature keyword (mt_metadata CHANNEL_MAPS) or, failing
     that, from the actual channel names (bx/by -> fluxgate B, hx/hy -> coil H).
+
+    Note the mode only drives the nT->A/m conversion via
+    :func:`_magnetic_to_h`: 'b' always converts (fluxgate B is nT), while
+    'h' converts unless the payload units already say A/m (coil archives are
+    nT too — see DESIGN §16.4 USArray verification).
     """
     mu = str(magnetic_unit or "auto").strip().lower()
     if mu in ("h", "b"):
@@ -228,8 +233,11 @@ def compute_fc(
 
     ``magnetic_unit``: "auto" (default) derives the mode from the channel
     nomenclature / actual channel names — "b" (fluxgate gives absolute B,
-    converted B->H by dividing by μ0) or "h" (coil sensors already give H).
-    An explicit "h"/"b" always wins (legacy workflows keep working).
+    converted B->H by dividing by μ0) or "h" (coil sensors — mth5 archives
+    coil data in nT too, so they are converted to A/m as well; only data
+    whose units explicitly say A/m, or unit-less synthetic payloads, are
+    left untouched). An explicit "h"/"b" always wins (legacy workflows keep
+    working — "h" there means "already A/m").
     ``channel_nomenclature``: mt_metadata CHANNEL_MAPS keyword (e.g. "lemi12")
     used to interpret channel names; when None/auto it is inferred and recorded
     on the fc so EstimateTF can map back to standard TF coordinates.
@@ -257,6 +265,7 @@ def compute_fc(
     channels, sample_rate, start_s, src_start = to_channels(value)
     if start_datetime is None:
         start_datetime = src_start
+    units = _channel_units(value)
     nperseg = max(8, int(window_length_s * sample_rate))
     noverlap = int(nperseg * overlap)
     win = _window(window_type)
@@ -275,14 +284,9 @@ def compute_fc(
             )
         x = channels[comp]
         if comp in input_channels:
-            if b_to_h:
-                # LEMI fluxgate B is in nT; H [A/m] = B[T]/mu0 = B[nT]*1e-9/mu0
-                x = x * 1e-9 / MU0
-            # else: coil sensor already gives H [A/m], unchanged
+            x = _magnetic_to_h(x, comp, b_to_h, units)
         elif is_magnetic_name(comp):  # vertical magnetic output (bz/hz) — tipper
-            # same units as the magnetic inputs, so Bz/H is dimensionless
-            if b_to_h:
-                x = x * 1e-9 / MU0
+            x = _magnetic_to_h(x, comp, b_to_h, units)  # same units as inputs
         elif is_electric_name(comp):  # electric output channel
             if e_scale is not None:
                 # raw potential (mV) -> V/m via dipole length
@@ -358,6 +362,7 @@ def compute_fc_levels(
     channels, sample_rate, start_s, start_dt = to_channels(value)
     if start_datetime is None:
         start_datetime = start_dt
+    units = _channel_units(value)
     input_channels, output_channels, keyword = _resolve_io_channels(
         list(channels), channel_nomenclature, input_channels, output_channels
     )
@@ -372,7 +377,8 @@ def compute_fc_levels(
         # normalize the raw data only once (level 0); deeper levels re-use the
         # already-normalized series passed down from the previous level.
         norm = (
-            _normalize_channels(cur, input_channels, output_channels, b_to_h, e_scale)
+            _normalize_channels(cur, input_channels, output_channels, b_to_h, e_scale,
+                                units)
             if level == 0
             else cur
         )
@@ -414,17 +420,53 @@ def compute_fc_levels(
     return levels
 
 
-def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_scale):
+def _channel_units(value):
+    """Per-channel unit strings from a ts.run payload (best-effort).
+
+    Returns ``{channel: units}`` for payloads that carry units (mth5 RunTS
+    xarray attrs — real archives say ``nanoTesla`` / ``milliVolt per
+    kilometer``; synthetic/core payloads usually carry none, so ``{}``).
+    """
+    if hasattr(value, "dataset"):
+        ds = value.dataset
+        out: dict[str, str] = {}
+        for name in ds.data_vars:
+            u = ds[name].attrs.get("units")
+            if u:
+                out[str(name)] = str(u)
+        return out
+    return {}
+
+
+def _magnetic_to_h(x, comp, b_to_h, units):
+    """Convert a magnetic channel from nT to A/m (B -> H, /mu0).
+
+    The fc must carry H in A/m for the impedance to be in ohm (V/m per A/m);
+    nT data must therefore be divided by mu0. ``b_to_h`` (fluxgate B, mode
+    'b') always converts; mode 'h' (coil) is archived in nT by mth5 as well,
+    so it converts too — unless the payload explicitly says the data are
+    already in A/m (or carries no unit info at all, e.g. synthetic tests,
+    which pass mode 'h' for unit-neutral A/m data).
+    """
+    if b_to_h:
+        return x * 1e-9 / MU0
+    u = str((units or {}).get(comp, "")).lower()
+    if u and ("nano" in u or u in ("nt", "nanotesla")):
+        return x * 1e-9 / MU0
+    return x
+
+
+def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_scale,
+                        units=None):
     """Apply instrument unit normalization (B->H, mV->V/m) to a channel dict."""
     out = {}
     for comp, x in channels.items():
         x = np.asarray(x, dtype=float)
-        if comp in input_channels and b_to_h:
-            x = x * 1e-9 / MU0  # fluxgate B [nT] -> H [A/m]
+        if comp in input_channels:
+            x = _magnetic_to_h(x, comp, b_to_h, units)
         elif comp in output_channels:
             if is_magnetic_name(comp):  # vertical magnetic output (tipper)
-                if b_to_h:
-                    x = x * 1e-9 / MU0  # Bz -> Hz, same units as inputs
+                x = _magnetic_to_h(x, comp, b_to_h, units)  # Bz -> Hz, same as inputs
             elif is_electric_name(comp):
                 if e_scale is not None:
                     x = x * e_scale  # raw potential (mV) -> V/m

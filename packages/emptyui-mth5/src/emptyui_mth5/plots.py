@@ -32,13 +32,34 @@ class PlotAppResPhase(Node):
         Param("mode", "radio", label="Components", default="off-diagonal",
               options=("off-diagonal", "diagonal"),
               description="off-diagonal = xy/yx; diagonal = xx/yy"),
+        Param("rho_ylim", "string", label="ρ_a y-limits", default="auto",
+              placeholder="auto or min,max (e.g. 5,40000)",
+              description="Pin the apparent-resistivity y-axis to a fixed "
+                          "range 'min,max' (e.g. '5,40000') to match an "
+                          "external reference figure; 'auto' (default) fits "
+                          "whole decades around the data."),
     )
 
-    def execute(self, ctx, tf, mode: str = "off-diagonal") -> dict[str, Any]:
+    def execute(self, ctx, tf, mode: str = "off-diagonal",
+                rho_ylim: str = "auto") -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
+        limits = None
+        if str(rho_ylim).strip() not in ("", "auto"):
+            try:
+                parts = [float(x) for x in str(rho_ylim).split(",")]
+            except ValueError as exc:
+                raise ValueError(
+                    f"rho_ylim '{rho_ylim}' is not 'auto' or 'min,max'"
+                ) from exc
+            if len(parts) != 2 or parts[0] <= 0 or parts[1] <= parts[0]:
+                raise ValueError(
+                    f"rho_ylim '{rho_ylim}' is not 'auto' or 'min,max' "
+                    "(min > 0, max > min)"
+                )
+            limits = (parts[0], parts[1])
         path = ctx.artifact_path("plot_appres_phase", ".png")
-        plot_impedance_response(tf, mode, path)
+        plot_impedance_response(tf, mode, path, rho_ylim=limits)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 

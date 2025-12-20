@@ -227,6 +227,24 @@ def _run_time_info(data):
     return ch, sr, abs_start, rel
 
 
+def _channel_units_from(source):
+    """Best-effort per-channel unit strings from a ts.run payload.
+
+    mth5 RunTS archives carry units in the dataset variable attrs
+    (``nanoTesla`` / ``milliVolt per kilometer``); core/synthetic payloads
+    usually carry none. Align Runs must preserve them: Compute FC reads the
+    units to decide the nT→A/m conversion (DESIGN §16.4) — dropping them
+    silently returns the impedance to wrong units.
+    """
+    units: dict[str, str] = {}
+    if hasattr(source, "dataset"):
+        for name in source.dataset.data_vars:
+            u = source.dataset[name].attrs.get("units")
+            if u:
+                units[str(name)] = str(u)
+    return units
+
+
 def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso):
     """Rebuild a ts.run payload cropped to [start_idx, start_idx+n_common).
 
@@ -238,6 +256,7 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
     from mt_timeseries import ChannelTS
     from mth5.timeseries import RunTS
 
+    units = _channel_units_from(source)
     pieces = []
     for name, arr in channels.items():
         seg = np.asarray(arr, dtype=float)[start_idx:start_idx + n_common].copy()
@@ -247,6 +266,9 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
         ch = ChannelTS(ctype, data=seg, start=start_iso or None,
                        sample_rate=float(sample_rate))
         ch.component = name
+        u = units.get(str(name))
+        if u:
+            ch.channel_metadata.units = u
         pieces.append(ch)
     kwargs = {}
     for attr in ("run_metadata", "station_metadata", "survey_metadata"):
@@ -355,7 +377,10 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     """
     names1 = {str(c) for c in out1.dataset.data_vars}
     names2 = {str(c) for c in out2.dataset.data_vars}
-    mags = [c for c in names1 if is_magnetic_name(c) and c in names2]
+    # horizontal magnetic channels only — the vertical (hz) field is
+    # naturally weakly coherent between stations (source-field geometry),
+    # so checking it would false-alarm on healthy station pairs.
+    mags = [c for c in ("hx", "hy") if c in names1 and c in names2]
     if not mags:
         return
     from scipy.signal import coherence

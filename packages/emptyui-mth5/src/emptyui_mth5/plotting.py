@@ -32,31 +32,45 @@ DPI = 150
 
 
 def apply_style(fig, axes=()):
-    """Apply the shared publication style to a figure and its axes."""
+    """Apply the shared publication style to a figure and its axes.
+
+    Grids follow the EMTF reference figure: solid major gridlines with
+    dotted minor gridlines (the USArray MT figures show the fine minor
+    grid on the log axes).
+    """
     fig.patch.set_facecolor("white")
     for ax in axes:
         ax.tick_params(labelsize=9, which="both")
-        ax.grid(True, which="both", alpha=0.25, linewidth=0.5)
+        ax.grid(True, which="major", alpha=0.30, linewidth=0.6)
+        ax.grid(True, which="minor", alpha=0.20, linewidth=0.5,
+                linestyle=":")
         for spine in ax.spines.values():
             spine.set_linewidth(0.8)
 
 
 def station_title(tf) -> str:
-    """USArray-style title: ``Site: <id> [ LON = …; LAT = … ]``."""
+    """EMTF/USArray-style title: ``<station><run> [ LON = …; LAT = … ]``
+    (the SDG31b_H28coh.png reference format — station + processing tag,
+    no "Site:" prefix; the run tag is appended when the TF carries one)."""
     try:
         st = tf.station_metadata
     except Exception:  # noqa: BLE001
         return "Site: unknown"
     sid = getattr(st, "id", None) or "unknown"
     try:
+        rid = tf.run_metadata.id
+    except Exception:  # noqa: BLE001
+        rid = None
+    tag = f"{sid}{rid}" if rid not in (None, "", "0") else str(sid)
+    try:
         lat = st.location.latitude
         lon = st.location.longitude
     except Exception:  # noqa: BLE001
-        return f"Site: {sid}"
+        return tag
     if lat not in (None, 0.0) or lon not in (None, 0.0):
-        return (f"Site: {sid} [ LON = {float(lon):.4f}; "
+        return (f"{tag} [ LON = {float(lon):.4f}; "
                 f"LAT = {float(lat):.4f} ]")
-    return f"Site: {sid}"
+    return tag
 
 
 def run_notes(tf) -> str:
@@ -185,8 +199,14 @@ def rho_phase_errors(z, z_std, period, rho):
     return rho_se, phi_se
 
 
-def plot_impedance_response(tf, mode: str, path):
-    """Render the apparent-resistivity / phase figure (2 panels) to ``path``."""
+def plot_impedance_response(tf, mode: str, path, rho_ylim=None):
+    """Render the apparent-resistivity / phase figure (2 panels) to ``path``.
+
+    ``rho_ylim`` optionally pins the apparent-resistivity y-limits
+    (``(min, max)``) instead of the auto whole-decade fit — used to match an
+    external reference figure's axis range exactly (DESIGN §15, the
+    SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m).
+    """
     comps = impedance_panels(tf, mode)
     if not comps:
         raise ValueError("transfer function has no impedance data")
@@ -207,7 +227,10 @@ def plot_impedance_response(tf, mode: str, path):
             phase_all.append(phase[ok])
 
     x_min, x_max = _decade_limits(period)
-    y_min, y_max = _decade_limits(np.concatenate(rho_all))
+    if rho_ylim is not None:
+        y_min, y_max = float(rho_ylim[0]), float(rho_ylim[1])
+    else:
+        y_min, y_max = _decade_limits(np.concatenate(rho_all))
     # Off-diagonal phase spans 0-90° -> half-height panel; diagonal spans
     # the full signed range -> full-height panel (DESIGN.md §15).
     phase_h = 1.3 if mode == "off-diagonal" else 2.6
@@ -227,16 +250,17 @@ def plot_impedance_response(tf, mode: str, path):
         label = label.upper()
         rho_se, phi_se = rho_phase_errors(z, c["z_std"], period, rho)
         rho_se_ok = rho_se[ok] if rho_se is not None else None
+        # markers only, no connecting lines (EMTF reference convention)
         ax_rho.errorbar(period[ok], rho[ok], yerr=rho_se_ok,
                         fmt=MARKERS.get(key, "o"), color=COLORS.get(key, "k"),
-                        linestyle=LINESTYLES.get(key, "-"), label=label,
-                        capsize=2.5, markersize=4, linewidth=1.0, elinewidth=0.8)
+                        label=label, capsize=2.5, markersize=5,
+                        linewidth=1.0, elinewidth=0.8)
         ph = _fold_phase_deg(phase)[ok] if mode == "off-diagonal" else phase[ok]
         phi_se_ok = phi_se[ok] if phi_se is not None else None
         ax_phi.errorbar(period[ok], ph, yerr=phi_se_ok,
                         fmt=MARKERS.get(key, "o"), color=COLORS.get(key, "k"),
-                        linestyle=LINESTYLES.get(key, "-"), label=label,
-                        capsize=2.5, markersize=4, linewidth=1.0, elinewidth=0.8)
+                        label=label, capsize=2.5, markersize=5,
+                        linewidth=1.0, elinewidth=0.8)
 
     apply_style(fig, (ax_rho, ax_phi))
     ax_rho.set_xscale("log")
@@ -247,13 +271,15 @@ def plot_impedance_response(tf, mode: str, path):
     ax_phi.set_xlabel("Period (secs)")
     if mode == "off-diagonal":
         ax_phi.set_ylim(0, 90)
-        ax_phi.set_yticks(np.arange(0, 91, 15))
+        ax_phi.set_yticks(np.arange(0, 91, 20))
     else:
         ax_phi.set_ylim(-180, 180)
         ax_phi.set_yticks(np.arange(-180, 181, 45))
-    for ax in (ax_rho, ax_phi):
-        ax.legend(loc="best", frameon=True, framealpha=0.9, fontsize=8,
-                  borderpad=0.3)
+    # boxed marker-only legend in the ρ_a panel (EMTF reference: no legend
+    # in the phase panel)
+    ax_rho.legend(loc="lower right", frameon=True, framealpha=0.9,
+                  fontsize=8, borderpad=0.3, handlelength=0.0,
+                  handletextpad=0.5)
     fig.suptitle(station_title(tf), fontsize=11, fontweight="bold")
     notes = run_notes(tf)
     if notes:

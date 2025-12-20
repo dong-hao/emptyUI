@@ -124,7 +124,7 @@ def test_appres_phase_diagonal_signed(tmp_path: Path):
     try:
         ax_phi = fig.axes[1]
         assert ax_phi.get_ylim() == (-180, 180)
-        assert fig._suptitle.get_text().startswith("Site: NO46")
+        assert fig._suptitle.get_text().startswith("NO46")
     finally:
         plt.close(fig)
 
@@ -142,6 +142,22 @@ def test_equal_per_decade_scale(tmp_path: Path):
         x_per_decade = (pos.width * fw) / xd
         y_per_decade = (pos.height * fh) / yd
         assert abs(x_per_decade - y_per_decade) / x_per_decade < 0.05
+    finally:
+        plt.close(fig)
+
+
+def test_rho_ylim_pins_axis(tmp_path: Path):
+    """Explicit ρ_a y-limits pin the axis (reference-figure matching,
+    DESIGN §15 / SDG31b_H28coh.png head-to-head)."""
+    tf = _impedance_tf()
+    path = tmp_path / "fig.png"
+    with patch.object(plotting.plt, "close", lambda *a, **k: None):
+        plotting.plot_impedance_response(tf, "off-diagonal", path,
+                                         rho_ylim=(5.0, 40000.0))
+    fig = plt.gcf()
+    try:
+        ax_rho = fig.axes[0]
+        assert ax_rho.get_ylim() == (5.0, 40000.0)
     finally:
         plt.close(fig)
 

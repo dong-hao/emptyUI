@@ -41,3 +41,5 @@ packages/web/blob-report/
 examples/data/lemi-424-test/
 examples/data/lemi_test_data/
 examples/data/bgs-lemi-424/
+# USArray verification MTH5 archives (regenerable via build_mth5.py)
+examples/data/lims-usarray-test/*.h5
