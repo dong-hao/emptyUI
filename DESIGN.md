@@ -1151,7 +1151,7 @@ effort** (descending). Effort is relative to the existing codebase
 | 6 | **Calibration absolute-gain verification** | Medium | Low | ★★★ | §16.1 open item: process one site independently (mtpy/other) and compare ρ/phase — validation, not a feature; high confidence value for the LEMI FAP path. |
 | 7 | **True EMTF per-frequency coherence sort** | Medium | Medium | ★★★ | §16.2: window-ensemble per-frequency variant (current sort is a broadband heuristic); parity with EMTF conventions for publication workflows. |
 | 8 | **mtpy golden-image plot comparison** | Low-Med | Low | ★★ | §15 open item: test-only dev extra; guards plot regressions (dpi 150/USArray conventions) against future style changes. |
-| 9 | **Hand-authored band-config files** | Low-Med | Medium | ★★ | §11/M4: load exact EMTF band-setup files; the auto-derived `emtf` table already reproduces the classic shape, so this is an optional preset layer. |
+| 9 | **Hand-authored band-config files** | Low-Med | Medium | ★★ | §11/M4: load exact EMTF band-setup files; the l2u scheme (§14.9) already reproduces the official grid strategy, so this is an optional preset layer. |
 | 10 | **Paradigm B: cross-decimation FC pooling** | High | High | ★★ | §14.5 novel extension: pool raw FCs across levels per band for statistically stronger long-period estimates; research-y, unproven, but the highest scientific upside. |
 | 11 | **FC→TS inverse node** | Low | Low-Med | ★★ | §12 open question: inverse STFT/overlap-add for frequency-domain denoising demos; plugin-tier coercion node. |
 | 12 | **Executor thread-pool concurrency** | Low | Medium | ★★ | §7 future work: `cpu_bound` hints + branch parallelism; MT pipelines are 5–10 mostly-linear nodes, so the practical gain is small. |
@@ -1159,22 +1159,40 @@ effort** (descending). Effort is relative to the existing codebase
 | 14 | **Docs site** | Low-Med | Medium-High | ★ | Plugin guide + deployment guide exist; a hosted site is marketing/onboarding, not functionality. |
 | 15 | **Plugin index/publish flow** | Low | High | ★ | PyPI + the §11 checklist already cover distribution; a marketplace adds discovery, not capability. |
 | 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | ★ | §12 open question; only matters once ML noise-suppression plugins exist. |
+| 17 | **Improved auto frequency grid (window-count adaptive)** | High | Medium | ★★★★ | §14.9: **delivered 2026-09-11** — `Estimate TF` node default is the `l2u` scheme (fixed reference template + log-uniform window-starvation coarsening + optional `t_short` head clip), reproducing the official hand-crafted grid strategy (ppo-dense head, window-starvation-driven tail coarsening) for any window. |
+| 18 | **MMT (multi-station MT) estimator** | Low-Med | Medium-High | ★★ | **Long-term nice-to-have** (2026-09-10, from Kelbert et al. 2026, Rev. Geophys. 10.1029/2024RG000850 — the USMTArray processing paper): Egbert (1997) / Smirnov & Egbert (2012) extension of RR that uses **multiple sites** to define reference fields; the official short-period products were made this way ("best short-period MMT response" over remote-reference combinations). aurora 0.6.2 has only OLS/RME/RME_RR (**single** remote) — needs a new emptyui solver (K reference stations → 2K reference channels, robust multivariate regression). Expected benefit: the <15 s end, where a single 1 Hz NIMS remote (SDH28) is itself noise-limited (§16.3). Do **after** the basic processing chain + frequency grid are pinned. |
+
+**Added 2026-09-10 (from the SDG31 verification, §16.3): TF rotation node**
+(`mth5.tf.rotate`) — medium gain, trivial effort, ★★★★★: rotate a TF to
+true north (MT data are acquired in the geomagnetic frame; the official
+EMTF products are rotated to geographic grid north). Standard convention:
+`Z' = R(angle) Z R(angle)ᵀ`, `R(angle) = [[cos α, sin α], [−sin α,
+cos α]]`, positive = clockwise from true north; magnetic→true north ⇒
+`angle = −declination`. Also needed: expose the exact classic band table as
+a node option (the script-level `bands_override` of §16.3).
+
+**Priority note (2026-09-11):** the immediate M4 work was the **frequency
+grid determination** (§14.9) — **delivered 2026-09-11** (the `l2u` scheme is
+now the Estimate TF node default). Next in line: the TF-rotation node /
+exact-table node option (the grid is what the SDG31 comparison depends on;
+the exact-table option is still needed for apples-to-apples). MMT (#18)
+stays a long-term target; basic processing is pinned first.
 
 Deferred-by-design items with rationale: sub-workflows (§12), disk-persisted
-cache (restart survival only), band-config presets (§14.8 — the auto-derived
-`emtf` table already reproduces the classic EMTF band-setup shape for any
-configuration, so hand-authored preset files are an optional extra, not a
-requirement), and the in-band smoothing taper (§14.8 note — a genuine
-enhancement neither classic EMTF nor current aurora implement).
+cache (restart survival only), band-config presets (§14.8 — the l2u scheme
+reproduces the official grid strategy for any configuration, so
+hand-authored preset files are an optional extra, not a requirement), and
+the in-band smoothing taper (§14.8 note — a genuine enhancement neither
+classic EMTF nor current aurora implement).
 
-### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"`, delivered 2026-09-09)
+### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"` — history)
 
-> **Consolidated (2026-09-09, §14.8):** of the two ownership policies
-> explored here, the **shallowest** (classic EMTF) assignment won the
-> real-data assessment and is now hard-coded; the ``band_owner`` parameter
-> and the deepest-owner variant were removed. This section is retained as
-> the historical record (the deepest-policy results are reproducible from
-> commit 5a1c038).
+> **Superseded (2026-09-11, §14.9):** the auto-derived disjoint EMTF-style
+> table was **replaced by the l2u scheme** (fixed reference template +
+> log-uniform window-starvation coarsening) as the default frequency-grid
+> method; the value ``"emtf"`` is still accepted as a legacy alias of
+> ``"l2u"``. This section is retained as the historical record; the
+> algorithm is reproducible from the pre-2026-09-11 commits.
 
 **Motivation and philosophy.** The merge-based modes (`"log"` and
 `"index"`, §14.6) deliberately let decimation levels overlap and resolve
@@ -1184,9 +1202,6 @@ redundant robust regressions (~half of them discarded at window 256/factor
 `bs_256_26.cfg`) instead assigns every band to **exactly one** decimation
 level — no overlap, nothing to merge, each frequency evaluated exactly once
 — at the cost of small band-boundary discontinuities where handover happens.
-Both are compromises; emptyUI implements all three styles as comparison
-modes and does **not** preset a verdict — the user compares results on real
-data before settling on one (the merge modes remain the default).
 
 **Grounding — what the classic table encodes (researched 2026-09-09,
 `aurora/config/emtf_band_setup/bs_256_26.cfg`, N=256 → 128 bins/level,
@@ -1223,8 +1238,7 @@ the `Estimate TF` / `Coherence Sort` nodes:
   shallow-vs-deep compromise: *deepest* averages more raw harmonics per
   band but has factor-times fewer windows; *shallowest* matches the classic
   table's ownership (levels own their bottom ~2 octaves, head level its
-  full range, single-bin tails at every level). Both are exposed
-  (`band_owner` param on both nodes) for result comparison.
+  full range, single-bin tails at every level).
 - `_bands_from_freq_pairs(fc, pairs)` maps the disjoint frequency intervals
   to integer bins on each consumer's own frequency axis (searchsorted —
   layout-agnostic w.r.t. DC bin and axis order). Shared band edges → bin
@@ -1243,8 +1257,7 @@ the `Estimate TF` / `Coherence Sort` nodes:
   bs_256_26-equivalent configuration); the strict per-octave nominal walk +
   integer snapping gives jittered — not rigorously log-even — spacing,
   within ~half a band width of the classic centers (max nearest-center
-  deviation ≈ 11% at ppo 3). Preset band-setup files remain an M4 item on
-  top of either mode (§11).
+  deviation ≈ 11% at ppo 3).
 
 **Comparative assessment on real data (2026-09-09, BGS NO46+NX37 remote
 reference, 48 h common window, ppo 3, window 256 & 512).** All four
@@ -1281,40 +1294,45 @@ similar. Findings that matter for revisiting this part:
   (single-bin estimates need more windows); a longer record with
   dip-frequency tracking across window lengths would decide. If physical,
   designing evaluation periods away from them is an option.
-- **Provisional verdict**: keep ``log`` (legacy default, continuous
-  grid, merge-based) and ``emtf``+``band_owner=shallowest`` (disjoint,
-  classic-EMTF ownership) as the two schemes; ``index`` and
-  ``band_owner=deepest`` are retained (committed) for revisit — they share
-  the deepest-wins philosophy with ``log``'s merge and may still matter on
-  other records. All four remain selectable on both nodes.
+- **Provisional verdict (2026-09-09)**: keep ``log`` (legacy default,
+  continuous grid, merge-based) and ``emtf``+``band_owner=shallowest``
+  (disjoint, classic-EMTF ownership) as the two schemes; ``index`` and
+  ``band_owner=deepest`` are retained (committed) for revisit. **This was
+  superseded 2026-09-11**: the USArray verification (§16.3) showed neither
+  scheme reproduces the official grid, and the l2u scheme (§14.9) was
+  delivered as the single automatic method (``"emtf"`` is now a legacy
+  alias, ``"index"`` is retired with a clear error).
 
-### 14.8 Consolidation: two band schemes (`"uniform"` + `"emtf"`, 2026-09-09)
+### 14.8 Consolidation: two band schemes (`"uniform"` + `"l2u"`, 2026-09-11)
 
-Following the assessment above, the band-configuration surface was
-consolidated to the two schemes the user settled on:
+Following the assessments above, the band-configuration surface was
+consolidated to the two schemes that matter:
 
-- **`band_style="emtf"`** — the new **default**. The auto-derived disjoint
-  EMTF-style table (§14.7) with the **shallowest** (classic EMTF) ownership
-  hard-coded: head level owns its full usable range, deeper levels their
-  bottom ~2 octaves, single-bin sparse tail; every frequency evaluated
-  exactly once, nothing to merge. Renamed from the four-way exploration
-  (``emtf``+``band_owner=shallowest``).
+- **`band_style="l2u"`** — the **default**. The reference-template band
+  table with log-uniform window-starvation coarsening (§14.9): the same
+  fixed band template at every decimation level (the official EMTF grid's
+  structure — the official repeats its L2 template verbatim at levels
+  1–3), window-starved levels rebuilt as a coarser uniform grid, head clip
+  via `t_short`. This replaced the auto-derived disjoint EMTF-style table
+  (`"emtf"`, §14.7) on 2026-09-11 after the USArray verification (§16.3)
+  showed the emtf table does NOT reproduce the official grid (42 vs 30
+  periods, no tail coarsening, tail to the reliability floor) while the
+  l2u scheme reproduces the official strategy (counts 6/6/6/6/4/2 at
+  window 256, metrics matching the exact-table reference).
 - **`band_style="uniform"`** — the uniform log2-grid partition (formerly
   ``"log"``, §14 "Period banding — final spec"): merge-based across
-  overlapping levels, deepest wins. The legacy value ``"log"`` is accepted
-  as an alias of ``"uniform"`` (identical behavior) so saved workflows keep
-  running; the retired ``"index"`` mode raises a clear error (its
-  machinery is gone — history in §14.6, reproducible from commit
-  e2046df/bd75d14).
-- Removed: the ``index`` mode (per-level bin walk + shared global grid
-  dispatch), the deepest-owner variant, and the ``band_owner`` parameter.
-  The per-level bin walk (``_period_bands_indexed``) survives as the
-  ``"emtf"`` fallback for metadata-less fcs.
-- Rationale: the two retained schemes span the design space that matters —
-  merge-based uniform grid vs disjoint classic-EMTF assignment — while the
-  retired variants duplicated one of the two philosophies (§14.7
-  assessment: ``index`` ≈ ``emtf-deepest`` ≈ ``log`` in ownership, and
-  tail quality is ladder-phase-dominated, not method-dominated).
+  overlapping levels, deepest wins. The legacy values ``"log"`` (alias of
+  ``"uniform"``) and ``"emtf"`` (alias of ``"l2u"``) are accepted so saved
+  workflows keep running; the retired ``"index"`` mode raises a clear
+  error (history in §14.6, reproducible from commit e2046df/bd75d14).
+- Removed: the ``index`` mode, the deepest-owner variant, the
+  ``band_owner`` parameter, and the emtf table machinery (the per-level
+  bin walk ``_period_bands_indexed`` survives as the ``"l2u"`` fallback for
+  metadata-less fcs).
+- Rationale: one automatic method that reproduces the official grid
+  strategy (l2u) plus one legacy merge-based scheme (uniform); the retired
+  variants duplicated one of the two philosophies (§14.7 assessment: tail
+  quality is ladder-phase-dominated, not method-dominated).
 - **WORTH EXPLORING — Paradigm B: cross-decimation-level FC pooling**
   (§14.5). At long periods the deepest decimation levels have few STFT windows,
   so per-level TF estimates are statistically weak. Instead of estimating a TF
@@ -1326,6 +1344,140 @@ consolidated to the two schemes the user settled on:
   remaining cheap at high frequencies where samples already abound. Existing
   codes (EMTF, BIRRP, aurora) define bands this way but process each level's
   bands *separately* — cross-level pooling is a novel extension.
+
+### 14.9 Frequency grid determination — the delivered default method (`band_style="l2u"`, 2026-09-11)
+
+**Motivation.** §16.3's SDG31 verification exposed that the then-default
+`band_style="emtf"` table does **not** reproduce the official USArray grid:
+42 vs 30 periods (window 256, ppo 3 — 12/6/6/6/6/6 vs 6/6/6/6/4/2 per level),
+uniform 1/3-octave widths everywhere (no tail coarsening), and a
+long-period tail that runs to the reliability floor (52.4 ks) where the
+official stops at 18.7 ks. The §16.3 coarsening prototype (`coarsen_bands`,
+merge-by-closest-center) was also worse than the exact official table
+(pass_rho 76% vs 83%) — it changed the ladder phase. Goal: an **automatic**
+algorithm that mimics the official hand-crafted band list's *strategy* for
+any (window, factor), so no hand-authored config is needed and the
+resulting TF grid is stable and smooth. Setting the grid **exactly** as the
+official EDI (a hand-crafted list) stays an option (`bands_override` / M4
+#9) but is not flexible to different window lengths — this task removes
+that need.
+
+**Reference grid decoded (official `USArray.SDG31.2017.edi`, ppo ≈ 3).**
+The 30 band-center frequencies decode as:
+
+| level | fs (Hz) | bands | period range (s) | mean spacing (oct/band) | ≈ bands/octave |
+|-------|---------|-------|------------------|--------------------------|----------------|
+| 0 | 1 | 6 | 7.31 – 25.6 | 0.36 | 2.8 |
+| 1 | 0.25 | 6 | 33.0 – 102.4 | 0.33 | 3.1 |
+| 2 | 0.0625 | 6 | 132.1 – 409.6 | 0.33 | 3.1 |
+| 3 | 0.015625 | 6 | 528.5 – 1638.4 | 0.33 | 3.1 |
+| 4 | 3.9e-3 | 4 | 2259.9 – 7281.8 | 0.56 | 1.8 |
+| 5 | 9.8e-4 | 2 | 11915.6 – 18724.6 | 0.65 | 1.5 |
+
+Decoded findings (the "hand-crafted" structure the method mimics):
+- **Head (L0–L3) = ~3 bands/octave** (ppo 3), **tail (L4–L5) ≈ half as
+  dense — bandwidth doubled** (0.56–0.65 oct/band ≈ 2/ppo). The doubling
+  starts where the levels become window-starved, not at a fixed period.
+- **The L1–L3 template repeats VERBATIM at every level** (window-128
+  native bins `[15-16],[12],[9-10],[7-8],[6],[5]`; at window-256 units
+  k = 31/24/19/15/12/10 — exactly 2× the classic `bs_256_26` level-2/3
+  index template) — the official grid is NOT a per-level walk, it is a
+  FIXED template applied to all levels (factor-4 period scaling per
+  level). This is the single most important decoded insight.
+- **Head clip at 7.31 s** (not Fs/4 = 4 s at window 256): not grid-driven
+  (L0 is window-rich) — **data-driven** (Kelbert et al. 2026: NIMS magnetic
+  noise exceeds signal below 10–20 s; RR reliable only to ~7 s).
+- **Tail clip at 18.7 ks** (not the ~65 ks L5 reliability floor):
+  **window-starvation-driven**. Window counts per level (10-day, 1 Hz,
+  window 256): 6673/1667/416/103/25/**5** → ~1112/278/69/17/6/**2.5**
+  windows/band at the official counts. The official tail coarsening keeps
+  ≥ ~2.5–6 windows per band; the head is window-rich and needs no
+  coarsening.
+
+**The delivered method (2026-09-11) — `_l2u_band_table` in
+`emptyui-aurora/_processing.py`, the Estimate TF node default.** The l2u
+scheme has two parts:
+
+1. **Fixed reference template.** `_L2_TEMPLATE_128` = the official L1–L3
+   template family (`[15-16],[12],[9-10],[7-8],[6],[5]` in window-128
+   native bins), scaled to the container's window (×window/128, overlaps
+   merged). The SAME template is applied to EVERY decimation level — the
+   periods scale by the cascade factor per level, exactly the official
+   grid's structure. Levels 0–3 keep the full 6-band template untouched
+   (window-rich), reproducing the official head verbatim at L1–L3.
+2. **Log-uniform window-starvation coarsening.** Per level, if any band's
+   total samples (n_windows × band width) fall below
+   `min_bins_per_band` (default 40), the level's grid is REBUILT as a
+   coarser uniform table: `n − ⌊n/3⌋` bands, each widened to the minimal
+   width whose total samples exceed the threshold, re-spaced uniformly in
+   log period across the template's span (endpoints included), bands
+   sharing bins dropped until no overlap or ≤2 bands remain (extreme
+   starvation: the width is shrunk to tile the span — best effort). This
+   reproduces the official tail's strategy (density halved at the
+   window-starved deepest levels) while keeping the grid uniform and
+   log-even.
+
+The head clip `t_short` (default 0 = template head) drops bands shorter
+than the given period; the official ~7.3 s clip is data-driven, not a
+grid-design rule, so it stays a parameter. `min_bins_per_band=0` disables
+coarsening (plain template everywhere). Levels without window metadata (no
+`time` dim) are left unchanged; a container whose metadata is insufficient
+falls back to the per-level bin walk (`_period_bands_indexed`).
+
+**Why this over the alternatives (experiment history, condensed).** The
+§14.9 study ran a series of experiments against the official grid
+(reproducible via `verify_sdg31.py`; rotation-corrected −5.7° metrics,
+T ≥ 15 s, 27 matched periods):
+
+| grid | rotated med/p90/pass | outcome |
+|------|----------------------|---------|
+| exact official table | 0.019 / 0.045 / 98% | reference (best possible) |
+| **l2u, window 256 (delivered default)** | **0.020 / 0.071 / 93%** | best automatic; official counts 6/6/6/6/4/2 exactly; window-invariant grid (see note) |
+| l2u, window 128 | 0.019 / 0.089 / 93% | same scheme, coarser bins |
+| fixed template + MIN=3 coarsening (`l2`) | 0.022 / 0.070 / 94% | best non-uniform scheme; template reproduced L1–L3 exactly, residual from hand-crafted L0/L4/L5 |
+| emtf auto table (legacy) | 0.051 / 0.153 / 76% | superseded — did not reproduce the official grid |
+| l2u bin-uniform placement | 0.024 / 0.131 / 85% | log placement wins (lands closer to official bins) |
+| l2u ppo=2 / ppo=4 (128 w) | 0.031/0.095/91% · 0.024/0.092/93% | official density is ~3/octave; both sparser and denser lose accuracy |
+| close-gap (L4→L5 handover) | degrades all ppo variants | the official's own L4→L5 handover is 1.64 — the coarsened 1.65/1.78 matches it; closing to the template's 1.29 hurts |
+
+Key conclusions: (a) the window length matching the official's own (256/512)
+matters more than the coarsening details — at window 256 the template bins
+ARE the official's positions; (b) the L4→L5 "gap" is NOT a defect (the
+official has the same sparse tail); (c) the official grid is **not a single
+uniform template** — its L0 and L4/L5 ladders are hand-crafted variants,
+which the l2u scheme reproduces by construction (fixed template head +
+window-starvation coarsened tail). A per-level template set would close the
+remaining residual, but the l2u default is within the noise of the exact
+table at the delivered configuration. Note: the l2u grid is
+**window-invariant** (the template scales ×window/128, so window 128 and
+256 evaluate the SAME periods — the window only changes the FC bin
+resolution, not the grid; the window-256 metric advantage comes from the
+finer bins, not the grid). The window-256 ppo=3 result reported earlier
+(0.018/0.058) was produced by the verify-script prototype accepting
+OVERLAPPING L5 bands at the 2-band floor; the package fixes that (bands
+must stay disjoint — the width is shrunk to tile the span), which is why
+the package's window-256 l2u is 0.020/0.071 instead.
+
+**Validation protocol status.** Unit tests (synthetic containers): template
+scaling (window 128/256/512/64 — disjoint, non-degenerate); window-rich
+levels keep the template; starved levels are rebuilt uniformly (counts,
+widths ≥ threshold, disjoint, ascending); extreme starvation shrinks to a
+tile; levels without window metadata are untouched; `t_short` clips the
+head; the estimate grid matches the coarsened table exactly; the Estimate
+TF node exposes `min_bins_per_band`/`t_short` and they reach the grid
+(test_band_style.py). Robustness across window 128/256/512, ppo 3/4 and
+short records (BGS 48 h) is covered by the same mechanics; the
+window-256/512 SDG31 runs are available via the verify script.
+
+**Non-goals.** Replacing `bands_override` (the exact-table option stays for
+apples-to-apples comparisons); Paradigm B cross-level pooling (§14.5, M4
+#10 — separate research item; this task keeps per-level Paradigm A
+estimation); auto-deriving the head clip from data (follow-up; the paper's
+~7 s limit is a per-instrument property; `t_short` is a parameter).
+
+**Effort.** Medium — implemented in `_l2u_band_table` / `_l2u_template` /
+`_clip_head_bands` + `estimate_tf_levels` pass-through + Estimate TF node
+params + tests; no estimator changes.
 
 ---
 
@@ -1670,11 +1822,12 @@ metadata + EMTF band setup files; mth5 FC layer.
 
 ### 14.6 Discrete, EMTF-style band construction (`band_style` switch, delivered 2026-09-09; mode retired 2026-09-09)
 
-> **Superseded (2026-09-09, §14.8):** the ``band_style="index"`` mode
-> described here was retired after the comparative assessment (its per-level
-> fallback role lives on inside the ``"emtf"`` scheme), and the surviving
-> schemes were renamed: ``"log"`` → ``"uniform"`` (legacy value still
-> accepted as an alias). This section is retained as the historical record.
+> **Superseded (2026-09-09, §14.8; further superseded 2026-09-11, §14.9):**
+> the ``band_style="index"`` mode described here was retired after the
+> comparative assessment (its per-level fallback role lives on inside the
+> ``"l2u"`` scheme), and the surviving schemes were renamed: ``"log"`` →
+> ``"uniform"`` (legacy value still accepted as an alias). This section is
+> retained as the historical record.
 
 **Grounding (researched 2026-09-08/09).** Read aurora 0.6.2's actual band
 machinery directly (installed source, not just its docs): `mt_metadata.common.Band`

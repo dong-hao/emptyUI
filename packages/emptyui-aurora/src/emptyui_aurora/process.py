@@ -261,21 +261,23 @@ class CoherenceSort(Node):
               description="Band geometry — must match the 'Estimate TF' "
                           "setting for the same banding."),
         Param("band_style", "select", label="Band style",
-              options=("emtf", "uniform"), default="emtf",
+              options=("l2u", "uniform"), default="l2u",
               description="Band construction scheme — must match 'Estimate "
-                          "TF' for consistent banding. 'emtf' (default) is "
-                          "the auto-derived disjoint EMTF-style table: every "
-                          "band assigned to exactly one decimation level, "
-                          "each frequency evaluated exactly once. 'uniform' "
-                          "is the uniform log2-grid partition with "
-                          "merge-based level combination (DESIGN.md §14.8)."),
+                          "TF' for consistent banding. 'l2u' (default) is "
+                          "the reference-template table with log-uniform "
+                          "window-starvation coarsening: the same fixed "
+                          "band template at every decimation level, "
+                          "window-starved levels rebuilt as a coarser "
+                          "uniform grid (DESIGN.md §14.9). 'uniform' is "
+                          "the uniform log2-grid partition with "
+                          "merge-based level combination."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 mode: str = "weight", coherence_trim: bool = False,
                 periods_per_octave: int = 4,
-                band_style: str = "emtf") -> dict[str, Any]:
+                band_style: str = "l2u") -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -341,23 +343,44 @@ class EstimateTF(Node):
               default=4, min=1,
               description="Log2 period bands per power-of-2 octave."),
         Param("band_style", "select", label="Band style",
-              options=("emtf", "uniform"), default="emtf",
-              description="Band construction scheme (DESIGN.md §14.8). "
-                          "'emtf' (default) is the auto-derived disjoint "
-                          "EMTF-style table: every band assigned to exactly "
-                          "one decimation level, each frequency evaluated "
-                          "exactly once (sparse single-bin tail, like "
-                          "aurora's bundled band-setup files). 'uniform' is "
-                          "the uniform log2-grid partition: overlapping "
-                          "levels estimate the same nominal bands and the "
-                          "merge keeps the deepest level."),
+              options=("l2u", "uniform"), default="l2u",
+              description="Band construction scheme (DESIGN.md §14.9). "
+                          "'l2u' (default) is the reference-template band "
+                          "table with log-uniform window-starvation "
+                          "coarsening: the same fixed band template at every "
+                          "decimation level (the official EMTF grid's "
+                          "structure), window-starved levels rebuilt as a "
+                          "coarser uniform grid. 'uniform' is the uniform "
+                          "log2-grid partition: overlapping levels estimate "
+                          "the same nominal bands and the merge keeps the "
+                          "deepest level."),
+        Param("min_bins_per_band", "number", label="Min bins per band",
+              default=40.0, min=0,
+              description="Window-starvation coarsening threshold "
+                          "(DESIGN.md §14.9): a level where any band has "
+                          "fewer than this many total samples (windows × "
+                          "band width) is rebuilt as a coarser uniform grid "
+                          "(n−⌊n/3⌋ bands, widened to exceed the threshold, "
+                          "log-uniform spacing, no overlaps) — the official "
+                          "USArray grid's coarse tail. 0 disables "
+                          "coarsening."),
+        Param("t_short", "number", label="Shortest period (s)",
+              default=0.0, min=0,
+              description="Head clip (DESIGN.md §14.9): bands shorter than "
+                          "this are not evaluated. 0 starts at the "
+                          "template's shortest band (the legacy behavior); "
+                          "the official USArray grid clips at ~7.3 s for "
+                          "the 1 Hz NIMS band (data-driven — noise exceeds "
+                          "signal below 10-20 s)."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 estimator_engine: str = "Robust",
                 remote_reference: bool = False,
                 periods_per_octave: int = 4,
-                band_style: str = "emtf") -> dict[str, Any]:
+                band_style: str = "l2u",
+                min_bins_per_band: float = 40.0,
+                t_short: float = 0.0) -> dict[str, Any]:
         # Accept either a single fc (treated as level 0) or a multi-level
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -387,12 +410,15 @@ class EstimateTF(Node):
             ref_levels=ref_fc,
             channel_nomenclature=kw,
             band_style=band_style,
+            min_bins_per_band=min_bins_per_band,
+            t_short=t_short,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
         notes = (
             f"estimator={estimator_engine}; remote_reference={remote_reference}; "
             f"levels={len(levels)}; "
             f"periods_per_octave={periods_per_octave}; band_style={band_style}; "
+            f"min_bins_per_band={min_bins_per_band}; t_short={t_short}; "
             f"nomenclature={kw or 'auto'}"
         )
         tf = build_tf(
