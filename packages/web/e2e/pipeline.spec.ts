@@ -88,7 +88,6 @@ async function ensureHeaderHittable(page: Page, title: string) {
       return block?.querySelector(".mt-node-header")?.textContent ?? null;
     }, title);
     if (!blocked) return;
-    console.log(`HEADER-BLOCK: ${title} covered by "${blocked}"`);
     await dragNodeBy(page, blocked, 160, 40);
   }
 }
@@ -148,15 +147,6 @@ async function ensureHandleHittable(
       [title, port, handlepos] as const,
     );
     if (!blocked) return;
-    console.log(
-      `HIT-BLOCK: ${handlepos} handle ${title}.${port} covered by "${blocked}"`,
-      await page.evaluate(() =>
-        Array.from(document.querySelectorAll(".react-flow__node")).map((n) => ({
-          t: n.querySelector(".mt-node-header")?.textContent,
-          x: n.style.transform,
-        })),
-      ),
-    );
     const zoom = await viewportZoom(page);
     const hb = (await node(page, blocked).locator(".mt-node-header").boundingBox())!;
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
