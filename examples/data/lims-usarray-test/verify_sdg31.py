@@ -71,6 +71,7 @@ from emptyui_aurora._processing import (
     merge_tf_levels,
 )
 from emptyui_mth5.nomenclature import classify_channels
+from emptyui_mth5.tf import rotate_transfer_function
 
 MU0 = 4.0 * np.pi * 1e-7
 DATA_DIR = Path(__file__).resolve().parent
@@ -440,23 +441,30 @@ def raw_overlay_figure(periods, Z, path, title, periods_o, zo,
 
 def render_appres_figure(reg, ctx, label, p, Z, Ze, out_name, note,
                          window=128):
-    """EMTF-convention AppRes & Phase figure via the Plot AppRes & Phase node
+    """    EMTF-convention AppRes & Phase figure via the Plot AppRes & Phase node
     (DESIGN §15: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
     title, ρ_a y-limits pinned to the reference figure's range 5-4e4 Ωm) —
     the head-to-head counterpart of SDG31b_H28coh.png. The TF is rotated to
-    TRUE NORTH (stop-gap for the planned mth5.tf.rotate node: angle = -5.7
-    deg, standard convention, positive = clockwise from true north) — the
-    official product is in the geographic frame ("Angle To GG North: 0.00")
-    while the as-archived data are geomagnetic. Degenerate bands (relative
-    error > 200%) are dropped for the DISPLAY figure only (the metrics keep
-    them) so the figure stays comparable to the reference."""
-    Zc = rotate_tensor(Z, ROTATION_DEG)
-    # errors rotate with the same matrix (|R| bound — the errors are stored
-    # as per-element stds, no covariance; acceptable for the display figure)
-    a = np.radians(ROTATION_DEG)
-    Rabs = np.array([[np.cos(a), np.abs(np.sin(a))],
-                     [np.abs(np.sin(a)), np.cos(a)]])
-    Zec = np.einsum("ij,njk,lk->nil", Rabs, Ze, Rabs)
+    TRUE NORTH with the package rotation (mth5.tf.rotate /
+    rotate_transfer_function: angle = -5.7 deg, standard convention, positive
+    = clockwise from true north) — the official product is in the geographic
+    frame ("Angle To GG North: 0.00") while the as-archived data are
+    geomagnetic. Degenerate bands (relative error > 200%) are dropped for
+    the DISPLAY figure only (the metrics keep them) so the figure stays
+    comparable to the reference."""
+    tf_rot = rotate_transfer_function(
+        build_tf(
+            p, Z, ["hx", "hy"], ["ex", "ey"], channel_nomenclature="default",
+            Z_err=Ze, survey_id="4P", station_id="SDG31", run_id="b",
+            latitude=45.3718, longitude=-98.2931, elevation=394.0,
+        ),
+        ROTATION_DEG,
+    )
+    arr = tf_rot.dataset["transfer_function"]
+    Zc = arr.sel(output=["ex", "ey"], input=["hx", "hy"]).values
+    Zec = tf_rot.dataset["transfer_function_error"].sel(
+        output=["ex", "ey"], input=["hx", "hy"]
+    ).values
     rel_err = np.abs(Zec) / np.maximum(np.abs(Zc), 1e-30)
     keep = np.max(rel_err, axis=(1, 2)) < 2.0
     n_drop = int(np.sum(~keep))
