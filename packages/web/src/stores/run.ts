@@ -22,6 +22,9 @@ interface RunState {
   runStatus: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled";
   nodeStates: Record<string, NodeRunState>;
   artifacts: ArtifactInfo[];
+  /** Events that arrived while runId was still null (between run creation
+   *  and setRunId) — flushed by setRunId, dropped by reset. Capped. */
+  pending: Record<string, unknown>[];
   setRunId: (id: string | null) => void;
   handleEvent: (event: Record<string, unknown>) => void;
   reset: () => void;
@@ -33,10 +36,26 @@ export const useRun = create<RunState>((set) => ({
   runStatus: "idle",
   nodeStates: {},
   artifacts: [],
-  setRunId: (id) =>
-    set({ runId: id, runStatus: id ? "queued" : "idle", nodeStates: {}, artifacts: [] }),
+  pending: [],
+  setRunId: (id) => {
+    set({ runId: id, runStatus: id ? "queued" : "idle", nodeStates: {}, artifacts: [] });
+    // flush events that arrived before the id was known (they were buffered
+    // precisely for this moment); the run_id filter drops foreign ones
+    const buffered = useRun.getState().pending;
+    if (buffered.length) {
+      set({ pending: [] });
+      for (const e of buffered) useRun.getState().handleEvent(e);
+    }
+  },
   handleEvent: (event) => {
-    if (event.run_id !== useRun.getState().runId) return;
+    const st = useRun.getState();
+    if (st.runId === null) {
+      // run id not yet known (the POST /runs response is in flight) — buffer
+      // instead of dropping; an older run's events are discarded at flush
+      set((s) => ({ pending: [...s.pending, event].slice(-200) }));
+      return;
+    }
+    if (event.run_id !== st.runId) return;
     switch (event.event) {
       case "run_started":
         set({ runStatus: "running" });
@@ -90,5 +109,6 @@ export const useRun = create<RunState>((set) => ({
         break;
     }
   },
-  reset: () => set({ runId: null, runStatus: "idle", nodeStates: {}, artifacts: [] }),
+  reset: () =>
+    set({ runId: null, runStatus: "idle", nodeStates: {}, artifacts: [], pending: [] }),
 }));

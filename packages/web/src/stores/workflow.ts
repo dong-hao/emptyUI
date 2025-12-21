@@ -104,6 +104,8 @@ interface WorkflowState {
   edges: Edge[];
   selectedNodeId: string | null;
   clipboard: NodeClipboard | null;
+  /** document name carried through save/load (meta.name, DESIGN.md §6) */
+  docName: string;
   onNodesChange: (changes: NodeChange<Node<MTNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
@@ -123,7 +125,7 @@ interface WorkflowState {
   copySelection: () => void;
   pasteSelection: () => void;
   duplicateSelection: () => void;
-  loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[]) => void;
+  loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[], name?: string) => void;
 }
 
 /** The workflow document is the single source of truth (DESIGN.md §9). */
@@ -132,6 +134,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   clipboard: null,
+  docName: "untitled",
   onNodesChange: (changes) =>
     set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
   onEdgesChange: (changes) =>
@@ -270,16 +273,28 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     get().copySelection();
     get().pasteSelection();
   },
-  loadDocument: (nodes, edges) =>
-    set({ nodes, edges, selectedNodeId: null }),
+  loadDocument: (nodes, edges, name) =>
+    set({
+      nodes,
+      edges,
+      selectedNodeId: null,
+      ...(name ? { docName: name } : {}),
+    }),
 }));
 
 /** Serialize the workflow document (DESIGN.md §6 format). */
-export function serializeWorkflow(nodes: Node<MTNodeData>[], edges: Edge[]) {
+export function serializeWorkflow(
+  nodes: Node<MTNodeData>[],
+  edges: Edge[],
+  name?: string,
+) {
   return {
     format: "emptyui/workflow",
     version: 1,
-    meta: { name: "untitled", created: new Date().toISOString() },
+    meta: {
+      name: name ?? useWorkflow.getState().docName ?? "untitled",
+      created: new Date().toISOString(),
+    },
     nodes: nodes.map((n) => ({
       id: n.id,
       type: n.data.nodeType,
@@ -296,13 +311,29 @@ export function serializeWorkflow(nodes: Node<MTNodeData>[], edges: Edge[]) {
   };
 }
 
-/** Rebuild editor state from a workflow document (inverse of serialize). */
+/** Rebuild editor state from a workflow document (inverse of serialize).
+ *
+ *  Validates the document envelope (format + version, DESIGN.md §6) and
+ *  prunes stale edges — edges referencing missing nodes or ports load
+ *  silently broken otherwise. Throws on foreign/unsupported documents.
+ */
 export function deserializeWorkflow(
   doc: {
+    format?: string;
+    version?: number;
+    meta?: { name?: string };
     nodes: { id: string; type: string; params?: Record<string, unknown>; position?: { x: number; y: number } }[];
     edges: { id: string; source: string; source_port: string; target: string; target_port: string }[];
   },
-): { nodes: Node<MTNodeData>[]; edges: Edge[] } {
+): { nodes: Node<MTNodeData>[]; edges: Edge[]; name: string } {
+  if (doc?.format !== "emptyui/workflow") {
+    throw new Error(
+      "not an emptyUI workflow document (missing format: 'emptyui/workflow')",
+    );
+  }
+  if (doc.version !== 1) {
+    throw new Error(`unsupported workflow version: ${String(doc.version)}`);
+  }
   const { catalog } = useCatalog.getState();
   const nodes: Node<MTNodeData>[] = doc.nodes.map((n) => {
     const manifest = catalog?.nodes.find((m) => m.type === n.type);
@@ -322,21 +353,39 @@ export function deserializeWorkflow(
           : { width: 250, height: "auto" },
     };
   });
-  const edges: Edge[] = doc.edges.map((e) => {
-    // re-derive edge color from the source port type
-    const src = doc.nodes.find((n) => n.id === e.source);
-    const manifest = catalog?.nodes.find((m) => m.type === src?.type);
-    const portType =
-      manifest?.outputs.find((o) => o.name === e.source_port)?.type ?? "any";
-    return {
-      id: e.id,
-      source: e.source,
-      sourceHandle: e.source_port,
-      target: e.target,
-      targetHandle: e.target_port,
-      style: { stroke: portColor(portType), strokeWidth: 2.5 },
-      data: { portType },
-    };
-  });
-  return { nodes, edges };
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const manifestOfType = (type: string) =>
+    catalog?.nodes.find((m) => m.type === type);
+  const edges: Edge[] = doc.edges
+    .filter((e) => {
+      // stale edge: endpoint node missing, or a port the manifest doesn't
+      // declare (renamed/removed in a newer plugin version)
+      const src = nodes.find((n) => n.id === e.source);
+      const tgt = nodes.find((n) => n.id === e.target);
+      if (!src || !tgt) return false;
+      const srcManifest = manifestOfType(src.data.nodeType);
+      const tgtManifest = manifestOfType(tgt.data.nodeType);
+      if (srcManifest && !srcManifest.outputs.some((o) => o.name === e.source_port))
+        return false;
+      if (tgtManifest && !tgtManifest.inputs.some((i) => i.name === e.target_port))
+        return false;
+      return true;
+    })
+    .map((e) => {
+      // re-derive edge color from the source port type
+      const src = nodes.find((n) => n.id === e.source)!;
+      const manifest = manifestOfType(src.data.nodeType);
+      const portType =
+        manifest?.outputs.find((o) => o.name === e.source_port)?.type ?? "any";
+      return {
+        id: e.id,
+        source: e.source,
+        sourceHandle: e.source_port,
+        target: e.target,
+        targetHandle: e.target_port,
+        style: { stroke: portColor(portType), strokeWidth: 2.5 },
+        data: { portType },
+      };
+    });
+  return { nodes, edges, name: doc.meta?.name || "untitled" };
 }

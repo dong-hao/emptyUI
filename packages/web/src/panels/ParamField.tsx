@@ -8,6 +8,10 @@ interface Props {
   onChange: (v: unknown) => void;
   compact?: boolean;
   disabled?: boolean;
+  /** Unique per node-instance id, used to namespace DOM ids (radio group
+   *  names, datalist ids) so sibling instances of the same node type don't
+   *  share form state. */
+  instanceId?: string;
   /** Render as a select with these options (e.g. values inherited from a
    *  connected upstream node). Falls back to the default widget when empty. */
   selectOptions?: unknown[];
@@ -15,17 +19,18 @@ interface Props {
 
 /** One schema-driven widget (widget vocabulary from the manifest).
  *  Used both inline on nodes (ComfyUI-style) and in the properties panel. */
-export function ParamField({ param, value, onChange, compact, disabled, selectOptions }: Props) {
+export function ParamField({ param, value, onChange, compact, disabled, instanceId, selectOptions }: Props) {
   const [browsing, setBrowsing] = useState(false);
   const set = (v: unknown) => onChange(v);
   const str = value === null || value === undefined ? "" : String(value);
+  const domScope = instanceId ?? "global";
 
   let field: JSX.Element;
   if (selectOptions && selectOptions.length > 0) {
     // Editable combobox (datalist): shows the upstream-provided options as
     // suggestions while remaining fully typeable, so an inherited value is a
     // convenience rather than a lock-in.
-    const listId = `dl-${param.name}`;
+    const listId = `dl-${domScope}-${param.name}`;
     const opts = Array.from(
       new Set([
         ...selectOptions.map(String),
@@ -76,7 +81,7 @@ export function ParamField({ param, value, onChange, compact, disabled, selectOp
               <label key={String(o)} className="radio-option">
                 <input
                   type="radio"
-                  name={`radio-${param.name}`}
+                  name={`radio-${domScope}-${param.name}`}
                   value={String(o)}
                   checked={String(o) === str}
                   onChange={(e) => set(e.target.value)}

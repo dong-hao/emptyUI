@@ -111,7 +111,19 @@ export function MTNode({ id, data, selected }: NodeProps) {
       }
     }
     if (Object.keys(updates).length) {
-      state.updateNodeData(id, (prev) => ({ params: { ...prev.params, ...updates } }));
+      // Idempotence guard: skip the write when nothing actually differs from
+      // the current params. Without it, an inherited value equal to the
+      // manifest default would produce updates on every pass and — since
+      // updateNodeData always creates new node objects and this effect
+      // depends on `nodes` — re-trigger itself forever.
+      const effective = Object.fromEntries(
+        Object.entries(updates).filter(([k, v]) => String(cur[k]) !== String(v)),
+      );
+      if (Object.keys(effective).length) {
+        state.updateNodeData(id, (prev) => ({
+          params: { ...prev.params, ...effective },
+        }));
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, catalog, manifest, edges, nodes]);
@@ -159,6 +171,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                 value={d.params[p.name] ?? p.default ?? ""}
                 onChange={(v) => setParam(p.name, v)}
                 compact
+                instanceId={id}
                 disabled={p.name === "remote_reference" && isLeastSquares}
                 selectOptions={sel}
               />

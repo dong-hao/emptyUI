@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
 import type { Connection, Edge } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";import { useQuery } from "@tanstack/react-query";
+import "@xyflow/react/dist/style.css";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
 import { ensureSocket } from "./api/ws";
 import { useCatalog } from "./stores/catalog";
@@ -25,6 +26,7 @@ export default function App() {
   const setCatalog = useCatalog((s) => s.setCatalog);
   const catalog = useCatalog((s) => s.catalog);
   const runStatus = useRun((s) => s.runStatus);
+  const docName = useWorkflow((s) => s.docName);
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -225,6 +227,9 @@ export default function App() {
           event.frac ?? "",
           event.msg ?? "",
           event.error ?? "",
+          // `cached` differentiates a cache-restored done from a fresh one —
+          // without it the chip is missed in polling-only replay
+          event.cached ?? "",
         ]);
       };
       pollRef.current = window.setInterval(async () => {
@@ -268,7 +273,7 @@ export default function App() {
   };
 
   const handleSave = () => {
-    const doc = serializeWorkflow(nodes, edges);
+    const doc = serializeWorkflow(nodes, edges, docName);
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -280,8 +285,8 @@ export default function App() {
   const handleLoad = async (file: File) => {
     try {
       const doc = JSON.parse(await file.text());
-      const { nodes: loaded, edges: loadedEdges } = deserializeWorkflow(doc);
-      useWorkflow.getState().loadDocument(loaded, loadedEdges);
+      const { nodes: loaded, edges: loadedEdges, name } = deserializeWorkflow(doc);
+      useWorkflow.getState().loadDocument(loaded, loadedEdges, name);
       setMessage(null);
     } catch (e) {
       setMessage(`Load failed: ${e instanceof Error ? e.message : String(e)}`);

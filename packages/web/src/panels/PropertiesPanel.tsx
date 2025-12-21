@@ -1,4 +1,5 @@
 import { useCatalog, portColor } from "../stores/catalog";
+import { useRun } from "../stores/run";
 import { useWorkflow } from "../stores/workflow";
 
 /**
@@ -15,6 +16,8 @@ export function PropertiesPanel({
   const catalog = useCatalog((s) => s.catalog);
   const nodes = useWorkflow((s) => s.nodes);
   const selectedNodeId = useWorkflow((s) => s.selectedNodeId);
+  // starting a second run while one is active orphans the first run's UI
+  const runActive = ["queued", "running"].includes(useRun((s) => s.runStatus));
 
   const node = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const manifest = node
@@ -79,6 +82,7 @@ export function PropertiesPanel({
       {onRunToHere && (
         <button
           onClick={() => onRunToHere(node.id)}
+          disabled={runActive}
           title="Run this node and everything upstream; unchanged nodes are reused from cache"
         >
           ▶ Run to here
