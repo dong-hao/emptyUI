@@ -222,8 +222,19 @@ class Executor:
         # Snapshot the manifests this run needs at start (DESIGN.md §5.1):
         # a plugin enable/disable toggle mid-run must not yank a node out of
         # an executing workflow — the run completes under the manifests it
-        # started with (toggling is serialized by the app lock).
+        # started with (rebuild swaps the node table atomically, so this
+        # snapshot is internally consistent even if a toggle overlaps it).
         manifests = {nid: self.registry.get(by_id[nid].type) for nid in order}
+        unknown = sorted(nid for nid, m in manifests.items() if m is None)
+        if unknown:
+            # direct executor.run callers may skip validate_workflow; also
+            # covers a type vanishing between validation and this snapshot
+            missing_types = sorted({by_id[nid].type for nid in unknown})
+            emit({"event": "run_finished", "status": "failed"})
+            raise ExecutionError(
+                unknown[0],
+                ValueError(f"unknown node type(s): {missing_types}"),
+            )
 
         # Structural signatures for every node, in topo order so each embeds
         # the already-computed signatures of its inputs (§7). Deliberately

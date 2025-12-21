@@ -247,3 +247,24 @@ def test_coherence_weight_bounds():
     # ramp only reaches 0 for max + ramp >= 1)
     assert _coherence_weight(0.0, 0.25, 0.98, "weight") == 0.0
     assert 0.0 < _coherence_weight(1.0, 0.25, 0.98, "weight") < 1.0
+
+
+def test_merge_tf_levels_without_z_err_merges_as_zeros():
+    """A hand-built level payload lacking Z_err merges with zero errors
+    instead of crashing on scalar indexing (2026-09-11 review fix)."""
+    from emptyui_aurora._processing import merge_tf_levels
+
+    per = {
+        0: {
+            "periods": np.array([1.0, 10.0]),
+            "Z": np.array([[[1, 0], [0, 1]], [[2, 0], [0, 2]]], dtype=complex),
+        },
+    }
+    P, _Z, Z_err = merge_tf_levels(per)
+    assert P.shape == (2,)
+    assert np.all(Z_err == 0)
+
+    # scalar Z_err broadcasts instead of crashing
+    per[0]["Z_err"] = 0.5
+    _, _, Z_err = merge_tf_levels(per)
+    assert np.all(Z_err == 0.5)

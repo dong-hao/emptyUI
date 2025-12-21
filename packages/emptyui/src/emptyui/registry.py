@@ -118,19 +118,23 @@ class Registry:
         node table with the given set of disabled plugin names.
 
         Module imports are cached by Python, so re-running discovery is
-        cheap; the node table is rebuilt in place so the catalog served to
-        the frontend reflects the toggle immediately. Nodes added directly
-        via :meth:`add` survive a rebuild (they are re-registered unless a
-        plugin claims the same type — plugin nodes win on conflict).
+        cheap; the node table is rebuilt into a scratch registry and
+        swapped in atomically, so readers (e.g. a run starting while a
+        toggle happens) see either the old or the new table — never an
+        empty or partial one. Nodes added directly via :meth:`add`
+        survive a rebuild (they are re-registered unless a plugin claims
+        the same type — plugin nodes win on conflict).
         """
-        self._nodes = {}
-        self._plugins = {}
-        self._plugin_of = {}
-        infos = discover_plugins(self, set(disabled))
+        scratch = Registry()
+        scratch._manual = self._manual
+        infos = discover_plugins(scratch, set(disabled))
         claimed = {t for info in infos for t in info.node_types}
         for node_type, node_cls in self._manual.items():
-            if node_type not in claimed and node_type not in self._nodes:
-                self.add(node_cls)
+            if node_type not in claimed and node_type not in scratch._nodes:
+                scratch.add(node_cls)
+        self._nodes = scratch._nodes
+        self._plugins = scratch._plugins
+        self._plugin_of = scratch._plugin_of
         return infos
 
 
@@ -166,9 +170,17 @@ def discover_plugins(
         register = ep.load()
         bundled = bool(getattr(register, "bundled", False))
         enabled = bundled or (disabled is None or ep.name not in disabled)
-        before = set(registry._nodes)
-        register(registry)
-        node_types = sorted(set(registry._nodes) - before)
+        if enabled:
+            before = set(registry._nodes)
+            register(registry)
+            node_types = sorted(set(registry._nodes) - before)
+        else:
+            # learn the disabled plugin's node types in a scratch registry:
+            # this must not mutate (or crash on type collisions with) the
+            # live table — the nodes are popped below either way
+            scratch = Registry()
+            register(scratch)
+            node_types = sorted(scratch._nodes)
         info = PluginInfo(
             name=ep.name,
             version=_plugin_version(ep),
@@ -180,9 +192,6 @@ def discover_plugins(
         if enabled:
             for t in node_types:
                 registry._plugin_of[t] = ep.name
-        else:
-            for t in node_types:
-                registry._nodes.pop(t, None)
         infos.append(info)
     return infos
 

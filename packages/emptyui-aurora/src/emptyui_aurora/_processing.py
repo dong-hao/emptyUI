@@ -154,13 +154,18 @@ def _resolve_io_channels(available, channel_nomenclature, input_channels,
     return ins, outs, keyword
 
 
-def to_channels(value):
+def to_channels(value, check_finite: bool = True):
     """Normalize a ts.run payload to (channels: dict[str, np.ndarray],
     sample_rate: float, start_s: float, start_dt: pd.Timestamp | None).
 
     Accepts:
       - mth5 RunTS (has .dataset xarray, .sample_rate, .start datetime)
       - core TimeSeries (has .channels dict, .sample_rate, .start float s)
+
+    ``check_finite`` guards every channel against NaN/inf; pass False to
+    defer the guard until the used channel subset is known (callers that
+    resolve in/out channels check only those, so a NaN in an unused
+    auxiliary channel cannot hard-fail the node).
     """
     # mth5 RunTS / mt_timeseries
     if hasattr(value, "dataset") and not isinstance(value, dict):
@@ -169,7 +174,8 @@ def to_channels(value):
         start_s = 0.0
         start_dt = _start_datetime(getattr(value, "start", None))
         channels = {str(k): np.asarray(v.values, dtype=float) for k, v in ds.data_vars.items()}
-        ensure_finite(channels, "Compute FC")
+        if check_finite:
+            ensure_finite(channels, "Compute FC")
         return channels, sample_rate, start_s, start_dt
     # core-nodes TimeSeries
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
@@ -179,7 +185,8 @@ def to_channels(value):
             getattr(value, "start_datetime", None) or getattr(value, "start", None)
         )
         channels = {str(k): np.asarray(v, dtype=float) for k, v in value.channels.items()}
-        ensure_finite(channels, "Compute FC")
+        if check_finite:
+            ensure_finite(channels, "Compute FC")
         return channels, sample_rate, start_s, start_dt
     raise TypeError(f"cannot normalize ts.run value of type {type(value).__name__}")
 
@@ -262,7 +269,7 @@ def compute_fc(
     import xarray as xr
     from scipy.signal import stft
 
-    channels, sample_rate, start_s, src_start = to_channels(value)
+    channels, sample_rate, start_s, src_start = to_channels(value, check_finite=False)
     if start_datetime is None:
         start_datetime = src_start
     units = _channel_units(value)
@@ -271,6 +278,12 @@ def compute_fc(
     win = _window(window_type)
     input_channels, output_channels, keyword = _resolve_io_channels(
         list(channels), channel_nomenclature, input_channels, output_channels
+    )
+    # NaN guard only on the channels that are actually STFT'd — a NaN in an
+    # unused auxiliary channel must not hard-fail the node
+    ensure_finite(
+        {c: channels[c] for c in dict.fromkeys(input_channels + output_channels)},
+        "Compute FC",
     )
     b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
@@ -359,12 +372,18 @@ def compute_fc_levels(
     """
     import xarray as xr
 
-    channels, sample_rate, start_s, start_dt = to_channels(value)
+    channels, sample_rate, start_s, start_dt = to_channels(value, check_finite=False)
     if start_datetime is None:
         start_datetime = start_dt
     units = _channel_units(value)
     input_channels, output_channels, keyword = _resolve_io_channels(
         list(channels), channel_nomenclature, input_channels, output_channels
+    )
+    # NaN guard only on the channels that are actually normalized/STFT'd —
+    # a NaN in an unused auxiliary channel must not hard-fail the node
+    ensure_finite(
+        {c: channels[c] for c in dict.fromkeys(input_channels + output_channels)},
+        "Compute FC",
     )
     b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
@@ -1690,7 +1709,13 @@ def merge_tf_levels(per_level):
             continue  # a level may legitimately contribute nothing (clipped)
         Z = np.asarray(per_level[lv]["Z"])
         err = per_level[lv].get("Z_err")
-        err = np.asarray(err) if err is not None else 0.0
+        if err is None:
+            # a hand-built level payload may carry no errors — treat as zeros
+            err = np.zeros(len(Z))
+        else:
+            err = np.asarray(err, dtype=float)
+            if err.ndim == 0:
+                err = np.full(len(Z), float(err))
         ok = ~np.all(np.abs(Z).reshape(len(Z), -1) == 0, axis=1)
         for p, z, e in zip(P[ok], Z[ok], err[ok]):
             key = round(float(np.log2(p)), 8)  # shared log2 grid -> exact dedup

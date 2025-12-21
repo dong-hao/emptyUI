@@ -271,3 +271,53 @@ def test_executor_snapshot_survives_mid_run_toggle(plugin_app):
         if e["event"] == "node_status"
     }
     assert statuses == {"n1": "done", "n2": "done"}
+
+
+class FakeDup(Node):
+    """Declares the same type as FakeCore — a cross-plugin collision."""
+    type = "fake.core"
+    outputs = ()
+
+    def execute(self, ctx):
+        return {}
+
+
+def test_disabled_plugin_type_collision_does_not_crash_discovery(monkeypatch):
+    """A disabled plugin whose node type collides with an enabled plugin must
+    not crash discovery (previously register() raised duplicate-type before
+    the disabled pop — outcome depended on entry-point order)."""
+    core = _register(FakeCore)
+    core.bundled = True
+    eps = [
+        SimpleNamespace(name="core", load=lambda r=core: r, dist=None),
+        SimpleNamespace(name="third", load=lambda: _register(FakeDup), dist=None),
+    ]
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+
+    registry = build_default_registry(disabled_plugins={"third"})
+    assert registry.get("fake.core").__class__ is FakeCore  # enabled plugin wins
+    assert registry.plugin("third").enabled is False
+    assert "fake.core" in registry.plugin("third").node_types  # learned
+
+    # and re-enabling the colliding plugin surfaces the conflict loudly
+    with pytest.raises(ValueError, match="duplicate node type"):
+        build_default_registry()
+
+
+def test_rebuild_swaps_node_table_atomically(monkeypatch):
+    """rebuild() builds into a scratch registry and swaps: the live table is
+    never observed empty/partial (a run starting mid-toggle sees the old or
+    the new table, not a broken one)."""
+    eps = _fake_eps()
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+
+    registry = build_default_registry()
+
+    # rebuild with third disabled: fake.core must remain continuously visible
+    registry.rebuild({"third"})
+    assert registry.get("fake.core") is not None
+    assert registry.get("fake.slow") is None
+
+    registry.rebuild(set())
+    assert registry.get("fake.core") is not None
+    assert registry.get("fake.slow") is not None

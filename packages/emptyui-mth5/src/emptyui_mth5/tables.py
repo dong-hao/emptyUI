@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 from emptyui import Input, Node, Output
 
+from .plotting import MU0
+
 
 def _as_dataframe(value):
     """Return a pandas DataFrame from a selection payload."""
@@ -64,7 +66,7 @@ class ViewTF(Node):
 
         def _rho_phase(out, inp):
             z = Z.sel(output=out, input=inp).values.astype(complex)
-            rho = (np.abs(z) ** 2) / (1.2566370614359172e-6 * omega)
+            rho = (np.abs(z) ** 2) / (MU0 * omega)
             phase = np.angle(z, deg=True)
             return rho, phase
 

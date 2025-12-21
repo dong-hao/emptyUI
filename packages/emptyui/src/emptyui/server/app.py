@@ -85,6 +85,25 @@ def _artifact_media(kind: str, path: str) -> tuple[str, str]:
     return "application/octet-stream", suffix or ".bin"
 
 
+_TERMINAL = frozenset({"completed", "failed", "cancelled"})
+
+
+def _merge_summary(current: dict, incoming: dict) -> dict:
+    """Merge a worker/executor summary into a run summary.
+
+    Terminal status is **monotonic**: once a summary reports completed /
+    failed / cancelled, a later status (e.g. a cancel that raced a
+    fast-completing run) must not flap it to a different terminal value.
+    Non-status keys (elapsed_s, error, ...) always merge.
+    """
+    merged = dict(current)
+    for k, v in incoming.items():
+        if k == "status" and merged.get("status") in _TERMINAL:
+            continue
+        merged[k] = v
+    return merged
+
+
 def create_app(
     registry: Registry | None = None,
     *,
@@ -322,7 +341,7 @@ def create_app(
                         info["started_at"] = time.time()
                 elif event["event"] == "run_finished":
                     status = event.get("status")
-                    if status in {"completed", "failed", "cancelled"}:
+                    if status in _TERMINAL and info["summary"].get("status") not in _TERMINAL:
                         info["summary"]["status"] = status
                 elif event["event"] == "artifact":
                     artifacts[event["id"]] = {
@@ -362,7 +381,7 @@ def create_app(
                 with lock:
                     info = runs.get(run_id)
                     if info is not None:
-                        info["summary"].update(summary)
+                        info["summary"] = _merge_summary(info["summary"], summary)
                         info["finished_at"] = time.time()
                         info["worker_done"] = True
                         if info["active_slot"]:
@@ -468,6 +487,10 @@ def create_app(
             while True:
                 await ws.receive_text()  # keepalive / future cancel messages
         except WebSocketDisconnect:
+            pass
+        finally:
+            # any exit path (disconnect, abrupt close raising RuntimeError,
+            # server shutdown) must drop the client from the hub
             hub.disconnect(ws)
 
     # single-origin serving (DESIGN.md §17.3): mount the built frontend

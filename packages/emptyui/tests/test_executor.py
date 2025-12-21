@@ -104,3 +104,19 @@ def test_execution_cancelled_mid_run():
     assert "n3" not in statuses
     finished = next(e for e in events if e["event"] == "run_finished")
     assert finished["status"] == "cancelled"
+
+
+def test_unknown_node_type_fails_cleanly():
+    """Direct executor.run callers (bypassing validate_workflow) get a loud
+    ExecutionError for unknown types, not a bare AttributeError from a None
+    manifest (2026-09-11 review fix)."""
+    import pytest
+
+    from emptyui.executor import ExecutionError
+
+    reg = _registry()
+    workflow = Workflow(
+        nodes=[WorkflowNode(id="n1", type="no.such.type")], edges=[]
+    )
+    with pytest.raises(ExecutionError, match="unknown node type"):
+        Executor(reg).run(workflow, emit=lambda e: None)

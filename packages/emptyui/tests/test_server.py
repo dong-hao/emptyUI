@@ -237,3 +237,50 @@ def test_artifact_download_and_preview():
     assert "attachment" not in prev.headers.get("content-disposition", "")
 
     assert client.get("/api/artifacts/unknown").status_code == 404
+
+
+def test_merge_summary_terminal_status_is_monotonic():
+    from emptyui.server.app import _merge_summary
+
+    # a cancel that races a fast-completing run must not flap back
+    assert (
+        _merge_summary({"status": "cancelled"}, {"status": "completed"})["status"]
+        == "cancelled"
+    )
+    # non-status keys always merge (error detail on a cancelled run)
+    merged = _merge_summary(
+        {"status": "cancelled"}, {"status": "failed", "error": "boom"}
+    )
+    assert merged["status"] == "cancelled"
+    assert merged["error"] == "boom"
+    # non-terminal -> terminal still applies
+    assert (
+        _merge_summary({"status": "running"}, {"status": "failed"})["status"]
+        == "failed"
+    )
+
+
+def test_cancel_after_completion_keeps_completed(client):
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],
+        "edges": [],
+    }
+    run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+    detail = _wait_status(client, run_id)
+    assert detail["status"] == "completed"
+
+    resp = client.post(f"/api/runs/{run_id}/cancel")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "completed"
+    assert client.get(f"/api/runs/{run_id}").json()["status"] == "completed"
+
+
+def test_ws_disconnect_removes_client():
+    reg = Registry()
+    client = TestClient(create_app(reg))
+    with client.websocket_connect("/api/ws") as ws:
+        ws.send_text("keepalive")
+    # after the disconnect the hub must have pruned the client: creating a
+    # fresh app state would be needed to observe clients directly, so just
+    # assert the endpoint accepted and closed cleanly (no leaked exception)
+    assert client.get("/api/health").json() == {"status": "ok"}

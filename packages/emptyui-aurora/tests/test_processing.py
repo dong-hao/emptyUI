@@ -496,3 +496,22 @@ def test_compute_fc_auto_case_insensitive_channel_names():
     assert fc.attrs["output_channels"] == "Ex,Ey"
     assert fc.attrs["channel_nomenclature"] == "default"
 
+
+
+def test_nan_in_unused_auxiliary_channel_is_tolerated():
+    """The NaN guard applies only to the channels that are actually STFT'd:
+    a NaN in an auxiliary data_var (e.g. a LEMI temperature channel) must not
+    hard-fail ComputeFC (2026-09-11 review fix)."""
+    rng = np.random.default_rng(11)
+    n = 4096
+    aux = rng.standard_normal(n)
+    aux[100] = np.nan  # NaN in a channel ComputeFC never touches
+    runts = _runts_with_channels({
+        "hx": rng.standard_normal(n), "hy": rng.standard_normal(n),
+        "ex": rng.standard_normal(n), "ey": rng.standard_normal(n),
+        "temperature": aux,
+    })
+    fc = compute_fc(runts, "hx,hy", "ex,ey",
+                    window_length_s=128, overlap=0.5, window_type="hamming")
+    assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
+    assert np.all(np.isfinite(fc["ex"].values))
