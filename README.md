@@ -75,7 +75,7 @@ npm run test:headed         # watch the browser while it runs
 Current state: **M0–M3 complete (2026-09-09)**; post-M3 deliveries — the
 **l2u automatic frequency grid** is now the `Estimate TF` default
 (2026-09-11, DESIGN.md §14.9) and the **TF rotation node** is delivered
-(2026-09-12, DESIGN.md §11/§16.3). All remaining work is the M4 backlog below;
+(2026-09-11, DESIGN.md §11/§16.3). All remaining work is the M4 backlog below;
 full architecture, contracts and verification records are in
 [DESIGN.md](DESIGN.md).
 

@@ -63,7 +63,13 @@ class PathPolicy:
             )
         if self.workspace is None:
             return p
-        return self.workspace / p
+        joined = self.workspace / p
+        if not self._under(joined, self.workspace):
+            raise ValueError(
+                f"param '{name}': output path escapes the run workspace "
+                f"{self.workspace}: {p}"
+            )
+        return joined
 
     @staticmethod
     def _under(path: Path, root: Path) -> bool:

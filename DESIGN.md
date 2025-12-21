@@ -6,7 +6,7 @@ data processing and visualization.
 Status: v0.2 — design frozen for M0/M1 (2026-08-25).
 Implementation status: **M0–M3 complete (2026-09-09)**; post-M3 deliveries:
 automatic l2u frequency grid (2026-09-11, §14.9) and the TF rotation node
-(2026-09-12, §11/§16.3). Every remaining item is M4 and ranked by gain/effort in
+(2026-09-11, §11/§16.3). Every remaining item is M4 and ranked by gain/effort in
 §11. Sections §1–§12 are the current contract; §13–§17 are condensed records of
 delivered plans (kept for the decisions they encode, not as work logs).
 
@@ -733,7 +733,7 @@ remote-server contract (§17.6 items 1–6). Sub-workflows deferred to M4 (§12)
   log-uniform window-starvation coarsening + optional `t_short` head clip),
   reproducing the official hand-crafted USArray grid strategy for any window
   (§14.9).
-- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-12**: rotate a
+- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-11**: rotate a
   TF to true north before comparison/inversion. Standard convention
   `Z' = R(angle) Z R(angle)ᵀ`, `R(angle) = [[cos α, sin α], [−sin α, cos α]]`,
   positive = clockwise from true north; magnetic→true north ⇒
@@ -771,7 +771,7 @@ consolidated here, ranked by expected **gain per unit effort** (descending).
 | 17 | **Improved auto frequency grid (window-count adaptive)** | High | Medium | ★★★★ | §14.9: **delivered 2026-09-11** — `Estimate TF` node default is the `l2u` scheme, reproducing the official grid strategy for any window. |
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Medium-High | ★★ | **Long-term nice-to-have** (2026-09-10, Kelbert et al. 2026, Rev. Geophys. 10.1029/2024RG000850): Egbert (1997) / Smirnov & Egbert (2012) extension of RR using **multiple sites** to define reference fields; the official short-period products were made this way. aurora 0.6.2 has only OLS/RME/RME_RR (**single** remote) — needs a new emptyUI solver (K reference stations → 2K reference channels, robust multivariate regression). Expected benefit: the <15 s end, where a single 1 Hz NIMS remote (SDH28) is itself noise-limited (§16.3). Do **after** the basic processing chain + frequency grid are pinned. |
 
-**Priority note (2026-09-12):** TF rotation is **delivered**; next in line is
+**Priority note (2026-09-11):** TF rotation is **delivered**; next in line is
 the exact-table node option (M4 #9 — still needed for apples-to-apples
 comparisons with the official product). MMT (#18) stays a long-term target;
 basic processing is pinned first.
@@ -1334,7 +1334,7 @@ periods; exact official grid, robust RR):
   10°. (2026-09-10 correction: a script bug had mislabeled a later variant as
   this "rotation-corrected" comparison; the numbers above are the genuine
   exact-grid results.)
-- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-12** (see §11):
+- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-11** (see §11):
   rotates a TF by an arbitrary angle or to true north via the station
   declination; `Import TF` parses the EDI declination (explicit field, else Hx
   azimuth) with a fallback to the `angle` parameter; the verify script's

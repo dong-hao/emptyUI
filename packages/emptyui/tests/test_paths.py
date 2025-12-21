@@ -121,6 +121,14 @@ def test_out_param_absolute_is_rejected_in_remote_mode(tmp_path: Path):
         policy.resolve_params(_manifest(), {"output_dir": str(outside)})
 
 
+def test_out_param_dotdot_escape_is_rejected(tmp_path: Path):
+    policy = PathPolicy(tmp_path / "data", tmp_path / "ws")
+    with pytest.raises(ValueError, match="escapes the run workspace"):
+        policy.resolve_params(_manifest(), {"output_dir": "../evil"})
+    with pytest.raises(ValueError, match="escapes the run workspace"):
+        policy.resolve_params(_manifest(), {"output_dir": "sub/../../evil"})
+
+
 def test_executor_applies_policy_with_data_root(tmp_path: Path):
     root = tmp_path / "data"
     root.mkdir()

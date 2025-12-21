@@ -18,7 +18,7 @@ from .merge import MergeRuns
 from .plots import PlotAppResPhase, PlotTipper
 from .runs import AlignRuns, ExtractRun, MergeChannels, SplitChannels
 from .tables import ViewSelection, ViewTF
-from .tf import ExportTF, ImportTF
+from .tf import ExportTF, ImportTF, RotateTF
 
 
 def register(registry) -> None:
@@ -33,6 +33,7 @@ def register(registry) -> None:
     registry.add(MergeRuns)
     registry.add(ImportTF)
     registry.add(ExportTF)
+    registry.add(RotateTF)
     registry.add(FCGroupToSpectra)
     registry.add(SpectraToFCGroup)
     registry.add(PlotAppResPhase)

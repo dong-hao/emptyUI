@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import emptyui
 from emptyui.cache import NodeCache
 from emptyui.config import Settings
 from emptyui.executor import Executor
@@ -132,7 +133,7 @@ def create_app(
     if isinstance(settings_path, str):
         settings_path = Path(settings_path)
 
-    app = FastAPI(title="emptyui", version="0.2.0", root_path=root_path or "")
+    app = FastAPI(title="emptyui", version=emptyui.__version__, root_path=root_path or "")
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,

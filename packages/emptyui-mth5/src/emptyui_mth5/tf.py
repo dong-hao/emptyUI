@@ -344,9 +344,3 @@ class ExportTF(Node):
         )
         ctx.progress(1.0, f"exported TF -> {saved}")
         return {}
-
-
-def register(registry) -> None:
-    registry.add(ImportTF)
-    registry.add(RotateTF)
-    registry.add(ExportTF)
