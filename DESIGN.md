@@ -383,6 +383,18 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
   ```
   The magnetic B/H mode is **not** a manual choice (derived from nomenclature;
   §3).
+- **`enabled_when`** (per param, added 2026-09-12): conditional-UX rule — the
+  widget is editable only when the named sibling param currently holds one of
+  the listed values:
+  ```python
+  Param("remote_reference", "boolean", default=False,
+        enabled_when=("estimator_engine", ("Robust", "RME", "RME_RR")),
+        cascade={True: (("estimator_engine", "Robust"),)}),
+  ```
+  Complements `cascade` (which *sets* values; `enabled_when` *gates* editing).
+  Rendering-only — the executor never enforces it (nodes validate their own
+  params). Replaced the frontend's string-sniffing of `estimator_engine`
+  (review §18.3), which was node-specific logic in generic code.
 - **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
   an upstream node is connected, those params render as dropdowns populated from
   the upstream node's params and auto-fill if empty. Same-name inheritance is an
@@ -1568,10 +1580,11 @@ parameters from an upstream Coherence Sort when one is connected**
 (`band_style`, `periods_per_octave`, `min_bins_per_band`, `t_short`) via
 the §4 chain-walking `inherit` mechanism (downstream auto-fill from the
 connected sort node; explicit user choices on Estimate TF are never
-overridden). Today the two nodes are consistent by convention (identical
-defaults + matching params); the inherit wiring makes the consistency
-structural. Deferred as a small M4 item — do it together with (or before)
-M4 #7, since the per-frequency variant changes the parameter surface.
+overridden). — **Delivered 2026-09-12**: `EstimateTF.inherit` declares the
+mapping on the `fc` input; e2e-verified (sort's band style flows into the
+estimator's unset params). The statistic itself remains the per-window
+broadband heuristic (M4 #7); do the inherit-aware parameter surface for
+the per-frequency variant together with M4 #7.
 
 ### 18.3 Open items (deferred — need a design decision)
 
@@ -1580,14 +1593,18 @@ M4 #7, since the per-frequency variant changes the parameter surface.
   portable local disk cache is a later design).
 - ~~Electric-unit scaling~~ — **decided & delivered 2026-09-12, see §19**
   (attr-aware electric path, modelled on the magnetic path).
-- Plugin-embedded node viewers (the frontend special-cases
-  `core.display.preview_plot`/`view_table` bodies) — decided 2026-09-12:
-  generalize by **output port type** (any node emitting a `plot`/`table`
-  output gets the inline viewer automatically, backend-driven); not yet
-  implemented.
-- `remote_reference` disabling is string-sniffed in `MTNode.tsx`
-  (duplicating the backend cascade) — remove once the cascade covers the
-  disabled UX.
+- Plugin-embedded node viewers — **decided 2026-09-12 (user)**: keep the
+  ComfyUI paradigm literal. Producing Display nodes stay compact (port
+  rows) and emit a `plot` port; previewing is a user choice via the
+  `Preview Plot`/`Save Plot`/`View Table` utility nodes, whose viewer
+  bodies remain deliberately special-cased (frontend literals accepted by
+  design — the two utility nodes are the framework's own viewer widgets).
+  Generalizing viewers (by output port type or shipped components) is
+  parked until table/viewer workflows mature and the inline-settings
+  interaction (axis ranges, time windows on plot nodes) is thought
+  through.
+- ~~`remote_reference` string-sniffing~~ — **delivered 2026-09-12**: the
+  manifest-declared `enabled_when` rule (§4) replaced it.
 - RunTS start == 1980-01-01 epoch sentinel ambiguity
   (`runs._run_time_info`); `SpectraToFCGroup` writes decimation level "0"
   with sample-rate default 1.0.

@@ -356,6 +356,7 @@ class EstimateTF(Node):
               default=False,
               description="Robust remote reference (RME_RR). Only applies to "
                           "the 'Robust' estimator.",
+              enabled_when=("estimator_engine", ("Robust", "RME", "RME_RR")),
               cascade={True: (("estimator_engine", "Robust"),)}),
         Param("periods_per_octave", "integer", label="Periods per octave",
               default=4, min=1,
@@ -456,6 +457,18 @@ class EstimateTF(Node):
             f"{len(periods)} merged periods",
         )
         return {"tf": tf, "tf_levels": per_level}
+
+    #: Banding parameters auto-fill from an upstream Coherence Sort (DESIGN
+    #: §18.2): the sort's weights/trimming must be applied on the same band
+    #: table the estimator uses, so the estimator inherits the sort's banding
+    #: (chain-walking §4 inherit; explicit user choices on Estimate TF are
+    #: never overridden — the auto-fill only touches unset/default values).
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "fc": {"band_style": "band_style",
+               "periods_per_octave": "periods_per_octave",
+               "min_bins_per_band": "min_bins_per_band",
+               "t_short": "t_short"},
+    }
 
 
 class MergeTFLevels(Node):

@@ -145,10 +145,10 @@ radio/datalist DOM id collisions, unvalidated workflow load (format/version
   multiple coherence over the band's bin ensemble, not EMTF's per-frequency
   window-ensemble statistic; agrees qualitatively, not numerically
   (DESIGN.md §16.2, M4 #7).
-- **Frontend hardcodes node behavior** — viewer bodies switch on literal
-  node types (`MTNode.tsx`), and `remote_reference` disabling duplicates the
-  backend cascade via string-sniffing (decision 2026-09-12: generalize
-  viewers by output port type; extension mechanism not yet implemented).
+- Viewer bodies stay **deliberately literal** (ComfyUI parity, decided
+  2026-09-12): producers emit `plot` ports and stay compact — previewing is
+  a user choice via the Preview/Save/View Table utility nodes; generalizing
+  inline viewers is parked until table workflows mature.
 
 ### M4 — community/advanced backlog (ranked by gain/effort; full detail in DESIGN.md §11)
 

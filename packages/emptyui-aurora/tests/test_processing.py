@@ -515,3 +515,26 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
     assert np.all(np.isfinite(fc["ex"].values))
+
+
+def test_estimate_tf_inherits_banding_and_remote_reference_rule():
+    """Manifest-level contracts (DESIGN §18.2 + §4 `enabled_when`):
+    - Estimate TF declares chain-walking inherit of the banding params from
+      the fc chain (an upstream Coherence Sort supplies them);
+    - remote_reference declares its estimator condition instead of the
+      frontend string-sniffing the engine value."""
+    from emptyui_aurora.process import EstimateTF
+
+    m = EstimateTF().manifest()
+    inherit = m["inherit"]["fc"]
+    for name in ("band_style", "periods_per_octave",
+                 "min_bins_per_band", "t_short"):
+        assert inherit[name] == name
+        # the inherited param exists on the upstream Coherence Sort too
+        from emptyui_aurora.process import CoherenceSort
+        assert any(p["name"] == name for p in CoherenceSort().manifest()["params"])
+
+    rr = next(p for p in m["params"] if p["name"] == "remote_reference")
+    assert rr["enabled_when"] == {
+        "param": "estimator_engine", "values": ["Robust", "RME", "RME_RR"],
+    }

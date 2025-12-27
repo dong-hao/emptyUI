@@ -77,6 +77,12 @@ class Param:
     #: value (key), set the listed (other_param, value) pairs. Keys are
     #: serialized as strings (bool -> "true"/"false") for JSON transport.
     cascade: dict[Any, tuple[tuple[str, Any], ...]] | None = None
+    #: Conditional-UX rule (DESIGN.md §4): the widget is editable only when
+    #: the named sibling param currently holds one of the listed values,
+    #: e.g. ``enabled_when=("estimator_engine", ("Robust",))``. Purely a
+    #: rendering/UX rule — the executor never enforces it (nodes validate
+    #: their own params).
+    enabled_when: tuple[str, tuple[Any, ...]] | None = None
 
     def _cascade_dict(self) -> dict[str, list[list[Any]]] | None:
         if not self.cascade:
@@ -104,6 +110,11 @@ class Param:
             "placeholder": self.placeholder,
             "cascade": self._cascade_dict(),
             "path_kind": self.path_kind,
+            "enabled_when": (
+                {"param": self.enabled_when[0],
+                 "values": [str(v) for v in self.enabled_when[1]]}
+                if self.enabled_when else None
+            ),
         }
 
 

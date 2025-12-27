@@ -70,3 +70,60 @@ test("Compute FC renders the channel nomenclature select and cascades channel na
   await expect(param(node, "Input channels").locator("input")).toHaveValue("bx,by");
   await expect(param(node, "Output channels").locator("input")).toHaveValue("e1,e2,bz");
 });
+
+test("Estimate TF's remote reference is enabled only for the robust estimator", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await addNode(page, "Estimate TF");
+
+  const node = page.locator(".mt-node", { hasText: "Estimate TF" }).first();
+  const engine = param(node, "Estimator").locator("select");
+  const remote = param(node, "Remote Reference").locator("input[type=checkbox]");
+
+  // default Robust -> editable; manifest-driven rule (enabled_when)
+  await expect(engine).toHaveValue("Robust");
+  await expect(remote).toBeEnabled();
+
+  await engine.selectOption("Least Squares");
+  await expect(remote).toBeDisabled();
+  await engine.selectOption("Robust");
+  await expect(remote).toBeEnabled();
+});
+
+test("Estimate TF inherits the banding params from an upstream Coherence Sort", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await addNode(page, "Coherence Sort");
+  await addNode(page, "Estimate TF");
+
+  const sort = page.locator(".mt-node", { hasText: "Coherence Sort" }).first();
+  const estimate = page.locator(".mt-node", { hasText: "Estimate TF" }).first();
+
+  // separate the randomly-placed nodes so both handles are hittable
+  const eb = (await estimate.locator(".mt-node-header").boundingBox())!;
+  await page.mouse.move(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(eb.x + eb.width / 2 + 420, eb.y + eb.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+
+  // connect Coherence Sort's fc output -> Estimate TF's fc input (raw mouse
+  // drag between handle centers — locator.dragTo undershoots on the canvas)
+  const sh = (await sort.locator('.mt-port[data-handlepos="right"]').first().boundingBox())!;
+  const th = (await estimate.locator('.mt-port[data-handlepos="left"]').first().boundingBox())!;
+  await page.mouse.move(sh.x + sh.width / 2, sh.y + sh.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(th.x + th.width / 2, th.y + th.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  // the sort's band style flows into the estimator's unset banding params
+  // (chain-walking inherit, DESIGN.md §4/§18.2)
+  const sortStyle = param(sort, "Band style").locator("select");
+  await sortStyle.selectOption("uniform");
+  await expect(param(estimate, "Band style").locator("input")).toHaveValue(
+    "uniform",
+  );
+});

@@ -22,6 +22,9 @@ export interface ParamSpec {
   placeholder?: string;
   /** Auto-change rules: value key -> [targetParam, targetValue][] */
   cascade?: Record<string, [string, unknown][]>;
+  /** Conditional-UX rule (DESIGN.md §4): editable only when the named
+   *  sibling param holds one of the listed values. Rendering-only. */
+  enabled_when?: { param: string; values: string[] } | null;
 }
 
 /** inherit: input port -> { targetParam: upstreamParam } */

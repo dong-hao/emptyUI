@@ -43,6 +43,25 @@ def test_manifest_cascade_and_inherit():
     assert m["inherit"] == {"data": {"survey": "survey", "station": "station", "run": "run"}}
 
 
+def test_manifest_enabled_when():
+    class Dummy(Node):
+        type = "test.conditional"
+        params = (
+            Param("engine", "select", options=("Robust", "Least Squares"),
+                  default="Robust"),
+            Param("remote", "boolean", default=False,
+                  enabled_when=("engine", ("Robust", "RME", "RME_RR"))),
+        )
+
+    m = Dummy().manifest()
+    # serialized for JSON transport; values stringified
+    assert m["params"][1]["enabled_when"] == {
+        "param": "engine", "values": ["Robust", "RME", "RME_RR"],
+    }
+    # unset rules serialize as null (old plugins stay consistent)
+    assert m["params"][0]["enabled_when"] is None
+
+
 def test_port_compatibility_rules():
     from emptyui.api import Input
 

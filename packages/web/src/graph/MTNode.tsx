@@ -1,6 +1,7 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import type { ParamSpec } from "../api/client";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
@@ -128,10 +129,16 @@ export function MTNode({ id, data, selected }: NodeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, catalog, manifest, edges, nodes]);
 
-  // The remote-reference checkbox only applies to the robust estimator;
-  // disable it when a least-squares estimator is selected.
-  const engineVal = String(d.params["estimator_engine"] ?? "Robust").toLowerCase();
-  const isLeastSquares = engineVal.includes("least") || engineVal === "ols" || engineVal === "ls";
+  // Conditional-UX rules are manifest-driven (DESIGN.md §4 `enabled_when`):
+  // a param is editable only when its named sibling param holds one of the
+  // listed values (e.g. remote_reference only for the robust estimator).
+  const isParamEnabled = (p: ParamSpec): boolean => {
+    const ew = p.enabled_when;
+    if (!ew) return true;
+    const sibling = manifest?.params.find((q) => q.name === ew.param);
+    const current = d.params[ew.param] ?? sibling?.default ?? "";
+    return ew.values.includes(String(current));
+  };
 
   return (
     <div className={`mt-node${selected ? " selected" : ""} status-${runState?.status ?? "idle"}`}>
@@ -172,7 +179,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
                 onChange={(v) => setParam(p.name, v)}
                 compact
                 instanceId={id}
-                disabled={p.name === "remote_reference" && isLeastSquares}
+                disabled={!isParamEnabled(p)}
                 selectOptions={sel}
               />
             );
