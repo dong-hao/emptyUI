@@ -1,0 +1,96 @@
+"""Phase tensor computation + plot node (DESIGN §20.2).
+
+Invariants: 1D → Φ ∝ I (circular, skew ≡ 0); 2D strike θ → azimuth
+rotation-covariant (azimuth − azimuth₀ = ∓ρ), skew ≡ 0, singular values
+invariant; 3D → β ≠ 0. σ₁/|σ₂| match the SVD of Φ.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from emptyui.context import RunContext
+from emptyui.store import DataStore
+from emptyui_mth5.phase_tensor import phase_tensor, pt_ellipse_params
+
+
+def _rotmat(deg):
+    t = np.radians(deg)
+    c, s = np.cos(t), np.sin(t)
+    return np.array([[c, s], [-s, c]])
+
+
+def test_1d_phase_tensor_is_circular_and_undistorted():
+    """1D earth: Z = z·I → Φ = c·I: circular (ell 0, σ1 = σ2), skew 0."""
+    z = np.array([[[2 + 1j, 0], [0, 2 + 1j]]])
+    phi = phase_tensor(z)
+    assert np.allclose(phi[0], np.eye(2) * 0.5)
+    _az, sk, el, s1, s2 = pt_ellipse_params(phi)
+    assert sk[0] == pytest.approx(0.0, abs=1e-12)
+    assert el[0] == pytest.approx(0.0, abs=1e-12)
+    assert s1[0] == pytest.approx(s2[0])
+
+
+def test_2d_strike_rotation_covariance():
+    """Rotating a 2D impedance by ρ shifts the PT azimuth by ∓ρ (mod 180),
+    keeps the skew at 0 and the singular values invariant."""
+    zxy = 3.0 * np.exp(1j * np.radians(60))
+    zyx = 4.0 * np.exp(1j * np.radians(-80))
+    z0 = np.array([[[0, zxy], [zyx, 0]]])
+    az0, sk0, el0, s10, s20 = pt_ellipse_params(phase_tensor(z0))
+    assert sk0[0] == pytest.approx(0.0, abs=1e-12)
+
+    for strike in (30.0, -45.0, 75.0):
+        R = _rotmat(strike)
+        zr = R @ z0[0] @ R.T
+        az, sk, el, s1, s2 = pt_ellipse_params(phase_tensor(np.array([zr])))
+        shift = ((az[0] - az0[0] + 90) % 180) - 90
+        assert shift == pytest.approx(-strike)  # rotation covariance
+        assert sk[0] == pytest.approx(0.0, abs=1e-12)
+        assert s1[0] == pytest.approx(s10[0])
+        assert abs(s2[0]) == pytest.approx(abs(s20[0]))
+        assert el[0] == pytest.approx(el0[0])
+
+
+def test_3d_phase_tensor_skew_is_nonzero():
+    z = np.array([[[1 + 0.5j, 2 + 1j], [3 + 0.2j, 4 + 2j]]])
+    phi = phase_tensor(z)
+    _az, sk, el, s1, s2 = pt_ellipse_params(phi)
+    assert abs(sk[0]) > 1  # 3D structure → nonzero skew
+    # σ1 matches the SVD's largest singular value; |σ2| the smaller one
+    _, sv, _ = np.linalg.svd(phi[0])
+    assert s1[0] == pytest.approx(sv[0])
+    assert abs(s2[0]) == pytest.approx(sv[1])
+    assert 0 <= el[0] <= 1
+
+
+def test_singular_re_z_propagates_nan():
+    """A singular Re(Z) band yields NaN, not inflated garbage."""
+    z = np.array([[[0 + 1j, 0], [0, 0 + 1j]]])  # Re(Z) = 0 → singular
+    phi = phase_tensor(z)
+    assert np.all(np.isnan(phi[0]))
+    _az, _sk, el, _s1, _s2 = pt_ellipse_params(phi)
+    assert np.all(np.isnan(_az)) and np.all(np.isnan(_sk)) and np.all(np.isnan(el))
+
+
+def test_phase_tensor_node_plot(tmp_path):
+    """The Display node renders a PNG for a synthetic 3D-like TF."""
+    from emptyui_aurora._processing import build_tf
+    from emptyui_mth5.plots import PlotPhaseTensor
+
+    periods = np.array([2.0, 4.0, 8.0])
+    Z = np.zeros((3, 2, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0.5j
+    Z[:, 0, 1] = 2 + 1j
+    Z[:, 1, 0] = 3 + 0.2j
+    Z[:, 1, 1] = 4 + 2j
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
+                  channel_nomenclature="lemi12", station_id="NO46")
+
+    artifact = PlotPhaseTensor().execute(
+        RunContext(workspace=tmp_path, store=DataStore()), tf)["plot"]
+    p = artifact["path"]
+    assert p.endswith(".png")
+    assert len(Path(p).read_bytes()) > 1000

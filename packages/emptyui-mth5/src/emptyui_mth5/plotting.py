@@ -336,3 +336,95 @@ def plot_tipper(tf, path):
                 metadata={"Software": "emptyUI", "Title": station_title(tf)})
     plt.close(fig)
     return path
+
+
+def _impedance_matrices(tf):
+    """Full 2x2 complex impedance per period, ordered (ex,ey) x (hx,hy).
+
+    Raises when any of the four components is missing (the phase tensor is
+    only defined for the complete tensor).
+    """
+    Z = tf.dataset["transfer_function"]
+    period = np.asarray(Z.coords["period"], dtype=float)
+    outs = (tf.ex, tf.ey)
+    ins = (tf.hx, tf.hy)
+    for o in outs:
+        if o not in Z.coords["output"].values:
+            raise ValueError(
+                f"transfer function has no '{o}' output — the phase tensor "
+                "needs the complete 2x2 impedance")
+    for i in ins:
+        if i not in Z.coords["input"].values:
+            raise ValueError(
+                f"transfer function has no '{i}' input — the phase tensor "
+                "needs the complete 2x2 impedance")
+    z = np.empty((period.size, 2, 2), dtype=complex)
+    for a, o in enumerate(outs):
+        for b, i in enumerate(ins):
+            z[:, a, b] = Z.sel(output=o, input=i).values.astype(complex)
+    return period, z
+
+
+def plot_phase_tensor(tf, path):
+    """Render the Caldwell-style phase-tensor figure (DESIGN §20.2).
+
+    PT ellipses vs period: the image ellipse of Φ = Re(Z)⁻¹·Im(Z) at each
+    period (semi-axes scaled by the largest σ1 so the biggest ellipse fits
+    the panel; relative sizes preserved), principal orientation from the
+    PT azimuth, fill color = skew (Caldwell β, colorbar) — the standard
+    3D-structure indicator. No PT error bars in this MVP (Z_err → PT
+    covariance propagation is nontrivial; §20.2).
+    """
+    from matplotlib.patches import Ellipse
+
+    from .phase_tensor import phase_tensor, pt_ellipse_params
+
+    period, z = _impedance_matrices(tf)
+    phi = phase_tensor(z)
+    az, skew, _ell, s1, s2 = pt_ellipse_params(phi)
+
+    ok = np.isfinite(s1)
+    if not np.any(ok):
+        raise ValueError(
+            "phase tensor is undefined — Re(Z) is singular at every period")
+    period_ok = period[ok]
+    s1_ok = s1[ok]
+    s2_ok = np.abs(s2[ok])  # |σ2| is the true minor semi-axis (σ2 signed)
+    skew_ok = skew[ok]
+    az_ok = az[ok]
+
+    scale = float(np.nanmax(s1_ok))
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("phase tensor is degenerate (all-zero impedance)")
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    apply_style(fig, (ax,))
+    cmap = plt.get_cmap("RdYlBu_r")
+    vmax = max(5.0, float(np.nanmax(np.abs(skew_ok))))
+    norm = plt.Normalize(vmin=-vmax, vmax=vmax)
+
+    x_min, x_max = _decade_limits(period_ok)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(-1.35, 1.35)
+    ax.set_xscale("log")
+    ax.set_xlabel("Period (secs)")
+    ax.set_ylabel("Phase tensor (normalized)")
+    ax.set_yticks([-1, 0, 1])
+    for p, w, h, angle, sk in zip(period_ok, s1_ok, s2_ok, az_ok, skew_ok):
+        ax.add_patch(Ellipse(
+            (p, 0.0), width=2.0 * (w / scale), height=2.0 * (h / scale),
+            angle=angle, facecolor=cmap(norm(sk)), edgecolor="0.25",
+            linewidth=0.7, alpha=0.85))
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    cbar = fig.colorbar(sm, ax=ax, pad=0.02, fraction=0.05)
+    cbar.set_label(r"Skew $\beta$ (deg)", fontsize=9)
+    ax.set_title(station_title(tf) + " — phase tensor", fontsize=11,
+                 fontweight="bold")
+    notes = run_notes(tf)
+    if notes:
+        fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
+                 style="italic", color="0.3")
+    fig.tight_layout(rect=(0, 0.02, 1, 1))
+    fig.savefig(path, dpi=DPI, bbox_inches="tight",
+                metadata={"Software": "emptyUI", "Title": station_title(tf)})
+    plt.close(fig)
+    return path

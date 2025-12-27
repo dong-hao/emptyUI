@@ -12,7 +12,7 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
-from .plotting import plot_impedance_response, plot_tipper
+from .plotting import plot_impedance_response, plot_phase_tensor, plot_tipper
 
 
 class PlotAppResPhase(Node):
@@ -92,6 +92,27 @@ class PlotTipper(Node):
         return {"plot": artifact}
 
 
-def register(registry) -> None:
-    registry.add(PlotAppResPhase)
-    registry.add(PlotTipper)
+class PlotPhaseTensor(Node):
+    type = "mth5.plot.phase_tensor"
+    title = "Plot Phase Tensor"
+    tooltip = "Plot the phase tensor (Caldwell ellipses colored by skew) vs period."
+    description = (
+        "Phase tensor vs period (Caldwell et al. 2004): the ellipse of "
+        "Φ = Re(Z)⁻¹·Im(Z) at each period — orientation = principal "
+        "azimuth, axis ratio from the singular values, fill color = skew "
+        "β (colorbar; β ≠ 0 indicates 3D structure; galvanic-distortion "
+        "free). Needs the complete 2x2 impedance. MVP: no PT error bars "
+        "(Z_err → PT covariance propagation is nontrivial, DESIGN.md §20.2)."
+    )
+    category = "Display"
+    inputs = (Input("tf", "tf", label="tf"),)
+    outputs = (Output("plot", "plot"),)
+    params = ()
+
+    def execute(self, ctx, tf) -> dict[str, Any]:
+        if not tf.has_impedance:
+            raise ValueError("transfer function has no impedance data")
+        path = ctx.artifact_path("plot_phase_tensor", ".png")
+        plot_phase_tensor(tf, path)
+        artifact = ctx.publish_artifact(path, kind="image")
+        return {"plot": artifact}

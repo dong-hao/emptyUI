@@ -8,6 +8,7 @@ RME_RR) are all aurora-backed.
 
 from __future__ import annotations
 
+from .plots import PlotCoherency
 from .process import CoherenceSort, ComputeFC, EstimateTF, MergeTFLevels
 
 
@@ -16,6 +17,7 @@ def register(registry) -> None:
     registry.add(CoherenceSort)
     registry.add(EstimateTF)
     registry.add(MergeTFLevels)
+    registry.add(PlotCoherency)
 
 
 # bundled plugin: always on, not toggleable in the Settings dialog (§5.1)

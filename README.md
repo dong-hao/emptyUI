@@ -152,8 +152,10 @@ radio/datalist DOM id collisions, unvalidated workflow load (format/version
 
 ### M4 — community/advanced backlog (ranked by gain/effort; full detail in DESIGN.md §11)
 
-1. **Plot Coherency + Plot Phase Tensor nodes** — high gain, low effort: standard
-   MT QC/interpretation products; data and plot patterns already exist.
+1. ~~Plot Coherency + Plot Phase Tensor nodes~~ — **delivered 2026-09-12**
+   (DESIGN.md §20): fc-direct coherence plot (numerically identical to the
+   Coherence Sort statistic) and Caldwell-style phase-tensor ellipses
+   colored by skew; no new runtime dependencies.
 2. **Merge Runs: remote multi-row warning** — medium gain, trivial effort: warn
    when a local run spans multiple remote runs.
 3. **Batch/queue runner** — high gain, medium effort: multi-station processing is

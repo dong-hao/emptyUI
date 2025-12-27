@@ -764,7 +764,7 @@ consolidated here, ranked by expected **gain per unit effort** (descending).
 
 | # | Task | Gain | Effort | Ratio | Notes |
 |---|------|------|--------|-------|-------|
-| 1 | **Plot Coherency + Plot Phase Tensor nodes** | High | Low | ★★★★★ | Standard MT QC/interpretation products; data already flows through `fc`/coherence diagnostics/`tf` — plot code patterns exist (mth5/plotting.py). Designed, not implemented. |
+| 1 | **Plot Coherency + Plot Phase Tensor nodes** | High | Low | ★★★★★ | Standard MT QC/interpretation products; data already flows through `fc`/coherence diagnostics/`tf` — plot code patterns exist (mth5/plotting.py). **Delivered 2026-09-12** (§20): `aurora.plot.coherency` (fc-direct, shared statistic with Coherence Sort) and `mth5.plot.phase_tensor` (Caldwell ellipses, skew-colored). |
 | 2 | **Merge Runs: remote multi-row warning** | Medium | Trivial | ★★★★★ | §3 open item (aurora TODO): warn when a local run spans multiple remote runs instead of silently mis-pairing; one `ctx.warn`/log guard + test. |
 | 3 | **Batch/queue runner** | High | Medium | ★★★★ | Multi-station processing is the real repetition pattern; headless `POST /api/runs` + a small queue UI/CLI reuses the executor as-is. |
 | 4 | **In-band smoothing taper (Parzen/Hann)** | Medium | Low | ★★★★ | §14.8/M4: `√weight` FC rows by band-center proximity before regression — the `_coherence_weight` mechanism already exists; composes with OLS/RME/RME_RR. Genuine enhancement (neither EMTF nor aurora does this). |
@@ -1656,3 +1656,60 @@ relabelled by `RunTS.calibrate` to `units_in`, which the attr-aware path
 honors. Backward compatibility: unitless payloads behave exactly as
 before — all fixtures and the USArray verification are unaffected
 (regression tests in `test_electric_units.py`).
+
+---
+
+## 20. Plot Coherency + Plot Phase Tensor nodes (designed 2026-09-12, M4 #1)
+
+Standard MT QC/interpretation products; both render to the `plot` port (§3
+grammar — producers stay compact, preview is a user choice). **No new
+runtime dependencies**: numpy + matplotlib only (both already pinned);
+mtpy is not needed for computation (its PhaseTensor math is elementary);
+it would only enter as a test-only golden-image reference (M4 #8).
+
+### 20.1 Plot Coherency (`aurora.plot.coherency`, emptyui-aurora, Display)
+
+- **Inputs**: `fc` + optional `ref_fc` (Coherence Sort's grammar); output
+  `plot`.
+- **Source decision (user, 2026-09-12): fc-direct** — computes per-band
+  multiple coherence from the fc itself, not the sort's diagnostics
+  table. The per-band coherence loop is refactored out of
+  `coherence_sort_fc` into a shared `_band_coherence(local, ref, ins,
+  outs, band_bins)` helper, so the plot shows **numerically exactly** the
+  statistic Coherence Sort uses (honest about the broadband-heuristic
+  caveat, §18.2) and works when no sort node is in the graph.
+- **Curves**: median coh² vs period per criterion — E–H signal coherence
+  (remote H when a `ref_fc` is connected) and, two-FC, the local↔remote
+  magnetic transfer coherence; shaded guidance band at
+  [`coherence_min`, `coherence_max`] (defaults 0.25/0.98 = the sort's
+  defaults) — a one-glance QC view of "what will the sort do".
+- **Params**: the banding set (`band_style`, `periods_per_octave`,
+  `min_bins_per_band`, `t_short`) with the **same inherit-from-sort
+  declaration as Estimate TF** (§18.2), plus `coherence_min`/
+  `coherence_max` references. §15 conventions (log period axis, dpi 150,
+  station title, framed legend).
+
+### 20.2 Plot Phase Tensor (`mth5.plot.phase_tensor`, emptyui-mth5, Display)
+
+- **Input**: `tf` → `plot`. Computation per period: `Φ = X⁻¹·Y` with
+  `Z = X + iY` (2×2 real; `pinv` + condition guard for singular Re(Z)).
+- **Presentation decision (user, 2026-09-12): Caldwell-style PT ellipses
+  vs period, colored by skew** — ellipses drawn from the SVD/polar form
+  (semi-axes = singular values σ1 ≥ σ2 of Φ, principal azimuth θ, skew
+  β = (α1+α2)/2 from the polar decomposition Φ = R(α1)·diag(σ1,σ2)·R(α2)),
+  colorbar for skew. §15 conventions.
+- **Errors (MVP)**: no PT error bars — Z_err → PT covariance propagation
+  is nontrivial (linearized through the inverse); noted in the plot label
+  and left as a follow-up, consistent with §15's "classical math only"
+  stance for error bars.
+- **Invariants under test**: 1D earth → Φ scalar × I (circular ellipses,
+  θ ≡ 0, β ≡ 0, ellipticity ≡ 0); 2D earth rotated by θ → PT azimuth
+  recovers the strike, skew ≡ 0; 3D synthetic → β ≠ 0.
+
+### 20.3 Placement
+
+Both nodes follow §15 via the shared plotting helpers; zero core changes;
+manifests carry the usual tooltip/description/palette protocol. The
+coherency plot node lives in `emptyui-aurora` (imports the band machinery
+and the shared coherence helper); the PT node in `emptyui-mth5` (a
+tf-consuming Display node like Plot AppRes & Phase).
