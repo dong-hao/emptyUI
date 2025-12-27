@@ -118,6 +118,36 @@ full architecture, contracts and verification records are in
   Verification also found and fixed two real bugs (coil-unit conversion,
   Align Runs dropping channel units).
 
+### Current issues (known problems, from the 2026-09-11 code review)
+
+Fixed by the review batches (each with a regression test): Rotate TF
+registration, the output-path confinement escape, Coherence Sort's
+banding mismatch with Estimate TF (`min_bins_per_band`/`t_short` are now
+exposed and verified identical), the plugin-toggle/discovery races, the
+cancelled→completed status flap, the WS client leak, `merge_tf_levels`
+crashing on payloads without `Z_err`, NaN guards on unused auxiliary
+channels, the Align Runs coherence guard ignoring LEMI `bx/by` names, and
+the missing absolute-ohm amplitude test (analytic ~1% anchor); frontend:
+radio/datalist DOM id collisions, unvalidated workflow load (format/version
++ stale-edge pruning), the lost-event window at run start, the inherit
+auto-fill re-render loop, Run-to-here double-start, and the permanent
+`untitled` save name. Still open:
+
+- **Unbounded growth by default** — with `workspace_ttl_seconds=None` (local
+  default) run state, event lists and temp workspaces are never cleaned; the
+  `NodeCache` pins payloads by reference and keeps stale entries.
+- **Unit-scaling asymmetry** — magnetic conversion checks payload units, but
+  the electric path unconditionally multiplies ×1e-6 (mV/km→V/m): payloads
+  already in V/m are silently mis-scaled; setting `e_dipole_length_m` on
+  mV/km data double-scales.
+- **Coherence Sort statistic is a broadband QC heuristic** — per-window
+  multiple coherence over the band's bin ensemble, not EMTF's per-frequency
+  window-ensemble statistic; agrees qualitatively, not numerically
+  (DESIGN.md §16.2, M4 #7).
+- **Frontend hardcodes node behavior** — viewer bodies switch on literal
+  node types (`MTNode.tsx`), and `remote_reference` disabling duplicates the
+  backend cascade via string-sniffing (extension mechanism deferred).
+
 ### M4 — community/advanced backlog (ranked by gain/effort; full detail in DESIGN.md §11)
 
 1. **Plot Coherency + Plot Phase Tensor nodes** — high gain, low effort: standard

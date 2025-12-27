@@ -223,3 +223,55 @@ def test_remote_reference_real_data_workflow(tmp_path):
     assert summary["status"] == "completed", summary
     edi = out_dir / "rr_tf.edi"
     assert edi.exists() and edi.stat().st_size > 0
+
+
+def test_coherence_guard_resolves_nomenclature_names(caplog):
+    """The long-period coherence diagnostic must find the horizontal
+    magnetic channels through the nomenclature: LEMI data keeps bx/by names
+    (the guard previously matched literal hx/hy and never fired on exactly
+    the data it was built for — 2026-09-11 review fix)."""
+    import logging
+
+    import xarray as xr
+    from emptyui_mth5.runs import _warn_if_uncorrelated
+
+    sr, n = 8.0, 16384
+    t = np.arange(n) / sr
+    src = np.sin(2 * np.pi * 0.1 * t)  # common source, long-period enough
+
+    def _payload(a_vals, b_vals, names=("bx", "by")):
+        class P:
+            pass
+        p = P()
+        p.dataset = xr.Dataset(
+            {names[0]: ("time", a_vals), names[1]: ("time", b_vals)},
+            coords={"time": t},
+        )
+        return p
+
+    rng = np.random.default_rng(31)
+    # strongly coherent: B = A + small independent noise
+    good1 = _payload(src, src + 0.05 * rng.standard_normal(n))
+    good2 = _payload(src, src + 0.05 * rng.standard_normal(n))
+    # weakly coherent: independent realizations
+    bad1 = _payload(rng.standard_normal(n), rng.standard_normal(n))
+    bad2 = _payload(rng.standard_normal(n), rng.standard_normal(n))
+
+    class Ctx:
+        logger = logging.getLogger("emptyui.align-test")
+
+    with caplog.at_level(logging.WARNING, logger="emptyui.align-test"):
+        _warn_if_uncorrelated(Ctx(), good1, good2, sr, n)
+        assert not any(r.levelname == "WARNING" for r in caplog.records)
+
+        caplog.clear()
+        _warn_if_uncorrelated(Ctx(), bad1, bad2, sr, n)
+        assert any("weakly coherent" in r.message for r in caplog.records)
+
+    # standard-named data (hx/hy) still works after the change
+    std1 = _payload(src, src, names=("hx", "hy"))
+    std2 = _payload(src, src + 0.05 * rng.standard_normal(n), names=("hx", "hy"))
+    with caplog.at_level(logging.WARNING, logger="emptyui.align-test"):
+        caplog.clear()
+        _warn_if_uncorrelated(Ctx(), std1, std2, sr, n)
+        assert not any(r.levelname == "WARNING" for r in caplog.records)

@@ -10,6 +10,7 @@ from emptyui import Input, Node, Output, Param
 
 from .nomenclature import (
     KEYWORDS,
+    actual_to_standard,
     infer_keyword,
     is_electric_name,
     is_magnetic_name,
@@ -375,12 +376,22 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     degrade a remote-reference estimate — this catches that before the user
     looks at a rough TF.
     """
-    names1 = {str(c) for c in out1.dataset.data_vars}
-    names2 = {str(c) for c in out2.dataset.data_vars}
+    names1 = [str(c) for c in out1.dataset.data_vars]
+    names2 = [str(c) for c in out2.dataset.data_vars]
     # horizontal magnetic channels only — the vertical (hz) field is
     # naturally weakly coherent between stations (source-field geometry),
     # so checking it would false-alarm on healthy station pairs.
-    mags = [c for c in ("hx", "hy") if c in names1 and c in names2]
+    # Names are resolved through the nomenclature (hx->hx, bx->hx for
+    # lemi12, ...), NOT matched literally: LEMI data keeps its bx/by names,
+    # and the guard was built precisely for that pair (2026-09-11 review).
+    # Names are resolved through the nomenclature (hx->hx, bx->hx for
+    # lemi12, ...), NOT matched literally: LEMI data keeps its bx/by names,
+    # and the guard was built precisely for that pair (2026-09-11 review).
+    # Each station's keyword is inferred from its own channels (handles a
+    # standard-named local site paired with a LEMI-named remote).
+    std1 = {actual_to_standard(infer_keyword(names1), c): c for c in names1}
+    std2 = {actual_to_standard(infer_keyword(names2), c): c for c in names2}
+    mags = [std1[s] for s in ("hx", "hy") if s in std1 and s in std2]
     if not mags:
         return
     from scipy.signal import coherence

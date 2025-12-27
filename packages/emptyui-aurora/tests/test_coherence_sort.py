@@ -211,3 +211,40 @@ def test_node_execute_returns_table(tmp_path: Path):
     # are NaN, exactly like drop) — the good windows must survive
     assert np.isfinite(res["fc"][0]["ex"].values).any()
 
+
+
+def test_node_band_params_match_estimate_tf(tmp_path: Path):
+    """The sort's l2u banding must be identical to Estimate TF's when the
+    same min_bins_per_band/t_short are passed — previously the node
+    hard-coded min_bins_per_band=40 and had no t_short, silently banding
+    differently from a customized estimator (2026-09-11 review fix)."""
+    from emptyui_aurora._processing import compute_fc_levels, estimate_tf_levels
+    from emptyui_aurora.process import CoherenceSort
+
+    runts = synthetic_runts(synthetic_source(12), seed=12)
+    levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
+                               num_decimations=2, factor=4,
+                               num_samples_window=256, overlap=0.5,
+                               window_type="hamming")
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = CoherenceSort().execute(ctx, levels, periods_per_octave=4,
+                                  band_style="l2u", min_bins_per_band=40.0,
+                                  t_short=0.0)
+    rows = json.loads(Path(res["table"]["path"]).read_text())
+    sort_periods = {(r["decimation_level"], round(r["period"], 6)) for r in rows}
+
+    per = estimate_tf_levels(levels, ["hx", "hy"], ["ex", "ey"],
+                             estimator_engine="Robust", periods_per_octave=4,
+                             band_style="l2u", min_bins_per_band=40.0,
+                             t_short=0.0)
+    est_periods = {(lv, round(float(p), 6))
+                   for lv, e in per.items() for p in e["periods"]}
+    assert sort_periods == est_periods
+
+    # a head clip on the node removes the clipped bands from the diagnostics
+    res2 = CoherenceSort().execute(
+        RunContext(workspace=tmp_path, store=DataStore()), levels,
+        periods_per_octave=4, band_style="l2u", min_bins_per_band=40.0,
+        t_short=4.0)
+    rows2 = json.loads(Path(res2["table"]["path"]).read_text())
+    assert rows2 and all(r["period"] >= 4.0 for r in rows2)

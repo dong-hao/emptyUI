@@ -1287,6 +1287,14 @@ geometry as `Estimate TF`; `periods_per_octave` exposed, default 4).
   noise-floor bands with a warning). Defaults are loose — BGS long-period
   results must remain stable.
 
+**Addendum (2026-09-11, review §18.2):** `min_bins_per_band` and `t_short` are
+now exposed on the node (previously the sort hard-coded 40 / had no head clip),
+so its banding can match a customized Estimate TF exactly — a test asserts
+set-identical band centers under matching params. The statistic itself remains
+the per-window broadband heuristic (M4 #7); Estimate TF should inherit the
+banding parameters from an upstream Coherence Sort when one is connected
+(§18.2 design note).
+
 ### 16.3 USArray verification: SDG31 vs the official EMTF (SPUD) TF (2026-09-10)
 
 **Goal.** Pin the emptyUI MT processing chain (TS → FC → TF) against a
@@ -1473,3 +1481,112 @@ root and forces outputs into the workspace.
 6. ✅ Config plumbing + deployment guide: `emptyui/config.py` (env-first, kwargs
    win) + `docs/deployment.md` (gateway contract, nginx sub-path/WS example,
    data provisioning, module embedding).
+
+---
+
+## 18. Code review record (2026-09-11) — findings, fixes, and follow-ups
+
+A full codebase review (framework, MT plugins, frontend) verified the
+delivered milestones and surfaced a set of defects, all fixed with
+regression tests the same day unless noted. Status of record:
+
+### 18.1 Delivered fixes (batches 1–4)
+
+1. **Rotate TF registration** — `mth5.tf.rotate` was implemented and tested
+   but never registered in `emptyui-mth5/plugin.py` (unreachable from the
+   UI); the "delivered 2026-09-11" claims were premature by one wiring line.
+   Registered + registration test; the dead duplicate `register` in `tf.py`
+   removed.
+2. **Output-path confinement escape** — `PathPolicy._resolve_output` joined
+   relative `path_kind="out"` values without an under-workspace check, so
+   `../…` escaped the run workspace (§17.2). Inputs were already correct;
+   outputs now normalize + validate identically.
+3. **Registry robustness** — `rebuild()` swaps the node table atomically
+   (scratch registry → swap), so a run starting during a plugin toggle sees
+   the old or new table, never a partial one (the "serialized by the app
+   lock" docstring claim was wrong); disabled plugins register into a
+   scratch registry during discovery, so a node-type collision with an
+   enabled plugin no longer crashes order-dependently (re-enabling still
+   surfaces the conflict loudly); unknown node types fail the run with a
+   clean `ExecutionError` instead of a bare `AttributeError`.
+4. **Run lifecycle** — terminal run status is monotonic (`_merge_summary`):
+   a cancel racing a fast-completing run can no longer flap
+   cancelled→completed; WS clients disconnect in a `finally` on any exit
+   path.
+5. **Processing guards** — `merge_tf_levels` tolerates level payloads
+   without `Z_err` (zeros) and broadcasts scalar `Z_err`; the ComputeFC NaN
+   guard is scoped to the actually-used in/out channels (a NaN in an unused
+   auxiliary channel — e.g. LEMI temperature — no longer hard-fails the
+   node; NaN in a used channel still errors).
+6. **Align Runs coherence guard** — the long-period (64–1024 s) diagnostic
+   resolved magnetic channels by literal `hx/hy` names and therefore never
+   fired on LEMI data (`bx/by`) — exactly the data it was built for. It now
+   resolves both stations' channels through the nomenclature (per-station
+   keyword inference), including mixed standard/LEMI pairs.
+7. **Coherence Sort banding consistency** — the sort hard-coded
+   `min_bins_per_band=40` and had no `t_short`, so it could band
+   differently from a customized Estimate TF (see §16.2/§18.2). Both
+   params are now exposed on the node with the estimator's defaults, and a
+   test asserts set-identical band centers between the sort's diagnostics
+   and `estimate_tf_levels` under matching params.
+8. **Absolute-ohm anchor test** — the prior known-Z regressions used
+   abs=0.5 tolerances (a tens-of-percent global FC-normalization error
+   would pass). New analytic test: with E = Z·H per sample, every STFT bin
+   satisfies the relation individually and common-mode window scaling
+   cancels in Z, so recovery is exact up to noise (~1e-4 relative measured);
+   the test asserts ~1% — any FC-normalization regression now fails loudly.
+9. **Frontend** — radio/datalist DOM ids scoped per node instance;
+   workflow load validates the §6 envelope (format/version) and prunes
+   stale edges (missing nodes/ports); `meta.name` round-trips (no more
+   permanent `untitled.emptyui.json`); events arriving in the
+   reset→setRunId window are buffered and flushed instead of dropped (poll
+   dedupe key includes `cached`); the inherit auto-fill is idempotent (an
+   inherited value equal to the manifest default no longer re-triggers the
+   effect — the update loop is guarded by an actual-change filter);
+   "Run to here" disabled while a run is active.
+
+### 18.2 Coherence Sort vs. EMTF — two distinct inconsistencies
+
+The review separated two issues that the "not EMTF" note (§16.2) conflated:
+
+- **Banding mismatch (fixed, item 7 above)** — a parameter-plumbing bug,
+  not a statistics question.
+- **Statistic mismatch (open, M4 #7)** — emptyUI scores a *per-window*
+  multiple coherence over the band's frequency-bin ensemble; EMTF/BIRRP
+  compute coherence *per frequency* over the window ensemble. The two
+  statistics are transposed axes of the same bins×windows cube: they agree
+  qualitatively (BGS verification: T=11–30 s improves, long periods
+  stable) but cannot be reconciled by parameter tuning — a per-frequency
+  variant needs a different algorithm shape (per-frequency masks instead
+  of per-window √w weights) and a decision on how per-frequency masks
+  interact with aurora's RME_RR row pairing. aurora 0.6.2 itself has no
+  sample-level coherence sorting at all (it only logs coherence), so the
+  node is additive, not a deviation.
+
+**Design note (follow-up):** Estimate TF should **inherit its banding
+parameters from an upstream Coherence Sort when one is connected**
+(`band_style`, `periods_per_octave`, `min_bins_per_band`, `t_short`) via
+the §4 chain-walking `inherit` mechanism (downstream auto-fill from the
+connected sort node; explicit user choices on Estimate TF are never
+overridden). Today the two nodes are consistent by convention (identical
+defaults + matching params); the inherit wiring makes the consistency
+structural. Deferred as a small M4 item — do it together with (or before)
+M4 #7, since the per-frequency variant changes the parameter surface.
+
+### 18.3 Open items (deferred — need a design decision)
+
+- Default retention policy (TTL / cache size bounds) — currently unbounded
+  in local mode by design.
+- Electric-unit scaling is unconditional (×1e-6 mV/km→V/m); payloads
+  already in V/m are mis-scaled, and `e_dipole_length_m` on mV/km data
+  double-scales — needs a unit-aware convention (the magnetic path checks
+  payload units and is the model).
+- Plugin-embedded node viewers (the frontend special-cases
+  `core.display.preview_plot`/`view_table` bodies) — needs an extension
+  mechanism in the manifest schema.
+- `remote_reference` disabling is string-sniffed in `MTNode.tsx`
+  (duplicating the backend cascade) — remove once the cascade covers the
+  disabled UX.
+- RunTS start == 1980-01-01 epoch sentinel ambiguity
+  (`runs._run_time_info`); `SpectraToFCGroup` writes decimation level "0"
+  with sample-rate default 1.0.

@@ -156,3 +156,36 @@ def test_fluxgate_nt_always_converts(tmp_path):
     _, Z, _ = merge_tf_levels(per)
     ok = np.abs(Z[:, 0, 1]) > 1e-9
     assert np.median(Z[ok, 0, 1].real) == pytest.approx(3.0, abs=0.5)
+
+
+def test_impedance_absolute_scale_is_ohm_analytic(tmp_path):
+    """Sharp absolute-amplitude anchor for the 'impedance is in ohm' claim.
+
+    The prior regressions used abs=0.5 on unit-scale values — a global FC
+    normalization error of tens of percent would pass. Because E = Z @ H
+    holds per sample, every STFT bin satisfies it individually and the
+    common-mode window scaling cancels in Z, so the recovery is exact up to
+    the (small, non-biasing) noise: assert ~1% agreement.
+    """
+    rng = np.random.default_rng(21)
+    runts = _runts(*_field(rng, n=32768))
+    levels = compute_fc_levels(
+        runts, ["hx", "hy"], ["ex", "ey"],
+        num_decimations=2, factor=4, num_samples_window=256,
+        overlap=0.5, window_type="hamming", channel_nomenclature="default",
+    )
+    per = estimate_tf_levels(
+        levels, ["hx", "hy"], ["ex", "ey"], estimator_engine="OLS",
+        periods_per_octave=4, channel_nomenclature="default",
+    )
+    P, Z, Z_err = merge_tf_levels(per)
+    true = np.array([[1.0, 3.0], [-1.0, 4.0]])
+    ok = np.abs(Z).reshape(len(P), -1).max(axis=1) > 1e-9
+    for i in range(2):
+        for j in range(2):
+            assert np.median(Z[ok, i, j].real) == pytest.approx(
+                true[i, j], rel=0.01
+            ), (i, j)
+            # the relation is real-coefficient, same-phase: imag ~ 0
+            assert np.median(np.abs(Z[ok, i, j].imag)) < 0.05 * abs(true[i, j]) + 0.05
+    assert np.all(np.isfinite(Z_err)) and np.all(Z_err >= 0)

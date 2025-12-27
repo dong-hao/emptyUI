@@ -271,13 +271,29 @@ class CoherenceSort(Node):
                           "uniform grid (DESIGN.md §14.9). 'uniform' is "
                           "the uniform log2-grid partition with "
                           "merge-based level combination."),
+        Param("min_bins_per_band", "number", label="Min bins per band",
+              default=40.0, min=0,
+              description="Window-starvation coarsening threshold "
+                          "(DESIGN.md §14.9) — must match the 'Estimate "
+                          "TF' setting for the same banding: a level where "
+                          "any band has fewer than this many total samples "
+                          "(windows × band width) is rebuilt as a coarser "
+                          "uniform grid. 0 disables coarsening."),
+        Param("t_short", "number", label="Shortest period (s)",
+              default=0.0, min=0,
+              description="Head clip (DESIGN.md §14.9) — must match the "
+                          "'Estimate TF' setting for the same banding: "
+                          "bands shorter than this are not evaluated. 0 "
+                          "starts at the template's shortest band."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 mode: str = "weight", coherence_trim: bool = False,
                 periods_per_octave: int = 4,
-                band_style: str = "l2u") -> dict[str, Any]:
+                band_style: str = "l2u",
+                min_bins_per_band: float = 40.0,
+                t_short: float = 0.0) -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -291,6 +307,8 @@ class CoherenceSort(Node):
             mode=mode, trim=coherence_trim,
             periods_per_octave=periods_per_octave,
             band_style=band_style,
+            min_bins_per_band=min_bins_per_band,
+            t_short=t_short or None,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))

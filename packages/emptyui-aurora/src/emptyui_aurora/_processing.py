@@ -813,7 +813,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
                        trim=False, periods_per_octave=4, band_style="l2u",
-                       min_bins_per_band=40.0):
+                       min_bins_per_band=40.0, t_short=None):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
@@ -822,13 +822,16 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
     decimation level for the diagnostics table. For ``band_style="l2u"``
     the reference-template band table is derived once for the whole
     container (like :func:`estimate_tf_levels`) so the sort's banding
-    matches the subsequent ``Estimate TF`` call.
+    matches the subsequent ``Estimate TF`` call — pass the **same**
+    ``min_bins_per_band`` and ``t_short`` values as the estimator
+    (2026-09-11 review: these refine the l2u table and were previously
+    hard-coded/missing here, silently banding differently from Estimate TF).
     """
     bands_override = None
     style = _resolve_band_style(band_style)
     if style == "l2u":
         bands_override = _l2u_band_table(
-            levels, min_bins_per_band=min_bins_per_band)
+            levels, min_bins_per_band=min_bins_per_band, t_short=t_short)
     out_levels: dict[int, object] = {}
     out_ref: dict[int, object] = {} if ref_levels is not None else None
     rows: list[dict] = []
