@@ -1576,17 +1576,66 @@ M4 #7, since the per-frequency variant changes the parameter surface.
 ### 18.3 Open items (deferred — need a design decision)
 
 - Default retention policy (TTL / cache size bounds) — currently unbounded
-  in local mode by design.
-- Electric-unit scaling is unconditional (×1e-6 mV/km→V/m); payloads
-  already in V/m are mis-scaled, and `e_dipole_length_m` on mV/km data
-  double-scales — needs a unit-aware convention (the magnetic path checks
-  payload units and is the model).
+  in local mode by design (user decision 2026-09-12: TTL only for now; a
+  portable local disk cache is a later design).
+- ~~Electric-unit scaling~~ — **decided & delivered 2026-09-12, see §19**
+  (attr-aware electric path, modelled on the magnetic path).
 - Plugin-embedded node viewers (the frontend special-cases
-  `core.display.preview_plot`/`view_table` bodies) — needs an extension
-  mechanism in the manifest schema.
+  `core.display.preview_plot`/`view_table` bodies) — decided 2026-09-12:
+  generalize by **output port type** (any node emitting a `plot`/`table`
+  output gets the inline viewer automatically, backend-driven); not yet
+  implemented.
 - `remote_reference` disabling is string-sniffed in `MTNode.tsx`
   (duplicating the backend cascade) — remove once the cascade covers the
   disabled UX.
 - RunTS start == 1980-01-01 epoch sentinel ambiguity
   (`runs._run_time_info`); `SpectraToFCGroup` writes decimation level "0"
   with sample-rate default 1.0.
+
+---
+
+## 19. Unit-aware electric scaling (decided 2026-09-12, delivered)
+
+The review (§18.3) found the electric path scaled **unconditionally**
+×1e-6 (mV/km assumed) while the magnetic path checks the payload's unit
+attrs — payloads already in V/m were silently mis-scaled by 10⁶, and
+`e_dipole_length_m` on mV/km data double-scaled by dipole/1000. The
+Calibrate chain made this a live hazard: `RunTS.calibrate` rewrites each
+channel's units attr to `channel_response.units_in`
+(`get_calibrated_units`), so a calibration declaring a real unit
+transformation (e.g. counts → V/m) delivers V/m data that Compute FC then
+mis-scaled. Decision (user, 2026-09-12): **check attrs like the magnetic
+path**; unitless payloads keep the legacy behavior.
+
+Policy — `Compute FC` (`_electric_to_vm`, applied in `compute_fc` and
+`_normalize_channels`):
+
+- **`e_dipole_length_m` set** — the explicit raw-potential path (user
+  choice wins): `x · 1e-3 / dipole`, with a **warning** when the channel's
+  attrs canonicalize to mV/km (contradiction: the dipole scaling assumes a
+  raw mV potential — clear the param for field data).
+- **No dipole — scale by the channel's canonical unit attrs** (canonicalized
+  via mt_metadata's unit registry, `_canonical_unit`: `'mV/km'` →
+  "milliVolt per kilometer", `'V/m'` → "Volt per meter"):
+
+  | canonical attrs | action |
+  |---|---|
+  | milliVolt per kilometer | ×1e-6 (LEMI archives; legacy path) |
+  | Volt per meter | passthrough (already physical) |
+  | milliVolt per meter | ×1e-3 |
+  | milliVolt (raw potential) | **hard error**: set `e_dipole_length_m` (was a silent wrong ×1e-6) |
+  | unrecognized | warning + passthrough (never silently scale what cannot be interpreted) |
+  | no attrs (unitless) | ×1e-6 — legacy behavior (synthetic fixtures, core payloads; emptyui's LEMI reader writes mV/km attrs) |
+
+- The fc records `electric_scaling` in attrs ("mV/km -> V/m", "passthrough
+  (V/m)", "mV potential -> V/m (dipole)", "legacy (unitless, mV/km
+  assumed)", ...; deeper decimation levels: "level 0 (passed down)").
+
+Calibrate side: **no change needed** — `attach_filters` fills missing
+units with the archival default, so gain-correction FAPs (LEMI,
+`units_in == units_out`) keep the mV/km label after calibration (verified
+numerically by the SDG31 chain), and declared unit transformations are
+relabelled by `RunTS.calibrate` to `units_in`, which the attr-aware path
+honors. Backward compatibility: unitless payloads behave exactly as
+before — all fixtures and the USArray verification are unaffected
+(regression tests in `test_electric_units.py`).

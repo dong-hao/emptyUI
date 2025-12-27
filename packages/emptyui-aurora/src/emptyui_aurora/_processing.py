@@ -289,6 +289,7 @@ def compute_fc(
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
     fc_vars = {}
+    e_labels: set[str] = set()
     for comp in input_channels + output_channels:
         if comp not in channels:
             raise ValueError(
@@ -301,12 +302,8 @@ def compute_fc(
         elif is_magnetic_name(comp):  # vertical magnetic output (bz/hz) — tipper
             x = _magnetic_to_h(x, comp, b_to_h, units)  # same units as inputs
         elif is_electric_name(comp):  # electric output channel
-            if e_scale is not None:
-                # raw potential (mV) -> V/m via dipole length
-                x = x * e_scale
-            else:
-                # LEMI E in mV/km == uV/m == 1e-6 V/m
-                x = x * 1e-6
+            x, e_label = _electric_to_vm(x, comp, e_scale, units)
+            e_labels.add(e_label)
         # unknown output channel: leave units untouched
         f, t, z = stft(
             x, fs=sample_rate, nperseg=nperseg, noverlap=noverlap,
@@ -333,6 +330,7 @@ def compute_fc(
             "input_channels": ",".join(input_channels),
             "output_channels": ",".join(output_channels),
             "magnetic_unit": b_to_h and "b" or "h",
+            "electric_scaling": "; ".join(sorted(e_labels)) if e_labels else "none",
             "channel_nomenclature": keyword,
             "e_dipole_length_m": e_dipole_length_m or 0.0,
             "start_datetime": start_iso,
@@ -395,11 +393,11 @@ def compute_fc_levels(
     for level in range(num_decimations + 1):
         # normalize the raw data only once (level 0); deeper levels re-use the
         # already-normalized series passed down from the previous level.
-        norm = (
+        norm, e_scaling = (
             _normalize_channels(cur, input_channels, output_channels, b_to_h, e_scale,
                                 units)
             if level == 0
-            else cur
+            else (cur, "level 0 (passed down)")
         )
         f, t, fc_vars = _stft_channels(
             norm, cur_rate, num_samples_window, overlap, window_type,
@@ -425,6 +423,7 @@ def compute_fc_levels(
                 "input_channels": ",".join(input_channels),
                 "output_channels": ",".join(output_channels),
                 "magnetic_unit": b_to_h and "b" or "h",
+                "electric_scaling": e_scaling,
                 "channel_nomenclature": keyword,
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
                 "start_datetime": start_iso,
@@ -475,10 +474,91 @@ def _magnetic_to_h(x, comp, b_to_h, units):
     return x
 
 
+def _canonical_unit(u):
+    """Canonical mt_metadata unit name for a unit string, or None.
+
+    Uses mt_metadata's unit registry (``'mV/km'`` -> ``'milliVolt per
+    kilometer'``, ``'V/m'`` -> ``'Volt per meter'``); unknown strings come
+    back lowercased (the registry answers 'unknown' for them). Lazy import —
+    mt_metadata is plugin-tier, never a core dependency.
+    """
+    if not u:
+        return None
+    try:
+        from mt_metadata.common.units import get_unit_object
+
+        name = str(get_unit_object(str(u)).name)
+        if name.lower() != "unknown":
+            return name
+    except Exception:  # noqa: BLE001, S110 — registry unavailable: raw text
+        pass
+    return str(u).strip().lower()
+
+
+def _electric_to_vm(x, comp, e_scale, units):
+    """Convert an electric channel to V/m; returns ``(x_scaled, label)``.
+
+    Policy (DESIGN §19, review 2026-09-12 — modelled on _magnetic_to_h):
+
+    - ``e_scale`` set (``e_dipole_length_m``): the explicit raw-potential
+      path, ``x * 1e-3 / dipole`` — the data are assumed to be a raw mV
+      potential. A warning is logged when the channel's unit attrs say
+      mV/km (that combination double-scales by dipole/1000 — clear the
+      dipole param for field data).
+    - no dipole: scale according to the channel's unit attrs:
+        * ``milliVolt per kilometer`` -> x1e-6 (LEMI archives; legacy path)
+        * ``Volt per meter``          -> passthrough (already physical —
+          e.g. calibrated data; previously silently mis-scaled x1e6)
+        * ``milliVolt per meter``     -> x1e-3
+        * ``milliVolt`` (raw potential, no dipole) -> hard error: set the
+          dipole length (previously a silent wrong x1e-6)
+        * other unknown units -> warning + passthrough (never silently
+          scale what cannot be interpreted)
+        * no unit attrs -> x1e-6 (legacy unitless behavior: synthetic
+          fixtures and core payloads; emptyui's LEMI reader writes mV/km)
+    """
+    u = (_canonical_unit((units or {}).get(comp, "")) or "").lower()
+    if e_scale is not None:
+        if u and "per kilometer" in u:
+            _log.warning(
+                "electric channel '%s' carries unit attrs '%s' but "
+                "e_dipole_length_m is set: the dipole scaling assumes a raw "
+                "mV potential and will double-scale mV/km field data by "
+                "dipole/1000 — clear e_dipole_length_m for field data",
+                comp, (units or {}).get(comp),
+            )
+        return x * e_scale, "mV potential -> V/m (dipole)"
+    if not u:
+        return x * 1e-6, "legacy (unitless, mV/km assumed)"
+    if u == "millivolt per kilometer":
+        return x * 1e-6, "mV/km -> V/m"
+    if u == "volt per meter":
+        return x, "passthrough (V/m)"
+    if u == "millivolt per meter":
+        return x * 1e-3, "mV/m -> V/m"
+    if u == "millivolt":
+        raise ValueError(
+            f"electric channel '{comp}' carries unit attrs 'milliVolt' — a "
+            "raw potential, not a field: set e_dipole_length_m so Compute FC "
+            "can convert it to V/m (previously this was silently mis-scaled)"
+        )
+    _log.warning(
+        "electric channel '%s' carries unrecognized unit attrs '%s' — "
+        "assuming the data are already in V/m and leaving them untouched",
+        comp, (units or {}).get(comp),
+    )
+    return x, f"passthrough (unrecognized unit {(units or {}).get(comp)!r})"
+
+
 def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_scale,
                         units=None):
-    """Apply instrument unit normalization (B->H, mV->V/m) to a channel dict."""
+    """Apply instrument unit normalization (B->H, mV->V/m) to a channel dict.
+
+    Returns ``(out, electric_scaling)`` — the normalized dict and the
+    electric-scaling label for the fc attrs (DESIGN §19).
+    """
     out = {}
+    e_labels = set()
     for comp, x in channels.items():
         x = np.asarray(x, dtype=float)
         if comp in input_channels:
@@ -487,12 +567,10 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
             if is_magnetic_name(comp):  # vertical magnetic output (tipper)
                 x = _magnetic_to_h(x, comp, b_to_h, units)  # Bz -> Hz, same as inputs
             elif is_electric_name(comp):
-                if e_scale is not None:
-                    x = x * e_scale  # raw potential (mV) -> V/m
-                else:
-                    x = x * 1e-6  # LEMI E in mV/km == uV/m
+                x, label = _electric_to_vm(x, comp, e_scale, units)
+                e_labels.add(label)
         out[comp] = x
-    return out
+    return out, ("; ".join(sorted(e_labels)) if e_labels else "none")
 
 
 def _decimate_channels(channels, factor):

@@ -130,23 +130,25 @@ channels, the Align Runs coherence guard ignoring LEMI `bx/by` names, and
 the missing absolute-ohm amplitude test (analytic ~1% anchor); frontend:
 radio/datalist DOM id collisions, unvalidated workflow load (format/version
 + stale-edge pruning), the lost-event window at run start, the inherit
-auto-fill re-render loop, Run-to-here double-start, and the permanent
-`untitled` save name. Still open:
+  auto-fill re-render loop, Run-to-here double-start, and the permanent
+  `untitled` save name; post-review: unit-aware electric scaling
+  (DESIGN.md §19 — V/m payloads pass through, raw-potential data error
+  instead of silently mis-scaling, `electric_scaling` recorded in fc
+  attrs). Still open:
 
 - **Unbounded growth by default** — with `workspace_ttl_seconds=None` (local
   default) run state, event lists and temp workspaces are never cleaned; the
-  `NodeCache` pins payloads by reference and keeps stale entries.
-- **Unit-scaling asymmetry** — magnetic conversion checks payload units, but
-  the electric path unconditionally multiplies ×1e-6 (mV/km→V/m): payloads
-  already in V/m are silently mis-scaled; setting `e_dipole_length_m` on
-  mV/km data double-scales.
+  `NodeCache` pins payloads by reference and keeps stale entries. (Decision
+  2026-09-12: TTL only for now; a portable local disk cache is a later
+  design.)
 - **Coherence Sort statistic is a broadband QC heuristic** — per-window
   multiple coherence over the band's bin ensemble, not EMTF's per-frequency
   window-ensemble statistic; agrees qualitatively, not numerically
   (DESIGN.md §16.2, M4 #7).
 - **Frontend hardcodes node behavior** — viewer bodies switch on literal
   node types (`MTNode.tsx`), and `remote_reference` disabling duplicates the
-  backend cascade via string-sniffing (extension mechanism deferred).
+  backend cascade via string-sniffing (decision 2026-09-12: generalize
+  viewers by output port type; extension mechanism not yet implemented).
 
 ### M4 — community/advanced backlog (ranked by gain/effort; full detail in DESIGN.md §11)
 
