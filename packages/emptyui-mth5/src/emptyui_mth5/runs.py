@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 from emptyui import Input, Node, Output, Param
+from emptyui_core_nodes.types import is_unknown_start, warn_placeholder_start
 
 from .nomenclature import (
     KEYWORDS,
@@ -209,15 +210,23 @@ def _run_time_info(data):
 
     ``abs_start`` is a pandas Timestamp when the payload carries a real
     absolute start (mth5 RunTS GPS time index or a core TimeSeries with
-    ``start_datetime``). mt_timeseries uses the 1980 epoch for unknown starts,
-    which is treated as "no absolute time".
+    ``start_datetime``). Placeholder epochs (mt_timeseries' 1980 default and
+    the Unix 1970 default — common in digitized paper records) are treated
+    as "no absolute time", with a warning — never a rejection (old records
+    keep processing; see emptyui_core_nodes.types.UNKNOWN_EPOCH_STARTS).
     """
     ch, sr = _payload(data)
     if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
         abs_start = None
         try:
             ts = pd.Timestamp(str(getattr(data, "start", None)))
-            if ts != pd.Timestamp("1980-01-01T00:00:00"):
+            if is_unknown_start(ts):
+                warn_placeholder_start(
+                    getattr(data, "station_metadata", None) and
+                    str(data.station_metadata.id) or "run",
+                    ts.isoformat(),
+                )
+            else:
                 abs_start = ts
         except (TypeError, ValueError):
             pass

@@ -13,7 +13,11 @@ from itertools import pairwise
 
 import numpy as np
 import pandas as pd
-from emptyui_core_nodes.types import ensure_finite
+from emptyui_core_nodes.types import (
+    ensure_finite,
+    is_unknown_start,
+    warn_placeholder_start,
+)
 from emptyui_mth5.nomenclature import (
     STANDARD_INPUTS,
     STANDARD_OUTPUTS,
@@ -195,8 +199,24 @@ def _start_datetime(value):
     """Return a pandas Timestamp for an absolute start time, or None.
 
     Handles datetime / pandas Timestamp, an ISO string (core TimeSeries), and
-    mt_metadata MTime. Returns None for relative float-second starts.
+    mt_metadata MTime. Returns None for relative float-second starts AND for
+    placeholder epochs (1980 mt_timeseries default / 1970 Unix default —
+    digitized paper records): the fc time axis must not carry fake absolute
+    stamps (consistency with runs._run_time_info; old records are warned
+    about and degraded, never rejected).
     """
+    ts = _start_datetime_raw(value)
+    if ts is None:
+        return None
+    if is_unknown_start(ts):
+        warn_placeholder_start("record", ts.isoformat())
+        return None
+    return ts
+
+
+def _start_datetime_raw(value):
+    """Parse a start value to a pandas Timestamp (or None) — no sentinel
+    handling; see _start_datetime."""
     if value is None or isinstance(value, (int, float, np.number)):
         return None
     if isinstance(value, str):

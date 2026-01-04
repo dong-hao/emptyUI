@@ -7,6 +7,7 @@ mth5 RunTS/xarray happens with the mth5 plugin in M2; the port tag stays
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -124,4 +125,41 @@ def coerce_run(value):
         return value
     raise TypeError(
         f"cannot interpret ts.run value of type {type(value).__name__} as time series"
+    )
+
+
+#: Placeholder epochs that mean "the start time is unknown": mt_timeseries
+#: stamps unknown starts with its 1980 default epoch, and digitized paper
+#: records (the pre-digital MT era — Cagniard/Tikhonov pioneers) commonly
+#: carry the Unix 1970 epoch from the digitizing tool. A record starting at
+#: exactly one of these is treated as having NO absolute start — with a
+#: warning, never a rejection (old records must keep processing; MT data
+#: from the 1950s on is legitimate).
+UNKNOWN_EPOCH_STARTS = ("1980-01-01T00:00:00", "1970-01-01T00:00:00")
+
+_log = logging.getLogger("emptyui")
+
+
+def is_unknown_start(ts) -> bool:
+    """True when a timestamp equals a placeholder epoch (see
+    UNKNOWN_EPOCH_STARTS) — "unknown start", not a real acquisition time."""
+    import pandas as pd
+
+    try:
+        ts = pd.Timestamp(ts)
+    except (TypeError, ValueError):
+        return False
+    return any(ts == pd.Timestamp(e) for e in UNKNOWN_EPOCH_STARTS)
+
+
+def warn_placeholder_start(source: str, epoch: str) -> None:
+    """Warn that a record's start is a placeholder epoch (old/ambiguous
+    metadata) — absolute-time features (alignment, persistence) are
+    degraded, processing continues."""
+    _log.warning(
+        "%s starts at the placeholder epoch %s — treating it as 'start time "
+        "unknown' (old or partially digitized record?). Absolute-time "
+        "features (run alignment, FC persistence) are degraded; provide the "
+        "real acquisition start if available",
+        source, epoch,
     )

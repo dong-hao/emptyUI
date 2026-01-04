@@ -275,3 +275,45 @@ def test_coherence_guard_resolves_nomenclature_names(caplog):
         caplog.clear()
         _warn_if_uncorrelated(Ctx(), std1, std2, sr, n)
         assert not any(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_placeholder_epoch_start_warns_and_aligns_by_relative(caplog):
+    """A run stamped with a placeholder epoch (1980 mt_timeseries default /
+    1970 Unix default — digitized paper records) is treated as 'start
+    unknown' with a warning — never rejected — and alignment falls back to
+    relative offsets (review #10 bundle)."""
+    import logging
+
+    import xarray as xr
+    from emptyui_mth5.runs import _run_time_info
+
+    sr, n = 8.0, 2048
+
+    class P:
+        sample_rate = sr
+        start_datetime = ""
+
+        def __init__(self, start):
+            t = np.arange(n) / sr
+            self.dataset = xr.Dataset(
+                {"bx": ("time", np.sin(2 * np.pi * 0.5 * t) + 1.0),
+                 "by": ("time", np.sin(2 * np.pi * 1.3 * t) + 1.0),
+                 "e1": ("time", np.sin(2 * np.pi * 0.5 * t) + 2.0),
+                 "e2": ("time", np.sin(2 * np.pi * 1.3 * t) + 2.0)},
+                coords={"time": t},
+            )
+            self.start = start
+
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        for epoch in ("1980-01-01T00:00:00", "1970-01-01T00:00:00"):
+            _ch, s, a, _r = _run_time_info(P(epoch))
+            assert a is None  # placeholder → no absolute start
+            assert s == sr
+        assert sum("placeholder epoch" in r.message
+                   for r in caplog.records) == 2
+
+    # a genuinely old (1957, Cagniard-era) digitized start is preserved
+    import pandas as pd
+
+    _ch, _s, a, _r = _run_time_info(P(pd.Timestamp("1957-06-15T12:00:00")))
+    assert a == pd.Timestamp("1957-06-15T12:00:00")

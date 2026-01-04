@@ -6,12 +6,15 @@ These nodes convert between a spectra handle and the FC storage layer.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
 
 from .nomenclature import classify_channels, infer_keyword
 from .runs import _resolve_run, _resolve_station, _resolve_survey
+
+_log = logging.getLogger("emptyui")
 
 
 class FCGroupToSpectra(Node):
@@ -85,23 +88,47 @@ class SpectraToFCGroup(Node):
         Param("survey", "string", default=""),
         Param("station", "string", default=""),
         Param("run", "string", default=""),
-        Param("sample_rate", "number", label="Decimation-level sample rate", default=1.0),
+        Param("decimation_level", "integer", label="Decimation level", default=0,
+              min=0,
+              description="Level id written into the archive (default 0). "
+                          "Set it when persisting a decimated fc so the "
+                          "archive's decimation metadata is correct."),
+        Param("sample_rate", "number", label="Decimation-level sample rate",
+              default=None, optional=True,
+              description="Sample rate of THIS decimation level (Hz). Empty "
+                          "= derive from the fc's metadata (set by Compute "
+                          "FC); falls back to 1.0 with a warning when the "
+                          "fc carries no rate."),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
         "fc": {"survey": "survey", "station": "station", "run": "run"},
     }
 
     def execute(self, ctx, fc, mth5=None, survey: str = "",
-                station: str = "", run: str = "", sample_rate: float = 1.0) -> dict[str, Any]:
+                station: str = "", run: str = "",
+                decimation_level: int = 0, sample_rate: float | None = None
+                ) -> dict[str, Any]:
         if mth5 is None:
             raise ValueError("Spectra → FC requires an archive to write into")
+        if sample_rate is None:
+            # derive from the fc's metadata (Compute FC records it; the read
+            # node enriches read-back fcs with it) — never silently label a
+            # wrong rate
+            sample_rate = fc.attrs.get("sample_rate")
+            if sample_rate is None:
+                _log.warning(
+                    "fc carries no sample_rate metadata and none was set — "
+                    "writing decimation-level rate 1.0 (set 'Decimation-"
+                    "level sample rate' explicitly for correct archive "
+                    "metadata)")
+                sample_rate = 1.0
         # dual-layout resolution (modern surveys_group + legacy single-survey)
         survey_obj = _resolve_survey(mth5, survey)
         station_obj = _resolve_station(survey_obj, station)
         run = _resolve_run(station_obj, run).metadata.id if not run else run
         fc_group = station_obj.fourier_coefficients_group.add_fc_group(run)
-        dec = fc_group.add_decimation_level("0")
-        dec.from_xarray(fc, sample_rate_decimation_level=sample_rate)
+        dec = fc_group.add_decimation_level(f"{int(decimation_level)}")
+        dec.from_xarray(fc, sample_rate_decimation_level=float(sample_rate))
         return {}
 
 

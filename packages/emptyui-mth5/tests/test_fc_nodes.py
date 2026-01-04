@@ -69,3 +69,38 @@ def test_merge_runs_physical_mode_resolves_ids(writable_archive, tmp_path):
     res = MergeRuns().execute(ctx, selection, mth5=writable_archive, mode="physical")
     assert set(res["merged_run"].channels) >= {"ex", "ey", "hx", "hy"}
 
+
+
+def test_spectra_to_fc_group_metadata(writable_archive, tmp_path, caplog):
+    """Archive metadata hygiene (review #10 bundle): the decimation level id
+    and the level's sample rate are written from the fc's metadata / params —
+    never silently defaulted (the old code always wrote level "0" with rate
+    1.0)."""
+    from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = _fc_dataset()
+    fc.attrs["sample_rate"] = 8.0
+
+    # derived from the fc's metadata when the param is left empty
+    SpectraToFCGroup().execute(ctx, fc, mth5=writable_archive,
+                               decimation_level=2)
+    st = _resolve_station(_resolve_survey(writable_archive, ""), "")
+    fcg = st.fourier_coefficients_group.get_fc_group(
+        st.fourier_coefficients_group.groups_list[0])
+    dec2 = fcg.get_decimation_level("2")
+    assert dec2.channel_summary.sample_rate_decimation_level.to_list() == [8.0] * 4
+
+    # an explicit param overrides the fc metadata
+    SpectraToFCGroup().execute(ctx, fc, mth5=writable_archive,
+                               decimation_level=1, sample_rate=2.0)
+    dec1 = fcg.get_decimation_level("1")
+    assert dec1.channel_summary.sample_rate_decimation_level.to_list() == [2.0] * 4
+
+    # no attrs, no param: 1.0 fallback with a warning (never a rejection)
+    import logging as _logging
+
+    fc2 = _fc_dataset()  # no sample_rate attr
+    with caplog.at_level(_logging.WARNING, logger="emptyui"):
+        SpectraToFCGroup().execute(ctx, fc2, mth5=writable_archive)
+    assert any("no sample_rate metadata" in r.message for r in caplog.records)

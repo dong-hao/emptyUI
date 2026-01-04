@@ -1617,9 +1617,19 @@ the per-frequency variant together with M4 #7.
   through.
 - ~~`remote_reference` string-sniffing~~ — **delivered 2026-09-12**: the
   manifest-declared `enabled_when` rule (§4) replaced it.
-- RunTS start == 1980-01-01 epoch sentinel ambiguity
-  (`runs._run_time_info`); `SpectraToFCGroup` writes decimation level "0"
-  with sample-rate default 1.0.
+- ~~RunTS start == 1980-01-01 epoch sentinel ambiguity;
+  `SpectraToFCGroup` writes decimation level "0" with sample-rate default
+  1.0~~ — **delivered 2026-09-12 (metadata-hygiene bundle)**: a shared
+  placeholder-epoch helper (`UNKNOWN_EPOCH_STARTS` = 1980 mt_timeseries
+  default + 1970 Unix default, common in digitized paper records) is used
+  by `runs._run_time_info` AND aurora's `_start_datetime` (previously
+  inconsistent — fc time axes could carry fake 1980 stamps). **Old records
+  are never rejected**: a placeholder-epoch start is warned about and
+  degraded (no absolute-time alignment/persistence), and genuinely old
+  stamps (1950s digitized data) are preserved as-is. `Write FC` gains a
+  `decimation_level` param and derives the level's sample rate from the
+  fc's metadata, falling back to 1.0 with a warning — never silently
+  mislabeled.
 
 ---
 
