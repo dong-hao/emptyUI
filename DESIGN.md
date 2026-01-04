@@ -1432,6 +1432,11 @@ per-user without any ownership metadata.
 - **Output workspace (writable)**: per-run workspaces hold artifacts, plots and
   TF/export files — served through the artifact endpoints; nothing outside the
   output workspace is writable.
+- **Project directory (stable, designed §21)**: a user-designated writable
+  directory holding long-lived, relocatable state — the `.emptyui-cache/`
+  disk cache. Unlike the ephemeral per-run workspaces it survives restarts
+  and travels with the data folder; `EMPTYUI_PROJECT_DIR` designates it
+  (unset → disk cache disabled, in-memory tier unaffected).
 
 Local development keeps today's behavior (data root defaults to
 unrestricted/cwd); confinement activates only in remote mode. Manifests mark
@@ -1735,3 +1740,89 @@ manifests carry the usual tooltip/description/palette protocol. The
 coherency plot node lives in `emptyui-aurora` (imports the band machinery
 and the shared coherence helper); the PT node in `emptyui-mth5` (a
 tf-consuming Display node like Plot AppRes & Phase).
+
+---
+
+## 21. Portable local disk cache (designed 2026-09-12; NOT yet implemented)
+
+User decisions (2026-09-12): **workspace-embedded** (the cache travels with
+the data folder), **type-native serialization** (no pickle), **opt-in per
+node**, **GB + TTL combined** eviction. Two-tier design — the existing
+in-memory `NodeCache` stays the fast path; the disk tier adds restart
+persistence and relocation. Consequence of "workspace-embedded": the cache
+lives in a **user-designated project directory**, NOT the ephemeral per-run
+workspaces (TTL-cleaned) — a third storage realm (§17.2).
+
+### 21.1 Project directory
+
+`EMPTYUI_PROJECT_DIR` (env) / `create_app(project_dir=…)` — a stable,
+writable directory the user designates, typically where the survey data
+lives. Cache root: `<project_dir>/.emptyui-cache/`; copying/moving the
+project folder moves the cache with it. Unset → disk cache disabled (no
+silent `~` writes); the in-memory tier always works. A Settings-dialog
+field is a natural follow-up (MVP: env + kwarg).
+
+### 21.2 Key design (relocation-friendly)
+
+The executor's structural sha256 (§7) plus: payload-format version, node
+plugin version, emptyui version — version bumps invalidate cleanly.
+**File params become relocatable**: `_value_signature` uses the path
+relative to the data root/project dir (plus size, mtime) when the file
+lives under them; absolute stat signature otherwise (graceful degradation —
+entries involving outside files simply do not relocate).
+
+### 21.3 Layout & codecs (type-native, no pickle)
+
+```
+<project_dir>/.emptyui-cache/
+  entries/<key[:2]>/<key>/
+    meta.json          # node type/version, key inputs, created, atime,
+                       #   format versions
+    payload/…          # type-native: fc / ts.run → netCDF (per decimation
+                       #   level), tf → XML, tables/arrays → JSON / npz
+    artifacts/<stem><suffix>   # published files, centrally stored (also
+                               #   fixes the stale-artifact-path issue)
+```
+
+- Codec registry `{payload-kind → (save, load, suffix)}`; payload kinds not
+  in the registry → the node skips disk caching with a log note (graceful,
+  plugin-extensible later).
+- Atomic writes (temp dir + rename). Deserialize failures → invalidate +
+  re-execute (never half-serve — same contract as the in-memory artifact
+  existence check).
+
+### 21.4 Opt-in per node
+
+`disk_cache: ClassVar[bool] = False` on `Node`; `True` for ComputeFC and
+EstimateTF (the real recomputation cost: STFT/decimation + robust solves).
+Plots/tables stay memory-only. The manifest records the flag (properties
+panel: "disk-cached").
+
+### 21.5 Executor integration (two-tier)
+
+```
+mem.get(key) → hit: as today (by-reference payloads)
+disk.get(key) → hit: materialize a CacheEntry (deserialize payloads, touch
+              atime) → the same restore path as memory hits
+execute → mem.put(key, entry); if manifest.disk_cache: disk.put(key, entry)
+```
+
+Disk I/O failures log and continue — **the cache must never break a run**.
+Plugin disable clears the memory tier (as today); stale disk entries age
+out (keys embed the manifest version, so stale reuse is impossible).
+
+### 21.6 Eviction (GB + TTL combined)
+
+`EMPTYUI_CACHE_MAX_GB` (default 10) — LRU by atime until under budget;
+`EMPTYUI_CACHE_TTL_DAYS` (default 30). Cleanup pass on server start +
+piggybacked on the existing workspace-TTL cleanup loop; `DELETE
+/api/cache?tier=disk|memory|all`. Per-entry size accounting from file
+sizes (structural keys stay cheap — no content hashing).
+
+### 21.7 Tests (planned)
+
+Round-trip per codec (fc multi-level, tf, table); restart persistence (new
+Executor/server instance, same project dir → cached rerun); relocation
+(move project dir + data root to a renamed path → still hits); eviction
+(GB + TTL); corruption → re-execute; opt-in flag respected; injected I/O
+error → the cache never breaks a run.
