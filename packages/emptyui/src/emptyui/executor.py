@@ -163,6 +163,43 @@ class Executor:
         name = f"{rec['stem']}_{node_id}{rec['suffix']}"
         return workspace / name if workspace is not None else Path(name)
 
+    @staticmethod
+    def _coerce_param(param, value: Any) -> Any:
+        """Coerce a workflow param value to the manifest's declared type.
+
+        Workflows are JSON-borne and older saved documents (or free-text
+        combobox entries) can carry numbers as strings — a '10' string on a
+        number param reaches node code as str and breaks arithmetic
+        ('10' <= 0 TypeError, review 2026-09-12). number/integer params are
+        coerced (empty string -> None); select params whose declared
+        options are numeric are matched back by their string form. Unknown
+        formats raise a clean ValueError naming the param.
+        """
+        if value is None:
+            return None
+        widget = getattr(param, "widget", "")
+        if widget in ("number", "integer") and isinstance(value, str):
+            s = value.strip()
+            if s == "":
+                return None
+            try:
+                f = float(s)
+            except ValueError:
+                raise ValueError(
+                    f"param '{param.name}': '{value}' is not a number"
+                ) from None
+            return round(f) if widget == "integer" else f
+        if widget == "select" and isinstance(value, str):
+            opts = getattr(param, "options", ()) or ()
+            if opts and all(
+                isinstance(o, (int, float)) and not isinstance(o, bool)
+                for o in opts
+            ):
+                for o in opts:
+                    if str(o) == value.strip():
+                        return o
+        return value
+
     def run(
         self,
         workflow: Workflow,
@@ -314,31 +351,6 @@ class Executor:
 
             emit({"event": "node_status", "node": node_id, "status": "running"})
 
-            kwargs: dict[str, Any] = {}
-            for edge in workflow.edges:
-                if edge.target != node_id:
-                    continue
-                upstream = store.get(outputs_by_node[edge.source][edge.source_port])
-                kwargs[edge.target_port] = upstream.value
-
-            # optional inputs left unconnected arrive as None
-            for port in manifest.inputs:
-                if not port.required:
-                    kwargs.setdefault(port.name, None)
-
-            for param in manifest.params:
-                if param.name in wnode.params:
-                    kwargs[param.name] = wnode.params[param.name]
-                elif param.default is not None:
-                    kwargs.setdefault(param.name, param.default)
-
-            # remote-mode path confinement (§17.2): inputs stay inside the
-            # data root, outputs resolve into this run's workspace
-            if data_root is not None:
-                kwargs = PathPolicy(data_root, workspace).resolve_params(
-                    manifest, kwargs
-                )
-
             ctx = RunContext(
                 workspace=workspace,
                 store=store,
@@ -348,6 +360,31 @@ class Executor:
                 ),
             )
             try:
+                kwargs: dict[str, Any] = {}
+                for edge in workflow.edges:
+                    if edge.target != node_id:
+                        continue
+                    upstream = store.get(outputs_by_node[edge.source][edge.source_port])
+                    kwargs[edge.target_port] = upstream.value
+
+                # optional inputs left unconnected arrive as None
+                for port in manifest.inputs:
+                    if not port.required:
+                        kwargs.setdefault(port.name, None)
+
+                for param in manifest.params:
+                    if param.name in wnode.params:
+                        kwargs[param.name] = self._coerce_param(
+                            param, wnode.params[param.name])
+                    elif param.default is not None:
+                        kwargs.setdefault(param.name, param.default)
+
+                # remote-mode path confinement (§17.2): inputs stay inside
+                # the data root, outputs resolve into this run's workspace
+                if data_root is not None:
+                    kwargs = PathPolicy(data_root, workspace).resolve_params(
+                        manifest, kwargs
+                    )
                 result = manifest.execute(ctx, **kwargs)
             except Exception as exc:
                 emit(

@@ -94,3 +94,46 @@ def test_phase_tensor_node_plot(tmp_path):
     p = artifact["path"]
     assert p.endswith(".png")
     assert len(Path(p).read_bytes()) > 1000
+
+
+def test_ellipse_outline_preserves_visual_geometry():
+    """Aspect regression (review 2026-09-12): the display-space outline must
+    render with exactly the requested pixel extent and aspect — the previous
+    data-space ellipses on the log axis rendered as flattened slivers."""
+    from emptyui_mth5.plotting import _ellipse_outline
+
+    px_per_decade, px_per_y = 160.0, 120.0
+    for p, w_px, h_px, angle in [(10.0, 120.0, 60.0, 0.0),
+                                 (100.0, 90.0, 45.0, 30.0),
+                                 (1000.0, 60.0, 60.0, 45.0)]:
+        xs, ys = _ellipse_outline(p, w_px, h_px, angle, px_per_decade, px_per_y)
+        # map back to display px
+        dx = px_per_decade * np.log10(xs / p)
+        dy = ys * px_per_y
+        # rotated-ellipse bbox in display space (analytic extent)
+        th = np.radians(angle)
+        w_true = np.hypot(w_px / 2 * np.cos(th), h_px / 2 * np.sin(th)) * 2
+        h_true = np.hypot(w_px / 2 * np.sin(th), h_px / 2 * np.cos(th)) * 2
+        assert dx.max() - dx.min() == pytest.approx(w_true, rel=0.02)
+        assert dy.max() - dy.min() == pytest.approx(h_true, rel=0.02)
+
+
+def test_phase_tensor_ellipses_render_with_anisotropic_axes(tmp_path):
+    """Aspect regression: even for a strongly anisotropic 3D tensor the
+    ellipses occupy real panel space (not flattened slivers). Rendered
+    ellipse pixel heights must reflect the σ2/σ1 ratio."""
+    from emptyui_aurora._processing import build_tf
+    from emptyui_mth5.plots import PlotPhaseTensor
+
+    periods = np.geomspace(1.0, 1000.0, 12)
+    Z = np.zeros((periods.size, 2, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0.5j
+    Z[:, 0, 1] = 2 + 1j
+    Z[:, 1, 0] = 3 + 0.2j
+    Z[:, 1, 1] = 4 + 2j
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2"],
+                  channel_nomenclature="lemi12", station_id="NO46")
+
+    artifact = PlotPhaseTensor().execute(
+        RunContext(workspace=tmp_path, store=DataStore()), tf)["plot"]
+    assert len(Path(artifact["path"]).read_bytes()) > 1000

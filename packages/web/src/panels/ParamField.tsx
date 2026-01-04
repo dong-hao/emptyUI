@@ -29,7 +29,9 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
   if (selectOptions && selectOptions.length > 0) {
     // Editable combobox (datalist): shows the upstream-provided options as
     // suggestions while remaining fully typeable, so an inherited value is a
-    // convenience rather than a lock-in.
+    // convenience rather than a lock-in. The free-text entry must be coerced
+    // back to the param's declared type — a raw string here used to break
+    // number params downstream ('10' <= 0 TypeError).
     const listId = `dl-${domScope}-${param.name}`;
     const opts = Array.from(
       new Set([
@@ -37,6 +39,12 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         ...(value === null || value === undefined ? [] : [String(value)]),
       ]),
     );
+    const coerce = (raw: string) => {
+      if (param.widget === "number" || param.widget === "integer") {
+        return raw.trim() === "" ? null : Number(raw);
+      }
+      return raw;
+    };
     field = (
       <>
         <input
@@ -44,7 +52,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
           value={str}
           disabled={disabled}
           placeholder={param.placeholder}
-          onChange={(e) => set(e.target.value)}
+          onChange={(e) => set(coerce(e.target.value))}
         />
         <datalist id={listId}>
           {opts.map((o) => (

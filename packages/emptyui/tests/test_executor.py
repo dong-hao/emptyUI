@@ -120,3 +120,91 @@ def test_unknown_node_type_fails_cleanly():
     )
     with pytest.raises(ExecutionError, match="unknown node type"):
         Executor(reg).run(workflow, emit=lambda e: None)
+
+
+def test_string_number_params_are_coerced():
+    """Old saved workflows (or free-text combobox entries) can carry numbers
+    as strings — the executor coerces to the manifest's declared type before
+    execute ('10' on a number param used to reach node code as str and
+    break arithmetic, review 2026-09-12)."""
+    from emptyui import Node, Output, Param
+
+    reg = Registry()
+    seen = {}
+
+    class Num(Node):
+        type = "test.num"
+        outputs = (Output("ok", "any"),)
+        params = (
+            Param("factor", "number", default=2.0),
+            Param("levels", "integer", default=1),
+            Param("unit", "select", options=(1, 4, 8), default=4),
+        )
+
+        def execute(self, ctx, factor=2.0, levels=1, unit=4):
+            seen["factor"] = factor
+            seen["levels"] = levels
+            seen["unit"] = unit
+            return {"ok": True}
+
+    reg.add(Num)
+    workflow = Workflow(
+        nodes=[WorkflowNode(id="n1", type="test.num", params={
+            "factor": "10", "levels": "3", "unit": "8", "junk": "x",
+        })],
+        edges=[],
+    )
+    Executor(reg).run(workflow, emit=lambda e: None)
+    assert seen["factor"] == 10.0 and not isinstance(seen["factor"], str)
+    assert seen["levels"] == 3 and isinstance(seen["levels"], int)
+    assert seen["unit"] == 8  # numeric select matched back by string form
+
+
+def test_string_number_param_empty_string_becomes_none():
+    from emptyui import Node, Output, Param
+
+    reg = Registry()
+    seen = {}
+
+    class Num(Node):
+        type = "test.num2"
+        outputs = (Output("ok", "any"),)
+        params = (Param("dipole", "number", default=None, optional=True),)
+
+        def execute(self, ctx, dipole=None):
+            seen["dipole"] = dipole
+            return {"ok": True}
+
+    reg.add(Num)
+    workflow = Workflow(
+        nodes=[WorkflowNode(id="n1", type="test.num2", params={"dipole": ""})],
+        edges=[],
+    )
+    Executor(reg).run(workflow, emit=lambda e: None)
+    assert seen["dipole"] is None
+
+
+def test_string_number_param_invalid_raises_clean_error():
+    import pytest
+
+    from emptyui import Node, Param
+    from emptyui.executor import ExecutionError
+
+    reg = Registry()
+
+    class Num(Node):
+        type = "test.num3"
+        inputs = ()
+        outputs = ()
+        params = (Param("factor", "number", default=2.0),)
+
+        def execute(self, ctx, factor=2.0):
+            return {}
+
+    reg.add(Num)
+    workflow = Workflow(
+        nodes=[WorkflowNode(id="n1", type="test.num3", params={"factor": "ten"})],
+        edges=[],
+    )
+    with pytest.raises(ExecutionError, match="'factor'"):
+        Executor(reg).run(workflow, emit=lambda e: None)

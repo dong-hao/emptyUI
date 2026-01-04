@@ -365,18 +365,37 @@ def _impedance_matrices(tf):
     return period, z
 
 
+def _ellipse_outline(p, w_px, h_px, angle_deg, px_per_decade, px_per_y, n=72):
+    """Ellipse outline in data coords, constructed in *display* space.
+
+    On a log x-axis a data-space ellipse cannot be rotated correctly: the
+    data-space path is log-warped (its huge data-space half-width rotates
+    into the y-extent — the flattened-sliver bug). Instead sample the
+    ellipse in display pixels (x = decade offsets, y linear), rotate
+    there, and map back: ``x_data = p·10^(dx/px_per_decade)``.
+    Returns (x_data, y_data) polygon vertices.
+    """
+    t = np.linspace(0.0, 2.0 * np.pi, n)
+    xs = 0.5 * w_px * np.cos(t)
+    ys = 0.5 * h_px * np.sin(t)
+    th = np.radians(angle_deg)
+    xr = xs * np.cos(th) - ys * np.sin(th)
+    yr = xs * np.sin(th) + ys * np.cos(th)
+    return p * 10.0 ** (xr / px_per_decade), yr / px_per_y
+
+
 def plot_phase_tensor(tf, path):
     """Render the Caldwell-style phase-tensor figure (DESIGN §20.2).
 
     PT ellipses vs period: the image ellipse of Φ = Re(Z)⁻¹·Im(Z) at each
     period (semi-axes scaled by the largest σ1 so the biggest ellipse fits
-    the panel; relative sizes preserved), principal orientation from the
-    PT azimuth, fill color = skew (Caldwell β, colorbar) — the standard
-    3D-structure indicator. No PT error bars in this MVP (Z_err → PT
-    covariance propagation is nontrivial; §20.2).
+    the panel; relative sizes and aspect preserved), principal orientation
+    from the PT azimuth, fill color = skew (Caldwell β, colorbar) — the
+    standard 3D-structure indicator. Ellipses are constructed in display
+    space so the log x-axis cannot distort them (_ellipse_outline). No PT
+    error bars in this MVP (Z_err → PT covariance propagation is
+    nontrivial; §20.2).
     """
-    from matplotlib.patches import Ellipse
-
     from .phase_tensor import phase_tensor, pt_ellipse_params
 
     period, z = _impedance_matrices(tf)
@@ -403,17 +422,13 @@ def plot_phase_tensor(tf, path):
     norm = plt.Normalize(vmin=-vmax, vmax=vmax)
 
     x_min, x_max = _decade_limits(period_ok)
+    y_span = 2.7
     ax.set_xlim(x_min, x_max)
-    ax.set_ylim(-1.35, 1.35)
+    ax.set_ylim(-y_span / 2, y_span / 2)
     ax.set_xscale("log")
     ax.set_xlabel("Period (secs)")
     ax.set_ylabel("Phase tensor (normalized)")
     ax.set_yticks([-1, 0, 1])
-    for p, w, h, angle, sk in zip(period_ok, s1_ok, s2_ok, az_ok, skew_ok):
-        ax.add_patch(Ellipse(
-            (p, 0.0), width=2.0 * (w / scale), height=2.0 * (h / scale),
-            angle=angle, facecolor=cmap(norm(sk)), edgecolor="0.25",
-            linewidth=0.7, alpha=0.85))
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     cbar = fig.colorbar(sm, ax=ax, pad=0.02, fraction=0.05)
     cbar.set_label(r"Skew $\beta$ (deg)", fontsize=9)
@@ -424,6 +439,20 @@ def plot_phase_tensor(tf, path):
         fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
                  style="italic", color="0.3")
     fig.tight_layout(rect=(0, 0.02, 1, 1))
+
+    # measure the laid-out axes: pixels per decade (log x) and per y-unit
+    fig.canvas.draw()
+    bbox = ax.get_window_extent()
+    px_per_decade = bbox.width / (np.log10(x_max) - np.log10(x_min))
+    px_per_y = bbox.height / y_span
+    # the largest ellipse spans 80% of the panel height
+    unit = 0.8 * bbox.height / scale  # pixels per σ unit
+
+    for p, w, h, angle, sk in zip(period_ok, s1_ok, s2_ok, az_ok, skew_ok):
+        xs, ys = _ellipse_outline(
+            p, w * unit, h * unit, angle, px_per_decade, px_per_y)
+        ax.fill(xs, ys, facecolor=cmap(norm(sk)), edgecolor="0.25",
+                linewidth=0.7, alpha=0.85, zorder=2)
     fig.savefig(path, dpi=DPI, bbox_inches="tight",
                 metadata={"Software": "emptyUI", "Title": station_title(tf)})
     plt.close(fig)

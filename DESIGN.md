@@ -1547,15 +1547,27 @@ regression tests the same day unless noted. Status of record:
    satisfies the relation individually and common-mode window scaling
    cancels in Z, so recovery is exact up to noise (~1e-4 relative measured);
    the test asserts ~1% — any FC-normalization regression now fails loudly.
-9. **Frontend** — radio/datalist DOM ids scoped per node instance;
-   workflow load validates the §6 envelope (format/version) and prunes
-   stale edges (missing nodes/ports); `meta.name` round-trips (no more
-   permanent `untitled.emptyui.json`); events arriving in the
-   reset→setRunId window are buffered and flushed instead of dropped (poll
-   dedupe key includes `cached`); the inherit auto-fill is idempotent (an
-   inherited value equal to the manifest default no longer re-triggers the
-   effect — the update loop is guarded by an actual-change filter);
-   "Run to here" disabled while a run is active.
+9. **Frontend** — radio/datalist DOM ids scoped per node instance; workflow
+   load validates the §6 envelope (format/version) and prunes stale edges
+   (missing nodes/ports); `meta.name` round-trips (no more permanent
+   `untitled.emptyui.json`); events arriving in the reset→setRunId window
+   are buffered and flushed instead of dropped (poll dedupe key includes
+   `cached`); the inherit auto-fill is idempotent (an inherited value equal
+   to the manifest default no longer re-triggers the effect — the update
+   loop is guarded by an actual-change filter); "Run to here" disabled
+   while a run is active.
+10. **Post-review browser-testing fixes (2026-09-12)** — (a) **string
+   number params**: inheritable number params render as free-text
+   comboboxes whose raw string entries ('10') reached node code as str
+   and broke arithmetic (`'10' <= 0` TypeError on `t_short`); the
+   executor now coerces number/integer (+ numeric select) params to the
+   manifest's declared type (empty string → None, clean error naming the
+   param) — healing old saved documents — and the combobox coerces
+   client-side too; (b) **phase-tensor ellipses rendered flattened**:
+   data-space ellipses on the log-period axis are log-warped and their
+   rotation mixes the huge data-space half-width into the y-extent;
+   ellipses are now constructed in *display* space and mapped back
+   (`_ellipse_outline`), preserving aspect/orientation exactly.
 
 ### 18.2 Coherence Sort vs. EMTF — two distinct inconsistencies
 
