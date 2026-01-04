@@ -15,6 +15,7 @@ packages/web/dist/
 .DS_Store
 .pytest_cache/
 .ruff_cache/
+.serena/
 
 # Local notes / scratch
 prompt.md
