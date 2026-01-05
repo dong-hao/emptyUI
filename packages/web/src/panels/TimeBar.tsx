@@ -1,0 +1,128 @@
+/**
+ * Time-selector bar (DESIGN.md §23.4): a horizontal acquisition bar whose
+ * length spans the upstream ts payload's extent, with two draggable handles
+ * sandwiching the selected time slot. Synced bidirectionally with the
+ * paired Start/End edit boxes — which are the node's own `start`/`end`
+ * string params (the bar only writes through their onChange).
+ *
+ * Guards (mirroring the server-side ones): handles stay within the record
+ * extent, cannot cross, and the slot is kept > 1 s (the server rejects
+ * slots ≤ 1 s; boxes have second resolution, so the clamp keeps ≥ 2 s).
+ *
+ * Extent may be absolute (epoch seconds — ISO GMT display) or relative
+ * (bare seconds display), mirroring the `payload` run-event summary.
+ */
+
+const MIN_GAP_S = 2.0; // > 1 s at second resolution
+
+export interface TimeExtent {
+  /** seconds — epoch seconds when absolute, else relative to series start */
+  startSec: number;
+  endSec: number;
+  absolute: boolean;
+}
+
+/** "2023-06-01T12:00:00" (param) → epoch seconds (UTC). null = unparsable */
+export function parseIsoGmt(value: string): number | null {
+  const t = Date.parse(`${value.trim().replace(" ", "T")}Z`);
+  return Number.isNaN(t) ? null : t / 1000;
+}
+
+/** epoch seconds → "YYYY-MM-DD HH:MM:SS" (UTC) */
+export function fmtIsoGmt(epochSec: number): string {
+  const d = new Date(epochSec * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  );
+}
+
+/** param value → seconds within the extent; null = empty/unparsable */
+function parseBound(
+  value: string,
+  extent: TimeExtent,
+  which: "start" | "end",
+): number | null {
+  const text = (value ?? "").trim();
+  if (!text) return which === "start" ? extent.startSec : extent.endSec;
+  if (extent.absolute) {
+    const t = parseIsoGmt(text);
+    if (t !== null) return t;
+  }
+  const rel = Number(text);
+  return Number.isFinite(rel) ? rel : null;
+}
+
+function fmtBound(sec: number, extent: TimeExtent): string {
+  return extent.absolute ? fmtIsoGmt(sec) : String(Math.round(sec * 1000) / 1000);
+}
+
+interface TimeBarProps {
+  extent: TimeExtent;
+  startValue: string;
+  endValue: string;
+  onChange: (which: "start" | "end", value: string) => void;
+}
+
+export function TimeBar({ extent, startValue, endValue, onChange }: TimeBarProps) {
+  const start = parseBound(startValue, extent, "start");
+  const end = parseBound(endValue, extent, "end");
+  if (start === null || end === null || end <= start) return null;
+
+  const span = extent.endSec - extent.startSec;
+  // display clamp: a box value outside the extent draws at the track edge
+  // (the server clamps the actual selection with a warning)
+  const frac = (t: number) =>
+    Math.min(100, Math.max(0, ((t - extent.startSec) / span) * 100));
+
+  const drag = (which: "start" | "end") => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const track = e.currentTarget.parentElement;
+    if (!track) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const rect = track.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+      let t = extent.startSec + f * span;
+      const other = which === "start" ? end : start;
+      if (which === "start") t = Math.min(t, other - MIN_GAP_S);
+      else t = Math.max(t, other + MIN_GAP_S);
+      t = Math.min(extent.endSec, Math.max(extent.startSec, t));
+      onChange(which, fmtBound(t, extent));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  return (
+    <div className="time-bar nodrag nopan">
+      <div className="time-bar-track">
+        <div
+          className="time-bar-sel"
+          style={{ left: `${frac(start)}%`, width: `${frac(end) - frac(start)}%` }}
+        />
+        <div
+          className="time-bar-handle"
+          style={{ left: `calc(${frac(start)}% - 3px)` }}
+          title={`start ${fmtBound(start, extent)}`}
+          onPointerDown={drag("start")}
+        />
+        <div
+          className="time-bar-handle"
+          style={{ left: `calc(${frac(end)}% - 3px)` }}
+          title={`end ${fmtBound(end, extent)}`}
+          onPointerDown={drag("end")}
+        />
+      </div>
+      <div className="time-bar-ticks">
+        <span>{fmtBound(extent.startSec, extent)}</span>
+        <span>{fmtBound(extent.endSec, extent)}</span>
+      </div>
+    </div>
+  );
+}

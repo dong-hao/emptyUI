@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { PayloadSummary } from "../api/client";
 
 export interface ArtifactInfo {
   id: string;
@@ -17,11 +18,16 @@ export interface NodeRunState {
   cached?: boolean;
 }
 
+/** payload summaries per node per output port (DESIGN.md §23.4) — e.g. the
+ *  time extent a `ts.run` payload covers, driving the time-selector bar. */
+export type PayloadMap = Record<string, Record<string, PayloadSummary>>;
+
 interface RunState {
   runId: string | null;
   runStatus: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled";
   nodeStates: Record<string, NodeRunState>;
   artifacts: ArtifactInfo[];
+  payloads: PayloadMap;
   /** Events that arrived while runId was still null (between run creation
    *  and setRunId) — flushed by setRunId, dropped by reset. Capped. */
   pending: Record<string, unknown>[];
@@ -36,9 +42,16 @@ export const useRun = create<RunState>((set) => ({
   runStatus: "idle",
   nodeStates: {},
   artifacts: [],
+  payloads: {},
   pending: [],
   setRunId: (id) => {
-    set({ runId: id, runStatus: id ? "queued" : "idle", nodeStates: {}, artifacts: [] });
+    set({
+      runId: id,
+      runStatus: id ? "queued" : "idle",
+      nodeStates: {},
+      artifacts: [],
+      payloads: {},
+    });
     // flush events that arrived before the id was known (they were buffered
     // precisely for this moment); the run_id filter drops foreign ones
     const buffered = useRun.getState().pending;
@@ -104,11 +117,24 @@ export const useRun = create<RunState>((set) => ({
           };
         });
         break;
+      case "payload": {
+        // time-series extent summary (§23.4) — last run wins (poll replays
+        // can repeat it; same summary, so overwrite is harmless)
+        const node = event.node as string;
+        const port = event.port as string;
+        set((s) => ({
+          payloads: {
+            ...s.payloads,
+            [node]: { ...(s.payloads[node] ?? {}), [port]: event.summary as PayloadSummary },
+          },
+        }));
+        break;
+      }
       case "run_finished":
         set({ runStatus: event.status as RunState["runStatus"] });
         break;
     }
   },
   reset: () =>
-    set({ runId: null, runStatus: "idle", nodeStates: {}, artifacts: [], pending: [] }),
+    set({ runId: null, runStatus: "idle", nodeStates: {}, artifacts: [], payloads: {}, pending: [] }),
 }));

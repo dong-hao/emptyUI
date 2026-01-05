@@ -350,7 +350,7 @@ export function deserializeWorkflow(
         n.type === "core.display.preview_plot" ||
         n.type === "core.display.view_table"
           ? { width: 340, height: 260 }
-          : { width: 250, height: "auto" },
+          : { width: 280, height: "auto" },
     };
   });
   const nodeIds = new Set(nodes.map((n) => n.id));

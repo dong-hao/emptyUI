@@ -6,7 +6,27 @@ import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
 import { ParamField } from "../panels/ParamField";
+import { parseIsoGmt, TimeBar, type TimeExtent } from "../panels/TimeBar";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
+
+/** payload summary → time-bar extent (epoch/relative seconds); null when
+ *  absent or degenerate (DESIGN.md §23.4). */
+function toExtent(s: {
+  start: string | number;
+  end: string | number;
+  absolute: boolean;
+}): TimeExtent | null {
+  if (s.absolute) {
+    const a = parseIsoGmt(String(s.start));
+    const b = parseIsoGmt(String(s.end));
+    if (a === null || b === null || b <= a) return null;
+    return { startSec: a, endSec: b, absolute: true };
+  }
+  const a = Number(s.start);
+  const b = Number(s.end);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+  return { startSec: a, endSec: b, absolute: false };
+}
 
 /** Resolve the artifact flowing into a Preview node's `plot` input:
  *  input edge → source node + source handle → matching artifact. */
@@ -148,6 +168,31 @@ export function MTNode({ id, data, selected }: NodeProps) {
     return ew.values.includes(String(current));
   };
 
+  // Time-selector bars (§23.4): params bound via `time_bar` are grouped by
+  // their input port (start/end pair per port) and rendered as a draggable
+  // acquisition bar once the upstream run streamed the payload extent.
+  const payloads = useRun((s) => s.payloads);
+  const barGroups = useMemo(() => {
+    const groups: { port: string; startP: ParamSpec; endP?: ParamSpec }[] = [];
+    for (const p of params) {
+      if (!p.time_bar) continue;
+      let g = groups.find((x) => x.port === p.time_bar);
+      if (!g) {
+        g = { port: p.time_bar, startP: p };
+        groups.push(g);
+      } else if (!g.endP) {
+        g.endP = p;
+      }
+    }
+    return groups;
+  }, [params]);
+  const barExtent = (port: string): TimeExtent | null => {
+    const edge = edges.find((e) => e.target === id && e.targetHandle === port);
+    if (!edge) return null;
+    const s = payloads[edge.source]?.[edge.sourceHandle ?? ""];
+    return s ? toExtent(s) : null;
+  };
+
   return (
     <div className={`mt-node${selected ? " selected" : ""} status-${runState?.status ?? "idle"}`}>
       <NodeResizer
@@ -189,6 +234,24 @@ export function MTNode({ id, data, selected }: NodeProps) {
                 instanceId={id}
                 disabled={!isParamEnabled(p)}
                 selectOptions={sel}
+              />
+            );
+          })}
+          {/* time-selector bars (§23.4): one per bound input port, rendered
+              under the paired Start/End boxes once the upstream has run and
+              streamed its extent */}
+          {barGroups.map((g) => {
+            const extent = barExtent(g.port);
+            if (!extent || !g.endP) return null;
+            return (
+              <TimeBar
+                key={g.port}
+                extent={extent}
+                startValue={String(d.params[g.startP.name] ?? "")}
+                endValue={String(d.params[g.endP.name] ?? "")}
+                onChange={(which, v) =>
+                  setParam(which === "start" ? g.startP.name : g.endP!.name, v)
+                }
               />
             );
           })}

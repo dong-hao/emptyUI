@@ -27,6 +27,19 @@ export interface ParamSpec {
   enabled_when?: { param: string; values: string[] } | null;
   /** Split inherited comma-separated candidates into individual options. */
   split_inherited?: boolean;
+  /** Time-selector bar binding (DESIGN.md §23.4): input port name whose
+   *  payload summary (extent, via `payload` run events) drives the bar. */
+  time_bar?: string;
+}
+
+/** Extent summary of a ts payload, streamed via `payload` run events
+ *  (DESIGN.md §23.4): absolute ISO bounds (UTC) or relative seconds. */
+export interface PayloadSummary {
+  start: string | number;
+  end: string | number;
+  absolute: boolean;
+  sample_rate: number;
+  channels: string[];
 }
 
 /** inherit: input port -> { targetParam: upstreamParam } */

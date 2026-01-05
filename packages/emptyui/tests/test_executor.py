@@ -208,3 +208,154 @@ def test_string_number_param_invalid_raises_clean_error():
     )
     with pytest.raises(ExecutionError, match="'factor'"):
         Executor(reg).run(workflow, emit=lambda e: None)
+
+
+def test_payload_summary_events_for_ts_outputs():
+    """ts.run outputs stream a lightweight extent summary (DESIGN §23.4)."""
+    from emptyui_core_nodes.types import TimeSeries
+
+    from emptyui import Node, Output
+
+    reg = _registry()
+
+    class TsSource(Node):
+        type = "test.tssource"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            n = 100
+            return {"data": TimeSeries(
+                channels={"ex": [0.0] * n}, sample_rate=10.0,
+                start_datetime="2023-06-01T12:00:00")}
+
+    reg.add(TsSource)
+    ex = Executor(reg)
+    events = []
+    wf = Workflow(nodes=[WorkflowNode(id="n1", type="test.tssource")], edges=[])
+    ex.run(wf, emit=events.append)
+    ev = next(e for e in events if e["event"] == "payload")
+    assert ev["node"] == "n1" and ev["port"] == "data" and ev["type"] == "ts.run"
+    s = ev["summary"]
+    assert s["absolute"] is True
+    assert s["start"] == "2023-06-01T12:00:00"
+    assert s["end"] == "2023-06-01T12:00:10"  # 100 samples @ 10 Hz
+    assert s["sample_rate"] == 10.0
+    assert s["channels"] == ["ex"]
+
+    # relative-only record: relative-second bounds, absolute False
+    from emptyui import Node, Output
+
+    class RelSource(Node):
+        type = "test.relsource"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            return {"data": TimeSeries(
+                channels={"ex": [0.0] * 50}, sample_rate=10.0, start=5.0)}
+
+    reg.add(RelSource)
+    events = []
+    Executor(reg).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.relsource")], edges=[]),
+        emit=events.append)
+    s = next(e for e in events if e["event"] == "payload")["summary"]
+    assert s["absolute"] is False and s["start"] == 5.0 and s["end"] == 10.0
+
+    # non-ts outputs emit nothing
+    events = []
+    Executor(_registry()).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.source")], edges=[]),
+        emit=events.append)
+    assert not [e for e in events if e["event"] == "payload"]
+
+
+def test_payload_summary_placeholder_epoch_degrades_to_relative():
+    """1980/1970 placeholder starts mean 'start unknown' — relative bounds."""
+    from emptyui_core_nodes.types import TimeSeries
+
+    from emptyui import Node, Output
+
+    class PSource(Node):
+        type = "test.psource"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            return {"data": TimeSeries(
+                channels={"ex": [0.0] * 10}, sample_rate=10.0,
+                start_datetime="1980-01-01T00:00:00")}
+
+    reg = _registry()
+    reg.add(PSource)
+    events = []
+    Executor(reg).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.psource")], edges=[]),
+        emit=events.append)
+    s = next(e for e in events if e["event"] == "payload")["summary"]
+    assert s["absolute"] is False and s["start"] == 0.0 and s["end"] == 1.0
+
+
+def test_payload_summary_mth5_runts_shape():
+    """Duck-typed mth5 RunTS payloads (`.dataset` + `.start`) summarize too."""
+    from types import SimpleNamespace
+
+    class RunTSStub:
+        sample_rate = 8.0
+        n_samples = 16
+        start = "2023-06-01T12:30:05"
+        dataset = SimpleNamespace(data_vars={"ex": None, "ey": None})
+
+    from emptyui import Node, Output
+
+    class MSource(Node):
+        type = "test.msource"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            return {"data": RunTSStub()}
+
+    reg = _registry()
+    reg.add(MSource)
+    events = []
+    Executor(reg).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.msource")], edges=[]),
+        emit=events.append)
+    s = next(e for e in events if e["event"] == "payload")["summary"]
+    assert s["absolute"] is True
+    assert s["start"] == "2023-06-01T12:30:05"
+    assert s["end"] == "2023-06-01T12:30:07"
+    assert s["channels"] == ["ex", "ey"]
+
+
+def test_payload_summary_on_cache_hit():
+    """A cached node's restored ts.run outputs stream the summary too."""
+    from emptyui_core_nodes.types import TimeSeries
+
+    from emptyui.cache import NodeCache
+
+    calls = {"n": 0}
+
+    from emptyui import Node, Output
+
+    class Counting(Node):
+        type = "test.counting"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            calls["n"] += 1
+            return {"data": TimeSeries(
+                channels={"ex": [0.0] * 20}, sample_rate=10.0,
+                start_datetime="2023-06-01T00:00:00")}
+
+    reg = _registry()
+    reg.add(Counting)
+    wf = Workflow(nodes=[WorkflowNode(id="n1", type="test.counting")], edges=[])
+    cache = NodeCache()
+    first, second = [], []
+    Executor(reg).run(wf, emit=first.append, cache=cache)
+    Executor(reg).run(wf, emit=second.append, cache=cache)
+    assert calls["n"] == 1  # second run was a cache hit
+    hit = next(e for e in second if e.get("cached") is True)
+    assert hit["event"] == "node_status"
+    ev = next(e for e in second if e["event"] == "payload")
+    assert ev["summary"]["start"] == "2023-06-01T00:00:00"
+    assert ev["summary"]["end"] == "2023-06-01T00:00:02"

@@ -1916,3 +1916,36 @@ Phase, Tipper and Phase Tensor) got three fixes:
   than the layout leaves, the tight bbox extends the saved image downward
   (`impedance_layout` stays single-pass; reserving inside it compounds its
   margin accounting — verified and rejected).
+
+### 23.4 Time selector UI (delivered 2026-09-13)
+Selecting a time slot (e.g. to avoid noisy intervals) in records spanning
+hours to days:
+- **Payload-summary run events (§23.4 mechanism)**: when the executor
+  materializes a `ts.run`/`ts.channel` output handle (fresh or restored
+  from cache), it emits `{"event": "payload", node, port, type, summary}`
+  with a duck-typed extent summary — absolute ISO bounds (UTC) when the
+  record carries a real start, relative seconds otherwise; placeholder
+  epochs (1980/1970) degrade to relative (start unknown, hygiene #10).
+  Poll/WS replay carries them like artifact events. Honest constraint:
+  the bar's extent is known only after the upstream has run once.
+- **`Param.time_bar`** (rendering-only): the input port name whose summary
+  drives the frontend time bar for this param pair.
+- **`TimeBar` widget** (custom, zero deps — vis-timeline/d3-brush/rc-slider
+  evaluated and rejected as heavyweight or generic): horizontal acquisition
+  bar with two pointer-driven handles sandwiching the slot, shaded
+  selection, extent tick labels, synced bidirectionally with the paired
+  Start/End edit boxes (which remain the node's own string params — the
+  bar only writes through their onChange). Guards: handles stay in the
+  record, cannot cross, slot kept > 1 s (server rejects ≤ 1 s; widget
+  clamps ≥ 2 s at second resolution); out-of-extent box values draw at the
+  track edge (server clamps with a warning — degrade, never reject).
+- **Plot Time Series** hosts it: new `start`/`end` params (ISO UTC or bare
+  seconds; empty = record boundary; ISO bounds measure from the record
+  start, so `data.start` offsets are subtracted). The legacy `seconds`
+  duration caps the slot from its start and keeps its old no-minimum
+  behavior (a 1 s waveform view of a 500 Hz run is legitimate).
+- **Node sizing**: standard node width 250 → 280 px so the bar fits with
+  consistent look across the palette.
+- Extract Run / Align Runs / Merge Runs hosting is deferred: their extent
+  source is an `mth5` archive payload (per-run extents inside one object),
+  not a streamed `ts.run` summary — needs its own summary mechanism.

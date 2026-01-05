@@ -290,3 +290,74 @@ test("unchanged rerun reports cached nodes; Run to here executes the ancestry on
   await expect(page.locator(".mt-cached")).toHaveCount(2);
   await expect(page.locator(".mt-preview img")).toBeVisible({ timeout: 30_000 });
 });
+
+test("time selector bar: drag updates boxes, box edit moves handle", async ({
+  page,
+}) => {
+  await buildPipeline(page);
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 90_000,
+  });
+
+  // The bar appears on Plot Time Series once the upstream streamed its
+  // payload extent (§23.4). The sample CSV has no time column ⇒ the bar
+  // renders relative seconds.
+  const plotNode = node(page, "Plot Time Series");
+  const bar = plotNode.locator(".time-bar");
+  await expect(bar).toBeVisible({ timeout: 15_000 });
+  const ticks = bar.locator(".time-bar-ticks span");
+  const t0 = parseFloat((await ticks.nth(0).textContent())!);
+  const t1 = parseFloat((await ticks.nth(1).textContent())!);
+  expect(t0).toBe(0);
+  expect(t1).toBeGreaterThan(1);
+
+  const startBox = plotNode
+    .locator(".param-field", { hasText: "Start (UTC)" })
+    .locator("input");
+  const endBox = plotNode
+    .locator(".param-field", { hasText: "End (UTC)" })
+    .locator("input");
+  await expect(startBox).toHaveValue("");
+
+  // Drag the start handle ~25% into the bar → the Start box updates.
+  const handle = bar.locator(".time-bar-handle").nth(0);
+  const track = bar.locator(".time-bar-track");
+  const hb = (await handle.boundingBox())!;
+  const tb = (await track.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tb.x + tb.width * 0.25, hb.y + hb.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  const dragged = await startBox.inputValue();
+  expect(parseFloat(dragged)).toBeGreaterThan(t1 * 0.1);
+  expect(parseFloat(dragged)).toBeLessThan(t1 * 0.4);
+
+  // Editing the box moves the handle (bidirectional sync).
+  await startBox.fill(String(Math.round(t1 / 2)));
+  const handlePct = (nth: number) =>
+    bar.locator(".time-bar-handle").nth(nth).evaluate((el) => {
+      const track = el.parentElement!;
+      const tr = track.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return ((r.x + r.width / 2 - tr.x) / tr.width) * 100;
+    });
+  const leftPct = await handlePct(0);
+  expect(leftPct).toBeGreaterThan(45);
+  expect(leftPct).toBeLessThan(55);
+
+  // Guards: handles cannot cross or leave the record — dragging the start
+  // handle far past the end keeps a > 1 s slot at the record end.
+  const endPctBefore = await handlePct(1);
+  await page.mouse.move(tb.x + tb.width * 0.25, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tb.x + tb.width * 0.98, hb.y + hb.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  const endPctAfter = await handlePct(1);
+  expect(endPctAfter).toBeLessThanOrEqual(endPctBefore + 1);
+  await expect(bar).toBeVisible(); // never crossed → slot stays valid
+});

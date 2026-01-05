@@ -16,6 +16,7 @@ import os
 import shutil
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -30,8 +31,85 @@ from emptyui.store import DataStore
 class ExecutionError(Exception):
     def __init__(self, node_id: str, original: BaseException) -> None:
         self.node_id = node_id
-        self.original = original
+        self.original: BaseException = original
         super().__init__(f"node '{node_id}' failed: {original}")
+
+
+def _ts_summary(value: Any) -> dict[str, Any] | None:
+    """Lightweight extent summary for a time-series payload (DESIGN §23.4).
+
+    Drives the frontend time-selector bar: absolute ISO bounds (UTC) when
+    the record carries a real start time, relative seconds otherwise.
+    Duck-typed over the two payload shapes (mth5 RunTS ``.dataset`` and the
+    core ``TimeSeries``) so the core package stays independent of mth5.
+    Returns None for anything that is not (interpretable as) a time series.
+    """
+    if isinstance(value, dict):
+        return None
+    try:
+        sample_rate = float(value.sample_rate)
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        n = int(value.n_samples)
+    except Exception:  # noqa: BLE001 - mt_timeseries raises NameError
+        try:
+            n = len(value.dataset.time)  # mth5 RunTS
+        except Exception:  # noqa: BLE001
+            return None
+    if sample_rate <= 0 or n <= 0:
+        return None
+
+    channels: list[str] | None = None
+    start_iso = ""
+    start_rel = 0.0
+    if hasattr(value, "dataset"):  # mth5 RunTS
+        try:
+            channels = [str(k) for k in value.dataset.data_vars]
+        except AttributeError:
+            channels = None
+        raw = getattr(value, "start", None)
+        if raw is not None:
+            try:
+                start_iso = datetime.fromisoformat(str(raw)[:19]).strftime(
+                    "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                start_iso = ""
+    elif hasattr(value, "channels"):
+        channels = [str(k) for k in value.channels]
+        start_iso = str(getattr(value, "start_datetime", "") or "")
+        try:
+            start_rel = float(getattr(value, "start", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            start_rel = 0.0
+        if start_iso:
+            try:
+                anchor = datetime.fromisoformat(start_iso[:19])
+            except ValueError:
+                start_iso = ""
+            else:
+                # `start` is an offset from the record start; the absolute
+                # bound of sample 0 is anchor + start
+                start_iso = (anchor + timedelta(seconds=start_rel)).strftime(
+                    "%Y-%m-%dT%H:%M:%S")
+                start_rel = 0.0
+    # Placeholder epochs (mt_timeseries' 1980 default, digitizers' 1970 —
+    # core-nodes UNKNOWN_EPOCH_STARTS, mirrored here because core cannot
+    # import its plugins) mean "start unknown": degrade to relative bounds.
+    if start_iso[:19] in ("1980-01-01T00:00:00", "1970-01-01T00:00:00"):
+        start_iso = ""
+    if channels is None:
+        return None
+    end = (start_rel + n / sample_rate) if not start_iso else (
+        datetime.fromisoformat(start_iso) + timedelta(seconds=n / sample_rate)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
+    return {
+        "start": start_iso if start_iso else start_rel,
+        "end": end,
+        "absolute": bool(start_iso),
+        "sample_rate": sample_rate,
+        "channels": channels,
+    }
 
 
 class Executor:
@@ -320,6 +398,11 @@ class Executor:
                 for port in manifest.outputs:
                     handle = store.put(port.type, entry.outputs.get(port.name))
                     handles[port.name] = handle.id
+                    summary = _ts_summary(entry.outputs.get(port.name))
+                    if summary is not None:
+                        emit({"event": "payload", "node": node_id,
+                              "port": port.name, "type": port.type,
+                              "summary": summary})
                 outputs_by_node[node_id] = handles
                 for rec in entry.artifacts:
                     dest = self._artifact_dest(rec, node_id, workspace)
@@ -405,6 +488,13 @@ class Executor:
                 handle = store.put(port.type, value)
                 handles[port.name] = handle.id
                 value_to_handle[id(value)] = handle.id
+                # time-series extent summary for the frontend time selector
+                # (§23.4) — lightweight, duck-typed, emitted per ts output
+                summary = _ts_summary(value)
+                if summary is not None:
+                    emit({"event": "payload", "node": node_id,
+                          "port": port.name, "type": port.type,
+                          "summary": summary})
             outputs_by_node[node_id] = handles
 
             for artifact in ctx.published:

@@ -209,6 +209,49 @@ button.danger:disabled {
   margin-right: auto;
 }
 
+/* time-selector bar (DESIGN.md §23.4): acquisition bar with two draggable
+   handles sandwiching the selected slot; nodrag/nopan via .param-field-like
+   interactive widget classes */
+.time-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0.1rem 0 0.2rem;
+}
+.time-bar-track {
+  position: relative;
+  height: 13px;
+  background: #ececec;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+}
+.time-bar-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(47, 111, 168, 0.3);
+}
+.time-bar-handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 7px;
+  background: #2f6fa8;
+  border-radius: 2px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.time-bar-handle:hover {
+  background: #1d5c96;
+}
+.time-bar-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.58rem;
+  color: #777;
+  white-space: nowrap;
+}
+
 .path-field {
   flex: 1;
   display: flex;

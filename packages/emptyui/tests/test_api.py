@@ -112,3 +112,11 @@ def test_first_sentence_fallbacks():
     long = "word " * 50
     out = first_sentence(long)
     assert out.endswith("…") and len(out) <= 140
+
+
+def test_param_time_bar_serialized():
+    from emptyui import Param
+
+    p = Param("start", "string", time_bar="data")
+    assert p.to_dict()["time_bar"] == "data"
+    assert Param("x", "string").to_dict()["time_bar"] == ""

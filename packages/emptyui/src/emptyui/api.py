@@ -87,6 +87,10 @@ class Param:
     #: options (§4): an upstream ``output_channels="e1,e2,bz"`` offers e1 /
     #: e2 / bz as separate choices. Rendering-only.
     split_inherited: bool = False
+    #: Time-selector bar binding (§23.4): the *input port name* whose
+    #: payload summary (extent streamed via `payload` run events) drives the
+    #: frontend time bar for this param pair. Rendering-only.
+    time_bar: str = ""
 
     def _cascade_dict(self) -> dict[str, list[list[Any]]] | None:
         if not self.cascade:
@@ -120,6 +124,7 @@ class Param:
                 if self.enabled_when else None
             ),
             "split_inherited": self.split_inherited,
+            "time_bar": self.time_bar,
         }
 
 
