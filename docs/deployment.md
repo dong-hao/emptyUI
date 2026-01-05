@@ -26,7 +26,7 @@ read it first; this guide is the operational counterpart.
 | `EMPTYUI_CORS_ORIGINS` | Comma-separated allowed origins. Empty value **disables** the CORS middleware (same-origin serving needs none). | `*` |
 | `EMPTYUI_WORKSPACE_TTL` | Retain completed run workspaces and artifacts for this many seconds before cleanup. `0` or unset disables cleanup. | disabled |
 | `EMPTYUI_MAX_CONCURRENT_RUNS` | Maximum queued/running runs per backend process. `0` or unset is unlimited. Excess submissions receive HTTP 429. | unlimited |
-| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime toggles (plugin enable/disable, §5.1). **Unset = in-memory only** — no settings file is created (the user-config default is deferred until the configure/env file lands). | unset (memory-only) |
+| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime settings (plugin enable/disable §5.1 + live knobs §22: retention TTL, run limit, cache size). **Unset = in-memory only** — no settings file is created. | unset (memory-only) |
 | `EMPTYUI_DISABLED_PLUGINS` | Comma-separated plugin entry-point names disabled at startup (the platform-level baseline; unknown names are silently ignored). | none |
 
 All knobs are mirrored as `create_app(...)` keyword arguments

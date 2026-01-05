@@ -30,6 +30,25 @@ export interface ParamSpec {
 /** inherit: input port -> { targetParam: upstreamParam } */
 export type InheritMap = Record<string, Record<string, string>>;
 
+/** One runtime knob in GET /api/settings (DESIGN.md §22). */
+export interface LiveSetting {
+  value: number | null;
+  type: string;
+  default: number | null;
+  description: string;
+  editable: boolean;
+  source: "platform" | "ui" | "default";
+}
+
+export interface SettingsView {
+  /** live-editable knobs (whitelist, validated server-side) */
+  live: Record<string, LiveSetting>;
+  /** deployment-level rows — display only (env/restart) */
+  deployment: Record<string, unknown>;
+  /** reserved for the postponed §21 disk cache */
+  planned: Record<string, unknown>;
+}
+
 export interface NodeManifest {
   type: string;
   version: string;
@@ -96,6 +115,21 @@ export const api = {
   nodes: () => getJson<Catalog>("/nodes"),
   files: (path = "") =>
     getJson<FileListing>(`/files?path=${encodeURIComponent(path)}`),
+  // runtime settings (DESIGN.md §22): live knobs editable, deployment rows
+  // read-only, planned (§21 cache) knobs reserved
+  settings: () => getJson<SettingsView>("/settings"),
+  putSettings: async (values: Record<string, number | null>): Promise<SettingsView> => {
+    const res = await fetch(`${BASE}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail ?? `PUT /settings: ${res.status}`);
+    }
+    return res.json();
+  },
   // targets: partial execution — run only these nodes plus their ancestors
   // ("execute to here", DESIGN.md §7); omitted = run everything
   runWorkflow: async (workflow: unknown, targets?: string[]): Promise<{ run_id: string }> => {

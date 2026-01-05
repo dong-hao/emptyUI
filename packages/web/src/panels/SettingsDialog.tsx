@@ -1,36 +1,191 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { api, type SettingsView } from "../api/client";
 import { usePlugins } from "../stores/plugins";
 
 interface Props {
   onClose: () => void;
 }
 
-/** Toolbar ⚙ Settings dialog — plugin enable/disable (DESIGN.md §5.1).
+/** One live-editable number row: empty input = null ("off"/unlimited). */
+function LiveKnobRow({
+  name,
+  setting,
+  draft,
+  onChange,
+}: {
+  name: string;
+  setting: SettingsView["live"][string];
+  draft: string;
+  onChange: (v: string) => void;
+}) {
+  const label = name.replaceAll("_", " ");
+  return (
+    <tr>
+      <td>
+        <label className="plugin-row" title={setting.description}>
+          <span className="plugin-name">{label}</span>
+        </label>
+      </td>
+      <td className="plugin-meta">
+        <input
+          type="number"
+          min={0}
+          step="any"
+          disabled={!setting.editable}
+          value={draft}
+          placeholder={setting.default === null ? "off" : String(setting.default)}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: 90 }}
+        />
+      </td>
+      <td className="plugin-meta">{setting.source}</td>
+      <td className="plugin-note">
+        {!setting.editable && "set via env/platform"}
+      </td>
+    </tr>
+  );
+}
+
+/** Toolbar ⚙ Settings dialog (DESIGN.md §22).
  *
- * Bundled plugins (core/mth5/aurora) are always on and shown as read-only
- * info rows; third-party plugins carry an enabled tick box. The palette is
- * catalog-driven, so toggling a plugin hides/shows its nodes immediately.
- * With no third-party plugin installed the dialog shows the read-only
- * bundled rows plus an empty-state note (requirement 4: silent when there
- * is nothing to switch). */
+ * Sections: Plugins (§5.1 enable/disable, bundled read-only), Server &
+ * retention (live-editable knobs, explicit Save), Deployment (read-only
+ * env/restart-level rows), Planned (reserved §21 cache knobs, inert).
+ */
 export function SettingsDialog({ onClose }: Props) {
   const { plugins, loading, error, load, toggle } = usePlugins();
+  const [view, setView] = useState<SettingsView | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void load();
+    api.settings()
+      .then((v) => {
+        setView(v);
+        const d: Record<string, string> = {};
+        for (const [k, s] of Object.entries(v.live)) d[k] = s.value === null ? "" : String(s.value);
+        setDrafts(d);
+      })
+      .catch((e) => setLoadErr(String(e)));
   }, [load]);
 
+  const apply = async () => {
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      const values: Record<string, number | null> = {};
+      for (const [k, s] of Object.entries(view?.live ?? {})) {
+        if (!s.editable) continue;
+        const raw = (drafts[k] ?? "").trim();
+        values[k] = raw === "" ? null : Number(raw);
+      }
+      const updated = await api.putSettings(values);
+      setView(updated);
+      const d: Record<string, string> = {};
+      for (const [k, s] of Object.entries(updated.live)) d[k] = s.value === null ? "" : String(s.value);
+      setDrafts(d);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const thirdParty = plugins.filter((p) => !p.bundled);
+  const dirty = view
+    ? Object.entries(view.live).some(([k, s]) => {
+        if (!s.editable) return false;
+        const raw = (drafts[k] ?? "").trim();
+        const num = raw === "" ? null : Number(raw);
+        return num !== s.value && !(raw === "" && s.value === null);
+      })
+    : false;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal settings-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <strong>Settings — Plugins</strong>
+          <strong>Settings</strong>
           <button onClick={onClose}>✕</button>
         </div>
-        {error && <div className="error-msg modal-error">{error}</div>}
+        {(error || loadErr) && (
+          <div className="error-msg modal-error">{error ?? loadErr}</div>
+        )}
         <div className="modal-list">
+          <h3 className="settings-section">Server &amp; retention</h3>
+          {view && (
+            <table className="plugin-table">
+              <tbody>
+                {Object.entries(view.live).map(([name, s]) => (
+                  <LiveKnobRow
+                    key={name}
+                    name={name}
+                    setting={s}
+                    draft={drafts[name] ?? ""}
+                    onChange={(v) => setDrafts((d) => ({ ...d, [name]: v }))}
+                  />
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!view && !loadErr && <div className="modal-empty">Loading settings…</div>}
+          {view && (
+            <p className="modal-empty">
+              Empty = off/unlimited. Saved settings persist only when
+              EMPTYUI_SETTINGS_PATH is configured.
+            </p>
+          )}
+
+          <h3 className="settings-section">Deployment (read-only)</h3>
+          {view && (
+            <table className="plugin-table">
+              <tbody>
+                {Object.entries(view.deployment).map(([k, v]) => (
+                  <tr key={k}>
+                    <td><span className="plugin-name">{k.replaceAll("_", " ")}</span></td>
+                    <td className="plugin-meta">
+                      <code>{v === null || v === undefined ? "unset" : String(v)}</code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <h3 className="settings-section">Planned — disk cache (§21)</h3>
+          {view && (
+            <table className="plugin-table">
+              <tbody>
+                {Object.entries(view.planned).map(([k, v]) => {
+                  const s = v as { default?: unknown; description?: string };
+                  return (
+                    <tr key={k}>
+                      <td>
+                        <span className="plugin-name" title={s.description}>
+                          {k.replaceAll("_", " ")}
+                        </span>
+                      </td>
+                      <td className="plugin-meta">
+                        <input
+                          type="number"
+                          step="any"
+                          disabled
+                          value={s.default === null ? "" : String(s.default)}
+                          style={{ width: 90 }}
+                        />
+                      </td>
+                      <td className="plugin-note">planned</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          <h3 className="settings-section">Plugins</h3>
           {loading && <div className="modal-empty">Loading plugins…</div>}
           {!loading && thirdParty.length === 0 && (
             <div className="modal-empty">
@@ -77,9 +232,15 @@ export function SettingsDialog({ onClose }: Props) {
           )}
         </div>
         <div className="modal-foot">
-          <button className="primary" onClick={onClose}>
-            Close
+          {saveErr && <span className="error-msg">{saveErr}</span>}
+          <button
+            className="primary"
+            disabled={!dirty || saving || !!view && Object.values(view.live).every((s) => !s.editable)}
+            onClick={() => void apply()}
+          >
+            {saving ? "Saving…" : "Save"}
           </button>
+          <button onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

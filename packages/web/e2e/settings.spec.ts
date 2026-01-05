@@ -55,3 +55,32 @@ test("settings dialog toggles third-party plugins live", async ({ page }) => {
   await page.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toBeHidden();
 });
+
+test("settings dialog: live knobs editable, deployment rows read-only", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "⚙ Settings" }).click();
+  const dialog = page.locator(".settings-dialog");
+  await expect(dialog).toBeVisible();
+
+  // Server & retention: the cache-size knob is editable and applies live
+  const cacheRow = dialog.locator("tr", { hasText: "cache max entries" });
+  const input = cacheRow.locator("input[type=number]");
+  await expect(input).toBeEnabled();
+  await input.fill("77");
+  await dialog.locator("button", { hasText: "Save" }).click();
+  // after save the server view reflects the edit (input value + ui source)
+  await expect(cacheRow.locator("input")).toHaveValue("77");
+  await expect(cacheRow).toContainText("ui");
+
+  // Deployment rows are read-only code values (no inputs)
+  const deployRow = dialog.locator("tr", { hasText: "cors origins" });
+  await expect(deployRow.locator("code")).toContainText("*");
+  await expect(deployRow.locator("input")).toHaveCount(0);
+
+  // Planned (§21) rows are disabled with a planned tag
+  const plannedRow = dialog.locator("tr", { hasText: "project dir" });
+  await expect(plannedRow.locator("input")).toBeDisabled();
+  await expect(plannedRow).toContainText("planned");
+});

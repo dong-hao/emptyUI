@@ -1826,3 +1826,37 @@ Executor/server instance, same project dir → cached rerun); relocation
 (move project dir + data root to a renamed path → still hits); eviction
 (GB + TTL); corruption → re-execute; opt-in flag respected; injected I/O
 error → the cache never breaks a run.
+
+---
+
+## 22. Runtime settings mechanism (delivered 2026-09-12)
+
+The ⚙ Settings dialog is the single settings surface; the backend is the
+source of truth (`GET/PUT /api/settings`).
+
+- **Precedence (§5.1 rule, generalized)**: env/platform baseline wins →
+  UI edits recorded on top → defaults. Knobs whose start value arrived
+  from env/kwarg are **platform-baselined and not UI-editable** (PUT →
+  409 naming the knob) — confinement/serving semantics stay
+  restart-level decisions.
+- **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
+  `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
+  (null/0 = unlimited), `cache_max_entries` (default 256). Applied
+  immediately (TTL loop re-reads per pass, admission check reads the
+  live holder, `NodeCache.resize()` trims). `RuntimeSettings` is the
+  mutable holder the app closures read.
+- **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
+  `cors_origins`, `root_path` — changing confinement/serving mid-flight
+  is an architecture change; env + restart only.
+- **Planned (reserved, inert)**: `project_dir`, `cache_max_gb`,
+  `cache_ttl_days` — the §21 disk cache lands into this scaffolding.
+- **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
+  (`disabled_plugins` + `settings` sections; atomic write; unknown keys
+  ignored on load — files may travel). Opt-in: unset = memory-only, no
+  file is created. Settings PUT validates against the whitelist
+  (numbers ≥ 0 or null-for-off; null not allowed for knobs with a
+  non-null default).
+- **Frontend**: Settings dialog sections — Server & retention (live
+  numbers, empty = off, explicit Save), Deployment (read-only code
+  values), Planned (disabled rows, "planned" tag), Plugins (§5.1,
+  unchanged).

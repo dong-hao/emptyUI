@@ -284,3 +284,107 @@ def test_ws_disconnect_removes_client():
     # fresh app state would be needed to observe clients directly, so just
     # assert the endpoint accepted and closed cleanly (no leaked exception)
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_settings_view_and_live_edit():
+    """GET shows effective values with sources; PUT applies whitelisted
+    live knobs immediately (cache resize) — §22."""
+    reg = Registry()
+    client = TestClient(create_app(reg))
+    view = client.get("/api/settings").json()
+    assert view["live"]["cache_max_entries"]["value"] == 256
+    assert view["live"]["cache_max_entries"]["editable"]
+    assert view["live"]["workspace_ttl_seconds"]["source"] == "default"
+    assert view["deployment"]["cors_origins"] == ["*"]
+    assert "project_dir" in view["planned"]  # reserved §21 scaffolding
+
+    resp = client.put("/api/settings", json={"values": {"cache_max_entries": 32}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["live"]["cache_max_entries"]["value"] == 32
+    assert body["live"]["cache_max_entries"]["source"] == "ui"
+
+
+def test_settings_put_validation():
+    reg = Registry()
+    client = TestClient(create_app(reg))
+    for values, code in (
+        ({"unknown_knob": 1}, 422),
+        ({"data_root": "/x"}, 422),  # deployment rows are not live-editable
+        ({"max_concurrent_runs": -2}, 422),
+        ({"cache_max_entries": "many"}, 422),
+    ):
+        resp = client.put("/api/settings", json={"values": values})
+        assert resp.status_code == code, (values, resp.status_code)
+    # null = off (allowed for off-able knobs)
+    assert client.put(
+        "/api/settings", json={"values": {"max_concurrent_runs": None}}
+    ).status_code == 200
+
+
+def test_settings_env_baselined_rejects_ui_edit():
+    """Env/platform-baselined knobs are read-only for the UI (platform wins,
+    §5.1 precedent): PUT returns 409 naming the knob."""
+    from emptyui.config import Settings
+
+    client = TestClient(
+        create_app(settings=Settings(workspace_ttl_seconds=600.0)))
+    resp = client.put(
+        "/api/settings", json={"values": {"workspace_ttl_seconds": 60.0}})
+    assert resp.status_code == 409
+    assert "environment" in resp.json()["detail"]
+    view = client.get("/api/settings").json()
+    assert view["live"]["workspace_ttl_seconds"]["value"] == 600.0
+    assert view["live"]["workspace_ttl_seconds"]["source"] == "platform"
+    assert not view["live"]["workspace_ttl_seconds"]["editable"]
+    # the non-baselined knob stays editable in the same payload shape
+    resp = client.put(
+        "/api/settings", json={"values": {"cache_max_entries": 64}})
+    assert resp.status_code == 200
+
+
+def test_settings_persist_to_file(tmp_path):
+    """UI edits round-trip through the settings JSON (opt-in via path)."""
+
+    path = tmp_path / "settings.json"
+    client = TestClient(create_app(settings_path=str(path)))
+    client.put("/api/settings", json={"values": {"cache_max_entries": 64}})
+    import json
+
+    data = json.loads(path.read_text())
+    assert data["settings"]["cache_max_entries"] == 64
+    # a fresh app instance reads the recorded value back
+    client2 = TestClient(create_app(settings_path=str(path)))
+    view = client2.get("/api/settings").json()
+    assert view["live"]["cache_max_entries"]["value"] == 64
+    assert view["live"]["cache_max_entries"]["source"] == "ui"
+
+
+def test_settings_live_ttl_effect(tmp_path):
+    """Changing the retention TTL takes effect on the next cleanup pass."""
+    from emptyui.config import Settings
+
+    root = tmp_path / "data"
+    root.mkdir()
+    settings = Settings(data_root=root, workspace_ttl_seconds=None)
+    client = TestClient(create_app(settings=settings))
+    view = client.get("/api/settings").json()
+    assert view["live"]["workspace_ttl_seconds"]["value"] is None
+    assert client.app.state.cleanup_expired_runs() == 0
+
+    # enable retention live; a run workspace older than the TTL is cleaned
+    resp = client.put(
+        "/api/settings", json={"values": {"workspace_ttl_seconds": 1.0}})
+    assert resp.json()["live"]["workspace_ttl_seconds"]["value"] == 1.0
+    workflow = {"nodes": [{"id": "n1", "type": "core.util.echo"}], "edges": []}
+    run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+    import time as _time
+
+    deadline = _time.monotonic() + 5
+    while _time.monotonic() < deadline:
+        detail = client.get(f"/api/runs/{run_id}").json()
+        if detail["status"] in ("completed", "failed"):
+            break
+        _time.sleep(0.02)
+    cleaned = client.app.state.cleanup_expired_runs(now=_time.time() + 11)
+    assert cleaned == 1

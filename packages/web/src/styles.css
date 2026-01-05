@@ -693,3 +693,17 @@ button.primary {
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-dasharray: 7 4;
 }
+
+/* Settings dialog sections (DESIGN.md §22) */
+.settings-section {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #666);
+  margin: 14px 0 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding-bottom: 3px;
+}
+.settings-section:first-child {
+  margin-top: 0;
+}

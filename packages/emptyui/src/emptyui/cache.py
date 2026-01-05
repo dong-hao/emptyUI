@@ -62,6 +62,20 @@ class NodeCache:
             while len(self._entries) > self._max:
                 self._entries.popitem(last=False)
 
+    def resize(self, max_entries: int) -> int:
+        """Change the LRU bound live (§22 settings); returns evicted count."""
+        self._max = max(1, int(max_entries))
+        with self._lock:
+            evicted = 0
+            while len(self._entries) > self._max:
+                self._entries.popitem(last=False)
+                evicted += 1
+        return evicted
+
+    @property
+    def max_entries(self) -> int:
+        return self._max
+
     def clear(self) -> int:
         """Drop all entries; returns how many were evicted."""
         with self._lock:

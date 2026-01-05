@@ -25,7 +25,7 @@ from emptyui.config import Settings
 from emptyui.executor import Executor
 from emptyui.registry import Registry, build_default_registry
 from emptyui.schema import ValidationError_, Workflow, validate_workflow
-from emptyui.settings import SettingsStore
+from emptyui.settings import LIVE_KNOBS, PLANNED_KNOBS, RuntimeSettings, SettingsStore
 
 
 class RunRequest(BaseModel):
@@ -33,6 +33,11 @@ class RunRequest(BaseModel):
     # partial execution ("execute to here"): run only these nodes plus their
     # ancestors; omitted/empty = run everything
     targets: list[str] | None = None
+
+
+class SettingsUpdate(BaseModel):
+    """PUT /api/settings payload (§22): partial update of live knobs."""
+    values: dict[str, float | int | None]
 
 
 class EventHub:
@@ -164,6 +169,40 @@ def create_app(
     # settings file at startup; UI toggles go through the store below
     plugin_store = SettingsStore(settings_path)
     env_plugin_baseline = set(disabled_plugins)
+
+    # runtime settings (§22): kwarg → env → settings file → default.
+    # Knobs arriving from kwarg/env are platform-baselined (not UI-editable,
+    # §5.1 precedent); file-section values are the recorded UI tier.
+    file_settings = plugin_store.ui_settings()
+    file_live = {}
+    try:
+        file_live = plugin_store.validate_live_values(
+            {k: v for k, v in file_settings.items() if k in LIVE_KNOBS})
+    except ValueError:
+        pass  # corrupt file values fall back to defaults
+    _ttl_kwarg = workspace_ttl_seconds
+    _runs_kwarg = max_concurrent_runs
+    runtime = RuntimeSettings(
+        workspace_ttl_seconds=(
+            _ttl_kwarg if _ttl_kwarg is not None
+            else (settings.workspace_ttl_seconds
+                  if settings.workspace_ttl_seconds is not None
+                  else file_live.get("workspace_ttl_seconds"))
+        ),
+        max_concurrent_runs=(
+            _runs_kwarg if _runs_kwarg is not None
+            else (settings.max_concurrent_runs
+                  if settings.max_concurrent_runs is not None
+                  else file_live.get("max_concurrent_runs"))
+        ),
+        cache_max_entries=int(
+            file_live.get("cache_max_entries") or 256),
+        env_baselined=frozenset(
+            k for k, v in (("workspace_ttl_seconds", _ttl_kwarg),
+                           ("max_concurrent_runs", _runs_kwarg))
+            if v is not None or getattr(settings, k) is not None
+        ),
+    )
     registry = registry or build_default_registry(
         disabled_plugins=plugin_store.effective_disabled(env_plugin_baseline)
     )
@@ -171,13 +210,13 @@ def create_app(
     hub = EventHub()
     runs: dict[str, dict] = {}
     artifacts: dict[str, dict] = {}  # artifact id -> {path, kind, run_id}
-    node_cache = NodeCache()  # cross-run result cache (§7), server-lifetime
+    node_cache = NodeCache(max_entries=runtime.cache_max_entries)  # §7, §22
     state = {"run_counter": 0, "active_runs": 0}
     lock = threading.Lock()
 
     def cleanup_expired_runs(now: float | None = None) -> int:
         """Remove completed run state and workspaces older than the TTL."""
-        ttl = workspace_ttl_seconds
+        ttl = runtime.workspace_ttl_seconds
         if ttl is None or ttl <= 0:
             return 0
         cutoff = (time.time() if now is None else now) - ttl
@@ -201,11 +240,13 @@ def create_app(
         return len(expired)
 
     async def cleanup_loop() -> None:
-        ttl = workspace_ttl_seconds
-        if ttl is None or ttl <= 0:
-            return
-        interval = max(0.1, min(ttl / 4.0, 60.0))
+        # retention (§22) is live-editable: re-read the TTL each pass; the
+        # loop idles at 60 s when disabled and picks up an enable/change on
+        # the next pass
         while True:
+            ttl = runtime.workspace_ttl_seconds
+            interval = 60.0 if ttl is None or ttl <= 0 else max(
+                0.1, min(ttl / 4.0, 60.0))
             await asyncio.sleep(interval)
             cleanup_expired_runs()
 
@@ -279,6 +320,83 @@ def create_app(
         """Hot-reload without the plugin; clear the cross-run cache (§5.1)."""
         return _toggle_plugin(name, disable=True)
 
+    # --- runtime settings (§22) -------------------------------------------
+
+    def _settings_view() -> dict:
+        """Effective settings with sources: platform (env/kwarg — read-only),
+        ui (UI edit, file-recorded when configured), default."""
+        with lock:
+            live = {}
+            for key, (vtype, default, desc) in LIVE_KNOBS.items():
+                value = getattr(runtime, key)
+                if key in runtime.env_baselined:
+                    source = "platform"
+                elif key in plugin_store.ui_settings():
+                    source = "ui"
+                else:
+                    source = "default"
+                live[key] = {
+                    "value": value,
+                    "type": vtype.__name__,
+                    "default": default,
+                    "description": desc,
+                    "editable": key not in runtime.env_baselined,
+                    "source": source,
+                }
+            deployment = {
+                "data_root": str(data_root) if data_root else None,
+                "serve_dist": serve_dist,
+                "cors_origins": list(cors_origins),
+                "root_path": root_path or None,
+            }
+            planned = {
+                key: {"value": plugin_store.ui_settings().get(key, default),
+                      "type": vtype.__name__, "default": default,
+                      "description": desc}
+                for key, (vtype, default, desc) in PLANNED_KNOBS.items()
+            }
+            return {"live": live, "deployment": deployment, "planned": planned}
+
+    @app.get("/api/settings")
+    def get_settings() -> dict:
+        """Effective runtime settings (§22): live-editable knobs, read-only
+        deployment rows and the reserved (planned) §21 cache knobs."""
+        return _settings_view()
+
+    @app.put("/api/settings")
+    def put_settings(req: SettingsUpdate) -> dict:
+        """Live-edit whitelisted runtime knobs (§22).
+
+        Validated + coerced against LIVE_KNOBS; knobs baselined by the
+        environment/platform are rejected with 409 (platform wins, §5.1
+        precedent — restart-level change). Applied immediately (TTL loop,
+        run admission, cache resize) and persisted to the settings file
+        when one is configured (memory-only otherwise).
+        """
+        try:
+            coerced = plugin_store.validate_live_values(req.values)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        with lock:
+            conflicts = sorted(set(coerced) & set(runtime.env_baselined))
+            if conflicts:
+                raise HTTPException(
+                    status_code=409,
+                    detail="set via environment/platform — restart-level "
+                           f"change required: {conflicts}",
+                )
+            plugin_store.set_settings(coerced)
+            if coerced.get("cache_max_entries") is not None:
+                runtime.cache_max_entries = round(coerced["cache_max_entries"])
+                node_cache.resize(runtime.cache_max_entries)
+            if "workspace_ttl_seconds" in coerced:
+                runtime.workspace_ttl_seconds = coerced["workspace_ttl_seconds"]
+            if "max_concurrent_runs" in coerced:
+                runtime.max_concurrent_runs = (
+                    round(coerced["max_concurrent_runs"])
+                    if coerced["max_concurrent_runs"] is not None else None)
+        return _settings_view()
+
     @app.post("/api/runs")
     def start_run(req: RunRequest) -> dict:
         try:
@@ -298,7 +416,7 @@ def create_app(
                 )
 
         with lock:
-            limit = max_concurrent_runs or 0
+            limit = runtime.max_concurrent_runs or 0  # live-editable (§22)
             if limit > 0 and state["active_runs"] >= limit:
                 raise HTTPException(
                     status_code=429,

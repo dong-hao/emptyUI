@@ -89,6 +89,11 @@ full architecture, contracts and verification records are in
 - DAG executor: topological scheduling, WebSocket run events/progress,
   content-addressed structural caching with artifact restore, partial runs
   ("Run to here"), run cancellation, artifact store/download (§7–§9).
+- Runtime settings (§22): ⚙ dialog sections (plugins / live knobs —
+  retention TTL, run limit, cache size — / read-only deployment rows /
+  planned §21 cache knobs); `GET/PUT /api/settings`, whitelist-validated,
+  env-baseline-wins precedence, opt-in JSON persistence via
+  `EMPTYUI_SETTINGS_PATH`.
 - Remote-server contract (DESIGN.md §17.6 items 1–6): data-root confinement,
   same-origin serving + CORS control, sub-path mounting, workspace TTL +
   artifact GC, max-concurrent-runs guard, config module + deployment guide.
