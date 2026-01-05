@@ -1899,3 +1899,20 @@ source of truth (`GET/PUT /api/settings`).
 - **Old node**: `core.plot.spectrogram` (ts.run + in-line FFT) →
   `hidden = True`, re-titled "Plot Spectrogram (TS)" — out of the palette,
   still executable by saved workflows.
+
+### 23.3 Provenance line on the TF display figures (delivered 2026-09-13)
+The processing-provenance line (the TF's run comment, drawn under AppRes &
+Phase, Tipper and Phase Tensor) got three fixes:
+- **Toggle**: new `print_params` boolean param ("Print parameters on plot",
+  default **on** — preserves the comparison workflow; untick for production
+  images) on all three plot nodes.
+- **No overlap**: the line is anchored to the *measured* x-label bottom
+  (5 px gap), instead of a fixed `y=0.005` that collided with
+  "Period (secs)".
+- **Word-wrap**: greedy renderer-measured wrapping (`_wrap_notes`) so no
+  line is wider than the axes — the old single-line note rendered ~1100 px
+  wide on a ~310 px figure, inflating the saved canvas via
+  `bbox_inches="tight"`. When the wrapped block needs more vertical room
+  than the layout leaves, the tight bbox extends the saved image downward
+  (`impedance_layout` stays single-pass; reserving inside it compounds its
+  margin accounting — verified and rejected).

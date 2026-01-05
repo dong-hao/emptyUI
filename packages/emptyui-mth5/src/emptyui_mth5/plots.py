@@ -38,10 +38,17 @@ class PlotAppResPhase(Node):
                           "range 'min,max' (e.g. '5,40000') to match an "
                           "external reference figure; 'auto' (default) fits "
                           "whole decades around the data."),
+        Param("print_params", "boolean", label="Print parameters on plot",
+              default=True,
+              description="Print the processing-provenance line (run "
+                          "comment) under the figure — useful for "
+                          "algorithm comparison; untick for production "
+                          "images."),
     )
 
     def execute(self, ctx, tf, mode: str = "off-diagonal",
-                rho_ylim: str = "auto") -> dict[str, Any]:
+                rho_ylim: str = "auto", print_params: bool = True) \
+            -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
         limits = None
@@ -59,7 +66,8 @@ class PlotAppResPhase(Node):
                 )
             limits = (parts[0], parts[1])
         path = ctx.artifact_path("plot_appres_phase", ".png")
-        plot_impedance_response(tf, mode, path, rho_ylim=limits)
+        plot_impedance_response(tf, mode, path, rho_ylim=limits,
+                                show_params=print_params)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 
@@ -86,9 +94,16 @@ class PlotTipper(Node):
                           "[-1, 1] and expands only when the data "
                           "legitimately exceeds 1 (|T| > 1 near 2D/3D "
                           "conductivity contrasts)."),
+        Param("print_params", "boolean", label="Print parameters on plot",
+              default=True,
+              description="Print the processing-provenance line (run "
+                          "comment) under the figure — useful for "
+                          "algorithm comparison; untick for production "
+                          "images."),
     )
 
-    def execute(self, ctx, tf, tipper_ylim: str = "auto") -> dict[str, Any]:
+    def execute(self, ctx, tf, tipper_ylim: str = "auto",
+                print_params: bool = True) -> dict[str, Any]:
         if not tf.has_tipper():
             raise ValueError(
                 "transfer function has no tipper data (no vertical magnetic "
@@ -109,7 +124,7 @@ class PlotTipper(Node):
                 )
             limits = (parts[0], parts[1])
         path = ctx.artifact_path("plot_tipper", ".png")
-        plot_tipper(tf, path, ylim=limits)
+        plot_tipper(tf, path, ylim=limits, show_params=print_params)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 
@@ -129,12 +144,19 @@ class PlotPhaseTensor(Node):
     category = "Display"
     inputs = (Input("tf", "tf", label="tf"),)
     outputs = (Output("plot", "plot"),)
-    params = ()
+    params = (
+        Param("print_params", "boolean", label="Print parameters on plot",
+              default=True,
+              description="Print the processing-provenance line (run "
+                          "comment) under the figure — useful for "
+                          "algorithm comparison; untick for production "
+                          "images."),
+    )
 
-    def execute(self, ctx, tf) -> dict[str, Any]:
+    def execute(self, ctx, tf, print_params: bool = True) -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
         path = ctx.artifact_path("plot_phase_tensor", ".png")
-        plot_phase_tensor(tf, path)
+        plot_phase_tensor(tf, path, show_params=print_params)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}

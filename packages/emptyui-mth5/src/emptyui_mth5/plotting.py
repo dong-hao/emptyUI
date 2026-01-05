@@ -85,6 +85,62 @@ def run_notes(tf) -> str:
     return value if value else ""
 
 
+def _wrap_notes(fig, text: str, width_px: float, fontsize: float) -> str:
+    """Greedy word-wrap measured in display pixels (DESIGN §23.3).
+
+    Proportional fonts make character-count wrapping unreliable, so each
+    candidate line is measured with the real renderer: a word moves to the
+    next line only when the current line would exceed ``width_px`` (the
+    axes width). A single word wider than the budget is kept on its own
+    line rather than dropped.
+    """
+    renderer = fig.canvas.get_renderer()
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        trial = f"{current} {word}" if current else word
+        probe = fig.text(0.0, 0.0, trial, fontsize=fontsize)
+        w = probe.get_window_extent(renderer).width
+        probe.remove()
+        if w <= width_px or not current:
+            current = trial
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
+def _annotate_notes(fig, ax, notes: str, show: bool = True,
+                    fontsize: float = 7.0, gap_px: float = 5.0) -> None:
+    """Place the provenance note below the x-axis label of ``ax``.
+
+    Anchored to the *measured* x-label bottom (never overlapping it, DESIGN
+    §23.3), centered on the axes, and word-wrapped so no line is wider than
+    the axes — an unwrapped long note used to blow the figure width up via
+    ``bbox_inches="tight"``. Skipped entirely when ``show`` is False (the
+    production-images toggle on the plot nodes).
+    """
+    if not show or not notes:
+        return
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    ax_bb = ax.get_window_extent(renderer)
+    wrapped = _wrap_notes(fig, notes, ax_bb.width, fontsize)
+    probe = fig.text(0.0, 0.0, wrapped, fontsize=fontsize)
+    h_px = probe.get_window_extent(renderer).height
+    probe.remove()
+    fig_w_px = fig.get_size_inches()[0] * fig.dpi
+    fig_h_px = fig.get_size_inches()[1] * fig.dpi
+    xlabel_bottom = ax.xaxis.label.get_window_extent(renderer).y0
+    cx = 0.5 * (ax_bb.x0 + ax_bb.x1) / fig_w_px
+    # top of the block sits gap_px below the x-label's bottom edge
+    y = (xlabel_bottom - gap_px - h_px) / fig_h_px
+    fig.text(cx, y, wrapped, ha="center", va="bottom", fontsize=fontsize,
+             style="italic", color="0.3")
+
+
 def impedance_layout(fig, ax_rho, ax_phi, x_min, x_max, y_min, y_max,
                      phase_inches: float, inches_per_decade: float = 0.9) -> None:
     """Size the impedance figure: equal per-decade scale for the ρ_a panel
@@ -94,6 +150,8 @@ def impedance_layout(fig, ax_rho, ax_phi, x_min, x_max, y_min, y_max,
     The phase panel height is independent of the ρ_a decade span: the
     off-diagonal phase panel is deliberately half the diagonal one (the
     off-diagonal range is 0–90° vs 360° for the signed diagonal phases).
+    Single-pass by design: margins are measured on the current geometry and
+    carried into the resized figure — do not re-run it on its own output.
     """
     xd = max(1.0, float(np.log10(x_max / x_min)))
     yd = max(1.0, float(np.log10(y_max / y_min)))
@@ -202,13 +260,15 @@ def rho_phase_errors(z, z_std, period, rho):
     return rho_se, phi_se
 
 
-def plot_impedance_response(tf, mode: str, path, rho_ylim=None):
+def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
+                            show_params: bool = True):
     """Render the apparent-resistivity / phase figure (2 panels) to ``path``.
 
     ``rho_ylim`` optionally pins the apparent-resistivity y-limits
     (``(min, max)``) instead of the auto whole-decade fit — used to match an
     external reference figure's axis range exactly (DESIGN §15, the
-    SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m).
+    SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m). ``show_params=False``
+    drops the processing-provenance line for production images (§23.3).
     """
     comps = impedance_panels(tf, mode)
     if not comps:
@@ -289,19 +349,16 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None):
                   fontsize=8, borderpad=0.3, handlelength=0.0,
                   handletextpad=0.5)
     fig.suptitle(station_title(tf), fontsize=11, fontweight="bold")
-    notes = run_notes(tf)
-    if notes:
-        fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
-                 style="italic", color="0.3")
     impedance_layout(fig, ax_rho, ax_phi, x_min, x_max, y_min, y_max,
                      phase_h)
+    _annotate_notes(fig, ax_phi, run_notes(tf), show_params)
     fig.savefig(path, dpi=DPI, bbox_inches="tight",
                 metadata={"Software": "emptyUI", "Title": station_title(tf)})
     plt.close(fig)
     return path
 
 
-def plot_tipper(tf, path, ylim=None):
+def plot_tipper(tf, path, ylim=None, show_params: bool = True):
     """Render the tipper figure — Re/Im panels, Tzx/Tzy series (DESIGN §23).
 
     Mirrors the AppRes & Phase grammar exactly (USArray reference figure):
@@ -310,7 +367,8 @@ def plot_tipper(tf, path, ylim=None):
     capsize 2.5, elinewidth 0.8; shared log-period x-limits
     (``_decade_limits``). ``ylim`` = (min, max) pins the y-axis on both
     panels; None keeps the smart default ([-1, 1], auto-expanded when the
-    data legitimately exceeds 1 near 2D/3D contrasts).
+    data legitimately exceeds 1 near 2D/3D contrasts). ``show_params=False``
+    drops the processing-provenance line for production images (§23.3).
     """
     panels = tipper_panels(tf)
     if not panels:
@@ -361,11 +419,8 @@ def plot_tipper(tf, path, ylim=None):
     axes[0].set_xlim(*_decade_limits(period))
     axes[-1].set_xlabel("Period (secs)")
     fig.suptitle(station_title(tf), fontsize=11, fontweight="bold")
-    notes = run_notes(tf)
-    if notes:
-        fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
-                 style="italic", color="0.3")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
+    _annotate_notes(fig, axes[-1], run_notes(tf), show_params)
     fig.savefig(path, dpi=DPI, bbox_inches="tight",
                 metadata={"Software": "emptyUI", "Title": station_title(tf)})
     plt.close(fig)
@@ -418,7 +473,7 @@ def _ellipse_outline(p, w_px, h_px, angle_deg, px_per_decade, px_per_y, n=72):
     return p * 10.0 ** (xr / px_per_decade), yr / px_per_y
 
 
-def plot_phase_tensor(tf, path):
+def plot_phase_tensor(tf, path, show_params: bool = True):
     """Render the Caldwell-style phase-tensor figure (DESIGN §20.2).
 
     PT ellipses vs period: the image ellipse of Φ = Re(Z)⁻¹·Im(Z) at each
@@ -428,7 +483,8 @@ def plot_phase_tensor(tf, path):
     standard 3D-structure indicator. Ellipses are constructed in display
     space so the log x-axis cannot distort them (_ellipse_outline). No PT
     error bars in this MVP (Z_err → PT covariance propagation is
-    nontrivial; §20.2).
+    nontrivial; §20.2). ``show_params=False`` drops the
+    processing-provenance line for production images (§23.3).
     """
     from .phase_tensor import phase_tensor, pt_ellipse_params
 
@@ -468,11 +524,8 @@ def plot_phase_tensor(tf, path):
     cbar.set_label(r"Skew $\beta$ (deg)", fontsize=9)
     ax.set_title(station_title(tf) + " — phase tensor", fontsize=11,
                  fontweight="bold")
-    notes = run_notes(tf)
-    if notes:
-        fig.text(0.5, 0.005, notes, ha="center", va="bottom", fontsize=7,
-                 style="italic", color="0.3")
     fig.tight_layout(rect=(0, 0.02, 1, 1))
+    _annotate_notes(fig, ax, run_notes(tf), show_params)
 
     # measure the laid-out axes: pixels per decade (log x) and per y-unit
     fig.canvas.draw()

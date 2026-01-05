@@ -295,3 +295,115 @@ def test_tipper_ylim_param_validation(tmp_path):
     for bad in ("2,-2", "1", "x", "1,2,3"):
         with pytest.raises(ValueError, match="tipper_ylim"):
             PlotTipper().execute(ctx, _tipper_tf(), tipper_ylim=bad)
+
+
+_LONG_NOTE = (
+    "estimator=RobustStaged; remote=False; band_style=octave; "
+    "periods_per_octave=4; min_bins_per_band=7; t_short=0.0001; "
+    "decimation_levels=8; window=128 samples (parkes); levels=3; "
+    "coherence_threshold=0.6; nomenclature=lemi12; reference=SDG31b"
+)
+
+
+def _long_note_tf():
+    periods = np.array([2.0, 4.0, 8.0, 16.0])
+    Z = np.zeros((4, 3, 2), dtype=complex)
+    Z[:, 0, 1] = 3 - 1j
+    Z[:, 1, 0] = 2 + 1j
+    return build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                    channel_nomenclature="lemi12",
+                    survey_id="bgs", station_id="NO46", run_id="sr1_0001",
+                    latitude=56.72, longitude=-2.85,
+                    processing_notes=_LONG_NOTE)
+
+
+def _long_note_tipper_tf():
+    periods = np.array([2.0, 4.0, 8.0])
+    Z = np.zeros((3, 3, 2), dtype=complex)
+    Z[:, 0, 0] = 1 + 0j
+    Z[:, 1, 1] = 2 + 0j
+    Z[:, 2, 0] = 0.3 + 0.1j
+    Z[:, 2, 1] = -0.2 + 0.05j
+    return build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                    channel_nomenclature="lemi12",
+                    survey_id="bgs", station_id="NO46", run_id="sr1_0001",
+                    latitude=56.72, longitude=-2.85,
+                    processing_notes=_LONG_NOTE)
+
+
+def _note_text(fig):
+    return next((t for t in fig.texts if "estimator" in t.get_text()), None)
+
+
+def test_print_params_toggle(tmp_path: Path):
+    """The provenance line is printed by default and dropped on demand."""
+    for fn, tf in ((plotting.plot_impedance_response, _long_note_tf()),
+                   (plotting.plot_tipper, _long_note_tipper_tf()),
+                   (plotting.plot_phase_tensor, _long_note_tf())):
+        path = tmp_path / f"on_{fn.__name__}.png"
+        with patch.object(plotting.plt, "close", lambda *a, **k: None):
+            fn(tf, path) if fn is not plotting.plot_impedance_response \
+                else fn(tf, "off-diagonal", path)
+        fig = plt.gcf()
+        try:
+            assert _note_text(fig) is not None
+        finally:
+            plt.close(fig)
+        path = tmp_path / f"off_{fn.__name__}.png"
+        with patch.object(plotting.plt, "close", lambda *a, **k: None):
+            fn(tf, path, show_params=False) \
+                if fn is not plotting.plot_impedance_response \
+                else fn(tf, "off-diagonal", path, show_params=False)
+        fig = plt.gcf()
+        try:
+            assert _note_text(fig) is None
+        finally:
+            plt.close(fig)
+
+
+def test_notes_wrapped_to_axes_width(tmp_path: Path):
+    """A long provenance line wraps; no line is wider than the axes."""
+    tf = _long_note_tf()
+    path = tmp_path / "fig.png"
+    with patch.object(plotting.plt, "close", lambda *a, **k: None):
+        plotting.plot_impedance_response(tf, "off-diagonal", path)
+    fig = plt.gcf()
+    try:
+        note = _note_text(fig)
+        assert note is not None
+        assert "\n" in note.get_text()
+        renderer = fig.canvas.get_renderer()
+        ax_w = fig.axes[1].get_window_extent(renderer).width
+        for line in note.get_text().split("\n"):
+            probe = fig.text(0, 0, line, fontsize=note.get_fontsize())
+            assert probe.get_window_extent(renderer).width <= ax_w + 1.0
+            probe.remove()
+        # wrapped note no longer inflates the saved canvas (§23.3: the old
+        # single-line note rendered ~1100px wide on a ~310px figure)
+        import io
+
+        from PIL import Image
+        buf = io.BytesIO(path.read_bytes())
+        assert Image.open(buf).size[0] < 800
+    finally:
+        plt.close(fig)
+
+
+def test_notes_below_xlabel(tmp_path: Path):
+    """The note sits below the x-axis label, never overlapping it."""
+    tf = _long_note_tf()
+    path = tmp_path / "fig.png"
+    with patch.object(plotting.plt, "close", lambda *a, **k: None):
+        plotting.plot_impedance_response(tf, "off-diagonal", path)
+    fig = plt.gcf()
+    try:
+        note = _note_text(fig)
+        renderer = fig.canvas.get_renderer()
+        xlabel_bb = fig.axes[1].xaxis.label.get_window_extent(renderer)
+        note_bb = note.get_window_extent(renderer)
+        # anchored 5px below the x-label — never overlapping (§23.3); when
+        # the wrapped block needs more room than the canvas has,
+        # bbox_inches="tight" extends the saved image downward to include it
+        assert note_bb.y1 <= xlabel_bb.y0 + 0.6
+    finally:
+        plt.close(fig)
