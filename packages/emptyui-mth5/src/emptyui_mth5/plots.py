@@ -78,16 +78,38 @@ class PlotTipper(Node):
     category = "Display"
     inputs = (Input("tf", "tf", label="tf"),)
     outputs = (Output("plot", "plot"),)
-    params = ()
+    params = (
+        Param("tipper_ylim", "string", label="Tz y-limits", default="auto",
+              placeholder="auto or min,max (e.g. -1,1)",
+              description="Pin the tipper y-axis to a fixed range 'min,max' "
+                          "on both Re/Im panels; 'auto' (default) uses "
+                          "[-1, 1] and expands only when the data "
+                          "legitimately exceeds 1 (|T| > 1 near 2D/3D "
+                          "conductivity contrasts)."),
+    )
 
-    def execute(self, ctx, tf) -> dict[str, Any]:
+    def execute(self, ctx, tf, tipper_ylim: str = "auto") -> dict[str, Any]:
         if not tf.has_tipper():
             raise ValueError(
                 "transfer function has no tipper data (no vertical magnetic "
                 "output — compute the FC with e.g. 'e1,e2,bz' outputs)"
             )
+        limits = None
+        if str(tipper_ylim).strip() not in ("", "auto"):
+            try:
+                parts = [float(x) for x in str(tipper_ylim).split(",")]
+            except ValueError as exc:
+                raise ValueError(
+                    f"tipper_ylim '{tipper_ylim}' is not 'auto' or 'min,max'"
+                ) from exc
+            if len(parts) != 2 or parts[1] <= parts[0]:
+                raise ValueError(
+                    f"tipper_ylim '{tipper_ylim}' is not 'auto' or 'min,max' "
+                    "(max > min)"
+                )
+            limits = (parts[0], parts[1])
         path = ctx.artifact_path("plot_tipper", ".png")
-        plot_tipper(tf, path)
+        plot_tipper(tf, path, ylim=limits)
         artifact = ctx.publish_artifact(path, kind="image")
         return {"plot": artifact}
 

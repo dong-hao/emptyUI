@@ -1860,3 +1860,42 @@ source of truth (`GET/PUT /api/settings`).
   numbers, empty = off, explicit Save), Deployment (read-only code
   values), Planned (disabled rows, "planned" tag), Plugins (§5.1,
   unchanged).
+
+---
+
+## 23. Plot Tipper restyle + fc-based Plot Spectrogram (delivered 2026-09-12)
+
+### 23.1 Plot Tipper — AppRes grammar alignment + y-limit param
+- **Layout** (user decision: the MT standard): panels = **Re / Im** (top /
+  bottom), series = components — the exact mirror of AppRes & Phase
+  (panels = parts, series = components): **Tzx = ○ open circle (blue)**,
+  **Tzy = ✕ cross (red)** via the shared `MARKERS`/`COLORS`.
+- **Open-circle correction (user)**: the USArray reference figure draws XY
+  as an OPEN circle — `MARKER_FACES = {"xy": "white"}` added to the shared
+  style; **AppRes & Phase XY is now open too** (was filled).
+- Symbols only (no connecting lines), shared log-period x-limits
+  (`_decade_limits`), same width (6.5), markersize 5, capsize 2.5,
+  elinewidth 0.8, boxed legend in the Re panel only.
+- **New param** `tipper_ylim` ("auto" | "min,max"), mirroring `rho_ylim`;
+  auto keeps the smart default ([-1, 1], auto-expand when |T| > 1 near
+  2D/3D contrasts — correct behavior, kept).
+
+### 23.2 Plot Spectrogram — fc input (no in-line FFT)
+- **New node `aurora.plot.spectrogram`** (emptyui-aurora, Display): input
+  `fc` from Compute FC; power = 10·log10|FC|² per (frequency, time) — the
+  coefficients are reused, no second FFT. pcolormesh, **log y
+  (frequency)**, x = time (datetime64 ConciseDateFormatter when persisted,
+  relative seconds otherwise), viridis + dB colorbar, §15 conventions.
+- **Params**: `channel` (string, empty = first electric channel; standard
+  names map via the fc's nomenclature) — **`split_inherited` Param flag
+  (new, generic §4 extension)**: inherited comma-separated candidates
+  (Compute FC's `output_channels = "e1,e2,bz"`) are split into individual
+  combobox choices; `decimation_level` (integer, −1 = deepest available,
+  invalid → actionable error listing levels — a payload-dependent dropdown
+  is impossible pre-run, the frontend never sees the payload);
+  `window_samples`/`decimation_levels` are **inherited from Compute FC**
+  (§4 map on the `fc` input) for annotation; the authoritative window
+  length shown comes from the fc's `num_samples_window` attr.
+- **Old node**: `core.plot.spectrogram` (ts.run + in-line FFT) →
+  `hidden = True`, re-titled "Plot Spectrogram (TS)" — out of the palette,
+  still executable by saved workflows.

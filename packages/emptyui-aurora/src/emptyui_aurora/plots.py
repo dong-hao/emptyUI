@@ -177,6 +177,132 @@ class PlotCoherency(Node):
         return {"plot": ctx.publish_artifact(path, kind="image")}
 
 
+class PlotSpectrogramFC(Node):
+    type = "aurora.plot.spectrogram"
+    title = "Plot Spectrogram"
+    tooltip = "Spectrogram (power vs time/frequency) of one fc channel — reuses the Compute FC coefficients."
+    description = (
+        "Spectrogram of one channel computed from the fc's Fourier "
+        "coefficients (10·log10|FC|² — no second FFT). The decimation level "
+        "to display is selected per level id (−1 = deepest available); the "
+        "channel resolves from the fc (standard names map via the "
+        "nomenclature; empty = first electric channel). The upstream "
+        "Compute FC's window length and channel lists are inherited "
+        "(window/decimation annotation; channels offered as suggestions)."
+    )
+    category = "Display"
+    inputs = (Input("fc", "fc"),)
+    outputs = (Output("plot", "plot"),)
+    params = (
+        Param("channel", "string", label="Channel", default="",
+              placeholder="auto (first electric channel)",
+              split_inherited=True,
+              description="Channel to spectrogram; empty = first electric "
+                          "channel (or first channel). Standard names "
+                          "(ex/ey/hx/hy/hz) are mapped through the fc's "
+                          "channel nomenclature. Suggestions are split "
+                          "from the upstream Compute FC channel params."),
+        Param("decimation_level", "integer", label="Decimation level",
+              default=-1, min=-1,
+              description="Which decimation level to display: −1 (default) "
+                          "= the deepest level in the connected fc; the "
+                          "upstream decimation count is inherited for "
+                          "orientation."),
+        Param("window_samples", "integer", label="Window (samples)",
+              default=None, optional=True,
+              description="Display only — inherited from Compute FC; the "
+                          "authoritative value is the fc's own metadata."),
+        Param("decimation_levels", "integer", label="Decimation levels (upstream)",
+              default=None, optional=True,
+              description="Display only — inherited from Compute FC."),
+    )
+    inherit: ClassVar[dict[str, dict[str, str]]] = {
+        "fc": {"channel": "output_channels",
+               "window_samples": "window_samples",
+               "decimation_levels": "decimation_levels"},
+    }
+    deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
+
+    def execute(self, ctx, fc, channel: str = "",
+                decimation_level: int = -1,
+                window_samples: int | None = None,
+                decimation_levels: int | None = None) -> dict[str, Any]:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+        from emptyui_core_nodes._channels import (
+            auto_channel,
+            is_electric_name,
+            resolve_channels,
+        )
+        from emptyui_mth5.plotting import apply_style
+
+        levels = fc if isinstance(fc, dict) else {0: fc}
+        if decimation_level < 0:
+            level = max(levels)
+        else:
+            level = int(decimation_level)
+            if level not in levels:
+                raise ValueError(
+                    f"fc has no decimation level {level} (available: "
+                    f"{sorted(levels)}) — set 'Decimation level' to one of "
+                    "them, or −1 for the deepest"
+                )
+        ds = _normalize_fc_layout(levels[level])
+        names = [str(c) for c in ds.data_vars]
+        if str(channel or "").strip():
+            spec = str(channel).strip().lower()
+            # exact name (case-insensitive) first, then standard-name mapping
+            low = {str(c).lower(): str(c) for c in names}
+            channel = low.get(spec)
+            if channel is None:
+                mapped = resolve_channels(names, spec)
+                channel = mapped[0] if mapped else None
+            if channel is None:
+                raise ValueError(
+                    f"channel {spec!r} not in fc (channels: {names})")
+        else:
+            electric = [str(c) for c in ds.data_vars if is_electric_name(str(c))]
+            base = [str(c) for c in ds.data_vars]
+            channel = auto_channel(electric or base) or base[0]
+
+        freq = ds["frequency"].values
+        power = 10.0 * np.log10(np.abs(ds[channel].values) ** 2 + 1e-24)
+        time = ds["time"].values
+        time_is_dt = time.dtype.kind == "M"  # datetime64 (persisted fc)
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        mesh = ax.pcolormesh(time, freq, power, shading="auto", cmap="viridis")
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label("Power (dB)")
+        apply_style(fig, (ax,))
+        ax.set_yscale("log")
+        ax.set_xlabel("Time" if time_is_dt else "Time (s)")
+        if time_is_dt:
+            ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(
+                mdates.AutoDateLocator()))
+        ax.set_ylabel("Frequency (Hz)")
+        attrs_note = (
+            f"level {level}, window {ds.attrs.get('num_samples_window', '?')} samples"
+        )
+        station = ds.attrs.get("station_id") or ""
+        ax.set_title(
+            (station + " — " if station else "")
+            + f"Spectrogram — {channel} ({attrs_note})",
+            fontsize=10,
+        )
+        fig.tight_layout()
+
+        path = ctx.artifact_path(f"plot_spectrogram_{channel}", ".png")
+        fig.savefig(path, dpi=150, bbox_inches="tight",
+                    metadata={"Software": "emptyUI"})
+        plt.close(fig)
+        artifact = ctx.publish_artifact(path, kind="image")
+        return {"plot": artifact}
+
+
 def station_title_from_fc(fc) -> str:
     """Station title from an fc's identity attrs (§15 convention)."""
     station = fc.attrs.get("station_id") or ""

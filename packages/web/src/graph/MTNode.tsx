@@ -50,8 +50,16 @@ export function MTNode({ id, data, selected }: NodeProps) {
     () => makeInheritContext(catalog?.nodes, nodes, edges),
     [catalog, nodes, edges],
   );
-  const inheritedOptions = (paramName: string): string[] =>
-    resolveInherited(inheritCtx, id, paramName);
+  const inheritedOptions = (paramName: string): string[] => {
+    const spec = params.find((p) => p.name === paramName);
+    let opts = resolveInherited(inheritCtx, id, paramName);
+    if (spec?.split_inherited) {
+      // comma-separated upstream lists (e.g. Compute FC output_channels
+      // "e1,e2,bz") become individual combobox choices
+      opts = opts.flatMap((o) => o.split(",").map((s) => s.trim()).filter(Boolean));
+    }
+    return opts;
+  };
 
   // Only params the node declares as inheritable may auto-fill / become a
   // dropdown; everything else (root defaults, radio/select config) stays manual.

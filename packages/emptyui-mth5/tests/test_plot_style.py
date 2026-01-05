@@ -195,14 +195,24 @@ def test_tipper_reim_conventions(tmp_path: Path):
         ax1, ax2 = fig.axes
         for ax in (ax1, ax2):
             assert ax.get_ylim() == (-1, 1)
-            markers = {
-                line.get_marker() for line in ax.get_lines()
-                if line.get_marker() in ("o", "x", "s", "D")
-            }
-            assert markers == {"o", "x"}  # Re = circle, Im = x
+            # symbols only (no connecting lines) + shared component grammar:
+            # Tzx = circle (blue), Tzy = x (red) — mirror of AppRes
+            lines = [l for l in ax.get_lines()
+                     if l.get_marker() in ("o", "x", "s", "D")]
+            markers = {l.get_marker() for l in lines}
+            assert markers == {"o", "x"}
+            labels = {c.get_label() for c in ax.containers}
+            assert labels == {"TZX", "TZY"}
+            assert all(l.get_linestyle() in ("None", "", "none")
+                       for l in lines if l.get_marker() != "_")
             assert ax.get_ylabel().endswith("(dimensionless)")
-        assert ax1.get_ylabel().startswith("Tzx")
-        assert ax2.get_ylabel().startswith("Tzy")
+            # shared log-period x-limits (AppRes convention)
+            assert ax.get_xscale() == "log"
+        assert ax1.get_ylabel().startswith("$T_z$ Re")
+        assert ax2.get_ylabel().startswith("$T_z$ Im")
+        # Tzx renders as an OPEN circle (white face) — USArray reference
+        tzx_line = next(c[0] for c in ax1.containers if c.get_label() == "TZX")
+        assert tzx_line.get_markerfacecolor() == "white"
         assert "NO46" in fig._suptitle.get_text()
     finally:
         plt.close(fig)
@@ -246,3 +256,42 @@ def test_high_dpi_saved(tmp_path: Path):
     from PIL import Image
     with Image.open(path) as im:
         assert round(im.info.get("dpi", (0, 0))[0]) == plotting.DPI
+
+
+def test_appres_xy_is_open_circle(tmp_path: Path):
+    """XY renders as an OPEN circle (white face, colored edge) — USArray
+    reference figure convention (review 2026-09-12)."""
+    tf = _impedance_tf()
+    fig, _path = _render(tf, "off-diagonal", tmp_path)
+    try:
+        ax_rho = fig.axes[0]
+        xy_line = next(c[0] for c in ax_rho.containers if c.get_label() == "XY")
+        assert xy_line.get_markerfacecolor() == "white"
+        yx = next(c for c in ax_rho.containers if c.get_label() == "YX")
+        assert yx[0].get_marker() == "x"  # cross has no face
+    finally:
+        plt.close(fig)
+
+
+def test_tipper_ylim_param_pins_axis(tmp_path: Path):
+    """An explicit tipper_ylim range pins both Re/Im panels exactly."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = PlotTipper().execute(ctx, _tipper_tf(), tipper_ylim="-2,2")
+    path = Path(out["plot"]["path"])
+    assert path.read_bytes().startswith(b"\x89PNG")
+    path2 = tmp_path / "tip2.png"
+    with patch.object(plotting.plt, "close", lambda *a, **k: None):
+        plotting.plot_tipper(_tipper_tf(), path2, ylim=(-2.0, 2.0))
+    fig = plt.gcf()
+    try:
+        for ax in fig.axes[:2]:
+            assert ax.get_ylim() == (-2.0, 2.0)
+    finally:
+        plt.close(fig)
+
+
+def test_tipper_ylim_param_validation(tmp_path):
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    for bad in ("2,-2", "1", "x", "1,2,3"):
+        with pytest.raises(ValueError, match="tipper_ylim"):
+            PlotTipper().execute(ctx, _tipper_tf(), tipper_ylim=bad)

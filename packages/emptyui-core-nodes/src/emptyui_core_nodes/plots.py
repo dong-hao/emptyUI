@@ -108,9 +108,15 @@ class PlotTimeSeriesNode(Node):
 
 class PlotSpectrogramNode(Node):
     type = "core.plot.spectrogram"
-    title = "Plot Spectrogram"
-    tooltip = "Plot an STFT spectrogram of one channel as a PNG figure."
-    description = "STFT spectrogram of one channel."
+    title = "Plot Spectrogram (TS)"
+    tooltip = "Plot an STFT spectrogram of one time-series channel (kept for old workflows; the fc-based Plot Spectrogram is preferred)."
+    description = (
+        "STFT spectrogram of one time-series channel (in-line FFT). "
+        "Superseded by aurora.plot.spectrogram, which reuses the Compute FC "
+        "coefficients — hidden from the palette; saved workflows using it "
+        "keep working."
+    )
+    hidden = True
     category = "Display"
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)

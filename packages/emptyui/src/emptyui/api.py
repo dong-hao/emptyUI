@@ -83,6 +83,10 @@ class Param:
     #: rendering/UX rule — the executor never enforces it (nodes validate
     #: their own params).
     enabled_when: tuple[str, tuple[Any, ...]] | None = None
+    #: Split inherited comma-separated candidates into individual combobox
+    #: options (§4): an upstream ``output_channels="e1,e2,bz"`` offers e1 /
+    #: e2 / bz as separate choices. Rendering-only.
+    split_inherited: bool = False
 
     def _cascade_dict(self) -> dict[str, list[list[Any]]] | None:
         if not self.cascade:
@@ -115,6 +119,7 @@ class Param:
                  "values": [str(v) for v in self.enabled_when[1]]}
                 if self.enabled_when else None
             ),
+            "split_inherited": self.split_inherited,
         }
 
 

@@ -27,6 +27,9 @@ MU0 = 4.0 * np.pi * 1e-7
 MARKERS = {"xy": "o", "yx": "x", "xx": "s", "yy": "D"}
 COLORS = {"xy": "#1f77b4", "yx": "#d62728", "xx": "#1f77b4", "yy": "#d62728"}
 LINESTYLES = {"xy": "-", "yx": "--", "xx": ":", "yy": "-."}
+#: marker face per component (USArray reference figure: XY = OPEN circle ○ —
+#: white face with the colored edge; other markers filled)
+MARKER_FACES = {"xy": "white"}
 
 DPI = 150
 
@@ -250,15 +253,20 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None):
         label = label.upper()
         rho_se, phi_se = rho_phase_errors(z, c["z_std"], period, rho)
         rho_se_ok = rho_se[ok] if rho_se is not None else None
-        # markers only, no connecting lines (EMTF reference convention)
+        # markers only, no connecting lines (EMTF reference convention);
+        # XY renders as an OPEN circle (white face, MARKER_FACES)
+        fmt = MARKERS.get(key, "o")
+        mfc = MARKER_FACES.get(key, COLORS.get(key, "k"))
         ax_rho.errorbar(period[ok], rho[ok], yerr=rho_se_ok,
-                        fmt=MARKERS.get(key, "o"), color=COLORS.get(key, "k"),
+                        fmt=fmt, color=COLORS.get(key, "k"),
+                        markerfacecolor=mfc,
                         label=label, capsize=2.5, markersize=5,
                         linewidth=1.0, elinewidth=0.8)
         ph = _fold_phase_deg(phase)[ok] if mode == "off-diagonal" else phase[ok]
         phi_se_ok = phi_se[ok] if phi_se is not None else None
         ax_phi.errorbar(period[ok], ph, yerr=phi_se_ok,
-                        fmt=MARKERS.get(key, "o"), color=COLORS.get(key, "k"),
+                        fmt=fmt, color=COLORS.get(key, "k"),
+                        markerfacecolor=mfc,
                         label=label, capsize=2.5, markersize=5,
                         linewidth=1.0, elinewidth=0.8)
 
@@ -293,38 +301,64 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None):
     return path
 
 
-def plot_tipper(tf, path):
-    """Render the tipper Re/Im figure (2 panels, Tzx and Tzy) to ``path``."""
+def plot_tipper(tf, path, ylim=None):
+    """Render the tipper figure — Re/Im panels, Tzx/Tzy series (DESIGN §23).
+
+    Mirrors the AppRes & Phase grammar exactly (USArray reference figure):
+    panels = Re (top) / Im (bottom); series = Tzx = OPEN circle (blue) /
+    Tzy = cross (red); symbols only (no connecting lines); markersize 5,
+    capsize 2.5, elinewidth 0.8; shared log-period x-limits
+    (``_decade_limits``). ``ylim`` = (min, max) pins the y-axis on both
+    panels; None keeps the smart default ([-1, 1], auto-expanded when the
+    data legitimately exceeds 1 near 2D/3D contrasts).
+    """
     panels = tipper_panels(tf)
     if not panels:
         raise ValueError("transfer function has no tipper data")
     period = panels[0]["period"]
-    fig, axes = plt.subplots(2, 1, figsize=(6.5, 6.4), sharex=True)
-    for ax, p in zip(axes, panels):
-        z = p["z"]
-        ok = np.isfinite(z.real) & np.isfinite(z.imag)
-        if not np.any(ok):
-            continue
-        z_std = p["z_std"]
-        re_se = (z_std / np.sqrt(2.0)) if z_std is not None else None
-        for part, data, err, marker, color, ls, label in (
-            ("Re", z.real, re_se, "o", "#1f77b4", "-", "Re"),
-            ("Im", z.imag, re_se, "x", "#d62728", "--", "Im"),
-        ):
-            yerr = err[ok] if err is not None else None
-            ax.errorbar(period[ok], data[ok], yerr=yerr, fmt=marker,
-                        color=color, linestyle=ls, label=label,
-                        capsize=2.5, markersize=4, linewidth=1.0, elinewidth=0.8)
+    # series per component (AppRes grammar: component -> marker/color)
+    series = {p["label"].lower(): p for p in panels}  # tzx / tzy
+    parts = (("Re", lambda z: z.real), ("Im", lambda z: z.imag))
+
+    fig = plt.figure(figsize=(6.5, 6.4))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.18)
+    ax_re = fig.add_subplot(gs[0])
+    ax_im = fig.add_subplot(gs[1], sharex=ax_re)
+    axes = [ax_re, ax_im]
+    for i, (part, getter) in enumerate(parts):
+        ax = axes[i]
+        for key, p in series.items():
+            z = p["z"]
+            ok = np.isfinite(z.real) & np.isfinite(z.imag)
+            if not np.any(ok):
+                continue
+            data = getter(z)[ok]
+            z_std = p["z_std"]
+            err = (z_std / np.sqrt(2.0))[ok] if z_std is not None else None
+            std = ("xy" if key == "tzx" else "yx")
+            ax.errorbar(
+                period[ok], data, yerr=err,
+                fmt=MARKERS.get(std, "o"),
+                color=COLORS.get(std, "k"),
+                markerfacecolor=MARKER_FACES.get(std, COLORS.get(std, "k")),
+                label=p["label"].upper(), capsize=2.5, markersize=5,
+                linewidth=1.0, elinewidth=0.8)
         ax.set_xscale("log")
-        ax.set_ylabel(f"{p['label']} (dimensionless)")
-        # USArray default [-1, 1], but auto-expand when data legitimately
-        # exceeds it (|T| > 1 occurs near 2D/3D conductivity contrasts)
-        finite = np.abs(np.concatenate([z.real[ok], z.imag[ok]])) if np.any(ok) else np.array([])
-        bound = max(1.0, 1.1 * float(finite.max())) if finite.size else 1.0
-        ax.set_ylim(-bound, bound)
-        ax.legend(loc="best", frameon=True, framealpha=0.9, fontsize=8,
-                  borderpad=0.3)
+        ax.set_ylabel(f"$T_z$ {part} (dimensionless)")
+        finite = np.concatenate([
+            np.abs(getter(p["z"])[np.isfinite(p["z"])])
+            for p in series.values()]) if series else np.array([])
+        if ylim is not None:
+            ax.set_ylim(float(ylim[0]), float(ylim[1]))
+        else:
+            bound = max(1.0, 1.1 * float(finite.max())) if finite.size else 1.0
+            ax.set_ylim(-bound, bound)
+    # boxed marker-only legend in the Re panel (AppRes convention: no
+    # legend in the lower panel)
+    axes[0].legend(loc="best", frameon=True, framealpha=0.9, fontsize=8,
+                   borderpad=0.3, handlelength=0.0, handletextpad=0.5)
     apply_style(fig, axes)
+    axes[0].set_xlim(*_decade_limits(period))
     axes[-1].set_xlabel("Period (secs)")
     fig.suptitle(station_title(tf), fontsize=11, fontweight="bold")
     notes = run_notes(tf)
