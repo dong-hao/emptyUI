@@ -504,8 +504,3 @@ class MergeTFLevels(Node):
         return {"tf": tf}
 
 
-def register(registry) -> None:
-    registry.add(ComputeFC)
-    registry.add(CoherenceSort)
-    registry.add(EstimateTF)
-    registry.add(MergeTFLevels)

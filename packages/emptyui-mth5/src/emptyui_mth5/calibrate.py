@@ -156,5 +156,3 @@ class Calibrate(Node):
         return {"data": out}
 
 
-def register(registry) -> None:
-    registry.add(Calibrate)

@@ -124,5 +124,3 @@ class LoadCsv(Node):
                                    start=start, start_datetime=start_datetime)}
 
 
-def register(registry) -> None:
-    registry.add(LoadCsv)

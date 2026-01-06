@@ -91,6 +91,3 @@ class ViewTF(Node):
         return {"table": artifact}
 
 
-def register(registry) -> None:
-    registry.add(ViewSelection)
-    registry.add(ViewTF)

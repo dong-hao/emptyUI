@@ -111,6 +111,3 @@ class Detrend(Node):
                                    meta=dict(data.meta))}
 
 
-def register(registry) -> None:
-    registry.add(Bandpass)
-    registry.add(Detrend)

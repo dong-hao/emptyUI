@@ -132,6 +132,3 @@ class SpectraToFCGroup(Node):
         return {}
 
 
-def register(registry) -> None:
-    registry.add(FCGroupToSpectra)
-    registry.add(SpectraToFCGroup)

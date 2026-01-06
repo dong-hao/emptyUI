@@ -215,6 +215,3 @@ class PlotSpectrogramNode(Node):
         return {"plot": artifact}
 
 
-def register(registry) -> None:
-    registry.add(PlotTimeSeriesNode)
-    registry.add(PlotSpectrogramNode)

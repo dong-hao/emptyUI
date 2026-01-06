@@ -70,5 +70,3 @@ class SavePlotNode(Node):
         return {"_saved": artifact}
 
 
-def register(registry) -> None:
-    registry.add(SavePlotNode)

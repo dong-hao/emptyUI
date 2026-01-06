@@ -138,5 +138,3 @@ class LoadLemi(Node):
         return {"mth5": archive}
 
 
-def register(registry) -> None:
-    registry.add(LoadLemi)

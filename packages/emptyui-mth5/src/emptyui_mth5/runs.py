@@ -275,11 +275,6 @@ class MergeChannels(Node):
         return {"data": runts}
 
 
-def register(registry) -> None:
-    registry.add(ExtractRun)
-    registry.add(SplitChannels)
-    registry.add(MergeChannels)
-    registry.add(AlignRuns)
 
 
 def _run_time_info(data):

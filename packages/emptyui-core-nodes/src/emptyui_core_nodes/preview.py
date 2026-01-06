@@ -25,5 +25,3 @@ class PreviewPlotNode(Node):
         return {"plot": plot}
 
 
-def register(registry) -> None:
-    registry.add(PreviewPlotNode)

@@ -25,5 +25,3 @@ class ViewTableNode(Node):
         return {"table": table}
 
 
-def register(registry) -> None:
-    registry.add(ViewTableNode)
