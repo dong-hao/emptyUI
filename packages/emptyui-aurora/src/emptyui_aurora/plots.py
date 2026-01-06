@@ -125,7 +125,7 @@ class PlotCoherency(Node):
                     lfc, bands_override.get(level, []))
             else:
                 periods, band_bins_list = _resolve_period_bands(
-                    lfc, periods_per_octave, style)
+                    lfc, periods_per_octave, style, t_short=t_short or None)
             for b in range(len(periods)):
                 band_bins = band_bins_list[b]
                 if band_bins.size == 0:

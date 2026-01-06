@@ -107,3 +107,18 @@ def test_no_bands_raises(tmp_path):
         PlotCoherency().execute(ctx, fc, periods_per_octave=4,
                                 band_style="l2u", min_bins_per_band=0.0,
                                 t_short=1e9)
+
+
+def test_uniform_head_clip_raises_when_all_clipped(tmp_path):
+    """The uniform scheme honors t_short (previously ignored): clipping
+    every band must raise the same 'no usable frequency bands' error the
+    l2u path raises — before the fix, uniform + t_short=1e9 silently
+    plotted the unclipped head."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = synthetic_fc(synthetic_runts(synthetic_source(14), seed=14),
+                      ["hx", "hy"], ["ex", "ey"])
+    fc = _normalize_fc_layout(fc)
+    with pytest.raises(ValueError, match="no usable frequency bands"):
+        PlotCoherency().execute(ctx, fc, periods_per_octave=4,
+                                band_style="uniform", min_bins_per_band=0.0,
+                                t_short=1e9)

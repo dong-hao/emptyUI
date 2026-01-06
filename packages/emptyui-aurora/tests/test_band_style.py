@@ -386,3 +386,87 @@ def test_node_estimate_tf_adaptive_params(tmp_path):
     notes = adaptive["tf"].run_metadata.comments.value
     assert "min_bins_per_band=40.0" in notes
     assert "t_short=10.0" in notes
+
+
+# --- head clip (t_short) across BOTH schemes (2026-09-13 fix) ---
+
+def test_uniform_head_clip_drops_short_periods():
+    """t_short must clip the uniform scheme too — the shortest-period bound
+    was silently ignored for band_style='uniform' (only the l2u table path
+    clipped); the same geometric-mean center-period criterion applies."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    periods_all, _ = _resolve_period_bands(fc, periods_per_octave=8,
+                                           band_style="uniform")
+    periods_clipped, band_bins = _resolve_period_bands(
+        fc, periods_per_octave=8, band_style="uniform", t_short=4.0)
+    assert len(periods_clipped) < len(periods_all)
+    assert np.all(periods_clipped >= 4.0 - 1e-9)
+    assert len(periods_clipped) == len(band_bins)
+    # the kept periods are a strict prefix of the unclipped grid
+    assert np.allclose(periods_all[-len(periods_clipped):], periods_clipped)
+
+
+def test_uniform_head_clip_reaches_estimate():
+    """estimate_tf_levels with band_style='uniform' + t_short: no merged
+    period is shorter, and the head level is skipped when fully clipped."""
+    fc = _multi_level_fc()
+    per_unclipped = estimate_tf_levels(
+        fc, ["hx", "hy"], ["ex", "ey"], periods_per_octave=3,
+        band_style="uniform")
+    per_clipped = estimate_tf_levels(
+        fc, ["hx", "hy"], ["ex", "ey"], periods_per_octave=3,
+        band_style="uniform", t_short=20.0)
+    P_full, _, _ = merge_tf_levels(per_unclipped)
+    P_clip, _, _ = merge_tf_levels(per_clipped)
+    assert P_clip.size < P_full.size
+    assert np.all(P_clip >= 20.0 - 1e-9)
+    # the head level (shortest periods) contributed nothing when clipped
+    assert 0 not in per_clipped
+
+
+def test_head_clip_applies_to_l2u_fallback():
+    """The l2u per-level fallback (metadata-less fcs) must honor t_short
+    too — previously only the primary container-level table clipped."""
+    fc = _multi_level_fc()
+    for fcl in fc.values():
+        fcl.attrs.pop("sample_rate", None)
+    per = estimate_tf_levels(fc, ["hx", "hy"], ["ex", "ey"],
+                             periods_per_octave=3, band_style="l2u",
+                             t_short=30.0)
+    assert per
+    for entry in per.values():
+        assert np.all(np.asarray(entry["periods"]) >= 30.0 - 1e-9)
+
+
+def test_coherence_sort_fc_head_clip_uniform():
+    """Coherence Sort honors t_short under the uniform scheme (it shares the
+    band-resolution choke point): no diagnostic row carries a shorter
+    period."""
+    source = synthetic_source(2)
+    runts = synthetic_runts(source, seed=2)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(
+        fc, None, ["hx", "hy"], ["ex", "ey"], coherence_min=0.25,
+        coherence_max=0.98, mode="weight", band_style="uniform",
+        t_short=4.0)
+    assert rows
+    assert all(r["period"] >= 4.0 - 1e-9 for r in rows)
+    assert np.isfinite(out["ex"].values).any()
+
+
+def test_head_clip_zero_is_noop_for_both_schemes():
+    """t_short=0/None preserves the legacy behavior for both schemes."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    for style in ("uniform", "l2u"):
+        p0, b0 = _resolve_period_bands(fc, periods_per_octave=8,
+                                       band_style=style)
+        pn, bn = _resolve_period_bands(fc, periods_per_octave=8,
+                                       band_style=style, t_short=None)
+        pz, bz = _resolve_period_bands(fc, periods_per_octave=8,
+                                       band_style=style, t_short=0.0)
+        assert len(p0) == len(pn) == len(pz)
+        assert len(b0) == len(bn) == len(bz)

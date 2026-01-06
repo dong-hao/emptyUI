@@ -1987,3 +1987,23 @@ The time selector extended to the mth5-backed hosts:
 - **Merge Runs deliberately skipped**: its per-run windows already live in
   the selection table rows (edited via View Selection) — a bar per row is
   a table-UI feature, not a node-param widget.
+
+### 23.5 Estimate TF shortest-period (t_short) honored for the uniform scheme (fixed 2026-09-13)
+**Bug**: `t_short` (head clip) was applied only inside `_l2u_band_table`
+→ `_clip_head_bands`, i.e. only on the primary l2u container-level table.
+For `band_style="uniform"` the clip never ran — the per-level
+`_resolve_period_bands` → `_period_bands` chain has no `t_short` at all —
+so the shortest-period parameter was silently ignored. The same gap hit
+Coherence Sort and Plot Coherency (both advertise the param) and the l2u
+**fallback** path (`_period_bands_indexed`, metadata-less fcs).
+
+**Fix (single choke point)**: `_resolve_period_bands(..., t_short=None)`
+post-filters BOTH schemes with the identical geometric-mean center-period
+criterion (`period >= t_short`, same as `_clip_head_bands`); `estimate_tf`,
+`coherence_sort_fc` and Plot Coherency thread the param through; the l2u
+primary path is untouched (mutually exclusive with this branch — no
+double-clip). Fully-clipped levels are skipped in `estimate_tf_levels`
+(mirroring the l2u `if not bands: continue`), and Plot Coherency raises
+its existing "no usable frequency bands" error when everything is clipped
+(uniform now behaves like l2u). Verified: `t_short=0`/`None` remains a
+no-op for both schemes (legacy behavior).

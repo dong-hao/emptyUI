@@ -829,7 +829,7 @@ def _band_coherence(local, ref, ins, outs, band_bins):
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
                       trim=False, periods_per_octave=4, band_style="l2u",
-                      bands_override=None):
+                      bands_override=None, t_short=None):
     """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
 
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
@@ -871,7 +871,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
         periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
     else:
         periods, band_bins_list = _resolve_period_bands(
-            local, periods_per_octave, band_style)
+            local, periods_per_octave, band_style, t_short=t_short)
     rows = []
     for b in range(len(periods)):
         band_bins = band_bins_list[b]
@@ -959,6 +959,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
             band_style=band_style,
             bands_override=None if bands_override is None
             else bands_override.get(level, []),
+            t_short=t_short,
         )
         out_levels[int(level)] = l_out
         if ref_levels is not None:
@@ -979,6 +980,7 @@ def estimate_tf(
     ref_fc=None,
     band_style="l2u",
     bands_override=None,
+    t_short=None,
 ):
     """MT transfer-function estimate -> (periods, Z[n_out x n_in complex], Z_err).
 
@@ -1017,6 +1019,10 @@ def estimate_tf(
     reference — a self-reference (degenerate but well-defined, equals RME).
     This is also what a duplicated/identical "dummy remote station" reduces to.
 
+    ``t_short`` (head clip, §14.9) is honored for BOTH schemes: the primary
+    l2u table clips upstream (:func:`_clip_head_bands`), and the uniform /
+    l2u-fallback paths clip in :func:`_resolve_period_bands`.
+
     FCs read back from an mth5 archive carry a ``(time, frequency)`` layout
     (mth5 ``to_xarray``), while :func:`compute_fc` produces
     ``(frequency, time)``; both are normalized to ``(frequency, time)`` here.
@@ -1047,7 +1053,7 @@ def estimate_tf(
         periods_out, band_bins_list = _bands_from_freq_pairs(fc, bands_override)
     else:
         periods_out, band_bins_list = _resolve_period_bands(
-            fc, periods_per_octave, band_style)
+            fc, periods_per_octave, band_style, t_short=t_short)
 
     nbands = len(periods_out)
     n_in = len(input_channels)
@@ -1460,13 +1466,20 @@ def _period_bands_indexed(fc, periods_per_octave=4):
     return periods_out, index_ranges
 
 
-def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u"):
+def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u",
+                          t_short=None):
     """Dispatch to the two band-construction schemes (DESIGN.md §14.9):
     the uniform log2-grid bands (:func:`_period_bands`) or the discrete
     bin-snapped partition (:func:`_period_bands_indexed` — the per-level
     fallback used when :func:`_l2u_band_table` could not derive the
     container-level table, e.g. for fcs without metadata; each level then
     walks its own bin grid).
+
+    ``t_short`` (head clip, §14.9) is applied to BOTH schemes here —
+    including the l2u fallback — so a shortest-period bound is honored
+    identically to the primary l2u table path (which clips upstream via
+    :func:`_clip_head_bands`); the criterion is the same geometric-mean
+    center period ``>= t_short``.
 
     Returns ``(periods_out, band_bins)`` — ``band_bins[b]`` is an
     ``np.ndarray`` of integer positions into ``fc``'s frequency axis for
@@ -1477,14 +1490,19 @@ def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u"):
     if style == "l2u":
         periods_out, index_ranges = _period_bands_indexed(fc, periods_per_octave)
         band_bins = [np.arange(lo, hi + 1) for lo, hi in index_ranges]
-        return periods_out, band_bins
-    periods_out, edges = _period_bands(fc, periods_per_octave)
-    with np.errstate(divide="ignore"):
-        logf = np.log2(fc["frequency"].values)
-    band_bins = []
-    for b in range(len(periods_out)):
-        sel = (logf <= edges[b]) & (logf > edges[b + 1])
-        band_bins.append(np.where(sel)[0])
+    else:
+        periods_out, edges = _period_bands(fc, periods_per_octave)
+        with np.errstate(divide="ignore"):
+            logf = np.log2(fc["frequency"].values)
+        band_bins = []
+        for b in range(len(periods_out)):
+            sel = (logf <= edges[b]) & (logf > edges[b + 1])
+            band_bins.append(np.where(sel)[0])
+    if t_short and t_short > 0:
+        periods_out = np.asarray(periods_out, dtype=float)
+        keep = periods_out >= float(t_short)
+        periods_out = periods_out[keep]
+        band_bins = [bb for bb, k in zip(band_bins, keep) if k]
     return periods_out, band_bins
 
 
@@ -1759,7 +1777,8 @@ def estimate_tf_levels(
     level ratios) the per-level bin walk is used as a fallback.
     ``min_bins_per_band`` (window-starvation threshold on total samples per
     band) and ``t_short`` (head clip) refine the table per DESIGN.md §14.9;
-    the latter is a no-op at its default (None).
+    ``t_short`` is honored for both schemes (the uniform path clips in
+    :func:`_resolve_period_bands`; a fully-clipped level is skipped).
     """
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
     bands_override = None
@@ -1784,7 +1803,10 @@ def estimate_tf_levels(
             ref_fc=ref_fc,
             band_style=band_style,
             bands_override=bands,
+            t_short=t_short,
         )
+        if periods.size == 0:
+            continue  # fully head-clipped — this level contributes nothing
         entry = {
             "periods": periods,
             "Z": Z,
