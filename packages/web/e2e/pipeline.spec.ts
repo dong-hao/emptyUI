@@ -361,3 +361,58 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
   expect(endPctAfter).toBeLessThanOrEqual(endPctBefore + 1);
   await expect(bar).toBeVisible(); // never crossed → slot stays valid
 });
+
+test("time selector bar on Extract Run shows the archive run extent (GMT)", async ({
+  page,
+}) => {
+  const H5 = path.resolve(
+    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+  );
+  await page.goto("/");
+  await addNode(page, "Load MTH5");
+  await addNode(page, "Extract Run");
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+  await placeNode(page, "Extract Run", 600, 150);
+  await placeNode(page, "Load MTH5", 150, 150);
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+
+  await node(page, "Load MTH5").locator(".path-field input").fill(H5);
+  await connect(page, { node: "Load MTH5", port: "mth5: mth5" }, {
+    node: "Extract Run",
+    port: "mth5: mth5",
+  });
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 120_000,
+  });
+
+  // The bar appears on Extract Run from the archive's per-run summary —
+  // run "a" (first run) of 4P/SDG31, absolute GMT ticks.
+  const bar = node(page, "Extract Run").locator(".time-bar");
+  await expect(bar).toBeVisible({ timeout: 15_000 });
+  const ticks = bar.locator(".time-bar-ticks span");
+  await expect(ticks.nth(0)).toHaveText("2017-10-16 17:01:13");
+  await expect(ticks.nth(1)).toHaveText("2017-10-16 17:32:06");
+
+  // Select a slot by editing the boxes; rerun crops the extraction.
+  const startBox = node(page, "Extract Run")
+    .locator(".param-field", { hasText: "Start (UTC)" })
+    .locator("input");
+  await startBox.fill("2017-10-16 17:10:00");
+  const handlePct = await bar.locator(".time-bar-handle").nth(0).evaluate((el) => {
+    const tr = el.parentElement!.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return ((r.x + r.width / 2 - tr.x) / tr.width) * 100;
+  });
+  // run "a" is 31 min long; 17:10 is ~9 min in ≈ 29%
+  expect(handlePct).toBeGreaterThan(20);
+  expect(handlePct).toBeLessThan(40);
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 120_000,
+  });
+});

@@ -34,12 +34,24 @@ export interface ParamSpec {
 
 /** Extent summary of a ts payload, streamed via `payload` run events
  *  (DESIGN.md §23.4): absolute ISO bounds (UTC) or relative seconds. */
+export interface RunExtent {
+  survey: string;
+  station: string;
+  run: string;
+  start: string;
+  end: string;
+  sample_rate: number;
+}
+
 export interface PayloadSummary {
+  kind?: "ts" | "mth5";
   start: string | number;
   end: string | number;
   absolute: boolean;
   sample_rate: number;
   channels: string[];
+  /** kind "mth5": per-run extents within the archive */
+  runs?: RunExtent[];
 }
 
 /** inherit: input port -> { targetParam: upstreamParam } */

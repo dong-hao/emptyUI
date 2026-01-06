@@ -10,8 +10,6 @@ run/station identity in titles.
 
 from __future__ import annotations
 
-import logging
-from datetime import datetime
 from typing import Any
 
 import matplotlib
@@ -24,13 +22,15 @@ from emptyui import Input, Node, Output, Param
 
 from ._channels import auto_channel, resolve_channels
 from ._plotstyle import DPI, apply_style, channel_unit_hint
-from .types import TimeSeries, coerce_run, is_unknown_start
+from ._timewindow import resolve_window_s
+from .types import TimeSeries, coerce_run
 
-_log = logging.getLogger("emptyui")
 
-#: minimum selectable time slot (DESIGN §23.4): a narrower window carries
-#: no useful MT signal and usually indicates a slider/box slip
-MIN_SLOT_S = 1.0
+def _select_channels(data: TimeSeries, spec: str) -> list[str]:
+    """Resolve a channel spec against the data (empty = all). Standard
+    component names (ex/ey/hx/hy/hz) are mapped through the inferred
+    nomenclature; matching is case-insensitive."""
+    return resolve_channels(list(data.channels), spec)
 
 
 def _select_channels(data: TimeSeries, spec: str) -> list[str]:
@@ -54,79 +54,27 @@ def _time_axis(data: TimeSeries, n0: int, n1: int):
     return data.start + n0 / sr + np.arange(n1 - n0) / sr, "Time (s)"
 
 
-def _parse_bound(value: str, anchor: datetime | None, rec_len: float,
-                 what: str, start_offset: float = 0.0) -> float:
-    """Parse one time-selector bound into seconds-from-series-start.
-
-    Accepts an ISO datetime (UTC; needs an absolute record start — measured
-    from the record start, so ``start_offset`` is subtracted) or a bare
-    number (relative seconds from the series start). Clamps into
-    [0, rec_len] with a warning — out-of-range selection degrades, never
-    rejects (DESIGN §23.4).
-    """
-    text = str(value).strip()
-    try:
-        rel = float(text)
-    except ValueError:
-        pass
-    else:
-        clamped = min(max(rel, 0.0), rec_len)
-        if clamped != rel:
-            _log.warning("%s=%.4g s falls outside the record (length %.3g s)"
-                         " — clamped", what, rel, rec_len)
-        return clamped
-    if anchor is None:
-        raise ValueError(
-            f"{what}='{value}' is not a number and the record has no "
-            "absolute start time — use relative seconds")
-    try:
-        dt = datetime.fromisoformat(text.replace(" ", "T")[:19])
-    except ValueError as exc:
-        raise ValueError(
-            f"{what}='{value}' is not an ISO datetime or seconds number"
-        ) from exc
-    rel = (dt - anchor).total_seconds() - start_offset
-    clamped = min(max(rel, 0.0), rec_len)
-    if clamped != rel:
-        _log.warning(
-            "%s=%s falls outside the record (%s .. +%.0f s) — clamped",
-            what, value, anchor.isoformat(sep=" ", timespec="seconds"),
-            rec_len)
-    return clamped
-
-
 def _time_window(data: TimeSeries, start: str, end: str,
                  seconds) -> tuple[int, int]:
     """Resolve the time-selector params to sample indices [n0, n1).
 
-    Guards (DESIGN §23.4): selector bounds are clamped into the record
-    (warn, never reject), cannot cross, and an explicitly bounded slot must
-    be > 1 s — that minimum applies to the time-selector params only, not
-    to the legacy ``seconds`` duration (a 1 s waveform view of a 500 Hz run
-    is legitimate). ``seconds`` caps the slot length from its start.
+    Guards live in the shared :mod:`._timewindow` (§23.4): bounds clamped
+    into the record (warn, never reject), explicitly bounded slot > 1 s.
+    The legacy ``seconds`` duration caps the slot from its start and keeps
+    its old no-minimum behavior (a 1 s waveform view of a 500 Hz run is
+    legitimate).
     """
     rec_len = data.n_samples / data.sample_rate
-    anchor = None
-    if data.start_datetime and not is_unknown_start(data.start_datetime):
-        try:
-            anchor = datetime.fromisoformat(data.start_datetime[:19])
-        except ValueError:
-            anchor = None
-    elif data.start_datetime:
-        _log.warning(
-            "record starts at a placeholder epoch — time selector bounds "
-            "are relative seconds, ISO values ignored")
+    s0, s1 = resolve_window_s(
+        start, end, rec_len=rec_len, start_datetime=data.start_datetime,
+        start_offset=data.start, enforce_min_slot=False)
     bounded = bool(str(start).strip() or str(end).strip())
-    s0 = (_parse_bound(start, anchor, rec_len, "start", data.start)
-          if str(start).strip() else 0.0)
-    s1 = (_parse_bound(end, anchor, rec_len, "end", data.start)
-          if str(end).strip() else rec_len)
     if seconds is not None:
         s1 = min(s1, s0 + float(seconds))
-    if bounded and s1 - s0 <= MIN_SLOT_S:
+    if bounded and s1 - s0 <= 1.0:
         raise ValueError(
             f"selected time slot is {s1 - s0:.3g} s — the minimum slot is "
-            f"> {MIN_SLOT_S:g} s (start={start or 'record start'}, "
+            f"> 1 s (start={start or 'record start'}, "
             f"end={end or 'record end'}, record length {rec_len:.3g} s)")
     sr = data.sample_rate
     n0 = round(s0 * sr)

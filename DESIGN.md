@@ -1949,3 +1949,41 @@ hours to days:
 - Extract Run / Align Runs / Merge Runs hosting is deferred: their extent
   source is an `mth5` archive payload (per-run extents inside one object),
   not a streamed `ts.run` summary — needs its own summary mechanism.
+
+#### 23.4.1 Phase 2 hosts (delivered 2026-09-13)
+The time selector extended to the mth5-backed hosts:
+- **Payload summaries extended**: the executor's summarizer now duck-types
+  a third shape — an **open MTH5 archive** (`.run_summary`, populated right
+  after open): `kind: "mth5"` with per-run extents
+  (survey/station/run/start/end/sample_rate); single-channel payloads
+  (ChannelTS, the `ts.channel` ports) summarize as one-channel `ts`. A
+  hard-won detail: mt_timeseries objects raise **NameError** (not
+  AttributeError) for missing attrs, so `getattr(x, "attr", None)` is not
+  safe on them — explicit try/except.
+- **`Param.time_bar` multi-port binding**: comma-separated port list;
+  the frontend *intersects* the connected ports' extents (Align Runs shows
+  the overlap of both inputs; identical extents intersect to themselves).
+- **Extract Run**: start/end get the bar bound to `mth5` — the extent is
+  the run matching the node's survey/station/run params (client-side
+  mirror of the server's first-run fallbacks), absolute GMT. Server-side:
+  bounds clamp into the run extent (metadata time_period, falling back to
+  the station's channel-derived run summary) — the extent axis is used
+  as-is, so even a 1980/1970 placeholder record is a valid *within-record*
+  selection axis (placeholders matter for cross-record alignment, not for
+  in-record selection). Extent-unknown → passthrough with warning.
+- **Align Runs**: one `start`/`end` pair (NOT per-input bars — the node's
+  contract is identical-interval outputs, so a single window within the
+  aligned overlap is the correct semantics; recorded over the earlier
+  two-bar sketch). ISO bounds anchor at the overlap start; without GPS
+  time only relative seconds are accepted. Bounds applied after the
+  overlap crop (clamped; slot > 1 s).
+- **Merge Channels**: `start`/`end` crop the merged run
+  (`_crop_to_runts`), bar bound to the first connected channel port.
+- **Bug fixes found on the way**: `is_unknown_start` failed on tz-aware
+  stamps (aware-vs-naive comparison is False) — placeholders are now
+  compared in their own zone; `_warn_if_uncorrelated` crashed when the
+  overlap was shorter than one coherence segment (skipped below 256
+  samples).
+- **Merge Runs deliberately skipped**: its per-run windows already live in
+  the selection table rows (edited via View Selection) — a bar per row is
+  a table-UI feature, not a node-param widget.

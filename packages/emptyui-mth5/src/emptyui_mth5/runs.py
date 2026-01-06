@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 from emptyui import Input, Node, Output, Param
+from emptyui_core_nodes._timewindow import resolve_window_s
 from emptyui_core_nodes.types import is_unknown_start, warn_placeholder_start
 
 from .nomenclature import (
@@ -82,8 +83,16 @@ class ExtractRun(Node):
         Param("survey", "string", label="Survey id", default=""),
         Param("station", "string", label="Station id", default=""),
         Param("run", "string", label="Run id", default=""),
-        Param("start", "string", label="Start (ISO)", default="", optional=True),
-        Param("end", "string", label="End (ISO)", default="", optional=True),
+        Param("start", "string", label="Start (UTC)", default="", optional=True,
+              time_bar="mth5", placeholder="run start",
+              description="Slot start: ISO datetime (UTC, e.g. "
+                          "2023-06-01 12:00:00) or seconds into the run; "
+                          "empty = run start. Driven by the time bar."),
+        Param("end", "string", label="End (UTC)", default="", optional=True,
+              time_bar="mth5", placeholder="run end",
+              description="Slot end: ISO datetime (UTC) or seconds into "
+                          "the run; empty = run end. Driven by the time "
+                          "bar."),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
         "mth5": {"survey": "survey_id", "station": "station_id",
@@ -95,8 +104,45 @@ class ExtractRun(Node):
         survey_obj = _resolve_survey(mth5, survey)
         station_obj = _resolve_station(survey_obj, station)
         run_obj = _resolve_run(station_obj, run)
-        start_dt = pd.to_datetime(start) if start else None
-        end_dt = pd.to_datetime(end) if end else None
+        start_dt = end_dt = None
+        if str(start).strip() or str(end).strip():
+            # time-selector guards (§23.4): clamp into the run's extent.
+            # The extent's time axis is used as-is — even a placeholder
+            # epoch (1980/1970 synthetic/digitized record) is a valid
+            # within-record selection axis (the bar shows the same axis).
+            ext0 = ext1 = None
+            tp = getattr(run_obj.metadata, "time_period", None)
+            try:
+                if tp and tp.start and tp.end:
+                    ext0 = pd.Timestamp(tp.start)
+                    ext1 = pd.Timestamp(tp.end)
+            except (TypeError, ValueError):
+                ext0 = ext1 = None
+            if ext0 is None or ext1 is None or not ext1 > ext0:
+                # fall back to the station's channel-derived run summary
+                try:
+                    row = station_obj.run_summary[
+                        station_obj.run_summary["id"] == run_obj.metadata.id
+                    ].iloc[0]
+                    ext0 = pd.Timestamp(row["start"])
+                    ext1 = pd.Timestamp(row["end"])
+                except Exception:  # noqa: BLE001
+                    ext0 = ext1 = None
+            if ext0 is None or ext1 is None or not ext1 > ext0:
+                ctx.logger.warning(
+                    "run extent unknown (no time metadata) — start/end "
+                    "passed through unclamped")
+                start_dt = pd.to_datetime(start) if str(start).strip() else None
+                end_dt = pd.to_datetime(end) if str(end).strip() else None
+            else:
+                rec_len = (ext1 - ext0).total_seconds()
+                s0, s1 = resolve_window_s(
+                    start, end, rec_len=rec_len,
+                    start_datetime=ext0.isoformat(),
+                    allow_placeholder_axis=True,
+                    what="time slot")
+                start_dt = ext0 + pd.Timedelta(seconds=s0)
+                end_dt = ext0 + pd.Timedelta(seconds=s1)
         runts = run_obj.to_runts(start=start_dt, end=end_dt)
         ctx.progress(1.0, f"extracted {survey_obj.metadata.id}/{station_obj.metadata.id}/{run_obj.metadata.id}")
         return {"data": runts}
@@ -186,15 +232,46 @@ class MergeChannels(Node):
         Input("hz", "ts.channel", required=False),
     )
     outputs = (Output("data", "ts.run", label="time series"),)
-    params = ()
+    params = (
+        Param("start", "string", label="Start (UTC)", default="", optional=True,
+              time_bar="ex,ey,hx,hy,hz", placeholder="run start",
+              description="Window start: ISO datetime (UTC) or seconds "
+                          "from the run start; empty = run start. Driven "
+                          "by the time bar (extent from the first "
+                          "connected channel)."),
+        Param("end", "string", label="End (UTC)", default="", optional=True,
+              time_bar="ex,ey,hx,hy,hz", placeholder="run end",
+              description="Window end: ISO datetime (UTC) or seconds from "
+                          "the run start; empty = run end."),
+    )
 
-    def execute(self, ctx, ex=None, ey=None, hx=None, hy=None, hz=None) -> dict[str, Any]:
+    def execute(self, ctx, ex=None, ey=None, hx=None, hy=None, hz=None,
+                start: str = "", end: str = "") -> dict[str, Any]:
         from mth5.timeseries import RunTS
 
         channels = [c for c in (ex, ey, hx, hy, hz) if c is not None]
         if not channels:
             raise ValueError("at least one channel required")
         runts = RunTS(array_list=channels)
+        if str(start).strip() or str(end).strip():
+            # time-selector window (§23.4): crop the merged run; all
+            # channels share the run's time base
+            ch, sr = _payload(runts)
+            n = max(len(v) for v in ch.values())
+            _, _, abs_start, rel_start = _run_time_info(runts)
+            anchor_iso = ""
+            if abs_start is not None:
+                anchor_iso = (abs_start + pd.Timedelta(seconds=rel_start)
+                              ).isoformat()
+            s0, s1 = resolve_window_s(
+                start, end, rec_len=n / sr, start_datetime=anchor_iso,
+                what="time slot")
+            i0 = round(s0 * sr)
+            n_common = round(s1 * sr) - i0
+            start_iso = (anchor_iso and (pd.Timestamp(anchor_iso)
+                                         + pd.Timedelta(seconds=s0)
+                                         ).isoformat()) or ""
+            runts = _crop_to_runts(runts, ch, sr, i0, n_common, start_iso)
         return {"data": runts}
 
 
@@ -311,9 +388,22 @@ class AlignRuns(Node):
         Output("data1", "ts.run", label="time series 1"),
         Output("data2", "ts.run", label="time series 2"),
     )
-    params = ()
+    params = (
+        Param("start", "string", label="Start (UTC)", default="", optional=True,
+              time_bar="data1,data2", placeholder="overlap start",
+              description="Window start within the aligned overlap: ISO "
+                          "datetime (UTC) or seconds from the overlap "
+                          "start; empty = overlap start. Driven by the "
+                          "time bar (extent = overlap of both inputs)."),
+        Param("end", "string", label="End (UTC)", default="", optional=True,
+              time_bar="data1,data2", placeholder="overlap end",
+              description="Window end within the aligned overlap: ISO "
+                          "datetime (UTC) or seconds from the overlap "
+                          "start; empty = overlap end."),
+    )
 
-    def execute(self, ctx, data1, data2) -> dict[str, Any]:
+    def execute(self, ctx, data1, data2, start: str = "",
+                end: str = "") -> dict[str, Any]:
         ch1, sr1, a1, r1 = _run_time_info(data1)
         ch2, sr2, a2, r2 = _run_time_info(data2)
         if abs(sr1 - sr2) > 1e-9 * max(sr1, sr2, 1.0):
@@ -366,6 +456,26 @@ class AlignRuns(Node):
         if n_common < 1:
             raise ValueError("runs have no overlapping samples")
 
+        # time-selector window (§23.4): one slot within the aligned overlap
+        # (both outputs must keep the identical interval). Absolute ISO
+        # bounds anchor at the overlap start when the runs carry GPS time;
+        # without GPS time only relative seconds are accepted (the shared
+        # resolver raises otherwise).
+        if str(start).strip() or str(end).strip():
+            rec_len = n_common / sr
+            s0, s1 = resolve_window_s(
+                start, end, rec_len=rec_len, start_datetime=start_iso or "",
+                what="time slot")
+            off = round(s0 * sr)
+            i1 += off
+            i2 += off
+            n_common = round(s1 * sr) - off
+            if start_iso:
+                start_iso = (pd.Timestamp(start_iso)
+                             + pd.Timedelta(seconds=s0)).isoformat()
+        if n_common < 1:
+            raise ValueError("runs have no overlapping samples")
+
         out1 = _crop_to_runts(data1, ch1, sr, i1, n_common, start_iso)
         out2 = _crop_to_runts(data2, ch2, sr, i2, n_common, start_iso)
         _warn_if_uncorrelated(ctx, out1, out2, sr, n_common)
@@ -402,6 +512,10 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     std2 = {actual_to_standard(infer_keyword(names2), c): c for c in names2}
     mags = [std1[s] for s in ("hx", "hy") if s in std1 and s in std2]
     if not mags:
+        return
+    # the coherence segments need room: a very short overlap (short windows,
+    # heavy cropping) cannot support the diagnostic — skip it
+    if n_common < 256:
         return
     from scipy.signal import coherence
 

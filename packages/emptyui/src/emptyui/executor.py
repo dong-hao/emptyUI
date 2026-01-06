@@ -38,14 +38,36 @@ class ExecutionError(Exception):
 def _ts_summary(value: Any) -> dict[str, Any] | None:
     """Lightweight extent summary for a time-series payload (DESIGN §23.4).
 
-    Drives the frontend time-selector bar: absolute ISO bounds (UTC) when
-    the record carries a real start time, relative seconds otherwise.
-    Duck-typed over the two payload shapes (mth5 RunTS ``.dataset`` and the
-    core ``TimeSeries``) so the core package stays independent of mth5.
-    Returns None for anything that is not (interpretable as) a time series.
+    Drives the frontend time-selector bar. Duck-typed over the payload
+    shapes so the core package stays independent of mth5:
+    - ``ts`` kind — mth5 RunTS (``.dataset``), the core ``TimeSeries``
+      (``.channels``) or a ChannelTS (``.component``): absolute ISO bounds
+      (UTC) when the record carries a real start time, relative seconds
+      otherwise;
+    - ``mth5`` kind — an open archive (``.run_summary``): per-run extents
+      (survey/station/run/start/end/sample_rate) for the Extract Run bar.
+    Returns None for anything that is not (interpretable as) either.
     """
     if isinstance(value, dict):
         return None
+    # NB: getattr(..., None) is not enough here — mt_timeseries objects
+    # convert missing-attribute AttributeError into NameError
+    try:
+        rs = value.run_summary
+    except Exception:  # noqa: BLE001
+        rs = None
+    if rs is not None and hasattr(rs, "iterrows") and len(rs):
+        runs = []
+        for _, row in rs.iterrows():
+            runs.append({
+                "survey": str(row.get("survey", "")),
+                "station": str(row.get("station", "")),
+                "run": str(row.get("run", "")),
+                "start": str(row.get("start", ""))[:19],
+                "end": str(row.get("end", ""))[:19],
+                "sample_rate": float(row.get("sample_rate", 0.0) or 0.0),
+            })
+        return {"kind": "mth5", "runs": runs}
     try:
         sample_rate = float(value.sample_rate)
     except Exception:  # noqa: BLE001
@@ -75,7 +97,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                     "%Y-%m-%dT%H:%M:%S")
             except ValueError:
                 start_iso = ""
-    elif hasattr(value, "channels"):
+    elif hasattr(value, "channels"):  # core TimeSeries
         channels = [str(k) for k in value.channels]
         start_iso = str(getattr(value, "start_datetime", "") or "")
         try:
@@ -93,6 +115,15 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                 start_iso = (anchor + timedelta(seconds=start_rel)).strftime(
                     "%Y-%m-%dT%H:%M:%S")
                 start_rel = 0.0
+    elif hasattr(value, "component"):  # single channel (ts.channel port)
+        channels = [str(getattr(value, "component", "channel") or "channel")]
+        raw = getattr(value, "start", None)
+        if raw is not None:
+            try:
+                start_iso = datetime.fromisoformat(str(raw)[:19]).strftime(
+                    "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                start_iso = ""
     # Placeholder epochs (mt_timeseries' 1980 default, digitizers' 1970 —
     # core-nodes UNKNOWN_EPOCH_STARTS, mirrored here because core cannot
     # import its plugins) mean "start unknown": degrade to relative bounds.
@@ -104,6 +135,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
         datetime.fromisoformat(start_iso) + timedelta(seconds=n / sample_rate)
     ).strftime("%Y-%m-%dT%H:%M:%S")
     return {
+        "kind": "ts",
         "start": start_iso if start_iso else start_rel,
         "end": end,
         "absolute": bool(start_iso),

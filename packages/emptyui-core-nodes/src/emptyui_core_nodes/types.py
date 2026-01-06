@@ -142,14 +142,18 @@ _log = logging.getLogger("emptyui")
 
 def is_unknown_start(ts) -> bool:
     """True when a timestamp equals a placeholder epoch (see
-    UNKNOWN_EPOCH_STARTS) — "unknown start", not a real acquisition time."""
+    UNKNOWN_EPOCH_STARTS) — "unknown start", not a real acquisition time.
+    Timezone-aware stamps are compared in their own zone (a UTC-stamped
+    1980 default from mt_timeseries must still count as unknown)."""
     import pandas as pd
 
     try:
         ts = pd.Timestamp(ts)
     except (TypeError, ValueError):
         return False
-    return any(ts == pd.Timestamp(e) for e in UNKNOWN_EPOCH_STARTS)
+    return any(
+        ts == pd.Timestamp(e, tz=ts.tz) for e in UNKNOWN_EPOCH_STARTS
+    )
 
 
 def warn_placeholder_start(source: str, epoch: str) -> None:

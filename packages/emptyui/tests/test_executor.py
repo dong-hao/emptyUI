@@ -359,3 +359,86 @@ def test_payload_summary_on_cache_hit():
     ev = next(e for e in second if e["event"] == "payload")
     assert ev["summary"]["start"] == "2023-06-01T00:00:00"
     assert ev["summary"]["end"] == "2023-06-01T00:00:02"
+
+
+def test_payload_summary_mth5_archive_per_run_extents():
+    """An open archive (`.run_summary`) streams per-run extents for the
+    Extract Run bar (DESIGN §23.4 phase 2)."""
+    import pandas as pd
+
+    from emptyui import Node, Output
+
+    class ArchiveStub:
+        filename = "x.h5"
+
+        @property
+        def run_summary(self):
+            return pd.DataFrame([{
+                "survey": "4P", "station": "SDG31", "run": "a",
+                "start": pd.Timestamp("2017-10-16 17:01:13+00:00"),
+                "end": pd.Timestamp("2017-10-16 17:32:06+00:00"),
+                "sample_rate": 1.0,
+            }])
+
+    class ASrc(Node):
+        type = "test.asrc"
+        outputs = (Output("mth5", "mth5"),)
+
+        def execute(self, ctx):
+            return {"mth5": ArchiveStub()}
+
+    reg = _registry()
+    reg.add(ASrc)
+    events = []
+    Executor(reg).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.asrc")], edges=[]),
+        emit=events.append)
+    ev = next(e for e in events if e["event"] == "payload")
+    assert ev["type"] == "mth5"
+    s = ev["summary"]
+    assert s["kind"] == "mth5"
+    assert s["runs"][0]["run"] == "a"
+    assert s["runs"][0]["start"] == "2017-10-16 17:01:13"
+    assert s["runs"][0]["end"] == "2017-10-16 17:32:06"
+
+
+def test_payload_summary_channel_ts_single_channel():
+    """A ts.channel payload (ChannelTS with .component) summarizes too."""
+    from mt_timeseries import ChannelTS
+
+    from emptyui import Node, Output
+
+    class CSrc(Node):
+        type = "test.csrc"
+        outputs = (Output("hx", "ts.channel"),)
+
+        def execute(self, ctx):
+            ch = ChannelTS("magnetic", data=[0.0] * 40, sample_rate=10.0,
+                           start="2023-06-01T12:00:00")
+            ch.component = "hx"
+            return {"hx": ch}
+
+    reg = _registry()
+    reg.add(CSrc)
+    events = []
+    Executor(reg).run(
+        Workflow(nodes=[WorkflowNode(id="n1", type="test.csrc")], edges=[]),
+        emit=events.append)
+    s = next(e for e in events if e["event"] == "payload")["summary"]
+    assert s["kind"] == "ts"
+    assert s["absolute"] is True
+    assert s["channels"] == ["hx"]
+    assert s["end"] == "2023-06-01T12:00:04"
+
+
+def test_ts_summary_kind_field_and_mt_getattr_safety():
+    """kind is always present; missing attrs on mt_timeseries-style objects
+    (NameError instead of AttributeError) do not crash the summarizer."""
+    from emptyui.executor import _ts_summary
+
+    class Tricky:
+        def __getattr__(self, name):
+            raise NameError(f"no {name}")
+
+    assert _ts_summary(Tricky()) is None
+    assert _ts_summary(42) is None

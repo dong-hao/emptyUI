@@ -1,29 +1,62 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
-import type { ParamSpec } from "../api/client";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
 import { ParamField } from "../panels/ParamField";
 import { parseIsoGmt, TimeBar, type TimeExtent } from "../panels/TimeBar";
+import type { ParamSpec, PayloadSummary } from "../api/client";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
 /** payload summary → time-bar extent (epoch/relative seconds); null when
- *  absent or degenerate (DESIGN.md §23.4). */
-function toExtent(s: {
-  start: string | number;
-  end: string | number;
-  absolute: boolean;
-}): TimeExtent | null {
-  if (s.absolute) {
-    const a = parseIsoGmt(String(s.start));
-    const b = parseIsoGmt(String(s.end));
+ *  absent or degenerate (DESIGN.md §23.4). An `mth5` archive summary
+ *  resolves the run matching the node's survey/station/run params
+ *  (mirroring the server's first-run fallbacks); multiple ports bind as an
+ *  intersection (e.g. Align Runs shows the overlap of both inputs). */
+function toExtent(
+  s: PayloadSummary,
+  params: Record<string, unknown>,
+): TimeExtent | null {
+  if (s.kind === "mth5") {
+    const runs = s.runs ?? [];
+    if (runs.length === 0) return null;
+    const survey = String(params.survey ?? "").trim();
+    const station = String(params.station ?? "").trim();
+    const run = String(params.run ?? "").trim();
+    const pick = runs.filter(
+      (r) =>
+        (!survey || r.survey === survey) &&
+        (!station || r.station === station) &&
+        (!run || r.run === run),
+    );
+    const picked = pick[0] ?? runs[0];
+    if (!picked) return null;
+    return tsExtent(picked.start, picked.end, true);
+  }
+  return tsExtent(s.start, s.end, s.absolute);
+}
+
+function intersect(a: TimeExtent, b: TimeExtent): TimeExtent | null {
+  if (a.absolute !== b.absolute) return null;
+  const startSec = Math.max(a.startSec, b.startSec);
+  const endSec = Math.min(a.endSec, b.endSec);
+  return endSec > startSec ? { startSec, endSec, absolute: a.absolute } : null;
+}
+
+function tsExtent(
+  start: string | number,
+  end: string | number,
+  absolute: boolean,
+): TimeExtent | null {
+  if (absolute) {
+    const a = parseIsoGmt(String(start));
+    const b = parseIsoGmt(String(end));
     if (a === null || b === null || b <= a) return null;
     return { startSec: a, endSec: b, absolute: true };
   }
-  const a = Number(s.start);
-  const b = Number(s.end);
+  const a = Number(start);
+  const b = Number(end);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
   return { startSec: a, endSec: b, absolute: false };
 }
@@ -186,11 +219,20 @@ export function MTNode({ id, data, selected }: NodeProps) {
     }
     return groups;
   }, [params]);
-  const barExtent = (port: string): TimeExtent | null => {
-    const edge = edges.find((e) => e.target === id && e.targetHandle === port);
-    if (!edge) return null;
-    const s = payloads[edge.source]?.[edge.sourceHandle ?? ""];
-    return s ? toExtent(s) : null;
+  const barExtent = (spec: string): TimeExtent | null => {
+    // `time_bar` may bind several ports (comma-sep): intersect the extents
+    // of the connected ones (Align Runs → overlap; identical extents → same)
+    let ext: TimeExtent | null = null;
+    for (const port of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+      const edge = edges.find((e) => e.target === id && e.targetHandle === port);
+      if (!edge) continue;
+      const s = payloads[edge.source]?.[edge.sourceHandle ?? ""];
+      if (!s) continue;
+      const e = toExtent(s, d.params);
+      if (!e) continue;
+      ext = ext ? intersect(ext, e) : e;
+    }
+    return ext;
   };
 
   return (
