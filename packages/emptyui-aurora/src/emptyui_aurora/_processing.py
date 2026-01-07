@@ -250,6 +250,9 @@ def compute_fc(
     e_dipole_length_m=None,
     start_datetime=None,
     channel_nomenclature=None,
+    prewhitening="",
+    per_window_detrend="",
+    clock_zero="",
 ):
     """Windowed STFT -> fc xarray Dataset (dims frequency x time).
 
@@ -285,17 +288,38 @@ def compute_fc(
     ``time`` coordinate (e.g. the run's start). When available (from the source
     RunTS or this arg) the fc ``time`` coordinate is ``datetime64`` and a
     ``start_datetime`` attr is recorded — required for mth5 FC persistence.
+
+    ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
+    start; ``"epoch"`` or an explicit ISO datetime anchors window starts on
+    the grid ``t0 + k·step`` (head partial window dropped) so separately-
+    computed runs/stations share one absolute window grid — the prerequisite
+    for remote-reference pairing across per-run FCs (Merge FC / burst mode).
     """
     import xarray as xr
-    from scipy.signal import stft
+
+    if prewhitening and prewhitening != "first difference":
+        raise ValueError(
+            f"unknown prewhitening {prewhitening!r} (supported: "
+            "'first difference' or '' for off)"
+        )
 
     channels, sample_rate, start_s, src_start = to_channels(value, check_finite=False)
     if start_datetime is None:
         start_datetime = src_start
+    start_ts = pd.Timestamp(start_datetime) if start_datetime is not None else None
+    if clock_zero and start_ts is None:
+        _log.warning(
+            "clock_zero=%r requires an absolute start time — the payload "
+            "carries none; anchoring skipped (windows anchor at the run "
+            "start)", clock_zero)
+        clock_zero = ""
     units = _channel_units(value)
     nperseg = max(8, int(window_length_s * sample_rate))
     noverlap = int(nperseg * overlap)
-    win = _window(window_type)
+    n_skip, off = _clock_zero_head_skip(start_ts, sample_rate, nperseg,
+                                        noverlap, clock_zero)
+    if start_ts is None:
+        off = start_s
     input_channels, output_channels, keyword = _resolve_io_channels(
         list(channels), channel_nomenclature, input_channels, output_channels
     )
@@ -305,10 +329,15 @@ def compute_fc(
         {c: channels[c] for c in dict.fromkeys(input_channels + output_channels)},
         "Compute FC",
     )
+    if len(channels[input_channels[0]]) - n_skip < nperseg:
+        raise ValueError(
+            f"series has {len(channels[input_channels[0]]) - n_skip} usable "
+            f"sample(s) after the clock-zero head clip — fewer than one "
+            f"window ({nperseg})")
     b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
-    fc_vars = {}
+    converted: dict[str, np.ndarray] = {}
     e_labels: set[str] = set()
     for comp in input_channels + output_channels:
         if comp not in channels:
@@ -316,7 +345,7 @@ def compute_fc(
                 f"channel '{comp}' not in data {list(channels)}; "
                 "LEMI data uses e1,e2,bx,by,bz — set input/output channels accordingly"
             )
-        x = channels[comp]
+        x = np.asarray(channels[comp], dtype=float)[n_skip:]
         if comp in input_channels:
             x = _magnetic_to_h(x, comp, b_to_h, units)
         elif is_magnetic_name(comp):  # vertical magnetic output (bz/hz) — tipper
@@ -325,18 +354,17 @@ def compute_fc(
             x, e_label = _electric_to_vm(x, comp, e_scale, units)
             e_labels.add(e_label)
         # unknown output channel: leave units untouched
-        f, t, z = stft(
-            x, fs=sample_rate, nperseg=nperseg, noverlap=noverlap,
-            window=win, boundary=None, padded=False,
-        )
-        fc_vars[comp] = (("frequency", "time"), z)
+        converted[comp] = x
+    f, t, fc_vars = _stft_channels(
+        converted, sample_rate, nperseg, overlap, window_type,
+        input_channels, output_channels,
+        prewhitening=prewhitening, per_window_detrend=per_window_detrend)
 
-    time_coord = t + start_s
+    time_coord = t + off
     start_iso = ""
-    if start_datetime is not None:
-        start_ts = pd.Timestamp(start_datetime)
-        time_coord = start_ts + pd.to_timedelta(t, unit="s")
-        start_iso = start_ts.isoformat()
+    if start_ts is not None:
+        time_coord = start_ts + pd.to_timedelta(t + off, unit="s")
+        start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
 
     fc = xr.Dataset(
         data_vars=fc_vars,
@@ -347,6 +375,8 @@ def compute_fc(
             "window_length_s": float(window_length_s),
             "overlap": float(overlap),
             "window_type": window_type,
+            "prewhitening": prewhitening or "off",
+            "per_window_detrend": per_window_detrend or "off",
             "input_channels": ",".join(input_channels),
             "output_channels": ",".join(output_channels),
             "magnetic_unit": b_to_h and "b" or "h",
@@ -372,6 +402,11 @@ def compute_fc_levels(
     e_dipole_length_m=None,
     start_datetime=None,
     channel_nomenclature=None,
+    prewhitening="",
+    per_window_detrend="",
+    window_type_deep="",
+    deep_from_level=None,
+    clock_zero="",
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
@@ -382,6 +417,23 @@ def compute_fc_levels(
     by ``factor`` and re-STFTs it with the **same constant ``num_samples_window``**
     (aurora-style), so the window *duration* grows at deeper levels and
     low-frequency resolution improves. Level *i*'s sample rate = native / factor^i.
+
+    ``window_type_deep`` + ``deep_from_level``: per-level taper override
+    (DESIGN §24.5 P2) — levels >= ``deep_from_level`` are STFT'd with
+    ``window_type_deep`` instead of ``window_type``. Physically motivated
+    (§24.3): the dominant contamination differs by scale — white-ish
+    fluxgate noise (post-prewhitening) at the short-period levels, where
+    boxcar maximizes effective dof, vs line-spectra (diurnal Sq) leakage
+    through boxcar sidelobes at the day-scale deep windows, where a
+    zero-endpoint taper wins.
+
+    ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
+    start; ``"epoch"`` or an explicit ISO datetime anchors window starts on
+    the grid ``t0 + k·step`` per level (head partial window dropped), so
+    per-run FCs share one absolute window grid across runs/stations —
+    required for remote-reference pairing over merged per-run FCs. Levels
+    with fewer usable samples than one window (e.g. burst slots at deep
+    levels) are skipped with a warning.
 
     Each level's fc is an xr.Dataset with ``(frequency, time)`` dims and a
     ``datetime64`` ``time`` coordinate when an absolute start is known (needed
@@ -407,6 +459,18 @@ def compute_fc_levels(
     e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
 
     num_decimations = max(0, int(num_decimations))
+    deep_from = (int(deep_from_level) if deep_from_level is not None
+                 and str(deep_from_level) != "" else None)
+    win_deep = window_type_deep or window_type
+    cz = str(clock_zero or "").strip()
+    if cz and start_datetime is None:
+        _log.warning(
+            "clock_zero=%r requires an absolute start time — the payload "
+            "carries none; anchoring skipped (windows anchor at the run "
+            "start)", clock_zero)
+        cz = ""
+    start_ts = (pd.Timestamp(start_datetime)
+                if start_datetime is not None else None)
     levels: dict[int, xr.Dataset] = {}
     cur = channels
     cur_rate = sample_rate
@@ -419,16 +483,40 @@ def compute_fc_levels(
             if level == 0
             else (cur, "level 0 (passed down)")
         )
+        win = win_deep if deep_from is not None and level >= deep_from else window_type
+        nperseg = max(8, int(num_samples_window))
+        noverlap = int(nperseg * overlap)
+        # clock-zero anchoring (§24.5 P1 v2b): drop the head partial window so
+        # window starts sit on the common t0 + k·step grid (per level — the
+        # step grows with the decimation level); next level decimates the
+        # UNSLICED series (aurora truncates per level too)
+        n_skip, off = _clock_zero_head_skip(
+            start_ts, cur_rate, nperseg, noverlap, cz)
+        if start_ts is None:
+            off = start_s  # no absolute time: keep the relative-offset base
+        series = {k: v[n_skip:] for k, v in norm.items()}
+        n_usable = max((len(v) for v in series.values()), default=0)
+        if n_usable < nperseg:
+            _log.warning(
+                "Compute FC: decimation level %d has %d usable sample(s), "
+                "fewer than one window (%d) — level skipped", level,
+                n_usable, nperseg)
+            if level < num_decimations:
+                cur = _decimate_channels(norm, factor)
+                cur_rate = cur_rate / float(factor)
+            continue
         f, t, fc_vars = _stft_channels(
-            norm, cur_rate, num_samples_window, overlap, window_type,
+            series, cur_rate, num_samples_window, overlap, win,
             input_channels, output_channels,
+            prewhitening=prewhitening,
+            per_window_detrend=per_window_detrend,
         )
-        time_coord = t + start_s
         start_iso = ""
-        if start_datetime is not None:
-            start_ts = pd.Timestamp(start_datetime)
-            time_coord = start_ts + pd.to_timedelta(t, unit="s")
-            start_iso = start_ts.isoformat()
+        if start_ts is not None:
+            time_coord = start_ts + pd.to_timedelta(t + off, unit="s")
+            start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
+        else:
+            time_coord = t + off  # off = the payload's relative start
 
         fc = xr.Dataset(
             data_vars=fc_vars,
@@ -439,7 +527,9 @@ def compute_fc_levels(
                 "factor": int(factor),
                 "num_samples_window": int(num_samples_window),
                 "overlap": float(overlap),
-                "window_type": window_type,
+                "window_type": win,
+                "prewhitening": prewhitening or "off",
+                "per_window_detrend": per_window_detrend or "off",
                 "input_channels": ",".join(input_channels),
                 "output_channels": ",".join(output_channels),
                 "magnetic_unit": b_to_h and "b" or "h",
@@ -601,11 +691,73 @@ def _decimate_channels(channels, factor):
     return {k: np.asarray(decimate(v, factor)) for k, v in channels.items()}
 
 
+#: Reference instants accepted by the ``clock_zero`` option (§24.5 P1 v2b).
+CLOCK_ZERO_EPOCH = "1970-01-01T00:00:00"
+
+
+def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
+                          clock_zero):
+    """Head-skip so window starts land on a common clock-zero grid.
+
+    Returns ``(n_skip, start_offset_s)``: drop ``n_skip`` samples from the
+    series head so the first full window starts at (or after) the data
+    start AND on the grid ``t0 + k·step`` (step = window step in seconds);
+    ``start_offset_s`` is the sliced series' start relative to the payload
+    record start — the offset the fc ``time`` coordinate must be built
+    from. With ``clock_zero`` "" (default) nothing is dropped and the
+    current run-start anchoring is kept.
+
+    The point (§24.5 P1 v2b): remote-reference pairing matches FC rows by
+    window position with an identical-grid check, so separately-computed
+    runs/stations must share one absolute window grid. A run-independent
+    ``t0`` (Unix epoch) guarantees coincidence for any run starts; anchoring
+    to a run's own start does not (starts are not whole steps apart).
+    Requires an absolute start; without one the anchoring is a warned no-op.
+    """
+    if clock_zero in ("", None):
+        return 0, 0.0
+    cz = str(clock_zero).strip()
+    t0 = pd.Timestamp(CLOCK_ZERO_EPOCH if cz.lower() == "epoch" else cz)
+    if data_start_abs is None:
+        _log.warning(
+            "clock_zero=%r requires an absolute start time — the payload "
+            "carries none; anchoring skipped (windows anchor at the run "
+            "start)", clock_zero)
+        return 0, 0.0
+    dt = (data_start_abs - t0).total_seconds()
+    step_s = (nperseg - noverlap) / float(sample_rate)
+    k0 = int(np.ceil(dt / step_s))
+    n_skip = max(0, round((k0 * step_s - dt) * sample_rate))
+    # sliced series' start relative to the payload's record start
+    return n_skip, max(0.0, k0 * step_s - dt)
+
+
 def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
-                   input_channels, output_channels):
-    """Windowed STFT of a channel dict -> (f, t, {channel: (freq,time) complex})."""
+                   input_channels, output_channels,
+                   prewhitening="", per_window_detrend=""):
+    """Windowed STFT of a channel dict -> (f, t, {channel: (freq,time) complex}).
+
+    ``prewhitening``: "" (off, default) or ``"first difference"`` — the
+    leakage-reduction prewhitening of classical MT processing: a time-domain
+    first difference x[n] − x[n−1] per channel before the STFT, inverted
+    exactly in the frequency domain by dividing by (1 − e^{−j2πfΔt})
+    (recoloring; the DC bin becomes NaN — recoloring is undefined there).
+    aurora 0.6.2 defaults to the same first-difference prewhitening but
+    recolors with the idealized j2πf, which does not exactly invert its
+    central-difference operator (response j·sin(ωΔt)/Δt) and leaves a
+    low-frequency amplitude bias — the exact inverse filter is used here
+    (DESIGN §24).
+    ``per_window_detrend``: "" (off, default) or ``"linear"`` — scipy detrend
+    per STFT segment before tapering (aurora's per-window default), keeping
+    window-level trends out of the low-frequency bins.
+    """
     from scipy.signal import stft
 
+    if prewhitening and prewhitening != "first difference":
+        raise ValueError(
+            f"unknown prewhitening {prewhitening!r} (supported: "
+            "'first difference' or '' for off)"
+        )
     nperseg = max(8, int(num_samples))
     noverlap = int(nperseg * overlap)
     win = _window(window_type)
@@ -613,10 +765,19 @@ def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
     fc_vars = {}
     for comp in input_channels + output_channels:
         x = np.asarray(channels[comp], dtype=float)
+        if prewhitening:
+            x = x - np.concatenate(([x[0]], x[:-1]))
         fi, ti, zi = stft(
             x, fs=sample_rate, nperseg=nperseg, noverlap=noverlap,
             window=win, boundary=None, padded=False,
+            detrend=per_window_detrend or None,
         )
+        if prewhitening:
+            # recolor along the frequency axis only (divisor must broadcast
+            # as a column — (nf,) would broadcast along time)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                zi = zi / (1.0 - np.exp(-2j * np.pi * fi / sample_rate))[:, None]
+            zi[fi == 0.0] = np.nan  # DC — recoloring undefined there
         f, t = fi, ti
         fc_vars[comp] = (("frequency", "time"), zi)
     return f, t, fc_vars

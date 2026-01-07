@@ -130,8 +130,51 @@ class ComputeFC(Node):
         Param("factor", "integer", label="Decimation factor", default=4, min=2),
         Param("window_samples", "integer", label="Window (samples)", default=256, min=8,
               description="Constant window length in samples across all levels"),
-        Param("overlap", "number", default=0.5),
-        Param("window_type", "select", options=("hamming", "hanning"), default="hamming"),
+        Param("overlap", "number", default=0.5, min=0.0, max=0.99,
+              description="Window overlap fraction (< 1)"),
+        Param("window_type", "select", options=("hamming", "hanning", "boxcar"),
+              default="hamming",
+              description="boxcar maximizes effective dof (best with "
+                          "prewhitening at white-noise-limited scales); "
+                          "hanning/hamming suppress line-spectra leakage "
+                          "(day-scale windows)"),
+        Param("window_type_deep", "select", label="Deep-level taper",
+              default="", options=("", "hamming", "hanning", "boxcar"),
+              optional=True,
+              description="Taper override for the deep decimation levels "
+                          "(see 'from level'): zero-endpoint tapers (hamming/"
+                          "hanning) suppress diurnal-line leakage through the "
+                          "day-scale windows; boxcar maximizes dof. Empty = "
+                          "same as the base taper."),
+        Param("deep_from_level", "integer", label="Deep taper from level",
+              default=None, optional=True, min=0,
+              description="Decimation level from which 'Deep-level taper' "
+                          "applies (e.g. 3 with window 256 = windows longer "
+                          "than ~1 h); empty = never (base taper everywhere)"),
+        Param("clock_zero", "string", label="Clock zero",
+              default="", optional=True,
+              placeholder='"epoch" or ISO datetime; empty = off',
+              description="Anchor window starts on a common absolute grid "
+                          "t0 + k·step (head partial window dropped): "
+                          "'epoch' (Unix epoch — automatically common to "
+                          "all stations/runs) or an explicit ISO datetime. "
+                          "Required for remote-reference pairing across "
+                          "separately-computed per-run FCs (Merge FC, burst "
+                          "mode); empty anchors at each run's start (legacy). "
+                          "Needs an absolute start time."),
+        Param("prewhitening", "select", label="Prewhitening", default="",
+              options=("", "first difference"),
+              description="Leakage-reduction prewhitening before the STFT: "
+                          "'first difference' (aurora/EMTF-style) differences "
+                          "each channel in time and recolors the FCs by the "
+                          "exact inverse filter; off (default) keeps the "
+                          "legacy emptyUI behavior."),
+        Param("per_window_detrend", "select", label="Per-window detrend",
+              default="", options=("", "linear"),
+              description="Detrend each STFT window (linear) before "
+                          "tapering — keeps window-level trends out of the "
+                          "low-frequency bins (aurora's per-window default); "
+                          "off (default) = global Detrend node only."),
         Param("persist", "boolean", label="Persist to workspace", default=True,
               description="Write each level's FC into the workspace MTH5 FC layer"),
         Param("survey", "string", label="Survey id", default="", optional=True),
@@ -150,6 +193,9 @@ class ComputeFC(Node):
                 decimation_levels: int = 0, factor: int = 4,
                 window_samples: int = 256,
                 overlap: float = 0.5, window_type: str = "hamming",
+                window_type_deep: str = "", deep_from_level=None,
+                clock_zero: str = "",
+                prewhitening: str = "", per_window_detrend: str = "",
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
         # Channel names resolve inside compute_fc_levels (empty fields = auto
@@ -162,6 +208,11 @@ class ComputeFC(Node):
             magnetic_unit=magnetic_unit,
             e_dipole_length_m=e_dipole_length_m,
             channel_nomenclature=channel_nomenclature,
+            prewhitening=prewhitening,
+            per_window_detrend=per_window_detrend,
+            window_type_deep=window_type_deep,
+            deep_from_level=deep_from_level,
+            clock_zero=clock_zero,
         )
         from emptyui_mth5.persist import persist_fc_level, runts_context
 
