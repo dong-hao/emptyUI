@@ -103,3 +103,19 @@ def test_attach_filters_and_calibrate_round_trip():
     # response removal changed the data (modulus < 1 at 1 Hz -> amplified)
     assert not np.allclose(cal.bx.ts, x)
     assert cal.bx.ts.size == n
+
+
+def test_default_unit_by_nomenclature():
+    """Default units come from the nomenclature, not a name-prefix guess:
+    standard-named magnetic channels (hx/hy/hz) are nanoTesla — the old
+    startswith("b") check stamped them mV/km, silently skipping aurora's
+    nT→A/m conversion downstream (Z off by mu0*1e9, the §16.3 bug class)."""
+    from emptyui_mth5.calibration import _default_unit
+
+    for ch in ("hx", "hy", "hz", "bx", "by", "bz", "h1", "H2"):
+        assert _default_unit(ch) == "nanoTesla", ch
+    for ch in ("ex", "ey", "e1", "e2", "e3", "E4"):
+        assert _default_unit(ch) == "mV/km", ch
+    # auxiliary/unknown channels have no meaningful default — never a guess
+    assert _default_unit("temperature") == ""
+    assert _default_unit("") == ""

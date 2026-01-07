@@ -81,3 +81,26 @@ def test_calibrate_mth5_runts_path(test12rr_path: Path, tmp_path: Path):
     out = Calibrate().execute(ctx, runts)["data"]
     # returns a RunTS with the same channel set
     assert set(out.channels) == set(runts.channels)
+
+
+def test_calibrate_stamps_nomenclature_default_units(tmp_path: Path):
+    """Integration for the _default_unit fix: a core TimeSeries with
+    standard names gets hx → nanoTesla (so ComputeFC's nT→A/m conversion
+    applies downstream) and ex → mV/km; auxiliary channels are not
+    mis-stamped with an electric/magnetic unit."""
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    t = np.arange(256) / 8.0
+    ts = TimeSeries(channels={"ex": t.copy(), "hx": t.copy(), "temperature": t.copy()},
+                    sample_rate=8.0)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = Calibrate().execute(
+        ctx, ts,
+        calibration={"ex": CoefficientFilter(gain=1.0),
+                     "hx": CoefficientFilter(gain=1.0)})["data"]
+    assert out.hx.channel_metadata.units == "nanoTesla"
+    # mt_metadata canonicalizes the abbreviation
+    assert out.ex.channel_metadata.units == "milliVolt per kilometer"
+    # RunTS.calibrate validates metadata: "" normalizes to "unknown" —
+    # auxiliary channels are not mis-stamped with an electric/magnetic unit
+    assert out.temperature.channel_metadata.units == "unknown"

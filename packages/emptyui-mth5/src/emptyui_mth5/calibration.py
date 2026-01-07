@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 from emptyui import Node, Output, Param
 
+from .nomenclature import is_electric_name, is_magnetic_name
+
 #: FAP channel labels (with/without '#' prefix) -> physical channel names.
 FAP_CHANNELS = {
     "#HX": "bx", "#HY": "by", "#HZ": "bz", "#EX": "e1", "#EY": "e2",
@@ -31,7 +33,20 @@ _HEADER_RE = re.compile(r"^['\"]?#FP['\"]?\s+(\d+)\s+(\d+)")
 
 
 def _default_unit(channel: str) -> str:
-    return "nanoTesla" if channel.startswith("b") else "mV/km"
+    """Best-effort default physical unit for a channel name (DESIGN §19).
+
+    Magnetic channels (hx/hy/hz, bx/by/bz, h1..h3) default to nanoTesla
+    (coil/fluxgate archives in A/m must be stamped from their real unit
+    attrs, never guessed); electric channels (ex/ey, e1..) default to
+    mV/km (LEMI logger output). Auxiliary/unknown channels have no
+    meaningful default — an empty string (mt_metadata normalizes the
+    filter units to "unknown") instead of a silently wrong guess.
+    """
+    if is_magnetic_name(channel):
+        return "nanoTesla"
+    if is_electric_name(channel):
+        return "mV/km"
+    return ""
 
 
 def _validate_calibration_table(channel: str, frequencies, amplitudes,
@@ -314,10 +329,6 @@ def attach_filters(run, filters, strict: bool = True) -> object:
             {"applied_filter": {"name": unity.name, "applied": True}}]
     run.filters = run_filters
     return run
-
-
-def register(registry) -> None:
-    registry.add(LoadCalibration)
 
 
 class LoadCalibration(Node):
