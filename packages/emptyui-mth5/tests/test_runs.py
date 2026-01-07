@@ -91,3 +91,67 @@ def test_split_merge_channels_roundtrip(tmp_path):
     )
     run = merged["data"]
     assert set(run.channels) == {"e1", "e2", "bx", "by", "bz"}
+
+
+def test_align_runs_mixed_naive_aware_starts(tmp_path):
+    """Regression: Align Runs raised a raw TypeError comparing a naive
+    (LoadCsv) start against a tz-aware (mth5 RunTS) start. Naive stamps are
+    assumed UTC and normalized; the overlap is still found."""
+
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    from emptyui_mth5.runs import AlignRuns
+
+    sr, n = 8.0, 2048
+
+    class _P:
+        """Duck-typed ts.run payload (mth5-branch interpretation)."""
+
+        sample_rate = sr
+        start_datetime = ""
+
+        def __init__(self, start):
+            t = np.arange(n) / sr
+            self.dataset = xr.Dataset(
+                {"bx": ("time", np.sin(2 * np.pi * 0.5 * t) + 1.0),
+                 "by": ("time", np.sin(2 * np.pi * 1.3 * t) + 1.0),
+                 "e1": ("time", np.sin(2 * np.pi * 0.5 * t) + 2.0),
+                 "e2": ("time", np.sin(2 * np.pi * 1.3 * t) + 2.0)},
+                coords={"time": t},
+            )
+            self.start = start
+
+    # local: naive ISO stamp (LoadCsv style); remote: tz-aware (mth5 GPS)
+    local = _P("2024-01-01T00:00:00")
+    remote = _P(pd.Timestamp("2024-01-01T00:04:00", tz="UTC"))
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = AlignRuns().execute(ctx, local, remote)
+    a, b = out["data1"], out["data2"]
+    assert pd.Timestamp(str(a.start)) == pd.Timestamp("2024-01-01T00:04:00", tz="UTC")
+    assert pd.Timestamp(str(b.start)) == pd.Timestamp(str(a.start))
+    assert len(a.dataset.data_vars["bx"].values) == n - 240 * sr
+
+
+def test_core_timeseries_placeholder_epoch_and_utc(tmp_path, caplog):
+    """The core-TimeSeries branch of _run_time_info applies the same
+    placeholder-epoch guard as the mth5 branch (digitized paper records are
+    stamped 1970/1980 by the digitizing tool), and naive stamps are
+    normalized to aware UTC."""
+    import logging
+
+    import numpy as np
+    import pandas as pd
+    from emptyui_core_nodes.types import TimeSeries
+    from emptyui_mth5.runs import _run_time_info
+
+    ctx_ts = TimeSeries(channels={"ex": np.zeros(16)}, sample_rate=8.0,
+                        start_datetime="1970-01-01T00:00:00")
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        _ch, _sr, a, _rel = _run_time_info(ctx_ts)
+    assert a is None
+    assert any("placeholder epoch" in r.message for r in caplog.records)
+
+    ctx_ts.start_datetime = "2024-01-01T00:00:00"
+    _ch, _sr, a, _rel = _run_time_info(ctx_ts)
+    assert a == pd.Timestamp("2024-01-01T00:00:00", tz="UTC")

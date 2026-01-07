@@ -312,8 +312,9 @@ def test_placeholder_epoch_start_warns_and_aligns_by_relative(caplog):
         assert sum("placeholder epoch" in r.message
                    for r in caplog.records) == 2
 
-    # a genuinely old (1957, Cagniard-era) digitized start is preserved
+    # a genuinely old (1957, Cagniard-era) digitized start is preserved —
+    # normalized to timezone-aware UTC (naive stamps are assumed UTC)
     import pandas as pd
 
     _ch, _s, a, _r = _run_time_info(P(pd.Timestamp("1957-06-15T12:00:00")))
-    assert a == pd.Timestamp("1957-06-15T12:00:00")
+    assert a == pd.Timestamp("1957-06-15T12:00:00", tz="UTC")

@@ -275,17 +275,29 @@ class MergeChannels(Node):
         return {"data": runts}
 
 
+def _utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Normalize a timestamp to timezone-aware UTC.
+
+    mth5 RunTS starts are tz-aware (GPS time) while LoadCsv produces naive
+    ISO stamps; mixing the two in Align Runs' overlap comparison raises a
+    raw TypeError. Naive stamps are assumed UTC (the repo-wide convention,
+    cf. ``parse_iso_utc``) and localized here.
+    """
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
 
 
 def _run_time_info(data):
     """-> (channels {name: np.ndarray}, sample_rate, abs_start | None, rel_start).
 
-    ``abs_start`` is a pandas Timestamp when the payload carries a real
-    absolute start (mth5 RunTS GPS time index or a core TimeSeries with
-    ``start_datetime``). Placeholder epochs (mt_timeseries' 1980 default and
-    the Unix 1970 default — common in digitized paper records) are treated
-    as "no absolute time", with a warning — never a rejection (old records
-    keep processing; see emptyui_core_nodes.types.UNKNOWN_EPOCH_STARTS).
+    ``abs_start`` is a timezone-aware UTC pandas Timestamp when the payload
+    carries a real absolute start (mth5 RunTS GPS time index or a core
+    TimeSeries with ``start_datetime``; naive stamps are assumed UTC).
+    Placeholder epochs (mt_timeseries' 1980 default and the Unix 1970
+    default — common in digitized paper records) are treated as "no
+    absolute time", with a warning — never a rejection (old records keep
+    processing; see emptyui_core_nodes.types.UNKNOWN_EPOCH_STARTS).
     """
     ch, sr = _payload(data)
     if hasattr(data, "dataset") and not isinstance(data, dict):  # mth5 RunTS
@@ -299,13 +311,25 @@ def _run_time_info(data):
                     ts.isoformat(),
                 )
             else:
-                abs_start = ts
+                abs_start = _utc(ts)
         except (TypeError, ValueError):
             pass
         return ch, sr, abs_start, 0.0
     rel = float(getattr(data, "start", 0.0) or 0.0)
     sd = getattr(data, "start_datetime", "") or ""
-    abs_start = pd.Timestamp(sd) if sd else None
+    abs_start = None
+    if sd:
+        try:
+            ts = pd.Timestamp(sd)
+            if is_unknown_start(ts):
+                warn_placeholder_start(
+                    str(getattr(data, "station", "") or "record"),
+                    ts.isoformat(),
+                )
+            else:
+                abs_start = _utc(ts)
+        except (TypeError, ValueError):
+            pass
     return ch, sr, abs_start, rel
 
 
@@ -495,9 +519,6 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     # horizontal magnetic channels only — the vertical (hz) field is
     # naturally weakly coherent between stations (source-field geometry),
     # so checking it would false-alarm on healthy station pairs.
-    # Names are resolved through the nomenclature (hx->hx, bx->hx for
-    # lemi12, ...), NOT matched literally: LEMI data keeps its bx/by names,
-    # and the guard was built precisely for that pair (2026-09-11 review).
     # Names are resolved through the nomenclature (hx->hx, bx->hx for
     # lemi12, ...), NOT matched literally: LEMI data keeps its bx/by names,
     # and the guard was built precisely for that pair (2026-09-11 review).
