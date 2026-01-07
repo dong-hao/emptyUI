@@ -51,23 +51,20 @@ def test_spectra_to_fc_group_resolves_empty_ids(writable_archive, tmp_path):
     assert st.fourier_coefficients_group.groups_list, "no fc group written"
 
 
-def test_merge_runs_physical_mode_resolves_ids(writable_archive, tmp_path):
-    """Physical merge resolves survey/station/run via the dual-layout
-    helpers (regression: StationGroup.runs_group does not exist in mth5
-    0.6.x, so the old st.runs_group.get_run crashed with AttributeError)."""
+def test_merge_runs_resolves_empty_ids(writable_archive, tmp_path):
+    """The rebuilt Merge Runs resolves survey/station via the fallback
+    helpers; runs='' merges every run of the station (a single-run archive
+    is a passthrough with the new run id)."""
     from emptyui_mth5.merge import MergeRuns
     from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
 
     survey_obj = _resolve_survey(writable_archive, "")
     station_obj = _resolve_station(survey_obj, "")
     run_id = _resolve_run(station_obj, "").metadata.id
-    selection = pd.DataFrame([{
-        "survey": survey_obj.metadata.id, "station": station_obj.metadata.id,
-        "run": run_id, "sample_rate": 1.0, "start": None, "end": None,
-    }])
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = MergeRuns().execute(ctx, selection, mth5=writable_archive, mode="physical")
+    res = MergeRuns().execute(ctx, writable_archive, runs=run_id)
     assert set(res["merged_run"].channels) >= {"ex", "ey", "hx", "hy"}
+    assert res["merged_run"].run_metadata.id == "merged"
 
 
 

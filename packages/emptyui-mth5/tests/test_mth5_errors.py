@@ -24,7 +24,6 @@ from emptyui_mth5.calibration import (
     parse_json_calibration,
 )
 from emptyui_mth5.fc import SpectraToFCGroup
-from emptyui_mth5.merge import MergeRuns
 from emptyui_mth5.persist import persist_fc_level
 from emptyui_mth5.plots import PlotTipper
 from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
@@ -196,10 +195,21 @@ def test_spectra_to_fc_group_requires_archive(tmp_path: Path):
         SpectraToFCGroup().execute(_ctx(tmp_path), fc, mth5=None)
 
 
-def test_merge_runs_fc_mode_mixed_rates_error(tmp_path: Path):
-    selection = pd.DataFrame([{"sample_rate": 1.0}, {"sample_rate": 8.0}])
+@pytest.mark.filterwarnings("ignore")
+def test_merge_runts_mixed_rates_error():
+    """The merge core rejects mixed sample rates with a clear error."""
+    from mt_timeseries import ChannelTS, RunTS
+
+    def _runts(sr):
+        ch = ChannelTS("electric", data=np.zeros(16), start="2024-01-01",
+                       sample_rate=sr)
+        ch.component = "ex"
+        return RunTS(array_list=[ch])
+
+    from emptyui_mth5.merge import merge_runts
+
     with pytest.raises(ValueError, match="mixed sample rates"):
-        MergeRuns().execute(_ctx(tmp_path), selection, mode="fc")
+        merge_runts([_runts(1.0), _runts(8.0)])
 
 
 # --- run id resolution / persistence / plots ----------------------------
