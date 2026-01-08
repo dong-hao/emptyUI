@@ -21,6 +21,7 @@ from ._processing import (
     coherence_sort_fcs,
     compute_fc_levels,
     estimate_tf_levels,
+    merge_fc_containers,
     merge_tf_levels,
 )
 
@@ -520,6 +521,44 @@ class EstimateTF(Node):
                "min_bins_per_band": "min_bins_per_band",
                "t_short": "t_short"},
     }
+
+
+class MergeFC(Node):
+    type = "aurora.fc.merge"
+    title = "Merge FC"
+    tooltip = "Concatenate Fourier coefficients from several runs along time, per decimation level."
+    description = (
+        "Merge Fourier coefficients from several runs of one station along "
+        "the time axis (per decimation level) — the FC-database route for "
+        "runs that must not be concatenated in the time domain: physically "
+        "non-adjacent runs (gaps) or burst-mode acquisition (a merged time-"
+        "series cascade cannot decimate across slot boundaries; per-run "
+        "cascades are fine and starved deep levels are skipped). Inputs are "
+        "matched per level: sample rates must agree (error), window "
+        "settings should agree (warning), frequency grids are intersected "
+        "and channels missing in some input are dropped (warnings). The "
+        "FCs must share one absolute window grid for remote-reference "
+        "pairing — compute with Compute FC's 'clock zero' anchor when the "
+        "runs were computed separately."
+    )
+    category = "Processing"
+    inputs = (
+        Input("fc1", "fc"),
+        Input("fc2", "fc", required=False),
+        Input("fc3", "fc", required=False),
+        Input("fc4", "fc", required=False),
+    )
+    outputs = (Output("fc", "fc"),)
+    params = ()
+
+    def execute(self, ctx, fc1, fc2=None, fc3=None, fc4=None) -> dict[str, Any]:
+        merged = merge_fc_containers([fc1, fc2, fc3, fc4])
+        n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
+        ctx.progress(
+            1.0,
+            f"merged FC: {len(merged)} level(s), {n_win} window(s)",
+        )
+        return {"fc": merged}
 
 
 class MergeTFLevels(Node):

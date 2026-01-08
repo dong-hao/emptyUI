@@ -1523,6 +1523,135 @@ def _bands_from_freq_pairs(fc, pairs):
     return np.array(periods_out), band_bins
 
 
+def _grid_nearest_keep(reference, other, rtol=1e-3):
+    """Boolean mask over ``reference`` bins that have a near-equal partner
+    in ``other`` (relative tolerance — float grid drift tolerance)."""
+    keep = np.zeros(reference.size, dtype=bool)
+    pos = np.searchsorted(other, reference)
+    for side in (-1, 0):
+        idx = np.clip(pos + side, 0, max(other.size - 1, 0))
+        keep |= np.isclose(reference, other[idx], rtol=rtol, atol=0.0)
+    return keep
+
+
+def merge_fc_containers(containers):
+    """Concatenate per-run FC containers along time, per decimation level.
+
+    The FC-database merge (aurora ``merge_stfts``; DESIGN §24.5 P1 v2) for
+    runs that must not be concatenated in the time domain: physically
+    non-adjacent runs (gaps) and burst-mode acquisition (thousands of short
+    recurring slots — a merged-TS decimation cascade cannot cross slot
+    boundaries, per-run cascades are fine and deep levels starve naturally).
+
+    Each input is a single fc Dataset (level 0) or a ``{level: Dataset}``
+    container. Per level, every contributing input must share the sample
+    rate (error) and ideally the window settings (warning — mixed settings
+    change the banding); the frequency axes are intersected with a small
+    relative tolerance (fast path: bit-identical), channels missing in some
+    inputs are dropped with a warning, and the windows are concatenated in
+    time-sorted order (duplicate/overlapping window times warn). Level sets
+    are unioned — a level missing in some inputs merges the rest.
+
+    Returns ``{level: xr.Dataset}`` with the first input's attrs (per level).
+    """
+    import xarray as xr
+
+    norm: list[dict[int, xr.Dataset]] = []
+    for c in containers:
+        if c is None:
+            continue
+        if isinstance(c, dict):
+            norm.append({int(lv): ds for lv, ds in c.items()})
+        else:
+            norm.append({0: c})
+    if not norm:
+        raise ValueError("no fc to merge")
+    out: dict[int, xr.Dataset] = {}
+    for lv in sorted({lv for c in norm for lv in c}):
+        parts = [c[lv] for c in norm if lv in c]
+        base = parts[0]
+        sr = float(base.attrs.get("sample_rate", 0.0))
+        for j, p in enumerate(parts[1:], start=2):
+            sr_j = float(p.attrs.get("sample_rate", 0.0))
+            if abs(sr_j - sr) > 1e-9 * max(sr, sr_j, 1.0):
+                raise ValueError(
+                    f"merge fc: input {j} level {lv} has sample_rate "
+                    f"{sr_j} != {sr} — decimation levels do not correspond")
+            for key in ("num_samples_window", "overlap", "window_type"):
+                if str(p.attrs.get(key, "")) != str(base.attrs.get(key, "")):
+                    _log.warning(
+                        "merge fc: input %d level %d %s=%r differs from "
+                        "%r — mixed window settings change the banding",
+                        j, lv, key, p.attrs.get(key), base.attrs.get(key))
+        vars0 = [str(v) for v in base.data_vars]
+        common = set(vars0)
+        for p in parts[1:]:
+            common &= {str(v) for v in p.data_vars}
+        if not common:
+            raise ValueError(
+                "merge fc: inputs share no channels: "
+                f"{[[str(v) for v in p.data_vars] for p in parts]}")
+        dropped = [v for v in vars0 if v not in common]
+        if dropped:
+            _log.warning(
+                "merge fc: channels %s are missing in some input — dropped "
+                "from the merged FC", dropped)
+        keep_vars = [v for v in vars0 if v in common]
+
+        freqs = [np.asarray(p["frequency"].values, dtype=float) for p in parts]
+        f0 = freqs[0]
+        aligned = all(np.array_equal(f0, g) for g in freqs[1:])
+        sliced = []
+        if aligned:
+            sliced = list(parts)
+        else:
+            keep = np.ones(f0.size, dtype=bool)
+            for g in freqs[1:]:
+                keep &= _grid_nearest_keep(f0, g)
+            n_kept = int(np.count_nonzero(keep))
+            if n_kept == 0:
+                raise ValueError(
+                    "merge fc: input frequency grids do not intersect at "
+                    f"level {lv}")
+            if n_kept < f0.size:
+                _log.warning(
+                    "merge fc: level %d frequency grids differ — intersected "
+                    "to %d of %d bins (mixed window settings?)", lv, n_kept,
+                    f0.size)
+            f0 = f0[keep]
+            for p, g in zip(parts, freqs):
+                # this part's nearest partner bin for every kept reference
+                # bin, re-labelled onto the reference grid (concat must see
+                # identical frequency coordinates or xarray outer-joins them)
+                pos = np.searchsorted(g, f0)
+                left = np.clip(pos - 1, 0, max(g.size - 1, 0))
+                right = np.clip(pos, 0, max(g.size - 1, 0))
+                use_left = np.isclose(f0, g[left], rtol=1e-3, atol=0.0)
+                use_right = np.isclose(f0, g[right], rtol=1e-3, atol=0.0)
+                pi = np.where(
+                    use_left & (~use_right
+                                | (np.abs(f0 - g[left])
+                                   <= np.abs(f0 - g[right]))),
+                    left, right)
+                if not np.all(np.isclose(f0, g[pi], rtol=1e-3, atol=0.0)):
+                    raise ValueError(
+                        "merge fc: input frequency grids do not intersect "
+                        f"at level {lv}")
+                sliced.append(
+                    p.isel(frequency=pi).assign_coords(frequency=f0))
+        merged = xr.concat(sliced, dim="time")
+        merged = merged.sortby("time")
+        times = merged["time"].values
+        if times.size > 1 and np.any(np.diff(times) == np.timedelta64(0)):
+            _log.warning(
+                "merge fc: level %d has duplicate/overlapping window times "
+                "across inputs", lv)
+        merged = merged[keep_vars]
+        merged.attrs = dict(base.attrs)
+        out[lv] = merged
+    return out
+
+
 def _period_bands_indexed(fc, periods_per_octave=4):
     """Discrete, bin-snapped period bands (DESIGN.md §14.6) — the
     per-level fallback of the ``"l2u"`` scheme: used when the
