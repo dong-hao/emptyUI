@@ -946,12 +946,201 @@ def _resolve_band_style(band_style):
         style = "uniform"
     if style == "emtf":  # legacy alias, superseded by l2u (2026-09-11)
         style = "l2u"
-    if style not in ("l2u", "uniform"):
+    if style not in ("l2u", "uniform", "manual"):
         raise ValueError(
-            f"unknown band_style '{band_style}' (expected 'l2u' or "
-            "'uniform'; the retired 'index' mode was removed 2026-09-09 — "
+            f"unknown band_style '{band_style}' (expected 'l2u', 'uniform' "
+            "or 'manual'; the retired 'index' mode was removed 2026-09-09 — "
             "use 'l2u' for the fixed-template log-uniform scheme)")
     return style
+
+
+def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
+                       smooth_bins=0):
+    """Per-frequency multiple coherence squared over a sliding window
+    ensemble (DESIGN 24.6 - the EMTF-style statistic, M4 #7/E7).
+
+    For every frequency bin f and window w: the multiple coherence squared
+    of each output on the magnetic inputs, estimated over the ensemble of
+    windows within +-ensemble_windows of w (center included - leave-one-out
+    would penalize isolated clean windows), optionally pooled over
+    +-smooth_bins adjacent bins first (a FIXED smoothing scale - deliberately
+    not the estimate's band table; restores dof at deep levels).
+    Adjusted-R2 correction removes the p/(W-1) high bias of sample
+    coherence (the 16.2 C2 bias, exact here since the ensemble count is
+    known).
+
+    Returns ``(coh_e, coh_x)`` - (n_bin, n_win) arrays: coh2 of each output
+    on the predicted-H ensemble (remote H when ``ref`` is given), minimum
+    across outputs; and the local<->remote magnetic transfer coherence (1.0
+    single-FC). NaN samples are excluded from the ensemble (segment counts
+    shrink accordingly); segments with <= n_in valid windows score 0.
+    """
+    import numpy as np
+
+    def _stack(ds, names):
+        return np.stack([np.asarray(ds[c].values, dtype=complex)
+                         for c in names], axis=0)  # (n, F, W)
+
+    E = _stack(local, outs)                            # (O, F, W)
+    Hl = _stack(local, ins)                            # (I, F, W)
+    Hp = _stack(ref, ins) if ref is not None else Hl   # predicted H
+    R = _stack(ref, ins) if ref is not None else None  # transfer target
+    F, W = E.shape[1], E.shape[2]
+
+    if smooth_bins > 0:
+        def pool(a):  # sum over +-k adjacent bins (bin axis = 1)
+            out = np.zeros_like(a)
+            for k in range(-smooth_bins, smooth_bins + 1):
+                out += np.roll(a, k, axis=1)
+            return out
+        E, Hl, Hp = pool(E), pool(Hl), pool(Hp)
+        Rp = pool(R) if R is not None else None
+    else:
+        Rp = R
+
+    w0 = max(0, int(ensemble_windows))
+
+    def _min_coh(Y, X):
+        """Per (bin, window) multiple coherence squared of Y's outputs on
+        X's inputs over the sliding ensemble; adjusted-R2; min across
+        outputs."""
+        n_in = X.shape[0]
+        pad_c = np.zeros((F, 1, n_in, n_in), dtype=complex)
+        pad_he = np.zeros((F, 1, n_in, Y.shape[0]), dtype=complex)
+        pad_oo = np.zeros((F, 1, Y.shape[0]), dtype=complex)
+        ok = (np.all(np.isfinite(X), axis=0)
+              & np.all(np.isfinite(Y), axis=0))            # (F, W)
+        Xz = np.where(ok[None], X, 0)
+        Yz = np.where(ok[None], Y, 0)
+        cnt = np.cumsum(np.concatenate(
+            [np.zeros((F, 1), dtype=int), ok.astype(int)], axis=1), axis=1)
+        cs_hh = np.cumsum(np.concatenate(
+            [pad_c, np.einsum("ifw,jfw->fwij", Xz, Xz.conj())], axis=1), axis=1)
+        cs_he = np.cumsum(np.concatenate(
+            [pad_he, np.einsum("ifw,ofw->fwio", Xz, Yz.conj())], axis=1), axis=1)
+        cs_oo = np.cumsum(np.concatenate(
+            [pad_oo, np.einsum("ofw,ofw->fwo", Yz.conj(), Yz)], axis=1),
+            axis=1)
+        idx = np.arange(W)
+        lo = np.maximum(idx - w0, 0)
+        hi = np.minimum(idx + w0 + 1, W)  # exclusive
+        S_hh = cs_hh[:, hi] - cs_hh[:, lo]               # (F, W, I, I)
+        S_he = cs_he[:, hi] - cs_he[:, lo]               # (F, W, I, O)
+        S_oo = np.real(cs_oo[:, hi] - cs_oo[:, lo])      # (F, W, O)
+        W_seg = (cnt[:, hi] - cnt[:, lo]).astype(float)  # (F, W)
+        usable = (W_seg > n_in) & ok
+        coh = np.zeros((F, W, Y.shape[0]))
+        if np.any(usable):
+            pinv = np.linalg.pinv(
+                S_hh.reshape(-1, n_in, n_in)).reshape(S_hh.shape)
+            t = np.einsum("fwio,fwij->fwjo", S_he.conj(), pinv)
+            num = np.real(np.einsum("fwjo,fwjo->fwo", t, S_he))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r2 = num / np.maximum(S_oo, 1e-300)
+            # adjusted R2: E[r2 | null] = n_in/(W_seg-1) -> debias
+            wseg = np.maximum(W_seg, 1.0)[:, :, None]
+            r2 = (r2 * (wseg - 1.0) - (n_in - 1.0)) / np.maximum(
+                wseg - n_in, 1.0)
+            coh = np.clip(np.nan_to_num(r2, nan=0.0), 0.0, 1.0)
+        coh[~ok] = 0.0
+        return coh.min(axis=2)  # (F, W)
+
+    coh_e = _min_coh(E, Hp)
+    coh_x = np.full((F, W), 1.0) if Rp is None else _min_coh(Hl, Rp)
+    return coh_e, coh_x
+
+
+def _coherence_weight_array(coh, lo, hi, mode, ramp=0.05):
+    """Vectorized :func:`_coherence_weight` over an array of coherence²."""
+    import numpy as np
+
+    coh = np.asarray(coh, dtype=float)
+    if mode == "off":
+        return np.ones_like(coh)
+    w = np.where(coh < lo, np.clip((coh - (lo - ramp)) / ramp, 0.0, 1.0), 1.0)
+    w = np.where(coh > hi, np.clip(((hi + ramp) - coh) / ramp, 0.0, 1.0), w)
+    if mode == "drop":
+        w = np.where((coh < lo) | (coh > hi), 0.0, w)
+    return w
+
+
+def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
+                  coherence_min, coherence_max, mode, trim,
+                  apply_below_period, ensemble_windows, smooth_bins,
+                  band_style, periods_per_octave, bands_override, t_short):
+    """The ``statistic="per_bin"`` sort body (DESIGN §24.6): per-(bin,
+    window) weights from :func:`_per_bin_coherence` — no band table in the
+    weighting; the band table only aggregates the diagnostics rows. The
+    period scope, trim and NaN-row grammar follow the band statistic's
+    semantics."""
+    import numpy as np
+
+    freq_vals = np.asarray(local["frequency"].values, dtype=float)
+    coh_e, coh_x = _per_bin_coherence(
+        local, ref, ins, outs, ensemble_windows=ensemble_windows,
+        smooth_bins=smooth_bins)
+    coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e  # (F, W)
+    weights = _coherence_weight_array(coh, coherence_min, coherence_max, mode)
+    thr = (float(apply_below_period)
+           if apply_below_period not in (None, "")
+           and float(apply_below_period) > 0 else None)
+    if thr:
+        with np.errstate(divide="ignore"):
+            bin_periods = np.where(freq_vals > 0, 1.0 / np.maximum(freq_vals, 1e-300),
+                                   np.inf)
+        weights = np.where(bin_periods[:, None] >= thr, 1.0, weights)
+        coh = np.where(bin_periods[:, None] >= thr, np.nan, coh)
+    scale = np.sqrt(weights)
+    # fully down-weighted samples are excluded (NaN) rather than zeroed —
+    # zero rows would make the remote-reference QR singular (same grammar
+    # as the band statistic); estimate_tf skips non-finite rows.
+    scale[scale <= 0.0] = np.nan
+    scale[freq_vals <= 0.0] = np.nan  # DC excluded (recoloring already NaNs it under PW)
+    if mode != "off":
+        for oc in outs + ins:
+            local_out[oc].values[:] = local_out[oc].values * scale
+        if ref_out is not None:
+            for ic in ins:
+                ref_out[ic].values[:] = ref_out[ic].values * scale
+    # diagnostics: aggregate per band (the band table is ONLY a view here)
+    if bands_override is not None:
+        periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
+    else:
+        periods, band_bins_list = _resolve_period_bands(
+            local, periods_per_octave, band_style, t_short=t_short)
+    rows = []
+    for b in range(len(periods)):
+        band_bins = band_bins_list[b]
+        if band_bins.size == 0:
+            continue
+        band_coh = coh[band_bins, :]
+        finite = np.isfinite(band_coh)
+        sc = scale[band_bins, :]
+        trimmed_band = False
+        if mode != "off" and trim:
+            med = float(np.nanmedian(band_coh)) if finite.any() else np.nan
+            if (not finite.any()) or med < coherence_min:
+                trimmed_band = True
+                for oc in outs + ins:
+                    local_out[oc].values[band_bins, :] = np.nan
+                if ref_out is not None:
+                    for ic in ins:
+                        ref_out[ic].values[band_bins, :] = np.nan
+        rows.append({
+            "period": float(periods[b]),
+            "n_windows": int(band_coh.size),
+            "n_retained": int(np.count_nonzero(sc > 0)),
+            "median_coherence_e": (float(np.nanmedian(coh_e[band_bins, :]))
+                                   if np.isfinite(coh_e[band_bins, :]).any() else None),
+            "median_coherence_transfer": (float(np.nanmedian(coh_x[band_bins, :]))
+                                          if ref is not None and
+                                          np.isfinite(coh_x[band_bins, :]).any() else None),
+            "median_coherence": (float(np.nanmedian(band_coh))
+                                 if finite.any() else None),
+            "trimmed": trimmed_band,
+            "unsorted": bool(thr and periods[b] >= thr),
+        })
+    return local_out, ref_out, rows
 
 
 def _band_coherence(local, ref, ins, outs, band_bins):
@@ -989,8 +1178,10 @@ def _band_coherence(local, ref, ins, outs, band_bins):
 
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
-                      trim=False, periods_per_octave=4, band_style="l2u",
-                      bands_override=None, t_short=None):
+                      trim=False, periods_per_octave=3, band_style="l2u",
+                      bands_override=None, t_short=None,
+                      apply_below_period=None, statistic="per_bin",
+                      ensemble_windows=16, smooth_bins=0):
     """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
 
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
@@ -1009,6 +1200,17 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     partition. It should match the ``band_style`` used on the corresponding
     ``Estimate TF`` call for consistent banding, exactly like
     ``periods_per_octave``.
+
+    ``statistic`` (DESIGN §24.6): ``"per_bin"`` (default) — the EMTF-style
+    per-frequency window-ensemble coherence over a sliding
+    ±``ensemble_windows`` window ensemble (center included) with optional
+    ±``smooth_bins`` frequency pooling: weights become per (bin, window),
+    the banding parameters are irrelevant to the weighting (the band table
+    only aggregates the diagnostics), and the sample-coherence bias is
+    adjusted-R²-corrected. ``"band"`` (legacy) — the per-window multiple
+    coherence over the band's bin ensemble (banding-DEPENDENT).
+    Note Plot Coherency renders the *band* statistic — the per-bin mode's
+    plot counterpart is pending.
     """
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
@@ -1027,6 +1229,15 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 
     local_out = local.copy(deep=True)
     ref_out = ref.copy(deep=True) if ref is not None else None
+
+    if str(statistic) == "per_bin":
+        return _per_bin_sort(
+            local, ref, local_out, ref_out, ins, outs,
+            coherence_min=coherence_min, coherence_max=coherence_max,
+            mode=mode, trim=trim, apply_below_period=apply_below_period,
+            ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
+            band_style=band_style, periods_per_octave=periods_per_octave,
+            bands_override=bands_override, t_short=t_short)
 
     if bands_override is not None:
         periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
@@ -1088,8 +1299,10 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
-                       trim=False, periods_per_octave=4, band_style="l2u",
-                       min_bins_per_band=40.0, t_short=None):
+                       trim=False, periods_per_octave=3, band_style="l2u",
+                       min_bins_per_band=20.0, t_short=None,
+                       apply_below_period=None, statistic="per_bin",
+                       ensemble_windows=16, smooth_bins=0):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
@@ -1121,6 +1334,10 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
             bands_override=None if bands_override is None
             else bands_override.get(level, []),
             t_short=t_short,
+            apply_below_period=apply_below_period,
+            statistic=statistic,
+            ensemble_windows=ensemble_windows,
+            smooth_bins=smooth_bins,
         )
         out_levels[int(level)] = l_out
         if ref_levels is not None:
@@ -1137,7 +1354,7 @@ def estimate_tf(
     output_channels,
     estimator_engine="RME_RR",
     remote_reference=False,
-    periods_per_octave=4,
+    periods_per_octave=3,
     ref_fc=None,
     band_style="l2u",
     bands_override=None,
@@ -2037,11 +2254,11 @@ def estimate_tf_levels(
     output_channels,
     estimator_engine="Robust",
     remote_reference=False,
-    periods_per_octave=4,
+    periods_per_octave=3,
     ref_levels=None,
     channel_nomenclature=None,
     band_style="l2u",
-    min_bins_per_band=40.0,
+    min_bins_per_band=20.0,
     t_short=None,
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc

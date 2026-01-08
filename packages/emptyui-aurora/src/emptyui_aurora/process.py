@@ -324,7 +324,7 @@ class CoherenceSort(Node):
                           "the uniform log2-grid partition with "
                           "merge-based level combination."),
         Param("min_bins_per_band", "number", label="Min bins per band",
-              default=40.0, min=0,
+              default=20.0, min=0,
               description="Window-starvation coarsening threshold "
                           "(DESIGN.md §14.9) — must match the 'Estimate "
                           "TF' setting for the same banding: a level where "
@@ -337,15 +337,49 @@ class CoherenceSort(Node):
                           "'Estimate TF' setting for the same banding: "
                           "bands shorter than this are not evaluated. 0 "
                           "starts at the template's shortest band."),
+        Param("apply_below_period", "number", label="Apply below period (s)",
+              default=0.0, min=0, optional=True,
+              description="Scope the sorting to the noise-floor head: band "
+                          "center periods at/above this value pass through "
+                          "unsorted (the deep tail is healthy and weighting "
+                          "it only perturbs the estimate). 0 = sort all "
+                          "bands."),
+        Param("statistic", "select", label="Statistic",
+              options=("band", "per_bin"), default="per_bin",
+              description="band (legacy): per-window multiple coherence "
+                          "over the estimate's band bins — banding-dependent. "
+                          "per_bin: EMTF-style per-frequency window-ensemble "
+                          "coherence (sliding ±ensemble windows, adjusted-R² "
+                          "bias-corrected) — weights per (bin, window), "
+                          "INDEPENDENT of the band-average method (M4 #7). "
+                          "Plot Coherency renders the band statistic."),
+        Param("ensemble_windows", "integer", label="Ensemble windows",
+              default=16, min=1,
+              enabled_when=("statistic", ("per_bin",)),
+              description="Sliding window-ensemble half-width for the "
+                          "per-bin statistic: coherence at each (bin, "
+                          "window) is estimated over ±this many windows "
+                          "(center included). Larger = smoother/more dof."),
+        Param("smooth_bins", "integer", label="Frequency smoothing (bins)",
+              default=0, min=0,
+              enabled_when=("statistic", ("per_bin",)),
+              description="Pool ±this many adjacent bins into the per-bin "
+                          "ensemble (a FIXED smoothing scale, not the "
+                          "estimate's band table) — restores dof where "
+                          "windows are few (deep levels)."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 mode: str = "weight", coherence_trim: bool = False,
-                periods_per_octave: int = 4,
+                periods_per_octave: int = 3,
                 band_style: str = "l2u",
-                min_bins_per_band: float = 40.0,
-                t_short: float = 0.0) -> dict[str, Any]:
+                min_bins_per_band: float = 20.0,
+                t_short: float = 0.0,
+                apply_below_period: float = 0.0,
+                statistic: str = "per_bin",
+                ensemble_windows: int = 16,
+                smooth_bins: int = 0) -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -361,6 +395,10 @@ class CoherenceSort(Node):
             band_style=band_style,
             min_bins_per_band=min_bins_per_band,
             t_short=t_short or None,
+            apply_below_period=apply_below_period or None,
+            statistic=statistic,
+            ensemble_windows=ensemble_windows,
+            smooth_bins=smooth_bins,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
@@ -411,10 +449,10 @@ class EstimateTF(Node):
               enabled_when=("estimator_engine", ("Robust", "RME", "RME_RR")),
               cascade={True: (("estimator_engine", "Robust"),)}),
         Param("periods_per_octave", "integer", label="Periods per octave",
-              default=4, min=1,
+              default=3, min=1,
               description="Log2 period bands per power-of-2 octave."),
         Param("band_style", "select", label="Band style",
-              options=("l2u", "uniform"), default="l2u",
+              options=("l2u", "uniform", "manual"), default="l2u",
               description="Band construction scheme (DESIGN.md §14.9). "
                           "'l2u' (default) is the reference-template band "
                           "table with log-uniform window-starvation "
@@ -424,9 +462,30 @@ class EstimateTF(Node):
                           "coarser uniform grid. 'uniform' is the uniform "
                           "log2-grid partition: overlapping levels estimate "
                           "the same nominal bands and the merge keeps the "
-                          "deepest level."),
+                          "deepest level. 'manual' uses an explicit "
+                          "band-center table (see 'Band centers') — the "
+                          "apples-to-apples/parity option."),
+        Param("band_centers", "string", label="Band centers (Hz)",
+              default="", optional=True,
+              enabled_when=("band_style", ("manual",)),
+              placeholder="e.g. 0.137, 0.109, 0.0856, ...",
+              description="Flat list of band-center frequencies (Hz) for "
+                          "manual mode — one per band across ALL levels, "
+                          "highest frequency first (order normalized); "
+                          "edges sit at geometric midpoints between "
+                          "adjacent centers. Count must match "
+                          "'Bands per level'."),
+        Param("bands_per_level", "string", label="Bands per level",
+              default="", optional=True,
+              enabled_when=("band_style", ("manual",)),
+              placeholder='e.g. "6,6,6,6,4,2"',
+              description="Number of bands per decimation level (level 0 = "
+                          "the highest frequencies); the sum must equal the "
+                          "number of band centers. Every level needs >= 2 "
+                          "centers (edges are reconstructed from geometric "
+                          "midpoints)."),
         Param("min_bins_per_band", "number", label="Min bins per band",
-              default=40.0, min=0,
+              default=20.0, min=0,
               description="Window-starvation coarsening threshold "
                           "(DESIGN.md §14.9): a level where any band has "
                           "fewer than this many total samples (windows × "

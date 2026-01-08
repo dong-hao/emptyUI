@@ -52,7 +52,7 @@ class PlotCoherency(Node):
               default=0.98, min=0.0, max=1.0,
               description="Upper reference bound — the Coherence Sort default."),
         Param("periods_per_octave", "integer", label="Periods per octave",
-              default=4, min=1,
+              default=3, min=1,
               description="Band geometry — inherited from an upstream "
                           "Coherence Sort when connected."),
         Param("band_style", "select", label="Band style",
@@ -61,7 +61,7 @@ class PlotCoherency(Node):
                           "inherited from an upstream Coherence Sort when "
                           "connected."),
         Param("min_bins_per_band", "number", label="Min bins per band",
-              default=40.0, min=0,
+              default=20.0, min=0,
               description="Window-starvation coarsening threshold (DESIGN.md "
                           "§14.9) — inherited from an upstream Coherence Sort."),
         Param("t_short", "number", label="Shortest period (s)",
@@ -82,9 +82,9 @@ class PlotCoherency(Node):
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
-                periods_per_octave: int = 4,
+                periods_per_octave: int = 3,
                 band_style: str = "l2u",
-                min_bins_per_band: float = 40.0,
+                min_bins_per_band: float = 20.0,
                 t_short: float = 0.0) -> dict[str, Any]:
         import matplotlib
 

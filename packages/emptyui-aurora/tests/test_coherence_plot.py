@@ -56,11 +56,12 @@ def test_plot_matches_coherence_sort_numerically(tmp_path):
                 coh_e = np.minimum(coh_e, 0.98 - 1e-9)
             helper_medians[round(float(p), 6)] = float(np.median(coh_e))
 
-    # the sort's diagnostics must carry the identical medians
+    # the sort's diagnostics must carry the identical medians (band
+    # statistic — the per-bin default's diagnostics aggregate differently)
     res2 = CoherenceSort().execute(
         RunContext(workspace=tmp_path, store=DataStore()), levels,
         periods_per_octave=4, band_style="l2u", min_bins_per_band=40.0,
-        t_short=0.0)
+        t_short=0.0, statistic="band")
     rows = json.loads(Path(res2["table"]["path"]).read_text())
     assert rows, "sort diagnostics empty"
     for r in rows:

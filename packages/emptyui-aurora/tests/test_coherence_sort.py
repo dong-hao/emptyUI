@@ -40,7 +40,8 @@ def test_coherence_sort_drop_removes_noisy_windows():
     fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.25, coherence_max=1.0,
-                                     mode="drop", band_style="uniform")
+                                     mode="drop", band_style="uniform",
+                                     periods_per_octave=4, statistic="band")
     win = out["time"].values
     # fs = 8 Hz, window = 256 s -> scipy STFT times are window centres at
     # 128 s spacing; the noisy segment (samples 2000-2600 = 250-325 s) makes
@@ -85,11 +86,12 @@ def test_two_fc_mode_uses_remote_reference():
     # single-FC mode: E-Hloc coherence is low -> windows dropped
     s_out, _, _ = coherence_sort_fc(local, None, ["hx", "hy"], ["ex", "ey"],
                                     coherence_min=0.25, coherence_max=0.98,
-                                    mode="drop")
+                                    mode="drop", statistic="band")
     # two-FC mode: the conservative min drops at least the same windows
     t_out, r_out, rows = coherence_sort_fc(local, remote, ["hx", "hy"],
                                            ["ex", "ey"], coherence_min=0.25,
-                                           coherence_max=0.98, mode="drop")
+                                           coherence_max=0.98, mode="drop",
+                                           statistic="band")
     assert np.isnan(s_out["ex"].values).any()
     assert np.isnan(t_out["ex"].values).any()
     assert (np.isnan(t_out["ex"].values).sum()
@@ -147,7 +149,8 @@ def test_two_fc_mode_conservative_min():
     remote = synthetic_fc(remote_runts, ["hx", "hy"], ["hx", "hy"])
     t_out, r_out, _ = coherence_sort_fc(local, remote, ["hx", "hy"],
                                         ["ex", "ey"], coherence_min=0.25,
-                                        coherence_max=0.98, mode="drop")
+                                        coherence_max=0.98, mode="drop",
+                                        statistic="band")
     win = t_out["time"].values
     bad1 = int(np.argmin(np.abs(win - 256.0)))
     bad2 = int(np.argmin(np.abs(win - 384.0)))
@@ -171,7 +174,8 @@ def test_trim_removes_noisy_band():
     out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
                                      coherence_min=0.5, coherence_max=1.0,
                                      mode="drop", trim=True,
-                                     band_style="uniform")
+                                     band_style="uniform",
+                                     periods_per_octave=4, statistic="band")
     assert any(r["trimmed"] for r in rows)
     # the fully-trimmed bands are NaN across every window; bins outside the
     # banded range (DC, above the shortest band edge) are never touched
@@ -248,3 +252,167 @@ def test_node_band_params_match_estimate_tf(tmp_path: Path):
         t_short=4.0)
     rows2 = json.loads(Path(res2["table"]["path"]).read_text())
     assert rows2 and all(r["period"] >= 4.0 for r in rows2)
+
+
+def test_trim_disabled_with_mode_off(caplog):
+    """mode="off" means no sorting at all: band-edge trimming must not NaN
+    bands even when their median coherence is below coherence_min
+    (regression: the trim block ran before the mode gate)."""
+    source = synthetic_source(11)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=11)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                     coherence_min=0.5, coherence_max=1.0,
+                                     mode="off", trim=True,
+                                     band_style="uniform")
+    assert not any(r["trimmed"] for r in rows)
+    assert np.all(np.isfinite(out["ex"].values))
+    # the trimmed-band warning is part of the drop/weight modes' contract
+    out2, _, rows2 = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                       coherence_min=0.5, coherence_max=1.0,
+                                       mode="drop", trim=True,
+                                       band_style="uniform")
+    assert any(r["trimmed"] for r in rows2)
+    assert np.isnan(out2["ex"].values).any()
+
+
+def test_apply_below_period_scope():
+    """§24.5 P3: bands at/above apply_below_period pass through unsorted
+    (bit-identical to the input FC) while bands below the threshold are
+    sorted as usual — the head-scoped remedy."""
+    source = synthetic_source(12)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=12)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(
+        fc, None, ["hx", "hy"], ["ex", "ey"],
+        coherence_min=0.5, coherence_max=1.0, mode="drop",
+        band_style="uniform", apply_below_period=32.0)
+    # bands above the threshold are untouched
+    for r in rows:
+        if r["period"] >= 32.0:
+            assert r.get("unsorted"), r
+    # find a banded period >= 32 s and check its bins are bit-identical
+    from emptyui_aurora._processing import _normalize_fc_layout, _period_bands
+    periods, edges = _period_bands(_normalize_fc_layout(out), 4)
+    logf = np.log2(out["frequency"].values)
+    checked = 0
+    for r in rows:
+        if not r.get("unsorted"):
+            continue
+        b = int(np.argmin(np.abs(np.array(periods) - r["period"])))
+        sel = (logf <= edges[b]) & (logf > edges[b + 1])
+        bins = np.where(sel)[0]
+        if bins.size:
+            np.testing.assert_array_equal(
+                out["hx"].values[bins], fc["hx"].values[bins])
+            checked += 1
+    assert checked, "no unsorted band verified"
+    # and at least one band below the threshold WAS sorted (NaNs present)
+    short_bands = [r for r in rows if not r.get("unsorted")]
+    assert short_bands, "expected bands below the threshold to be sorted"
+    got_nan = False
+    for r in short_bands:
+        b = int(np.argmin(np.abs(np.array(periods) - r["period"])))
+        sel = (logf <= edges[b]) & (logf > edges[b + 1])
+        bins = np.where(sel)[0]
+        if bins.size and np.isnan(out["hx"].values[bins]).any():
+            got_nan = True
+            break
+    assert got_nan, "no band below the threshold was actually sorted"
+
+
+def test_per_bin_statistic_known_values():
+    """The per-bin window-ensemble coherence: perfectly coherent E = Z·H
+    scores ≈ 1 at every (bin, window); added noise lowers it; the
+    adjusted-R² correction keeps a pure-noise bin at ≈ 0 (the C2 bias is
+    removed, unlike the band statistic)."""
+    from emptyui_aurora._processing import _per_bin_coherence
+
+    rng = np.random.default_rng(5)
+    F, W = 6, 40
+    H = rng.standard_normal((2, F, W)) + 1j * rng.standard_normal((2, F, W))
+    Z = np.array([[1 + 2j, 0.5 - 1j], [-0.5 + 0.3j, 2 + 0j]])
+    E = np.einsum("oi,ifw->ofw", Z, H)  # E_o = Σ_i Z[o,i]·H_i (exact fit)
+    coh_e, coh_x = _per_bin_coherence(
+        _ds(E[0], E[1], H[0], H[1]), None, ["hx", "hy"], ["ex", "ey"],
+        ensemble_windows=8)
+    assert coh_e.shape == (F, W)
+    assert np.all(coh_e > 0.95)  # perfectly coherent, debiased
+    assert np.all(coh_x == 1.0)  # single-FC mode
+    # noise-dominated: E = pure independent noise → coh ≈ 0 (debias removes
+    # the p/(W-1) sample bias that would otherwise inflate it to ~2/16)
+    noise = (rng.standard_normal((2, F, W))
+             + 1j * rng.standard_normal((2, F, W)))
+    coh_n, _ = _per_bin_coherence(
+        _ds(noise[0], noise[1], H[0], H[1]), None, ["hx", "hy"],
+        ["ex", "ey"], ensemble_windows=8)
+    assert np.all(coh_n < 0.5)
+
+
+def _ds(hx, hy, ex, ey):
+    import pandas as pd
+    import xarray as xr
+
+    t = pd.date_range("2024-01-01", periods=hx.shape[1], freq="s")
+    f = np.arange(1, hx.shape[0] + 1) * 0.125
+    return xr.Dataset(
+        {"hx": (("frequency", "time"), hx), "hy": (("frequency", "time"), hy),
+         "ex": (("frequency", "time"), ex), "ey": (("frequency", "time"), ey)},
+        coords={"frequency": f, "time": t},
+        attrs={"sample_rate": 8.0, "num_samples_window": 64,
+               "overlap": 0.5, "window_type": "boxcar"})
+
+
+def test_per_bin_sort_band_independent():
+    """The per-bin weights must be identical under two different band
+    tables (banding independence — the whole point of E7): sorting with
+    bands_override=None (auto bands) vs a different override leaves the
+    FC values identical (the band table only aggregates diagnostics)."""
+    source = synthetic_source(14)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=14)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    kw = {"coherence_min": 0.5, "coherence_max": 1.0, "mode": "drop",
+          "statistic": "per_bin", "ensemble_windows": 8}
+    out1, _, _ = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                   band_style="uniform", **kw)
+    out2, _, _ = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                   band_style="l2u", **kw)
+    np.testing.assert_array_equal(out1["ex"].values, out2["ex"].values)
+    np.testing.assert_array_equal(out1["hx"].values, out2["hx"].values)
+    # and the weights actually did something (noise-floor windows NaN'd)
+    assert np.isnan(out1["ex"].values).any()
+
+
+def test_per_bin_vs_band_mode_grammar():
+    """Both statistics keep the NaN-row grammar: mode="drop" excludes
+    low-coherence samples (NaN) in both flavors; the per-bin mode covers
+    every bin (no band table in the weighting)."""
+    source = synthetic_source(15)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=15)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                     coherence_min=0.5, coherence_max=1.0,
+                                     mode="drop", band_style="uniform",
+                                     statistic="per_bin")
+    assert np.isnan(out["ex"].values).any()
+    assert np.all(np.isfinite(out["ex"].values[~np.isnan(out["ex"].values)]))
+    assert any(r["n_retained"] < r["n_windows"] for r in rows)
+    # diagnostics still aggregate per band
+    assert all("period" in r and "n_retained" in r for r in rows)
+
+
+def test_per_bin_scope_leaves_tail_untouched():
+    """apply_below_period with the per-bin statistic: bins at/above the
+    threshold are bit-identical to the input; bins below may be sorted."""
+    source = synthetic_source(16)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=16)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    out, _, _ = coherence_sort_fc(
+        fc, None, ["hx", "hy"], ["ex", "ey"], coherence_min=0.5,
+        coherence_max=1.0, mode="drop", band_style="uniform",
+        statistic="per_bin", apply_below_period=8.0)
+    freqs = np.asarray(out["frequency"].values)
+    tail = (freqs < 1.0 / 8.0) & (freqs > 0)  # period >= 8 s, DC excluded
+    if tail.any():
+        np.testing.assert_array_equal(out["hx"].values[tail],
+                                      fc["hx"].values[tail])
