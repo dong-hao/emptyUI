@@ -1249,18 +1249,39 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
         band_bins = band_bins_list[b]
         if band_bins.size == 0:
             continue
+        # period scope (§24.5 P3): bands at/above the threshold pass through
+        # unsorted — the noise-floor remedy belongs at the head; weighting
+        # the deep tail only perturbs healthy long-period estimates.
+        unsorted_band = (apply_below_period is not None
+                         and str(apply_below_period) != ""
+                         and float(apply_below_period) > 0
+                         and float(periods[b]) >= float(apply_below_period))
+        if unsorted_band:
+            rows.append({
+                "period": float(periods[b]),
+                "n_windows": int(local_out[outs[0]].values.shape[1]) if outs else 0,
+                "n_retained": int(local_out[outs[0]].values.shape[1]) if outs else 0,
+                "median_coherence_e": None,
+                "median_coherence_transfer": None,
+                "median_coherence": None,
+                "trimmed": False,
+                "unsorted": True,
+            })
+            continue
         coh_e, coh_x = _band_coherence(local, ref, ins, outs, band_bins)
         n_win = coh_e.size
         coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
-        # degenerate bands (fewer bins than inputs+1) fit the regression
-        # exactly, so their coherence is trivially 1.0 — the "coh ≈ 1 is
-        # suspicious" rule must not apply there
+        # degenerate bands (fewer bins than inputs+1): the ensemble statistic
+        # falls back to the minimum pairwise coherence there (not the
+        # regression fit, which is exact) — cap it at coherence_max so the
+        # "coh ≈ 1 is suspicious" rule does not unconditionally drop the
+        # longest-period bands; the lower bound still applies (conservative).
         if band_bins.size < len(ins) + 1:
             coh = np.minimum(coh, coherence_max - 1e-9)
         weights = np.array([_coherence_weight(c, coherence_min, coherence_max, mode)
                             for c in coh])
         trimmed = False
-        if trim:
+        if mode != "off" and trim:
             keep = weights > 0
             if keep.sum() == 0:
                 trimmed = True  # nothing retained in this band
@@ -1345,6 +1366,14 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
         for r in level_rows:
             r["decimation_level"] = int(level)
             rows.append(r)
+    trimmed_periods = [r["period"] for r in rows if r["trimmed"]]
+    if trimmed_periods:
+        _log.warning(
+            "coherence trim: %d band(s) with median coherence below "
+            "coherence_min=%s NaNed (periods, s): %s",
+            len(trimmed_periods), coherence_min,
+            ", ".join(f"{p:.3g}" for p in trimmed_periods),
+        )
     return out_levels, out_ref, rows
 
 
@@ -1869,6 +1898,67 @@ def merge_fc_containers(containers):
     return out
 
 
+def manual_bands(freqs, counts) -> dict[int, list[tuple[float, float]]]:
+    """Per-level ``(f_hi, f_lo)`` band table from band-center frequencies.
+
+    The EMTF band-table reconstruction used by the SDG31 parity harness
+    (`exact_official_bands`, DESIGN §24.4 item 5 / §24.5 P4): ``freqs`` is
+    the flat list of band-center frequencies (any order — normalized to
+    descending), ``counts`` the number of bands per decimation level as a
+    comma string or sequence (level 0 = the highest frequencies, e.g.
+    ``"6,6,6,6,4,2"``). Band edges sit at the geometric midpoints between
+    adjacent centers; the outer edges extend by the same geometric ratio.
+    Each level needs >= 2 centers (a lone band has no midpoint to anchor
+    its edges).
+
+    Returns ``{level: [(f_hi, f_lo), ...]}`` — feed per level into
+    ``estimate_tf(..., bands_override=...)``. ``freqs``/``counts`` accept
+    comma-separated strings or sequences.
+    """
+    def _numbers(value, what):
+        if isinstance(value, str):
+            parts = [x for x in value.split(",") if x.strip()]
+        else:
+            try:
+                parts = list(value)
+            except TypeError:
+                parts = [value]
+        try:
+            return np.asarray([float(x) for x in parts], dtype=float)
+        except ValueError as exc:
+            raise ValueError(f"{what}: cannot parse values ({exc})") from exc
+
+    f = _numbers(freqs, "band_centers")
+    if f.size == 0 or not np.all(np.isfinite(f)) or np.any(f <= 0):
+        raise ValueError("band_centers must be finite positive frequencies")
+    f = np.sort(f)[::-1]  # descending: level 0 = highest frequencies
+    if np.any(np.diff(f) == 0):
+        raise ValueError("band_centers contains duplicate frequencies")
+    c = [int(x) for x in _numbers(counts, "bands_per_level")]
+    if not c or any(k < 1 for k in c):
+        raise ValueError("bands_per_level must be >= 1 per level")
+    if any(k < 2 for k in c):
+        raise ValueError(
+            f"bands_per_level: every level needs >= 2 band centers to "
+            f"reconstruct edges (got {c})")
+    if sum(c) != f.size:
+        raise ValueError(
+            f"bands_per_level sums to {sum(c)} but {f.size} band centers given")
+    out: dict[int, list[tuple[float, float]]] = {}
+    pos = 0
+    for lv, k in enumerate(c):
+        cs = f[pos:pos + k]
+        pos += k
+        r = np.sqrt(cs[0] / cs[1])
+        edges = [cs[0] * r]
+        for i in range(len(cs) - 1):
+            edges.append(np.sqrt(cs[i] * cs[i + 1]))
+        edges.append(cs[-1] / np.sqrt(cs[-2] / cs[-1]))
+        out[lv] = [(float(edges[i]), float(edges[i + 1]))
+                   for i in range(len(edges) - 1)]
+    return out
+
+
 def _period_bands_indexed(fc, periods_per_octave=4):
     """Discrete, bin-snapped period bands (DESIGN.md §14.6) — the
     per-level fallback of the ``"l2u"`` scheme: used when the
@@ -1994,6 +2084,11 @@ def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u",
     long-period end — callers already handle empty bands by skipping them).
     """
     style = _resolve_band_style(band_style)
+    if style == "manual":
+        raise ValueError(
+            "band_style='manual' requires an explicit per-level band table "
+            "(bands_override from manual_bands) — there is no auto table "
+            "for manual mode")
     if style == "l2u":
         periods_out, index_ranges = _period_bands_indexed(fc, periods_per_octave)
         band_bins = [np.arange(lo, hi + 1) for lo, hi in index_ranges]
@@ -2260,6 +2355,7 @@ def estimate_tf_levels(
     band_style="l2u",
     min_bins_per_band=20.0,
     t_short=None,
+    bands_override=None,
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
@@ -2288,9 +2384,8 @@ def estimate_tf_levels(
     :func:`_resolve_period_bands`; a fully-clipped level is skipped).
     """
     keyword = _resolve_keyword(channel_nomenclature, input_channels, output_channels)
-    bands_override = None
     style = _resolve_band_style(band_style)
-    if style == "l2u":
+    if bands_override is None and style == "l2u":
         bands_override = _l2u_band_table(
             levels, min_bins_per_band=min_bins_per_band, t_short=t_short)
     result = {}

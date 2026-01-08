@@ -309,9 +309,11 @@ class CoherenceSort(Node):
               description="Remove bands whose retained-window median "
                           "coherence is below the lower bound (NaN)."),
         Param("periods_per_octave", "integer", label="Periods per octave",
-              default=4, min=1,
-              description="Band geometry — must match the 'Estimate TF' "
-                          "setting for the same banding."),
+              default=3, min=1,
+              description="Band geometry (diagnostics aggregation; the "
+                          "per-bin weighting is band-independent) — must "
+                          "match the 'Estimate TF' setting for the same "
+                          "banding."),
         Param("band_style", "select", label="Band style",
               options=("l2u", "uniform"), default="l2u",
               description="Band construction scheme — must match 'Estimate "
@@ -507,10 +509,12 @@ class EstimateTF(Node):
     def execute(self, ctx, fc, ref_fc=None,
                 estimator_engine: str = "Robust",
                 remote_reference: bool = False,
-                periods_per_octave: int = 4,
+                periods_per_octave: int = 3,
                 band_style: str = "l2u",
-                min_bins_per_band: float = 40.0,
-                t_short: float = 0.0) -> dict[str, Any]:
+                min_bins_per_band: float = 20.0,
+                t_short: float = 0.0,
+                band_centers: str = "",
+                bands_per_level: str = "") -> dict[str, Any]:
         # Accept either a single fc (treated as level 0) or a multi-level
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -532,6 +536,17 @@ class EstimateTF(Node):
                 "could not determine input/output channels from the fc — "
                 f"data_vars: {list(sample_fc.data_vars)}"
             )
+        manual_bands = None
+        if band_style == "manual":
+            from emptyui_aurora._processing import manual_bands
+            if not str(band_centers).strip() or not str(bands_per_level).strip():
+                raise ValueError(
+                    "band_style='manual' requires both 'band_centers' "
+                    "(band-center frequencies in Hz) and 'bands_per_level' "
+                    "(bands per decimation level, e.g. \"6,6,6,6,4,2\")")
+            manual = manual_bands(band_centers, bands_per_level)
+        else:
+            manual = None
         per_level = estimate_tf_levels(
             levels, ins, outs,
             estimator_engine=estimator_engine,
@@ -542,6 +557,7 @@ class EstimateTF(Node):
             band_style=band_style,
             min_bins_per_band=min_bins_per_band,
             t_short=t_short,
+            bands_override=manual,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
         notes = (
@@ -549,7 +565,9 @@ class EstimateTF(Node):
             f"levels={len(levels)}; "
             f"periods_per_octave={periods_per_octave}; band_style={band_style}; "
             f"min_bins_per_band={min_bins_per_band}; t_short={t_short}; "
-            f"nomenclature={kw or 'auto'}"
+            + (f"manual_bands={len(band_centers.split(','))} centers; "
+               if manual else "")
+            + f"nomenclature={kw or 'auto'}"
         )
         tf = build_tf(
             periods, Z, ins, outs, channel_nomenclature=kw, Z_err=Z_err,

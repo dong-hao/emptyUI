@@ -27,6 +27,7 @@ from emptyui_aurora._processing import (
     compute_fc_levels,
     estimate_tf,
     estimate_tf_levels,
+    manual_bands,
     merge_tf_levels,
 )
 
@@ -470,3 +471,93 @@ def test_head_clip_zero_is_noop_for_both_schemes():
                                        band_style=style, t_short=0.0)
         assert len(p0) == len(pn) == len(pz)
         assert len(b0) == len(bn) == len(bz)
+
+
+def test_manual_bands_geometry():
+    """§24.5 P4: manual_bands reproduces the parity harness's
+    exact_official_bands reconstruction exactly (geometric-midpoint edges,
+    level 0 = highest frequencies, order-normalized input)."""
+    from emptyui_aurora._processing import manual_bands
+
+    # official SDG31 level-0/1 centers (descending), scrambled on purpose
+    freqs = [0.0391, 0.0312, 0.0195, 0.0156, 0.0244, 0.0488,  # level 0
+             0.0137, 0.0117, 0.00977, 0.00781, 0.00610, 0.00488]  # level 1
+    table = manual_bands(freqs, "6,6")
+    assert sorted(table) == [0, 1]
+    # level 0 = the six highest frequencies
+    f0 = sorted((f for f in freqs[:6]), reverse=True)
+    r = np.sqrt(f0[0] / f0[1])
+    assert table[0][0][0] == pytest.approx(f0[0] * r)
+    assert table[0][0][1] == pytest.approx(np.sqrt(f0[0] * f0[1]))
+    hi, lo = table[0][0]
+    assert hi > lo
+    # edges are contiguous within a level
+    for a, b in zip(table[0], table[0][1:]):
+        assert a[1] == pytest.approx(b[0])
+
+
+def test_manual_bands_matches_harness_formula():
+    """The shared helper equals the parity harness's exact_official_bands
+    (the provenance guarantee for band_style='manual')."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]
+                           / "examples" / "data" / "lims-usarray-test"))
+    from emptyui_aurora._processing import manual_bands
+
+    try:
+        from verify_sdg31 import exact_official_bands
+    except ImportError:  # harness deps unavailable — skip quietly
+        pytest.skip("parity harness unavailable")
+    periods_off = np.array([7.34, 9.17, 11.68, 15.08, 19.75, 25.6,
+                            33.0, 42.7, 53.9])
+    table_h = exact_official_bands(1.0 / periods_off)
+    table_m = manual_bands(1.0 / periods_off, "6,2")
+    for lv in table_h:
+        for (hi_h, lo_h), (hi_m, lo_m) in zip(table_h[lv], table_m[lv]):
+            assert hi_m == pytest.approx(hi_h, rel=1e-12)
+            assert lo_m == pytest.approx(lo_h, rel=1e-12)
+
+
+def test_manual_bands_validation():
+    """Clear errors for duplicate/non-positive centers, count mismatches,
+    and single-band levels."""
+    from emptyui_aurora._processing import manual_bands
+
+    with pytest.raises(ValueError, match="duplicate"):
+        manual_bands("0.1, 0.1, 0.05", "2,1")
+    with pytest.raises(ValueError, match="positive"):
+        manual_bands("0.1, -0.05", "1,1")
+    with pytest.raises(ValueError, match="sums to"):
+        manual_bands("0.1, 0.05, 0.02", "2,2")
+    with pytest.raises(ValueError, match=">= 2"):
+        manual_bands("0.1, 0.05, 0.02", "2,1")
+    with pytest.raises(ValueError, match="cannot parse"):
+        manual_bands("0.1, abc", "2")
+
+
+def test_estimate_tf_manual_parity():
+    """band_style='manual' through estimate_tf equals the equivalent
+    bands_override call (same table, same estimate)."""
+    source = synthetic_source(13)
+    runts = synthetic_runts(source, seed=13)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    freqs = np.asarray(fc["frequency"].values)
+    # two bands straddling a decade, on fc's own grid (single level, so all
+    # three centers reconstruct that level's two edges + outer edges)
+    centers = [freqs[20], freqs[10], freqs[5]]
+    table = manual_bands(centers, "3")
+    kw = {"estimator_engine": "OLS", "remote_reference": False}
+    p1, Z1, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                            band_style="manual",
+                            bands_override=table.get(0, []), **kw)
+    p2, Z2, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                            band_style="l2u",
+                            bands_override=table.get(0, []), **kw)
+    np.testing.assert_allclose(p1, p2)
+    np.testing.assert_allclose(Z1, Z2)
+    # manual without an override errors clearly
+    from emptyui_aurora._processing import _resolve_period_bands
+    with pytest.raises(ValueError, match="requires an explicit per-level band table"):
+        _resolve_period_bands(fc, 4, "manual")
