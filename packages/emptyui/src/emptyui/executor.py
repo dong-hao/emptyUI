@@ -319,6 +319,7 @@ class Executor:
         cache: NodeCache | None = None,
         targets: list[str] | None = None,
         data_root=None,
+        include_store: bool = False,
     ) -> dict[str, Any]:
         """Execute the workflow; returns a run summary.
 
@@ -412,7 +413,11 @@ class Executor:
 
             if cancel_event.is_set():
                 emit({"event": "run_finished", "status": "cancelled"})
-                return {"status": "cancelled", "outputs": outputs_by_node}
+                summary = {"status": "cancelled",
+                           "outputs": outputs_by_node}
+                if include_store:
+                    summary["store"] = store
+                return summary
 
             wnode = by_id[node_id]
             manifest = manifests[node_id]
@@ -563,7 +568,11 @@ class Executor:
             # still reports "cancelled" instead of "completed".
             if cancel_event.is_set():
                 emit({"event": "run_finished", "status": "cancelled"})
-                return {"status": "cancelled", "outputs": outputs_by_node}
+                summary = {"status": "cancelled",
+                           "outputs": outputs_by_node}
+                if include_store:
+                    summary["store"] = store
+                return summary
 
         emit(
             {
@@ -572,4 +581,10 @@ class Executor:
                 "elapsed_s": round(time.monotonic() - started, 3),
             }
         )
-        return {"status": "completed", "outputs": outputs_by_node}
+        summary = {"status": "completed", "outputs": outputs_by_node}
+        if include_store:
+            # in-process embedding/scripts: resolve handle ids to payloads
+            # (the server layer resolves handles its own way and never
+            # passes this flag — the store never leaks through the API)
+            summary["store"] = store
+        return summary
