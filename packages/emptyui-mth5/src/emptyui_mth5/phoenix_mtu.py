@@ -207,7 +207,7 @@ def read_phoenix_mtu(
             f"{[p.name for p in tbls]}")
     from mth5.mth5 import MTH5
     from mt_io.phoenix.readers.mtu.mtu_table import MTUTable
-    from mt_timeseries import ChannelTS, RunTS
+    from mt_timeseries import ChannelTS
 
     table = MTUTable(tbls[0])
     table.read_tbl()
@@ -217,8 +217,8 @@ def read_phoenix_mtu(
                  or "survey")
     channel_keys = table.channel_keys
 
-    runs: list[tuple[str, int, int]] = []  # (run_id, rate, n_samples)
-    run_ts_by_id: dict[str, Any] = {}
+    runs: list[tuple[str, Any, list]] = []  # (run_id, run_metadata, ChannelTS list)
+    n_samples_by_run: list[int] = []
     warnings: list[str] = []
     statuses: set[int] = set()
     max_clock_error = 0.0
@@ -252,6 +252,11 @@ def read_phoenix_mtu(
             run_meta = table.run_metadata.copy()
             run_meta.id = run_id
             run_meta.sample_rate = float(seg.rate)
+            # actual block-tag time period — never the TBL placeholders
+            # (STIM/ETIM); end = last sample (mt_timeseries convention)
+            run_meta.time_period.start = seg.start.isoformat()
+            run_meta.time_period.end = (seg.end - pd.to_timedelta(
+                1.0 / seg.rate, unit="s")).isoformat()
             array_list = []
             for comp, pos in channel_keys.items():
                 meta = getattr(table, f"{comp}_metadata")
@@ -266,10 +271,13 @@ def read_phoenix_mtu(
                     data=x,
                     channel_metadata=meta,
                 ))
-            run_ts = RunTS(array_list=array_list, run_metadata=run_meta)
-            run_ts.run_metadata.id = run_id
-            run_ts_by_id[run_id] = run_ts
-            runs.append((run_id, seg.rate, run_ts.dataset.sizes["time"]))
+            # (run_id, run_metadata, channels) — written via from_channel_ts
+            # below: RunGroup.from_runts costs ~5x more per run (mt_metadata
+            # deepcopy/validation storm + station-metadata rebuild, DESIGN
+            # §24.8 performance note)
+            runs.append((run_id, run_meta, array_list))
+            n_samples_by_run.append(array_list[0].ts.size)
+        blocks = None  # free the sample chunks
 
     if len(statuses) > 1:
         warnings.append(
@@ -296,16 +304,17 @@ def read_phoenix_mtu(
         station_group = survey_group.stations_group.add_station(
             station_id, station_metadata=table.station_metadata)
         station_group.metadata.id = station_id
-        for run_id, _rate, _n in runs:
-            run_ts = run_ts_by_id[run_id]
-            run_group = station_group.add_run(run_id)
-            run_group.from_runts(run_ts)
+        for run_id, run_meta, array_list in runs:
+            run_group = station_group.add_run(run_id, run_metadata=run_meta)
+            for ch_ts in array_list:
+                run_group.from_channel_ts(ch_ts)
         station_group.update_metadata()
         survey_group.update_metadata()
 
     return {
         "path": str(target),
-        "runs": runs,
+        "runs": [(rid, float(meta.sample_rate), n)
+                 for (rid, meta, _chs), n in zip(runs, n_samples_by_run)],
         "warnings": warnings,
     }
 
