@@ -15,6 +15,7 @@ from .fc import FCGroupToSpectra, SpectraToFCGroup
 from .io import LoadMth5, SaveMth5
 from .lemi import LoadLemi
 from .merge import MergeRuns
+from .phoenix_mtu import LoadPhoenixMtu
 from .plots import PlotAppResPhase, PlotPhaseTensor, PlotTipper
 from .runs import AlignRuns, ExtractRun, MergeChannels, SplitChannels
 from .tables import ViewSelection, ViewTF
@@ -25,6 +26,7 @@ def register(registry) -> None:
     registry.add(LoadMth5)
     registry.add(SaveMth5)
     registry.add(LoadLemi)
+    registry.add(LoadPhoenixMtu)
     registry.add(LoadCalibration)
     registry.add(ExtractRun)
     registry.add(SplitChannels)

@@ -40,6 +40,8 @@ packages/web/blob-report/
 
 # Large raw instrument data (LEMI etc.)
 examples/data/lemi-424-test/
+# Phoenix MTU-5A burst corpus (IAGA mth5-test-data phoenix_mtu)
+examples/data/phoenix-mtu-test/
 examples/data/lemi_test_data/
 examples/data/bgs-lemi-424/
 # USArray verification MTH5 archives (regenerable via build_mth5.py)

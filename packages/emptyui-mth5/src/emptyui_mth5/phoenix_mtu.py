@@ -1,0 +1,373 @@
+"""Raw-instrument loaders (legacy Phoenix MTU-5A burst recordings).
+
+The MTU-5A writes one binary ``TSn`` file per sample-rate level (TS2..TS5;
+rates come from the TBL's ``SRL3/SRL4/SRL5``) plus one ``TBL`` metadata
+file. Burst-mode recordings interleave scheduled high-rate slots with
+continuous low-rate streams; the per-block 32-byte tags carry the true UTC
+timestamp of each block, which the upstream reader discards (DESIGN
+§24.8) — here the tags are parsed and maximal contiguous block runs become
+one mth5 run each (the mth5/aurora run-per-segment convention,
+``sr{rate}_{NNNN:04d}``).
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterator
+
+import numpy as np
+import pandas as pd
+
+from emptyui import Node, Output, Param
+
+_log = logging.getLogger("emptyui")
+
+#: Accepted time-series extensions (upstream mt_io convention).
+TS_EXTENSIONS = ("TS2", "TS3", "TS4", "TS5", "TSL", "TSH")
+
+#: TBL sample-rate tags per level (SRL3 -> TS3, ...).
+_RATE_TAGS = {3: "SRL3", 4: "SRL4", 5: "SRL5"}
+
+#: TBL seconds-recorded-per-slot tags per level.
+_SLOT_TAGS = {3: "L3NS", 4: "L4NS"}
+
+
+@dataclass
+class _BlockTag:
+    """Decoded 32-byte per-block tag (layout verified on 1690C16C, §24.8)."""
+
+    start: pd.Timestamp  # UTC time of the block's first scan
+    rate: int
+    n_scan: int
+    n_ch: int
+    clock_status: int
+    clock_error_s: float
+    saturated: bool
+
+
+def _sign24(x: np.ndarray) -> np.ndarray:
+    x = x.astype(np.int32)
+    x[x > 2**23 - 1] -= 2**24
+    return x
+
+
+def _block_tag(buf: bytes) -> _BlockTag:
+    start = pd.Timestamp(
+        datetime(2000 + buf[5], buf[4], buf[3], buf[2], buf[1], buf[0]),
+        tz="UTC",
+    )
+    return _BlockTag(
+        start=start,
+        rate=int.from_bytes(buf[18:20], "little"),
+        n_scan=int.from_bytes(buf[10:12], "little"),
+        n_ch=buf[12],
+        clock_status=buf[21],
+        clock_error_s=float(int.from_bytes(buf[22:26], "little", signed=True)),
+        saturated=buf[15] != 0,
+    )
+
+
+def _iter_blocks(
+    path: Path, warnings: list[str] | None = None,
+) -> Iterator[tuple[_BlockTag, np.ndarray]]:
+    """Stream a TSn file block by block (tag + samples).
+
+    Validates per-block rate/tag-length consistency and ignores a truncated
+    final block with a warning (appended to ``warnings`` when given).
+    """
+    size = path.stat().st_size
+    with open(path, "rb") as fid:
+        head = fid.read(32)
+        n_scan = int.from_bytes(head[10:12], "little")
+        n_ch = head[12]
+        tag_len = head[13]
+        rate = int.from_bytes(head[18:20], "little")
+        if tag_len != 32:
+            raise NotImplementedError(
+                f"{path.name}: tag length {tag_len} (V5-2000 lineage) is not "
+                "supported — only 32-byte MTU-5 tags carry the per-block "
+                "rate/time fields the burst parsing needs")
+        stride = tag_len + n_scan * n_ch * 3
+        n_block, tail = divmod(size, stride)
+        if tail:
+            msg = (f"{path.name}: {tail} trailing byte(s) after {n_block} "
+                   "complete blocks — partial block ignored")
+            _log.warning(msg)
+            if warnings is not None:
+                warnings.append(msg)
+        for k in range(n_block):
+            fid.seek(k * stride)
+            tag = _block_tag(fid.read(32))
+            if (tag.rate, tag.n_scan, tag.n_ch) != (rate, n_scan, n_ch):
+                raise ValueError(
+                    f"{path.name} block {k}: header fields diverge from the "
+                    f"file header (rate {tag.rate} != {rate}, n_scan "
+                    f"{tag.n_scan} != {n_scan}, n_ch {tag.n_ch} != {n_ch})")
+            raw = np.frombuffer(fid.read(n_scan * n_ch * 3), dtype=np.uint8)
+            # channel-interleaved per scan: (n_scan, n_ch*3); channel c is
+            # the consecutive byte triple (low, mid, high) = [3c, 3c+1, 3c+2]
+            raw = raw.reshape(n_scan, n_ch * 3).T.astype(np.int32)
+            samples = np.empty((n_ch, n_scan), dtype=np.float64)
+            for c in range(n_ch):
+                samples[c] = _sign24(
+                    raw[3 * c + 2] * 2**16 + raw[3 * c + 1] * 2**8 + raw[3 * c])
+            yield tag, samples
+
+
+@dataclass
+class Segment:
+    """A maximal contiguous block run within one TSn file."""
+
+    start: pd.Timestamp
+    end: pd.Timestamp  # exclusive
+    rate: int
+    n_blocks: int
+    chunks: list[np.ndarray] = field(default_factory=list)
+
+
+def _group_segments(
+    blocks: Iterator[tuple[_BlockTag, np.ndarray]],
+) -> list[Segment]:
+    """Regroup blocks into maximal contiguous runs: a block continues the
+    current segment iff its start equals the segment's exclusive end."""
+    segs: list[Segment] = []
+    cur: Segment | None = None
+    for tag, samples in blocks:
+        step = pd.to_timedelta(tag.n_scan / tag.rate, unit="s")
+        end = tag.start + step
+        if cur is not None and tag.start == cur.end:
+            cur.end, cur.n_blocks = end, cur.n_blocks + 1
+            cur.chunks.append(samples)
+        else:
+            if cur is not None:
+                segs.append(cur)
+            cur = Segment(tag.start, end, tag.rate, 1, [samples])
+    if cur is not None:
+        segs.append(cur)
+    return segs
+
+
+def _file_rate(path: Path) -> int:
+    with open(path, "rb") as fid:
+        return int.from_bytes(fid.read(32)[18:20], "little")
+
+
+def _ts_files(data_path: Path, sample_rates: list[int] | None) -> list[Path]:
+    files = sorted(
+        p for p in data_path.iterdir()
+        if p.is_file() and p.suffix.lstrip(".").upper() in TS_EXTENSIONS
+    )
+    if sample_rates:
+        files = [p for p in files if _file_rate(p) in sample_rates]
+    return files
+
+
+def _apply_tbl_calibration(
+    comp: str, x: np.ndarray, table,
+) -> tuple[np.ndarray, str]:
+    """Multiply the TBL scalar calibration into the counts (§24.8 decision
+    (c): calibration at ingest; filter/FAP handling is later work)."""
+    if comp in ("ex", "ey"):
+        scale = table.ex_calibration if comp == "ex" else table.ey_calibration
+        return x * scale, "mV/km"
+    if comp in ("hx", "hy", "hz"):
+        return x * table.magnetic_calibration, "nT"
+    return x, ""
+
+
+def read_phoenix_mtu(
+    data_path: str | Path,
+    sample_rates: list[int] | None = None,
+    survey_id: str = "",
+    station_id: str = "",
+    save_path: str | Path | None = None,
+    mth5_filename: str = "from_phoenix_mtu.mth5",
+) -> dict[str, Any]:
+    """Convert a legacy Phoenix MTU-5A recording (TBL + TSn files) into an
+    mth5 archive with one run per maximal contiguous segment.
+
+    Run ids follow the mth5/aurora convention ``sr{rate}_{NNNN:04d}``
+    (§24.7); run time periods come from the per-block tag timestamps —
+    never the TBL's placeholder STIM/ETIM. TBL scalar calibrations are
+    applied at ingest and units stamped (mV/km, nT).
+
+    Returns ``{"path": archive_path, "runs": [(run_id, rate, n_samples)],
+    "warnings": [str]}``.
+    """
+    data_path = Path(data_path).expanduser().resolve()
+    if not data_path.is_dir():
+        raise FileNotFoundError(f"MTU-5A data dir not found: {data_path}")
+    tbls = sorted(data_path.glob("*.TBL")) + sorted(data_path.glob("*.tbl"))
+    if len(tbls) != 1:
+        raise ValueError(
+            f"expected exactly one TBL in {data_path}, found "
+            f"{[p.name for p in tbls]}")
+    from mth5.mth5 import MTH5
+    from mt_io.phoenix.readers.mtu.mtu_table import MTUTable
+    from mt_timeseries import ChannelTS, RunTS
+
+    table = MTUTable(tbls[0])
+    table.read_tbl()
+    station_id = (station_id or str(table.tbl_dict.get("SITE", "")).strip()
+                  or "station")
+    survey_id = (survey_id or str(table.tbl_dict.get("SRVY", "")).strip()
+                 or "survey")
+    channel_keys = table.channel_keys
+
+    runs: list[tuple[str, int, int]] = []  # (run_id, rate, n_samples)
+    run_ts_by_id: dict[str, Any] = {}
+    warnings: list[str] = []
+    statuses: set[int] = set()
+    max_clock_error = 0.0
+    n_saturated = 0
+
+    for path in _ts_files(data_path, sample_rates):
+        # single pass over the file: tags feed the quality aggregation,
+        # samples feed the segment grouping (re-reading 20 h of 15 Hz data
+        # per pass measurably slows ingestion)
+        blocks = list(_iter_blocks(path, warnings))
+        for tag, _samples in blocks:
+            statuses.add(tag.clock_status)
+            max_clock_error = max(max_clock_error, abs(tag.clock_error_s))
+            n_saturated += tag.saturated
+        segs = _group_segments(iter(blocks))
+        # schedule cross-check (loose): slot lengths vs the TBL schedule
+        for lv, rate_tag in _RATE_TAGS.items():
+            expected_rate = int(table.tbl_dict.get(rate_tag, 0) or 0)
+            if expected_rate != _file_rate(path):
+                continue
+            slot_tag = _SLOT_TAGS.get(lv)
+            expected_len = int(table.tbl_dict.get(slot_tag, 0) or 0) if slot_tag else 0
+            for seg in segs:
+                got = (seg.end - seg.start).total_seconds()
+                if expected_len and abs(got - expected_len) > 1e-6:
+                    warnings.append(
+                        f"{path.name}: segment {seg.start} spans {got:g} s, "
+                        f"TBL schedule says {expected_len:g} s ({slot_tag})")
+        for i, seg in enumerate(segs, 1):
+            run_id = f"sr{seg.rate}_{i:04d}"
+            run_meta = table.run_metadata.copy()
+            run_meta.id = run_id
+            run_meta.sample_rate = float(seg.rate)
+            array_list = []
+            for comp, pos in channel_keys.items():
+                meta = getattr(table, f"{comp}_metadata")
+                meta.sample_rate = float(seg.rate)
+                meta.start_time = seg.start.isoformat()
+                x = np.concatenate([c[pos - 1] for c in seg.chunks])
+                x, unit = _apply_tbl_calibration(comp, x, table)
+                if unit:
+                    meta.units = unit
+                array_list.append(ChannelTS(
+                    "electric" if comp.startswith("e") else "magnetic",
+                    data=x,
+                    channel_metadata=meta,
+                ))
+            run_ts = RunTS(array_list=array_list, run_metadata=run_meta)
+            run_ts.run_metadata.id = run_id
+            run_ts_by_id[run_id] = run_ts
+            runs.append((run_id, seg.rate, run_ts.dataset.sizes["time"]))
+
+    if len(statuses) > 1:
+        warnings.append(
+            f"per-block clock status varies across the recording: "
+            f"{sorted(statuses)} — check GPS lock (DESIGN §24.5 P1 v2b)")
+    if max_clock_error:
+        warnings.append(
+            f"per-block clock error up to {max_clock_error:g} s reported by "
+            "the receiver")
+    if n_saturated:
+        warnings.append(
+            f"{n_saturated} saturated block(s) (tag byte 15 != 0)")
+
+    save = (Path(save_path).expanduser().resolve() if save_path
+            else data_path)
+    target = save / mth5_filename
+    if target.exists():
+        _log.warning("overwriting existing MTH5 at %s", target)
+        target.unlink()
+
+    with MTH5() as m:
+        m.open_mth5(str(target), "w")
+        survey_group = m.add_survey(survey_id)
+        station_group = survey_group.stations_group.add_station(
+            station_id, station_metadata=table.station_metadata)
+        station_group.metadata.id = station_id
+        for run_id, _rate, _n in runs:
+            run_ts = run_ts_by_id[run_id]
+            run_group = station_group.add_run(run_id)
+            run_group.from_runts(run_ts)
+        station_group.update_metadata()
+        survey_group.update_metadata()
+
+    return {
+        "path": str(target),
+        "runs": runs,
+        "warnings": warnings,
+    }
+
+
+class LoadPhoenixMtu(Node):
+    type = "mth5.io.phoenix_mtu"
+    title = "Load Phoenix MTU-5A"
+    tooltip = "Convert raw legacy Phoenix MTU-5A (TBL/TSn) data into an MTH5 archive and open it."
+    description = (
+        "Convert a legacy Phoenix MTU-5A recording (one TBL + one TSn file "
+        "per sample-rate level) into an MTH5 archive and open it as the "
+        "data source. Burst-mode recordings (scheduled high-rate slots + "
+        "continuous low-rate streams) become one run per maximal contiguous "
+        "segment (mth5 convention sr{rate}_NNNN) — the per-block tags' true "
+        "timestamps are parsed, unlike the upstream reader that densely "
+        "concatenates and compresses the slots (DESIGN §24.8). TBL scalar "
+        "calibrations are applied at ingest (units mV/km / nT); run time "
+        "periods come from the actual block timestamps, never the TBL's "
+        "placeholder schedule times."
+    )
+    category = "Data I/O"
+    inputs = ()
+    outputs = (Output("mth5", "mth5"),)
+    params = (
+        Param("data_path", "directory", label="MTU-5A data directory",
+              path_kind="in"),
+        Param("survey_id", "string", default="", optional=True,
+              placeholder="auto (TBL SRVY)"),
+        Param("station_id", "string", default="", optional=True,
+              placeholder="auto (TBL SITE)"),
+        Param("sample_rates", "string", label="Sample rates (Hz)",
+              default="", optional=True,
+              placeholder="e.g. 2400, 150 (empty = all TS files)"),
+        Param("mth5_filename", "string", label="Output file name",
+              default="from_phoenix_mtu.mth5"),
+        Param("save_path", "directory", label="Output directory", default="",
+              optional=True, path_kind="out"),
+    )
+
+    def execute(self, ctx, data_path: str, survey_id: str = "",
+                station_id: str = "", sample_rates: str = "",
+                mth5_filename: str = "from_phoenix_mtu.mth5",
+                save_path: str = "") -> dict[str, Any]:
+        rates = ([int(x) for x in str(sample_rates).split(",") if x.strip()]
+                 if str(sample_rates).strip() else None)
+        res = read_phoenix_mtu(
+            data_path,
+            sample_rates=rates,
+            survey_id=survey_id,
+            station_id=station_id,
+            save_path=save_path or None,
+            mth5_filename=mth5_filename,
+        )
+        for w in res["warnings"]:
+            ctx.logger.warning(w)
+        from mth5.mth5 import MTH5
+
+        archive = MTH5()
+        archive.open_mth5(res["path"], mode="a")
+        ctx.progress(
+            1.0,
+            f"loaded MTU-5A -> {Path(res['path']).name}: "
+            f"{len(res['runs'])} run(s)",
+        )
+        return {"mth5": archive}
