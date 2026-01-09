@@ -155,6 +155,17 @@ full architecture, contracts and verification records are in
   headers carry true slot times, upstream discards them) and no working
   MTU-5A ingestion path. Design: two load nodes (5C collection walk,
   5A TBL+block-header parser) feeding per-run cascades + Merge FC.
+- **MTU-5A burst ingestion delivered (DESIGN.md §24.8, 2026-09-14)**:
+  `Load Phoenix MTU-5A` node (TBL + per-block-tag parsing — fixes the
+  upstream dense-concat timestamp defect; run-per-contiguous-segment
+  `sr{rate}_NNNN`, TBL scalar calibration at ingest, clock/saturation
+  warnings) + `Build FC Database` node (`aurora.fc.build`: per-run FC
+  cascades merged along time, clock zero defaults to "epoch" — staggered
+  slot schedules make run-start anchoring useless; per-run FC persistence
+  off by default). Validated against the official IAGA 1690C16C recording
+  (121 × 1 s @ 2400 Hz slots, 122 × 16 s @ 150 Hz slots, 20.3 h
+  continuous @ 15 Hz) with a CI-safe synthetic-corpus test suite. MTU-5C
+  loader follows once the procedure is proven.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 

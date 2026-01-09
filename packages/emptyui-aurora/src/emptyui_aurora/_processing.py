@@ -724,6 +724,12 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
             "carries none; anchoring skipped (windows anchor at the run "
             "start)", clock_zero)
         return 0, 0.0
+    # tz alignment: the epoch is definitionally UTC — localize to match the
+    # payload's awareness (naive payloads keep a naive t0)
+    if data_start_abs.tzinfo is not None and t0.tzinfo is None:
+        t0 = t0.tz_localize("UTC")
+    elif data_start_abs.tzinfo is None and t0.tzinfo is not None:
+        t0 = t0.tz_localize(None)
     dt = (data_start_abs - t0).total_seconds()
     step_s = (nperseg - noverlap) / float(sample_rate)
     k0 = int(np.ceil(dt / step_s))

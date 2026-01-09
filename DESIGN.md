@@ -2576,3 +2576,195 @@ coverage), so the cross-cascade merge is where the full-spectrum TF
 assembles — v1 scope: single-family many-slots first, then cross-family.
 Test corpora: the two IAGA archives (44 MB / 21 MB, gitignored data
 dir); a synthesized burst collection remains the fallback for e2e.
+
+### 24.8 MTU-5A burst ingestion — format reference, upstream scheme, design (started 2026-09-14)
+
+Focus of the first burst-mode delivery (§24.7): the **legacy MTU-5A**
+format; MTU-5C (already-working upstream collection) follows once the
+procedure is proven.
+
+**Format reference (verified byte-level on the official IAGA test
+recording `1690C16C`, mth5-test-data/phoenix_mtu).**
+
+- `TBL` — station metadata + acquisition schedule + scalar calibrations,
+  a series of 25-byte blocks (12-byte tag + 13-byte value, mixed types;
+  decoded by `mt_io.phoenix.readers.mtu.mtu_table.MTUTable`). Key tags:
+  site/serial (`SITE`/`SNUM`), location (`LATG`/`LNGG` DDM formats,
+  `ELEV`, `DECL`), channel map (`CHEX`..`CHHZ`, 1-indexed positions),
+  dipole lengths (`EXLN`/`EYLN`), gains (`HGN`/`HGNC`, `EGN`/`EGNC`,
+  `HATT`, `HNOM` normalization mA/nT, `FSCV` full-scale V), coil serials
+  (`HXSN`..), powerline (`LFRQ`), GPS satellites (`NSAT`), firmware
+  (`HW`), and the **slot schedule**: `SRL3/SRL4/SRL5` = sample rates per
+  level (here 2400/150/15 Hz), `L3NS`/`L4NS` = seconds recorded per slot,
+  `HSMP` = slot period. `STIM`/`ETIM` are schedule placeholders in the
+  test file (2009-01-01..2011-01-01) — **never use them as the data
+  time period**; actual block timestamps are the truth.
+- `TSn` — one file per rate level (TS3 = SRL3 rate, TS4 = SRL4, TS5 =
+  SRL5; TS2/TSL/TSH also exist): a sequence of **data blocks**, each a
+  32-byte tag followed by `n_scan × n_ch × 3` bytes of 24-bit
+  little-endian samples (channel-interleaved per scan, sign via two's
+  complement on 24 bits). The **per-block tag carries its own UTC
+  timestamp** (bytes 0-5: sec/min/hour/day/month/year-2000), serial
+  (8-9), `n_scan` (10-11), `n_ch` (12), tag length (13, 32 = MTU-5 /
+  16 = V5-2000), status (14), **saturation flags** (15), sample length
+  (17), **sample rate** (18-19), rate units (20), **clock status** (21),
+  **clock error in seconds** (22-25). Empirically confirmed on the test
+  file across all three rates (rate field matches per level, clock
+  status constant 4, clock error 0).
+
+**Upstream processing scheme (mt_io, installed) — and its burst gap.**
+
+- `MTUTable` decodes the TBL into mt_metadata Survey/Station/Run objects
+  (incl. per-channel metadata) and three **scalar** calibrations
+  (`ex_calibration`/`ey_calibration`/`magnetic_calibration` — here
+  1.9073e-4 counts→mV/km-ish and 2.7287e-7 counts→nT).
+- `MTUTSN.read()` allocates `(n_ch, n_scan·n_block)` and **densely
+  concatenates every block**, skipping the 32-byte per-block tags
+  (`ts_fid.seek(32, 1)`) — only the FILE header's start time is kept.
+  `to_runts()` wraps the dense array as ONE RunTS `sr{rate}_001` stamped
+  with the file start and the nominal rate, multiplying the TBL scalar
+  calibrations into the data and stamping units (mV/km, nT).
+- Consequence for burst recordings: **every slot after the first gets a
+  wrong, compressed implicit clock** (the test TS3: 121 one-second slots
+  spread over 10 h come out as a dense 121-second array). Continuous
+  rates (TS5; TS4 when configured continuous) are coincidentally correct.
+- There is **no mth5 client for MTU-5A**: `mth5.clients.phoenix` is
+  MTU-5C-only (folder collection), and `PhoenixCollection` crashes on a
+  flat MTU-5A directory. The only MTU-5A→mth5 path is the single-file
+  `read_phoenix` (with the dense-concat defect above).
+
+**emptyUI design (two nodes, feeding the existing graph).**
+
+1. `mth5.io.phoenix_mtu` ("Load Phoenix MTU-5A", mirrors LoadLemi's
+   contract): params `data_path` (directory), `survey_id`/`station_id`
+   (defaults from TBL `SRVY`/`SITE`), `save_path`/`mth5_filename`,
+   `sample_rates` (comma list; empty = every TS file present),
+   `calibration_path` (optional FAP files via `attach_filters`, like
+   LEMI; TBL scalar calibrations always applied + recorded in run
+   metadata), `gap_method` unused — runs are never merged. Core
+   `read_phoenix_mtu(data_path)`:
+   - parse the TBL once (schedule, metadata, calibrations);
+   - stream each TS file block-by-block, reading the per-block tags:
+     true UTC time, rate, `n_scan`/`n_ch` consistency, clock status /
+     clock error, saturation flags — **the fix for the upstream
+     dense-concat defect**;
+   - group contiguous blocks (`t[k+1] == t[k] + n_scan/rate`) into
+     segments; **one mth5 run per maximal segment**, id
+     `sr{rate}_{NNNN:04d}` (the mth5/aurora convention, §24.7);
+     continuous rates collapse to a single run per rate naturally;
+   - metadata: TBL survey/station/run metadata + per-run sample_rate and
+     time period from ACTUAL block times; units stamped mV/km / nT
+     (TBL scalars applied); per-block clock/saturation anomalies
+     aggregated into node warnings (feeds the GPS-stray awareness of
+     §24.5 P1 v2b);
+   - cross-check parsed segment times against the TBL slot schedule
+     (`HSMP`/`L3NS`/`L4NS`); report deviations, never reject.
+   Output `{"mth5": archive}` open in "a" mode (LoadLemi contract).
+
+2. `aurora.fc.build` ("Build FC Database"): input `mth5` (+ the
+   ComputeFC STFT parameter set + `survey`/`station`/`runs`); iterates
+   the listed runs, `compute_fc_levels` per run (epoch-anchored
+   `clock_zero` default **"epoch"** here — staggered slot schedules make
+   run-start anchoring useless), `merge_fc_containers` per station →
+   output `fc` container. Optional `persist` writes each run's FC levels
+   into the archive's FC layer keyed by run (aurora
+   `save_fourier_coefficients` pattern) for reuse/caching. This node is
+   the "per-run cascade builder" — it also serves the gapped-continuous
+   route without any new machinery. Rationale for a node rather than N×
+   ComputeFC + Merge FC: burst recordings yield 100+ slot runs and the
+   Merge FC ports are fixed (fc1..fc4); the builder owns the iteration.
+
+**Downstream data flow (all existing nodes).** Load MTU-5A (local) →
+Build FC; Load MTU-5A (remote) → Build FC; Estimate TF (`fc`,
+`ref_fc`) — the epoch-anchored grids pair slots across stations despite
+staggered schedules (flagship e2e of test_fc_merge generalizes to real
+slots); Coherence Sort (per_bin default) → Rotate. Coverage model:
+2400 Hz slots populate the top octaves (level-0 FCs only — 1 s of
+samples per slot), 150 Hz slots the mid-band, 15 Hz continuous the
+tail; Merge FC's level-set union assembles the full spectrum
+cross-family, EMpower-style. Starved slot levels skip with warnings
+(§24.5 P1 v2b behavior).
+
+**Test plan.** Corpus: the official IAGA archive (21 MB, gitignored
+data dir). Unit: block-header parsing (times/rates/clock fields vs the
+empirically decoded values); segment grouping (TS5 → 1 run of 73036 s;
+TS4 → 122 runs of 16 s; TS3 → 121 runs of 1 s); schedule cross-check;
+archive structure (run ids `sr2400_0001...`). e2e: Build FC with
+`clock_zero="epoch"` over all runs; single-station Estimate TF spanning
+the families; RR e2e with a synthesized second station (the corpus is
+single-station) to pin slot-level remote pairing. Negative controls:
+truncated block (short read), inconsistent `n_scan` across blocks,
+clock-error ≠ 0 → warnings not rejections.
+
+**Core-logic dry run (2026-09-14, validated).** A prototype of the
+block-stream → segment grouping (per-block tag timestamps, contiguous
+`next_start == prev_end` regrouping) reproduces the expected structure
+on the real recording exactly: TS3 → 121 segments of 1 s, TS4 → 122
+segments of 16 s, TS5 → 1 segment of 73036 s (07:46:52..04:04:08) —
+consistent with the TBL schedule (`L3NS=1`, `L4NS=16`, 10-min slots)
+and confirming the per-block-tag fix against the upstream dense-concat
+defect. The staggered starts across rates (TS5 07:46:52, TS4 07:50:00,
+TS3 07:55:00) confirm run-start anchoring cannot pair these streams —
+the epoch-anchored grid (§24.5 P1 v2b) is the required mechanism.
+
+**Prior art — the multi-run problem in aurora's tracker (surveyed
+2026-09-14; corroborates the design).** aurora #80 (closed 2021,
+"Handling of multiple acquisition runs as a single processing run"):
+the frequency-domain solution — per-run decimation cascades + STFT
+concat — is exactly Build FC's route; the closing comment defers
+time-domain merging to #152 (still OPEN: NaN-fill corrupts anti-alias
+filters — cf. #328 where a few NaNs at run edges propagate to all-NaN
+series through `prototype_decimate`; informal community preference is
+median-fill plus a max-gap-length knob, unimplemented — the
+`fill_gaps_by_*` hooks in `run_summary.py` are TODO stubs). Our Merge
+Runs' `gap_method` interpolation matches the median-fill preference;
+Build FC avoids the whole problem for burst data. #103 (short runs
+crash deep decimation levels) is the upstream face of the starvation
+our skip-with-warning handles. MTU-5A specifics upstream: the mth5
+legacy notebook (`make_mth5_from_phoenix_legacy_mtu.ipynb`) assembles
+runs manually with a TODO to accommodate the format in
+`PhoenixCollection` (its run-assignment never landed — the §24.7
+crash), `MakeMTH5` lists "Phoenix legacy MTU (TODO)", and the TBL tag
+semantics are partly guesses (the notebook asks the community for
+contributions — our byte-verified layout, including per-block clock
+status/error/saturation fields, is a candidate contribution). MTU-5C
+segmented readers track per-segment GPS time, `missing_count` and
+saturation counts in a sub-header — the analog of our per-block tags,
+relevant for the later 5C loader.
+
+**Performance note (2026-09-14).** Parsing is NOT the bottleneck: the
+full real-corpus ingestion profiled at ~137 s of which **~120 s was the
+MTH5 archive write** (244 `from_runts` calls, each running mt_metadata
+validation). Fixes applied: single pass per file (tags feed the quality
+aggregation, samples the segment grouping), `run_metadata` passed into
+the `RunTS` constructor (avoids the per-run validation churn and its
+warning spam), and the real-corpus test reshaped to parse-only
+assertions plus a single-rate archive round trip (test time 166 s →
+16 s). Known production cost: archive writes scale ~0.5 s/run — a
+future optimization target if slot counts reach thousands (batch
+channel writes / skip validation).
+
+**Open decisions — resolved (2026-09-14).** (a) run ids follow the mth5
+convention `sr{rate}_{NNNN:04d}`; (b) Build FC persists per-run FCs OFF
+by default (the param exists; turn on when the procedure is settled);
+(c) TBL scalar calibrations are applied at ingest (upstream behavior);
+filter/FAP + Calibrate-node handling is later work.
+
+**Delivered (2026-09-14).** `emptyui_mth5.phoenix_mtu`: core
+`read_phoenix_mtu` (TBL parse, per-block tag streaming with true
+timestamps, contiguous segment grouping, run-per-segment archive build,
+TBL scalar calibration at ingest, quality aggregation — clock status /
+clock error / saturation / truncated tails as warnings, loose TBL slot
+schedule cross-check) + `LoadPhoenixMtu` node (`mth5.io.phoenix_mtu`,
+LoadLemi contract). `emptyui_aurora.process.BuildFC` (`aurora.fc.build`):
+mth5 + the ComputeFC STFT parameter set, `clock_zero` default "epoch",
+per-run `compute_fc_levels` → `merge_fc_containers`, identity attrs per
+run, optional persist. Tests: synthetic binary corpus writer (CI-safe;
+TBL tags encoded via `MTUTable.TBL_TAG_TYPES`, TS blocks per the
+verified layout) covering block-tag decode, slot/continuous grouping,
+archive structure, sample-rate filter, quality warnings, truncated
+tails, schedule cross-check; real-corpus structure test (121/122/1
+runs, skipif absent); Build FC node tests (epoch-anchored merged grid,
+identity attrs, Estimate TF flow). Full suite 385 passing. The tz
+alignment fix in `_clock_zero_head_skip` (naive epoch vs aware/naive
+payload starts) came out of the Build FC tests.

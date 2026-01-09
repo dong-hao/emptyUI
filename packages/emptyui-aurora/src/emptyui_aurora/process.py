@@ -242,6 +242,156 @@ class ComputeFC(Node):
         return {"fc": levels}
 
 
+class BuildFC(Node):
+    type = "aurora.fc.build"
+    title = "Build FC Database"
+    tooltip = "Compute per-run FC cascades for every run of a station and merge them along time."
+    description = (
+        "Iterate the listed runs of one station, compute each run's "
+        "cascading-decimation FC levels, and merge them along time (Merge "
+        "FC's route) — the per-run cascade builder for archives with many "
+        "runs: burst-mode recordings (scheduled high-rate slots + "
+        "continuous low-rate streams, DESIGN §24.8) or gapped continuous "
+        "acquisitions. A merged-time-series cascade cannot decimate across "
+        "slot/run boundaries; per-run cascades are fine and starved deep "
+        "levels are skipped with warnings. Clock zero defaults to 'epoch' "
+        "here — staggered slot schedules make run-start anchoring useless "
+        "and the absolute grid is what lets remote-reference slots pair "
+        "across stations. FC persistence per run is available but off by "
+        "default."
+    )
+    category = "Processing"
+    inputs = (Input("mth5", "mth5"),)
+    outputs = (Output("fc", "fc"),)
+    params = (
+        Param("survey", "string", label="Survey id", default="", optional=True),
+        Param("station", "string", label="Station id", default="",
+              optional=True, placeholder="auto (first available)"),
+        Param("runs", "string", label="Runs", default="", optional=True,
+              placeholder="e.g. sr2400_0001,... (empty = all runs)"),
+        Param("input_channels", "string", default="", optional=True),
+        Param("output_channels", "string", default="", optional=True),
+        Param("channel_nomenclature", "select", label="Channel nomenclature",
+              options=("auto", "lemi12", "lemi34"), default="auto"),
+        Param("magnetic_unit", "select", label="Magnetic unit",
+              options=("auto", "h", "b"), default="auto"),
+        Param("e_dipole_length_m", "number", label="E dipole length (m)",
+              default=0.0, optional=True, min=0,
+              description="0 = take from the run metadata when present"),
+        Param("decimation_levels", "integer", label="Decimation levels",
+              default=0, min=0,
+              description="0 = auto (decimate until fewer samples than one "
+                          "window remain)"),
+        Param("factor", "integer", label="Decimation factor", default=4, min=2),
+        Param("window_samples", "integer", label="Window (samples)",
+              default=256, min=8),
+        Param("overlap", "number", default=0.5, min=0.0, max=0.99),
+        Param("window_type", "select",
+              options=("hamming", "hanning", "boxcar"), default="hamming"),
+        Param("window_type_deep", "select", label="Deep-level taper",
+              default="", options=("", "hamming", "hanning", "boxcar"),
+              optional=True),
+        Param("deep_from_level", "integer", label="Deep taper from level",
+              default=None, optional=True, min=0),
+        Param("clock_zero", "string", label="Clock zero", default="epoch",
+              optional=True,
+              placeholder='"epoch" or ISO datetime; empty = run starts',
+              description="Defaults to 'epoch' (absolute grid): staggered "
+                          "slot schedules make run-start anchoring useless "
+                          "for burst archives, and the absolute grid is "
+                          "what pairs remote-reference slots across "
+                          "stations (DESIGN §24.8)."),
+        Param("prewhitening", "select", label="Prewhitening", default="",
+              options=("", "first difference")),
+        Param("per_window_detrend", "select", label="Per-window detrend",
+              default="", options=("", "linear")),
+        Param("persist", "boolean", label="Persist per-run FCs", default=False,
+              description="Write each run's FC levels into the workspace "
+                          "MTH5 keyed by run (aurora's FC-layer pattern) — "
+                          "off by default; turn on once the procedure is "
+                          "settled (DESIGN §24.8 decision (b))."),
+    )
+
+    def execute(self, ctx, mth5, survey: str = "", station: str = "",
+                runs: str = "", input_channels: str = "",
+                output_channels: str = "", channel_nomenclature: str = "auto",
+                magnetic_unit: str = "auto", e_dipole_length_m=None,
+                decimation_levels: int = 0, factor: int = 4,
+                window_samples: int = 256, overlap: float = 0.5,
+                window_type: str = "hamming", window_type_deep: str = "",
+                deep_from_level=None, clock_zero: str = "epoch",
+                prewhitening: str = "", per_window_detrend: str = "",
+                persist: bool = False) -> dict[str, Any]:
+        from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
+        from emptyui_mth5.persist import runts_context
+
+        survey_obj = _resolve_survey(mth5, survey)
+        station_obj = _resolve_station(survey_obj, station)
+        available = [str(x) for x in station_obj.run_summary["id"]]
+        wanted = ([r.strip() for r in str(runs).split(",") if r.strip()]
+                  if str(runs).strip() else available)
+        missing = [r for r in wanted if r not in available]
+        if missing:
+            raise ValueError(
+                f"run(s) {missing} not in station archive {available}")
+        surv = str(survey_obj.metadata.id)
+        stat = str(station_obj.metadata.id)
+
+        dipole = e_dipole_length_m or None
+        containers = []
+        for i, run_id in enumerate(wanted):
+            run_ts = _resolve_run(station_obj, run_id).to_runts()
+            levels = compute_fc_levels(
+                run_ts, input_channels, output_channels,
+                num_decimations=decimation_levels, factor=factor,
+                num_samples_window=window_samples, overlap=overlap,
+                window_type=window_type,
+                magnetic_unit=magnetic_unit,
+                e_dipole_length_m=dipole,
+                channel_nomenclature=channel_nomenclature,
+                prewhitening=prewhitening,
+                per_window_detrend=per_window_detrend,
+                window_type_deep=window_type_deep,
+                deep_from_level=deep_from_level,
+                clock_zero=clock_zero,
+            )
+            # the run identity travels in the attrs (runts_context on the
+            # first run of the archive would report the archive's first run,
+            # not this one — set it explicitly per run)
+            _run_id, _stat, run_label = runts_context(run_ts, surv, stat, run_id)
+            identity = _station_identity_attrs(run_ts, surv, stat, run_label)
+            for level, fc in levels.items():
+                fc.attrs.update(identity)
+            if persist:
+                from emptyui_mth5.persist import persist_fc_level
+
+                for level, fc in levels.items():
+                    if "datetime64" in str(fc.time.dtype):
+                        persist_fc_level(ctx, fc, level,
+                                         fc.attrs["sample_rate"],
+                                         survey=surv, station=stat,
+                                         run=run_id)
+                    else:
+                        ctx.logger.warning(
+                            "run %s level %d has no absolute time axis — "
+                            "skipping persistence", run_id, level)
+                        break
+            containers.append(levels)
+            ctx.progress(
+                (i + 1) / len(wanted),
+                f"FC {i + 1}/{len(wanted)}: run {run_id} "
+                f"({len(levels)} level(s))",
+            )
+        merged = merge_fc_containers(containers)
+        n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
+        ctx.progress(
+            1.0,
+            f"FC database: {len(wanted)} run(s) -> {len(merged)} level(s), "
+            f"{n_win} window(s)",
+        )
+        return {"fc": merged}
+
+
 def _fc_io_channels(fc):
     """(input_channels, output_channels, keyword) from an fc's attrs.
 
