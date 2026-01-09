@@ -122,6 +122,39 @@ full architecture, contracts and verification records are in
   delivered l2u default grid is statistically equivalent (0.020/0.071/93%).
   Verification also found and fixed two real bugs (coil-unit conversion,
   Align Runs dropping channel units).
+- **EMTF physics-parity ablations (DESIGN.md §24, 2026-09-13)**: opt-in
+  first-difference prewhitening (exact inverse recoloring) + per-window
+  detrend on ComputeFC. First ablation: the current default's whole deficit
+  vs the official product is DC/edge leakage at T = 7.3–15 s; prewhitening
+  OR a zero-endpoint taper closes it (94%/88% → 100%/100% within-gate,
+  short-period p90 0.065 → 0.016 decades); boxcar without prewhitening is
+  catastrophic (~1 decade) — quantifying the classical prewhitening
+  motivation. Default flip deferred until the detrend ablation and the
+  persisted-FC convention are settled.
+- **Short-period gap closed (DESIGN.md §24.3 E1b, 2026-09-13)**: the
+  residual deficit at 7.3–11.6 s was remote-data coverage, not estimator
+  physics — the official EMTF-FCU product (`SDG31b_H28coh` tag) uses all
+  SDH28 remote data; aligning against SDH28-b only had cropped away ~29%
+  of the local run. Full remote coverage fixes 9.1–11.6 s outright; 7.3 s
+  closes with mild coherence selection (the FCU's own "coh" lever).
+  Self-reference underestimates ρ by up to 5.8 decades below 15 s —
+  quantifying the fluxgate noise floor.
+- **Long-period tail explained (DESIGN.md §24.3, 2026-09-13)**: the diurnal
+  Sq variation inside the 9.1 h/36.4 h deep-level windows leaks through
+  boxcar's sidelobes — a per-level taper schedule (boxcar+PW at short-period
+  levels, hann+PW at deep levels) combines the head and tail wins. Refined
+  full-band recipe vs the official EMTF: median |Δlog₁₀ρ| 0.009, p90 0.029,
+  98% within gate (original record: 0.019/0.045/98%). Per-window detrend
+  ruled out as a tail lever (it is not in emptyUI's chain and not needed).
+- **Burst-mode prior art surveyed (DESIGN.md §24.7, 2026-09-14)**: Phoenix
+  MTU-5C/MTU-5A burst data (scheduled high-rate slots + continuous low-rate
+  streams) is represented upstream as run-per-slot (mth5 convention) and
+  processed as independent per-run FC cascades + time concat (aurora
+  legacy) — matching our Merge FC design. Decoded the official IAGA test
+  archives; found a latent timestamp bug in the MTU-5A reader (block
+  headers carry true slot times, upstream discards them) and no working
+  MTU-5A ingestion path. Design: two load nodes (5C collection walk,
+  5A TBL+block-header parser) feeding per-run cascades + Merge FC.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 
@@ -146,10 +179,13 @@ radio/datalist DOM id collisions, unvalidated workflow load (format/version
   `NodeCache` pins payloads by reference and keeps stale entries. (Decision
   2026-09-12: TTL only for now; a portable local disk cache is a later
   design.)
-- **Coherence Sort statistic is a broadband QC heuristic** — per-window
-  multiple coherence over the band's bin ensemble, not EMTF's per-frequency
-  window-ensemble statistic; agrees qualitatively, not numerically
-  (DESIGN.md §16.2, M4 #7).
+- **Coherence Sort statistic default is per-bin (2026-09-14)** — the EMTF-style
+  per-frequency window-ensemble multiple coherence (`statistic="per_bin"`,
+  sliding ±16 windows, adjusted-R² debiased), **independent of the band-average
+  method**; the legacy per-window band statistic (`statistic="band"`) remains
+  available and is what Plot Coherency renders (DESIGN.md §24.6, M4 #7).
+  Band-geometry defaults follow the SDG31 recipe (3 periods/octave, 20 min
+  bins per band).
 - Viewer bodies stay **deliberately literal** (ComfyUI parity, decided
   2026-09-12): producers emit `plot` ports and stay compact — previewing is
   a user choice via the Preview/Save/View Table utility nodes; generalizing

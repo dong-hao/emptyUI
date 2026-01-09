@@ -430,7 +430,8 @@ def raw_overlay_figure(periods, Z, path, title, periods_o, zo,
     ax_phi.set_xlabel("Period (s)")
     ax_phi.set_ylim(0, 90)
     ax_phi.set_yticks(np.arange(0, 91, 20))
-    ax_rho.set_title(title + (" — rotated −5.7°" if corrected else ""))
+    ax_rho.set_title(title + (" — rotated −5.7°" if corrected else ""),
+                     fontsize=9)
     ax_rho.legend(fontsize=7, loc="lower right", frameon=True)
     ax_phi.legend(fontsize=7, loc="lower right", frameon=True)
     fig.subplots_adjust(left=0.12, right=0.97, top=0.92, bottom=0.09,

@@ -871,6 +871,37 @@ Status: **delivered**. This section is the historical plan for broadband MT;
   coordinate** (float seconds fails) — persisted FCs must carry the run's
   absolute start time.
 
+**emptyUI deviations from the aurora STFT chain (documented 2026-09-13).**
+`ComputeFC` implements **taper → FFT only** (Hamming, 50% overlap,
+`boundary=None`, `detrend=False`); the remaining aurora steps are
+deliberately absent:
+
+- **No prewhitening / recoloring** — aurora 0.6.2 defaults to
+  `stft.prewhitening_type: "first difference"` (a time-domain first
+  difference, inverted in the frequency domain by `÷ j2πf`;
+  `mth5.processing.spectre.prewhitening`). Its EMTF-style ARMA
+  prewhitening (`pwset.cfg`, aurora Issue #60) is only a placeholder
+  upstream — nothing beyond the first difference exists in the pinned
+  aurora either. emptyUI relies on the Hamming taper's sidelobe
+  suppression instead; leakage from strongly colored (≈1/f) natural fields
+  is therefore higher than aurora's at short windows. Ratio-based TF
+  products target the same estimator, but persisted FC amplitudes are not
+  directly comparable to aurora-persisted FCs.
+- **No per-window detrend** — aurora applies
+  `scipy.signal.detrend("linear")` per window, keeping window-level trends
+  out of the low-frequency bins. emptyUI detrends globally via the
+  upstream `Detrend` node only; windowed trends leak into low-frequency
+  bins via window sidelobes.
+- **No clock-zero truncation** — emptyUI decimates the (aligned) runs
+  directly; aurora truncates to a run-config clock zero first.
+- **FC normalization** — scipy 'spectrum' scaling (÷ win.sum()); aurora
+  additionally applies a linear spectral-density calibration factor. All
+  ratio-based products (Z, tipper, coherence, OLS σ) are scale-equivariant
+  and unaffected; persisted FC amplitudes and spectrogram dB are in
+  emptyUI's own convention.
+- **Window family** — Hamming with 50% overlap vs aurora's default boxcar
+  with 25% overlap (128/32).
+
 ### 14.2 Design decisions (all delivered)
 - **D1** — fc `time` must be `datetime64`; `ts.run` carries an absolute
   `start_datetime` (normalized end-to-end so persistence round-trips).
@@ -909,7 +940,11 @@ Status: **delivered**. This section is the historical plan for broadband MT;
   window/4); the merge keeps the **deepest** level covering each period
   (deeper level = longer window = more cycles = better long-period resolution),
   dropping degenerate bands. This achieved aurora's "consistent frequency
-  points between levels" without external band files.
+  points between levels" without external band files. Implementation note
+  (2026-09-13): the `uniform` scheme's midpoint-edge membership extends the
+  first/last band half a bandwidth past these anchors — bins up to
+  ≈2^(1/ppo)·Fs/4 enter the shortest band (the `l2u` template table is scaled
+  from the same anchors).
 - **TF table node** (`mth5.table.tf` "View TF") renders a TF as a table
   (period, rho_xy/yx, phase_xy/yx).
 - **Decimation convention**: level *i* = decimated *i* times; `decimation_levels`
@@ -1146,8 +1181,10 @@ layout). We do **not** build a combined plot — `Plot AppRes & Phase` and
   `cov_ss_inv`/`cov_nn` (default `return_covariance=True`); OLS uses the
   classical `(XᴴX)⁻¹·σ²` covariance from residuals.
 - **Error-bar math** (aurora/mtpy formulas): `σ_|Z| = σ_Z/√2`;
-  `σ_ρ/ρ = 2·σ_|Z|/|Z|`; `σ_φ(rad) = σ_|Z|/|Z|`; tipper error used directly
-  (Re/Im panels).
+  `σ_ρ/ρ = 2·σ_|Z|/|Z|`; `σ_φ(rad) = σ_|Z|/|Z|`; tipper per Re/Im panel:
+  `σ_component = σ_T/√2` (component std under the isotropic complex-error
+  assumption — the same √2 convention as `σ_|Z|`; doc corrected 2026-09-13
+  to match the delivered code, which divides by √2).
 - **Phase display**: off-diagonal components (Zxy, Zyx) folded into (0°, 90°) by
   ±180° (aurora `RhoPlot`/USArray convention), ylim 0–90°, ticks every 15°;
   **diagonal components (Zxx, Zyy) keep signed phase in [-180°, 180°]**.
@@ -1267,25 +1304,42 @@ geometry as `Estimate TF`; `periods_per_octave` exposed, default 4).
   coherence can be a noise signature: few DOF/overfit or coherent noise, so
   coh ≈ 1 must not automatically mean "good data"), `mode` (`weight` default /
   `drop` / `off`), `coherence_trim` (False — band-edge trimming: set bins whose
-  band median coherence is below `coherence_min` to NaN with a warning),
+  band median coherence is below `coherence_min` to NaN with a warning;
+  trimming applies only in `weight`/`drop` modes — `mode=off` means no
+  coherence-based modification at all, warning added 2026-09-13),
   `periods_per_octave` (4).
 - **Statistic**: per-window **multiple coherence** over the frequency-bin
   ensemble inside one STFT window, per level; sparse bands fall back to the
   minimum pairwise coherence; degenerate windows score 0 (conservative); per
-  output channel the minimum across outputs is used. Degenerate bands
-  (n_bins < n_in + 1) fit exactly so their coherence is trivially 1.0 — the
-  `coherence_max` rule is **not** applied there (implemented 2026-09-07),
-  otherwise the longest-period bands would be dropped unconditionally.
+  output channel the minimum across outputs is used.   statistic falls back to the minimum pairwise coherence there — which is
+  **not** trivially 1, so the lower bound still applies (conservative);
+  only the upper rule is capped (`coh ≤ coherence_max − ε`,
+  implemented 2026-09-07; rationale corrected 2026-09-13 — the original
+  "fits exactly, so coherence is trivially 1.0" wording described the
+  regression, not the computed statistic).
 - **Semantics note (Batch B)**: this is a per-window broadband (bin-ensemble)
   QC heuristic — **not** EMTF/BIRRP's window-ensemble coherence per frequency.
   The two agree qualitatively but not numerically; a true EMTF-style
   per-frequency variant is M4 #7. The node description states this.
+- **Known statistical bias (documented 2026-09-13, uncorrected)**: the sample
+  multiple coherence treats the band's n_bins × n_windows rows as independent,
+  but windows overlap 50% and bins within a window share that window's noise
+  realization, so the effective DOF is far smaller and the sample coherence is
+  biased high by ≈ n_in/(N_eff − 1) (~5% at the default `min_bins_per_band=40`;
+  no Egbert-style DOF correction is applied). Consequences: long-period bands
+  pass `coherence_min` more easily than the nominal threshold implies, the
+  "coh ≈ 1 is suspicious" rule fires inconsistently, and OLS σ² (dof =
+  n_obs − n_in, §15) is underestimated by the same DOF inflation. Correcting
+  or replacing the statistic is part of M4 #7.
 - **`Estimate TF` change (small, generic)**: skip non-finite FC samples when
   gathering band rows — required by `drop`/`coherence_trim`, and gives correct
   RR semantics for free (a row is used only if both local and remote FCs are
   finite; row pairing stays aligned because the time grid is never dropped).
 - **Diagnostics**: `table` output with per-period median coherence for each
-  criterion, retained/total window counts, applied weight range. A
+  criterion (E–H and, two-FC, the magnetic transfer coherence, plus their
+  min), retained/total window counts, and a `trimmed` flag (the
+  "applied weight range" wording from the original spec was never
+  delivered — weight range is not in the rows). A
   coherence-vs-period plot is a later add-on (M4 #1).
 - **Implementation**: `_simple_coherence`, `_multiple_coherence`,
   `_coherence_weight`, `coherence_sort_fc(s)` in `emptyui-aurora/_processing.py`;
@@ -1702,9 +1756,12 @@ it would only enter as a test-only golden-image reference (M4 #8).
   multiple coherence from the fc itself, not the sort's diagnostics
   table. The per-band coherence loop is refactored out of
   `coherence_sort_fc` into a shared `_band_coherence(local, ref, ins,
-  outs, band_bins)` helper, so the plot shows **numerically exactly** the
-  statistic Coherence Sort uses (honest about the broadband-heuristic
-  caveat, §18.2) and works when no sort node is in the graph.
+  outs, band_bins)` helper, so the plot uses **numerically the same
+  per-criterion statistics** as Coherence Sort (honest about the
+  broadband-heuristic caveat, §18.2) and works when no sort node is in
+  the graph. One nuance (noted 2026-09-13): the sort's criterion is the
+  **minimum** of the two curves in two-FC mode, while the plot renders
+  the criteria separately without taking the min.
 - **Curves**: median coh² vs period per criterion — E–H signal coherence
   (remote H when a `ref_fc` is connected) and, two-FC, the local↔remote
   magnetic transfer coherence; shaded guidance band at
@@ -2007,3 +2064,515 @@ double-clip). Fully-clipped levels are skipped in `estimate_tf_levels`
 its existing "no usable frequency bands" error when everything is clipped
 (uniform now behaves like l2u). Verified: `t_short=0`/`None` remains a
 no-op for both schemes (legacy behavior).
+
+## 24. Physics parity with classical EMTF — discrepancy inventory & research plan (started 2026-09-13)
+
+**Motivation.** The SDG31 experiment case is a controlled physics experiment,
+not just a regression test: identical input data (4P.SDG31 + remote 4P.SDH28
+MTH5 archives, 1 Hz NIMS/100 m dipoles) and a ground-truth output (the
+official EMTF/SPUD `USArray.SDG31.2017.edi`) allow *ablation* — change one
+processing factor at a time and measure which classical-EMTF ingredient
+actually closes the gap. Classical EMTF (Kelbert et al.) is the traditional
+gold standard; emptyUI delegates its estimators to aurora 0.6.2 but computes
+its own Fourier coefficients, so the FC stage is where the schemes diverge.
+
+### 24.1 Fixed comparison protocol (the "exact" approach)
+
+Every parity experiment keeps these FIXED and changes exactly one factor:
+
+- **Band table**: reconstructed exactly from the official EDI band-center
+  frequencies (`exact_official_bands` — 6,6,6,6,4,2 bands per level, edges at
+  geometric midpoints; `bands_override`). NOT the l2u default — the residual
+  grid difference (§14.9: 93% vs 98% pass) must not confound physics deltas.
+- **Frame**: fixed −5.7° true-north rotation (documented coordinate-frame
+  rotation, §16.3) — never a per-variant rotation fit.
+- **Estimator**: Robust (RME_RR) with the remote reference; aurora defaults.
+- **STFT base**: window 128 samples, factor 4, 5 decimations, 50% overlap.
+- **Metrics** (matched nearest-period rows, off-diagonal xy/yx,
+  reliable band [15 s, 18 725 s] plus a **short-period split [15, 100) s**
+  — the low-hanging-fruit target):
+  median / p90 / max |Δlog₁₀ρ| and |Δφ| (folded convention), pass rates at
+  the §16.3 gates (0.1 decades / 10°), and — added for statistics — **error
+  -bar agreement** (our σ vs official `.VAR`, ratio statistics), which the
+  original metrics never tested (§16.2/C2 bias makes our OLS dof inflated;
+  RME errors are the production path).
+- **Statistics discipline**: paired deltas on the identical matched grid;
+  one factor per variant; every variant's full kwargs recorded in the
+  metrics JSON (fc attrs already carry `prewhitening`/`per_window_detrend`
+  provenance, §19-style).
+
+Harness: `examples/data/lims-usarray-test/verify_sdg31.py` (importable
+helpers) and `parity_sdg31.py` (the ablation driver).
+
+### 24.2 Discrepancy inventory (2026-09-13 full audit)
+
+**FC/STFT stage** (emptyUI = taper→FFT only; aurora default = first-
+difference PW + per-window linear detrend + boxcar 25% overlap + LSDL
+factor; original EMTF = AR(3) PW + Slepian-family taper + 128/32):
+
+| # | Discrepancy | Priority | SDG31 signal |
+|---|---|---|---|
+| A1 | No prewhitening/recoloring | **E1 (first)** | T < 30 s leakage-limited end |
+| A2 | No per-window detrend (global node only) | **E2** | long-period tail |
+| A3 | Taper family: Hamming 50% vs boxcar 25% vs EMTF Slepian | **E1** (with A1) | in-band p90 gap |
+| A4 | No clock-zero truncation | low | negligible (aurora default also ignores) |
+| A5 | FC normalization scipy 'spectrum' vs LSDL factor | none for TF (ratios scale-equivariant); blocks FC round-trip comparison with aurora | — |
+| A6 | DC bin retained (NaN'd under PW) | cosmetic | spectrogram log-axis row |
+
+**Band grid**: B1 l2u ≈ official (0.020 median, 93% vs exact 0.019/98%);
+B2 uniform anchors extend half a bandwidth past Fs/4 · window/4 (documented);
+B3 boundary-bin drift via fs-recovery (low probability); B4 hand-authored
+band files = M4 #9 (E4).
+
+**Estimation**: C1 estimator parity verified (delegated to aurora, incl.
+`RME_RR.qr_input="Z"`); C2 row-pooling independence assumption → OLS dof
+inflation, σ² underestimated (uncorrected; robust engines less sensitive);
+C3 no error floors anywhere (also absent in pinned aurora); C4 coherence
+statistic = per-window broadband heuristic, biased high ≈ n_in/(N_eff−1), no
+DOF correction (§16.2, M4 #7); C5 √w weighting exact for OLS, approximate for
+robust engines; C6 degenerate-band min-pairwise fallback (conservative,
+documented); C7 ref_fc silently ignored by non-RR engines (behavior bug, not
+physics); C8 merge deepest-wins parity OK, 1-D `Z_err` fallback latent crash.
+
+**Frame/units** (resolved): −5.7° frame rotation (documented, not a bug);
+EDI declination 0.0-override bug (`tf.py`, parsing); units verified
+analytically incl. the `_default_unit` hx-mislabel fix (2026-09-13).
+
+### 24.3 Research plan (staged ablations, gain-ordered)
+
+- **E1 — Prewhitening + taper at short periods** (enablers delivered
+  2026-09-13; **ablated 2026-09-13**, `parity_sdg31.py`):
+  opt-in `prewhitening` ("first difference") and taper family on ComputeFC.
+  Ablation grid: taper ∈ {hamming, boxcar, hann} × PW ∈ {off, first
+  difference}, all else fixed per §24.1 (exact bands, −5.7° rotation,
+  Robust RME_RR). Results (paired medians |Δlog₁₀ρ| / p90, pass = ρ/φ
+  gates; short = [15, 100) s, tail = [100, 18 725] s):
+
+  | variant | short med/p90 | tail med/p90 | pass ρ/φ |
+  |---|---|---|---|
+  | hamming, no PW (**current default**) | 0.015 / 0.065 | 0.019 / 0.044 | 94% / 88% |
+  | hamming + PW | 0.010 / 0.016 | 0.009 / 0.030 | 100% / 100% |
+  | boxcar, no PW | **0.98 / 1.53** | 0.85 / 1.44 | 0% / 75% |
+  | boxcar + PW | 0.008 / 0.023 | 0.009 / 0.031 | 100% / 100% |
+  | hann, no PW | 0.008 / 0.016 | 0.008 / 0.032 | 100% / 100% |
+  | hann + PW | 0.009 / 0.016 | 0.008 / 0.030 | 100% / 100% |
+
+  **Findings** (statistics on matched official periods):
+  1. The current default's entire deficit vs the official product is
+     concentrated at T = 7.3–15.1 s (worst: Δlog₁₀ρ +9.7, Δφ +152° at
+     11.6 s — a noise-floor band); above 19.7 s all variants agree to
+     ≤0.03 decades / 4°.
+  2. The controlling factor is **DC/edge leakage suppression**, not PW per
+     se: the calibrated SDG31 series carry significant DC offsets
+     (|mean|/std up to 0.38 on ey). Hamming's nonzero (0.08) endpoints let
+     that offset leak; Hann's zero endpoints kill it — which is why
+     hann+noPW already matches hamming+PW. Boxcar without PW is
+     catastrophic (~1 decade, all periods) — a clean quantification of why
+     classical pipelines (aurora boxcar+PW default, EMTF AR-PW) never
+     taper with a nonzero-DC window unwhitened.
+  3. First-difference PW with the **exact** inverse recoloring preserves
+     clean-signal FCs to ~1e-4 relative (unit-tested) and drops red-noise
+     leakage hard (synthetic: >2× out-of-band mean amplitude reduction).
+  4. **Error-bar signature (E5 preview)**: our σ_Z vs official σ tracks the
+     taper, not PW (median ratio: boxcar 1.7 > hamming 1.1 > hann 0.66) —
+     the official EMTF σ convention embeds its taper/DOF choices; the PW
+     shrinkage (0.66→0.68 on hamming) needs the DOF study before any
+     interpretation. Do not tune error floors against this yet.
+  5. Cross-check: hamming+noPW tail median 0.019 reproduces the §16.3
+     record (0.019) — the review fixes since 2026-09-10 did not shift the
+     reliable band.
+  **Decision (pending E2)**: leakage-suppressed variants are pairwise
+  statistically indistinguishable; per the §24.3 rule PW qualifies for
+  default adoption, but the default flip is deferred until E2 (per-window
+  detrend) is ablated and the persisted-FC convention (A5/E6) is settled —
+  PW changes persisted FC amplitudes.
+  Comparison figures (boxcar+PW vs official, §24.1 protocol):
+  `examples/data/lims-usarray-test/sdg31_parity_boxcar_first_difference_vs_official.png`
+  (raw overlay, each dataset at its own periods, ours rotated −5.7°) and
+  `sdg31_parity_boxcar_first_difference_appres_phase.png` (§15
+  EMTF-convention figure via the plot node); rendered with
+  `parity_sdg31.py --plot <taper> <pw>`. Working-recipe figures (full
+  remote b+c + weight sort 0.7):
+  `sdg31_parity_boxcar_first_difference_b-c_sort0.7_vs_official.png`
+  (the head now sits on the official points, 7.3–11.6 s included) and
+  `sdg31_parity_boxcar_first_difference_b-c_sort0.7_appres_phase.png`;
+  `--plot <taper> <pw> <remote-runs e.g. b,c> [coh_min]`.
+- **E1b — Data selection / remote coverage: the short-period gap closed**
+  (2026-09-13, `short_period_sdg31.py`). The residual deficit at the first
+  three official periods (7.3/9.1/11.6 s) was **not** an estimator or FC
+  factor — it was **remote-data coverage**. The official product's tag is
+  `SDG31b_H28coh` (RUNLIST=SDG31a SDG31b, REMOTESITE=SDH28): an EMTF-FCU
+  coherence-processed product using all SDH28 data (runs b+c, ~14.7 d),
+  while our alignment against SDH28-b only cropped away the last ~29% of
+  SDG31-b (SDH28-b ends 2017-10-23, SDG31-b 2017-10-26). Findings:
+  - **Full remote (b+c) alone fixes 9.1 s and 11.6 s with no sorting**
+    (Δlog₁₀ρ ≤ 0.07, Δφ ≤ 3.2°; head [7.3, 15) s median 0.534 → 0.050);
+    window-64 also becomes viable (it was harmful under b-only coverage —
+    the earlier "window 64 remedy" was confounded by the missing remote
+    data). EMTF's decset.cfg uses 128-sample windows at ALL levels;
+    window reduction is confirmed NOT the classical lever.
+  - **7.3 s closes with mild coherence selection** (weight,
+    coherence_min=0.7: Δlog₁₀ρ −0.046/−0.050, Δφ +3.7/−1.3° — 119/13348
+    windows retained; fragile — the estimate rides on 0.9% of windows).
+    The official `…H28coh` tag supports coherence processing as the FCU's
+    actual lever; the principled form is the per-frequency window-ensemble
+    statistic (M4 #7/E7), not our broadband per-window heuristic.
+  - **Self-reference quantifies the fluxgate noise floor**: RR-off
+    underestimates ρ by up to 5.8 decades below 15 s (smooth SNR
+    degradation with period) — the remote reference does the heavy
+    lifting; below ~50 s the local-H noise floor ≈ signal (user hypothesis
+    confirmed quantitatively).
+  - **σ-honesty discrepancy (E5 input)**: the un-cleaned estimate reports
+    σ/|Z| ≈ 0.3–0.9 at 7.3–11.6 s (honest) while the official .VAR claims
+    0.053/0.030/0.008 — the FCU error convention at noise-floor periods is
+    far more optimistic than the raw data support; reconcile before any
+    error-floor tuning.
+  - Level-0 sort diagnostics: E–remote-H multiple coherence
+    0.32/0.49/0.52 at 7.3/9.1/11.6 s — most of E is noise there, yet the
+    cleaned estimates match the official to ≤5%: coherence selection at
+    the noise floor works because the *clean subset* is consistent.
+  - Trade-off: weight-0.7 selection slightly regresses the deepest tail
+    (tail p90 0.039 → 0.069, pass 97 → 95) — selection belongs at the
+    noise-floor end. A period-dependent selection schedule is the natural
+    refinement (E7).
+  **Working recipe (SDG31)**: boxcar + first-difference PW, window 128,
+  exact band table, −5.7° rotation, Robust RME_RR, **full remote coverage
+  (SDH28 b+c)**, optional weight-mode coherence selection at the head.
+- **E2 + tail probes — long-period mismatches** (2026-09-13,
+  `long_period_sdg31.py`). With the recipe baseline (full remote), the tail
+  picture changed completely: 18 724.6 s was a remote-coverage artifact
+  (now Δlog₁₀ρ ≤ 0.044, within the official's own σ/|Z| = 0.098 there).
+  Tail level geometry: level 4 (window 9.1 h, ~52 windows) owns
+  2 260–7 282 s; level 5 (window 36.4 h, ~13 windows ≈ 6 independent)
+  owns 11 916–18 725 s. Findings:
+  - **The dominant tail factor is the taper** — the diurnal (Sq) magnetic
+    variation (~24 h + harmonics) lies inside every level-4/5 window, and
+    boxcar's −13 dB sidelobes leak that huge line into the tail bands;
+    zero-endpoint tapers suppress it (4681 s: Δ −0.075 → −0.025; 11 916 s
+    xy: +0.249 → +0.130; 18 725 s Δφ: −3.2° → −0.3°; boxcar → hann).
+  - **Per-window detrend (E2) is NOT the lever**: negligible on the tail
+    (it removes the linear trend, not the periodic Sq line), and slightly
+    harmful at the head (pass 83 → 67 with boxcar). Verdict: keep off —
+    emptyUI's PW chain does not need aurora's per-window default.
+  - **A per-level taper schedule combines the wins**: the dominant
+    contamination differs by scale — white-ish fluxgate noise (post-PW) at
+    level 0, where boxcar maximizes dof, vs line-spectra leakage at the
+    day-scale windows where hann wins. boxcar L0–2 / hann L3–5 gives head
+    0.050 (83/83) AND tail 0.010/0.036 (97/100); hann at level 0 destroys
+    the 7.3 s band (Δ +4.3 decades, σ/|Z| = 8.1) — the schedule is
+    physically motivated, not tuned. (Code path needed: compute_fc_levels
+    takes one window_type; the investigation merges per-level fc dicts.)
+  - **Level resolution**: deepest-wins assigns 11 916/18 725 s to level 5;
+    the level-4 estimates at its own bands are clean (≤0.075 boxcar,
+    ≤0.033 hann). The residual 11 916 s xy (+0.13) rides on ~6 independent
+    windows — few-windows statistics, and the official σ/|Z| = 0.082
+    there; E5/E7 territory (DOF correction, per-frequency ensemble
+    statistic).
+  **Refined recipe (SDG31, full band)**: boxcar + PW at levels 0–2, hann +
+  PW at levels 3–5, full remote b+c, weight sort 0.7 at level 0 →
+  head 0.034/0.080, short 0.007/0.022, tail 0.010/0.036;
+  **reliable full band: median 0.009 / p90 0.029 / 98% pass** — vs the
+  §16.3 original record 0.019/0.045/98%. Worst remaining rows: 9.1 s yx
+  (−0.110, marginal) and the 11 916 s few-windows band. Figures:
+  `sdg31_parity_final_recipe_vs_official.png`,
+  `sdg31_parity_final_recipe_appres_phase.png`.
+- **E2 — Per-window detrend** (enabled, ablation pending): hypothesis:
+  closes the long-period tail bias.
+- **E3 — EMTF Slepian multitaper** (research): multi-taper FC ensemble;
+  only if E1 leaves a measurable in-band gap.
+- **E4 — Exact EMTF band ladder as a node option** (M4 #9): the ablation
+  harness uses `bands_override` internally; expose a band-table node.
+- **E5 — Error-bar statistics + error floors**: add σ-agreement metrics to
+  the SDG31 harness; then evaluate EMTF-style floors (C2/C3).
+- **E6 — aurora FC round-trip** (blocked by A5): persist emptyUI FCs and
+  compare amplitudes against aurora's own persisted FC layer for the same
+  run — requires settling a shared normalization convention first.
+- **E7 — True EMTF per-frequency coherence sort** (= M4 #7) and C2 DOF
+  correction: statistics work, after the deterministic factors are settled.
+
+Decision rule: adopt a factor into the **defaults** only when it improves
+the paired short-period AND reliable-band medians without regressing the
+pass rates; keep every adopted factor opt-in-able (provenance attrs) so
+legacy workflows and the verified §16.3 record stay reproducible.
+
+### 24.4 Workflow enablement — missing nodes/params for the parity recipe (2026-09-13)
+
+The refined recipe (§24.3) cannot yet be expressed end-to-end in the node
+UI. Recipe step → current node state → gap (effort):
+
+1. **Merge remote runs (b+c)** — ✗ **blocking**. `Merge Runs`
+   (`mth5.runs.merge`) has NO ts.run input ports: both modes require a
+   `selection` payload whose producer node is M4-deferred, so merging
+   SDH28-b + SDH28-c is impossible in the UI (the investigation merged
+   physically via `RunTS.merge` in code). Needed (medium):
+   (a) physical merge node taking `ts.run` inputs directly (pairwise
+   `RunTS.merge`, gap-aware — 28-min interpolation caveat, ~0.2% windows);
+   (b) production-grade: FC-level concatenation (aurora `merge_stfts`,
+    `xr.concat` along time — fabricates nothing; makes the gap a no-window
+   region).
+2. **Compute FC taper vocabulary** — ✗ trivial. `window_type` select offers
+   only `hamming`/`hanning`; the recipe needs **`boxcar`** (it wins at the
+   short-period levels). The API already passes any scipy window name
+   through `_window`; only the manifest vocabulary must grow.
+3. **Per-level taper schedule** — ✗ medium. Recipe: boxcar L0–2 / hann L3–5;
+   `compute_fc_levels` takes one global `window_type` (the investigation
+   merged per-level fc dicts in code). Natural shape: `window_type` per
+   decimation level (list/schedule param), or a `deep_level_taper`
+   override for levels ≥ N. Physically motivated (white-noise scale vs
+   Sq-line-leakage scale), not tuned.
+4. **Coherence Sort level/period schedule** — ✗ medium. The node sorts ALL
+   levels; the recipe uses weight-0.7 at level 0 only (sorting perturbs the
+   deepest tail: p90 0.039 → 0.069 with boxcar). Needed: an
+   `apply_below_period` (or level-schedule) param so the sort can be
+   scoped to the noise-floor head.
+5. **Exact band table** — ✗ M4 #9 (already backlog). The parity protocol's
+   exact-official-bands table (`bands_override`) is low-level only; the UI
+   offers l2u/uniform (l2u is statistically equivalent — this is for
+   apples-to-apples comparisons).
+6. **Estimate TF** — ✓ nothing missing (Robust, remote reference + `ref_fc`
+   port, `min_bins_per_band`/`t_short`, inherit-from-sort).
+7. **Rotate TF** — ✓ manual angle entry covers the −5.7° documented frame
+   rotation (declination auto-pickup exists; the SDG31 −5.7° = IGRF 4.26° +
+   1.4° site azimuth is site-specific, not in any archive the node reads).
+8. **Align Runs / Merge TF Levels / Calibrate / Export** — ✓ nothing missing.
+
+Priority: (1) is the workflow blocker (the recipe's single most important
+factor — remote coverage — has no UI path today); (2) is a one-line
+manifest change; (3)/(4) are the per-level schedule generalization; (5)
+stays M4 #9. `overlap` also lacks a max validation (crashes mid-node for
+overlap ≥ 1 — review item B13, now user-reachable while experimenting).
+
+### 24.5 Implementation plan for §24.4 (decided 2026-09-13)
+
+Decisions (user-confirmed): merge = **both routes, TS-physical first** (FC
+concat as the later production-grade addition); **rebuild
+`mth5.runs.merge` in place** (drop the dead `selection`/DataFrame path —
+params-based run list like Extract Run); per-level taper = **minimal
+override** (`window_type` base + `window_type_deep` + `deep_from_level`);
+manual bands = **folded into Estimate TF** (`band_style="manual"`,
+`enabled_when`-gated `band_centers` + `bands_per_level` → geometric-
+midpoint edges, the harness-proven reconstruction).
+
+- **P1 Merge Runs rebuild**: inputs `mth5`; params `survey`/`station`/
+  `runs` (comma list; empty = all runs)/`gap_method`/`new_run_id`; output
+  `merged_run: ts.run`. Core merge operates on a list of RunTS (unit-
+  testable without an archive). **P1 v2 — Merge FC node (delivered this
+  round)**: fixed `fc1..fc4` ports (burst-mode bulk mth5 ingestion is a
+  recorded follow-up — it needs special care because a merged-TS cascade
+  cannot decimate *across* burst slots; per-run cascades within a slot are
+  fine, deep levels starve naturally in short slots); **best-effort
+  intersect** validation (frequency grids intersected with tolerance,
+  mismatched channels dropped with warnings, sample-rate mismatch errors);
+  output feeds `Estimate TF`'s strict identical-grid check.
+- **P1 v2b — clock-zero window anchoring (user-corrected: required)**:
+  ComputeFC gains `clock_zero` ("" = off/run-start anchoring, "epoch" =
+  Unix epoch, or an explicit ISO datetime): window starts anchor to
+  ``t0 + k·step`` per level and the head partial window is dropped, so
+  per-run FCs of *different* runs/stations share one window grid — the
+  prerequisite for remote-reference pairing across separately-computed
+  runs (gapped continuous runs, burst mode). Note: anchoring each station
+  to "the first station's start" (the initial proposal) does not generalize
+  — run starts are not whole window-steps apart, so the shared reference
+  must be run-independent (epoch) or passed explicitly (ISO). Levels with
+  fewer samples than one window (burst slots at deep levels) are skipped
+  with a warning. Estimate TF keeps the **strict** identical-grid policy;
+  a time-value-matching loosening is recorded for GPS-stray clocks on
+  semi-permanent stations (not uncommon) — later option.
+- **P2 ComputeFC per-level taper**: `window_type_deep` (select, empty =
+  base) + `deep_from_level` (integer); per-level window recorded in the
+  fc attrs.
+- **P3 CoherenceSort scope**: `apply_below_period` — band-center periods
+  at/above the threshold pass through unsorted (default empty = all, the
+  recipe scopes the head remedy to level 0 without touching the tail).
+- **P4 EstimateTF manual bands**: `band_style` + `"manual"`; shared
+  `manual_bands(freqs, counts)` helper in `_processing.py` (descending
+  frequency list + per-level counts → per-level `(f_hi, f_lo)` pairs at
+  geometric midpoints — identical to the parity harness's
+  `exact_official_bands`).
+- **P5 verification**: synthetic multi-run e2e through the executor
+  (merge → align → FC → scoped sort → estimate → rotate); manual-band
+  parity against `bands_override`; per-level attr checks. SDG31 recipe
+  workflow JSON template: after P1–P4 land.
+- **P5 head-to-head (delivered 2026-09-14,
+  `node_vs_harness_sdg31.py`)**: the refined recipe as a stock node graph
+  (Load ×2 → Extract → **Merge Runs b,c** → Calibrate ×2 (archived
+  responses apply to the merged raw run — the filter attrs survive
+  `RunTS.merge`) → Align → Compute FC ×2 (boxcar/deep-hanning/PW) →
+  Coherence Sort (weight 0.7, apply-below-20 s) → Estimate TF
+  (Robust RR, **band_style="manual"** with the official centers +
+  "6,6,6,6,4,2") → Rotate (−5.7°)), executed by the `Executor`, vs the
+  recorded harness numbers. Result: **reliable full band identical
+  (0.009 median / 0.029 p90 / 98% pass)**; short/tail identical; the only
+  deviation is the 7.3 s band (node +0.180/−0.269 vs harness −0.046/
+  −0.050) — the node sort bands with the l2u scheme (it has no band-table
+  input; the harness sorted on the exact official table), so the head
+  weights differ slightly. Extending the manual band table to the sort
+  node (or feeding it one) would close that; the executor gained an
+  opt-in `include_store` summary flag so scripts can resolve output
+  handle ids to payloads. Metrics:
+  `sdg31_node_vs_harness_metrics.json`.
+
+### 24.6 Per-bin coherence statistic (E7/M4 #7 — the banding-independent sort)
+
+**Grounding (2026-09-14).** aurora 0.6.2 has no reusable per-frequency
+coherence routine: `compute_squared_coherence` (TRME lineage,
+`m_estimator.py:315`) is a per-band explained-variance R² = 1 − SSR/SSYc
+of the band regression on the *cleaned* data, per output channel — only
+logged, never used for selection; `adjust_band_for_coherence_sorting`/
+`get_band_for_coherence_sorting` are WIP band-widening placeholders
+("min3" rule, never delivered). The EMTF-style per-frequency
+window-ensemble statistic is therefore implemented fresh in emptyUI.
+
+**Statistic (as implemented, opt-in `statistic="per_bin"`)**: for every
+frequency bin f and window w, the multiple coherence² of each output on
+the magnetic inputs estimated over a **sliding window ensemble**
+(±`ensemble_windows` windows, center included — leave-one-out would
+penalize isolated clean windows) with optional pooling over
+±`smooth_bins` adjacent bins (a FIXED smoothing scale — deliberately not
+the estimate's band table; restores dof at deep levels with few windows).
+Adjusted-R² correction removes the p/(W−1) high bias of sample coherence
+(the §16.2 C2 bias, corrected exactly for this statistic since the
+ensemble count is known). Weights are per (bin, window) — finer than the
+per-window scalars, frequency-dependent like EMTF's, and independent of
+the band-average method (the band table survives only as the diagnostics
+table's aggregation view). Failure mode trade-off: isolated clean windows
+in noisy neighborhoods get down-weighted (conservative; the robust
+estimator still sees the retained rows).
+
+**SDG31 ablation (2026-09-14, recipe baseline: full remote b+c, exact
+bands, −5.7°, all sorts scoped < 20 s, weight 0.7):**
+
+| sort variant | head med/p90 (pass ρ/φ) | full med/p90 (pass) |
+|---|---|---|
+| band (l2u-banded sort) | 0.020 / 0.156 (67/67) | 0.008 / 0.029 (98/100) |
+| per_bin ens=8 sm=0 | 0.223 / 0.399 (33/83) | 0.008 / 0.038 (98/100) |
+| **per_bin ens=16 sm=0** | **0.043 / 0.064 (100/100)** | 0.008 / 0.037 (98/100) |
+| per_bin ens=8 sm=1 | 0.161 / 0.341 (33/67) | 0.009 / 0.036 (98/100) |
+| **per_bin ens=16 sm=1** | **0.040 / 0.043 (100/100)** | 0.008 / 0.037 (98/100) |
+
+Findings: (1) **the per-bin statistic with ens=16 is the best head
+variant — 100/100 within gate, and BAND-INDEPENDENT** (no exact-table
+needed; the node-sort banding deviation from §24.5 P5 vanishes by
+construction); 7.3 s: +0.041/−0.044 with sm=1. (2) Small ensembles (8 →
+17-window segments) fail at the head — the noise-floor bins need the
+ensemble dof for the debiased coherence to discriminate. (3) The debias
+correction is what makes the thresholds transferable (the raw sample
+coherence would sit at ~n_in/W ≈ 0.12 under the null). (4) Full-band
+p90 (0.037) is marginally above the band statistic's 0.029 — the debias
+makes the sort slightly stricter at short periods. **Recommendation**:
+use `statistic="per_bin", ensemble_windows=16` in the recipe; node
+default stays "band" pending the Plot Coherency counterpart (§20.1's
+"the plot shows exactly the statistic the sort applies" holds only for
+the band mode).
+
+**Default flip (2026-09-14, user-directed).** The recommendation was
+adopted as the DEFAULT everywhere user-facing:
+
+- Coherence Sort node + `coherence_sort_fc`/`coherence_sort_fcs`:
+  `statistic="per_bin"`, `ensemble_windows=16`;
+- Coherence Sort / Estimate TF / Plot Coherency nodes +
+  `estimate_tf`/`estimate_tf_levels`: `periods_per_octave=3`,
+  `min_bins_per_band=20` (SDG31-recipe values, replacing the
+  ablation-era 4/40);
+- `_per_bin_coherence` helper default aligned to `ensemble_windows=16`.
+
+Internal geometry helpers (`_period_bands`, `_period_bands_indexed`,
+`_resolve_period_bands`, `_l2u_band_table`) keep their historical
+defaults — every call site passes explicit values, so they never leak.
+Pinned by `tests/test_defaults.py`; the legacy band-statistic tests now
+pass `statistic="band"` (and `periods_per_octave=4` where their
+assertions assume the old grid) explicitly. Caveat retained: Plot
+Coherency renders the **band** statistic, so §20.1's "the plot shows
+exactly the statistic the sort applies" now holds only when the sort is
+explicitly set to `statistic="band"` — the node description documents
+this. A browser e2e run with the per_bin default is pending.
+
+### 24.7 Burst-mode data (MTU-5C / MTU-5A) — prior art & ingestion design (2026-09-14)
+
+**Motivation.** The deferred follow-up to the Merge FC node (§24.5 P1 v2):
+bulk ingestion of burst-mode archives — recorders that interleave
+**scheduled high-rate slots ("mini-runs") with continuous low-rate
+streams** — into the per-run-cascade + FC-merge pipeline.
+
+**Hardware data model (Phoenix MTU-5C / MTU-5A).** Both recorders write
+*several simultaneous streams at different sample rates*; only the low
+rates are continuous. Rate families are mode-dependent — MTU-5C: sparse
+24 kHz + continuous 150 Hz ("24 kHz continuous or decimation with sparse
+24 kHz and continuous 150 Hz", GEF equipment spec); MTU-5A adds a fourth
+rate: 24K/2.4K/150/15, where AMT tasks use 24K+2.4K+150 and MT tasks use
+2.4K+150+15. Duty cycles can be extreme (the official MTU-5A test file
+records 1 s per 10 min at 2400 Hz).
+
+**Official IAGA test data** (`github.com/IAGA-DVI-DataStandards/
+mth5-test-data`, master): `phoenix/phoenix_test_data.zip` (44 MB,
+MTU-5C session folders: per-channel subdirs, `td_150` continuous +
+`td_24k` segment files, `recmeta.json`) and `phoenix_mtu/
+phoenix_mtu_test_data.zip` (21 MB, MTU-5A: `1690C16C.{TBL,TS3,TS4,TS5}`).
+Both downloaded and decoded locally (2026-09-14); the MTU-5A file's TBL
+schedule decodes as: TS5 = 15 Hz continuous 20.3 h; TS4 = 150 Hz in
+16-second slots every 10 min (122 slots); TS3 = 2400 Hz in 1-second
+slots every 10 min, staggered +5 min against TS4 — and the TBL's own
+STIM/ETIM are placeholders (2009–2011), not the data extent.
+
+**Prior art — mth5's representation: burst becomes runs.**
+`mt_io.phoenix.phoenix_collection.PhoenixCollection.assign_run_names`
+(mt_io/phoenix/phoenix_collection.py:325): files < 1000 Hz group into ONE
+run split on temporal gaps; files ≥ 1000 Hz become **one run per
+segment** (`sr24k_0001…`). No special burst container — the burst model
+is *many short runs at multiple sample rates* in one station.
+`PhoenixClient.make_mth5_from_phoenix` (mth5/clients/phoenix.py) writes
+each as a RunGroup.
+
+**Prior art — aurora's processing answer: never merge in the time
+domain.** `aurora.pipelines`: one dataset row per run; per decimation
+level each run is decimated + STFT'd **independently** (per-run cascade,
+`clock_zero_type="ignore"` default) and `merge_stfts` (time_series/
+spectrogram_helpers.py) plain-`xr.concat`s the per-run STFT arrays along
+time — exactly the per-run-cascade + MergeFC decision of §24.5 P1 v2.
+Two upstream weaknesses confirmed in code: (1) **chunk-positional RR
+pairing** — `shape_check_spectrograms` (issue #289 glb/lub trim) +
+`time_axis_check_spectrograms` assume local and remote share the same
+chunk structure; our epoch-anchored `clock_zero` is strictly stronger
+(pairable grids regardless of run partitioning); (2) **deep-level
+starvation is punted** — run-decimation rows yielding <
+`min_num_stft_windows` are marked invalid and skipped
+(transfer_function_kernel.py:316, with an explicit WCGW note that short
+chunks cannot reach deep levels); our skip-with-warning matches.
+(3) **Mixed sample rates are NOT handled**: `prototype_decimate` blindly
+applies the config factor to every run, so 150 Hz and 24 kHz runs land
+on incompatible frequency grids in one concat — upstream users process
+one rate family per config.
+
+**Upstream gaps found in the installed stack (mt_io 2025-12 lineage).**
+(1) **Latent correctness bug**: `MTUTSN.read()`
+(mt_io/phoenix/readers/mtu/mtu_ts.py:435) densely concatenates all
+25-byte-headed 32-byte-header data blocks (`ts[:,
+iblock*n_scan:(iblock+1)*n_scan]`, skipping the block header) and stamps
+the whole array with the file start + uniform rate — but **each 32-byte
+block header carries a true timestamp** (verified: TS3 block 0 =
+07:55:00, block 1 = 08:05:00). For burst files every slot after the
+first gets a wrong, compressed implicit clock (121 slots over 10 h come
+out as a dense 121-second array). (2) `PhoenixCollection` crashes on a
+flat MTU-5A directory (AttributeError in `_set_df_dtypes`; it only
+walks MTU-5C-style station folders). Net: **no working MTU-5A burst →
+MTH5 path exists upstream**.
+
+**Design direction (decided 2026-09-14).** Two distinct **load nodes**
+for ingestion, both feeding the per-run cascade builder (ComputeFC per
+run, epoch-anchored `clock_zero`) + Merge FC:
+
+- `mth5.io.load_phoenix_5c` (MTU-5C): walk session folders via the
+  collection convention; continuous rates → gap-split runs, high rates →
+  run-per-slot; persist as an mth5 archive.
+- `mth5.io.load_phoenix_5a` (MTU-5A): parse the TBL schedule
+  (HSMP/L3NS/L4NS/SRL3-5) **and the per-block 32-byte headers** for true
+  slot times (fixing the upstream dense-concat bug); emit run-per-slot
+  at each burst rate + continuous runs.
+
+The staggered slot schedules across rate families make the epoch-anchored
+window grid essential; families meet at shared frequency coverage only at
+Merge FC (the 2.4K cascade's deep levels overlap the 150/15 continuous
+coverage), so the cross-cascade merge is where the full-spectrum TF
+assembles — v1 scope: single-family many-slots first, then cross-family.
+Test corpora: the two IAGA archives (44 MB / 21 MB, gitignored data
+dir); a synthesized burst collection remains the fallback for e2e.
