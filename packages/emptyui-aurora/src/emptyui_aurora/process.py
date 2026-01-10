@@ -323,7 +323,6 @@ class BuildFC(Node):
                 prewhitening: str = "", per_window_detrend: str = "",
                 persist: bool = False) -> dict[str, Any]:
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
-        from emptyui_mth5.persist import runts_context
 
         survey_obj = _resolve_survey(mth5, survey)
         station_obj = _resolve_station(survey_obj, station)
@@ -337,13 +336,69 @@ class BuildFC(Node):
         surv = str(survey_obj.metadata.id)
         stat = str(station_obj.metadata.id)
 
+        # per-family decimation trim (DESIGN §24.8): on a mixed-rate burst
+        # archive the continuous (lowest-rate) family carries the full
+        # 'decimation_levels' cascade; higher-rate families decimate only
+        # until their rate would reach the next family's native rate — the
+        # lower family's cascade covers those frequencies, and same-rate
+        # levels computed from different families would double-cover the
+        # same acquisition windows. E.g. 2400/150/15 Hz with factor 4:
+        # 2400 Hz slots decimate once (-> 600), 150 Hz slots once
+        # (-> 37.5), the 15 Hz stream takes the full parameter.
+        import numpy as np
+
+        summary = station_obj.run_summary
+        rate_of = dict(zip(summary["id"].astype(str),
+                           summary["sample_rate"].astype(float)))
+        family_rates = sorted({rate_of[r] for r in wanted})
+        dec_of_run: dict[str, int] = {}
+        for rid in wanted:
+            r = rate_of[rid]
+            lower = [x for x in family_rates if x < r * (1 - 1e-9)]
+            if not lower:
+                dec_of_run[rid] = decimation_levels
+                continue
+            d_max = max(0, int(np.ceil(np.log2(r / max(lower))
+                                       / np.log2(factor))) - 1)
+            dec_of_run[rid] = min(decimation_levels, d_max)
+
         dipole = e_dipole_length_m or None
         containers = []
+        # fast per-run data path: reading channels via to_xarray and
+        # wrapping in a duck payload avoids RunGroup.to_runts — whose
+        # mt_metadata deepcopy/validation storm costs ~7 s per run (40x
+        # the data read itself; DESIGN §24.8 performance note). The same
+        # storm lives in the group .metadata properties (~20 s per access
+        # on a burst archive) — access station metadata ONCE and derive
+        # per-run rate/start from the channel attrs/coords.
+        from types import SimpleNamespace
+
+        import xarray as xr
+
+        station_md = station_obj.metadata
+        identity_base = _station_identity_attrs(
+            SimpleNamespace(station_metadata=station_md), surv, stat, "")
         for i, run_id in enumerate(wanted):
-            run_ts = _resolve_run(station_obj, run_id).to_runts()
+            run_obj = _resolve_run(station_obj, run_id)
+            data_vars = {}
+            sample_rate = 0.0
+            start = None
+            for name in run_obj.groups_list:
+                da = run_obj.get_channel(name).to_xarray()
+                sample_rate = float(da.attrs.get("sample_rate",
+                                                 sample_rate))
+                if start is None and "time" in da.coords:
+                    start = da.coords["time"].values[0]
+                data_vars[str(name)] = da
+            ds = xr.Dataset(data_vars)
+            run_ts = SimpleNamespace(
+                dataset=ds,
+                sample_rate=sample_rate,
+                start=start,
+            )
             levels = compute_fc_levels(
                 run_ts, input_channels, output_channels,
-                num_decimations=decimation_levels, factor=factor,
+                num_decimations=dec_of_run[run_id], factor=factor,
                 num_samples_window=window_samples, overlap=overlap,
                 window_type=window_type,
                 magnetic_unit=magnetic_unit,
@@ -355,11 +410,9 @@ class BuildFC(Node):
                 deep_from_level=deep_from_level,
                 clock_zero=clock_zero,
             )
-            # the run identity travels in the attrs (runts_context on the
-            # first run of the archive would report the archive's first run,
-            # not this one — set it explicitly per run)
-            _run_id, _stat, run_label = runts_context(run_ts, surv, stat, run_id)
-            identity = _station_identity_attrs(run_ts, surv, stat, run_label)
+            # the station identity travels in the attrs (DESIGN.md §15);
+            # run_id is per-run, the rest comes from the hoisted station md
+            identity = dict(identity_base, run_id=run_id)
             for level, fc in levels.items():
                 fc.attrs.update(identity)
             if persist:
