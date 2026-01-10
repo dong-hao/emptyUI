@@ -1787,7 +1787,7 @@ def _grid_nearest_keep(reference, other, rtol=1e-3):
 
 
 def merge_fc_containers(containers):
-    """Concatenate per-run FC containers along time, per decimation level.
+    """Concatenate per-run FC containers along time, per rate level.
 
     The FC-database merge (aurora ``merge_stfts``; DESIGN §24.5 P1 v2) for
     runs that must not be concatenated in the time domain: physically
@@ -1796,15 +1796,20 @@ def merge_fc_containers(containers):
     boundaries, per-run cascades are fine and deep levels starve naturally).
 
     Each input is a single fc Dataset (level 0) or a ``{level: Dataset}``
-    container. Per level, every contributing input must share the sample
-    rate (error) and ideally the window settings (warning — mixed settings
-    change the banding); the frequency axes are intersected with a small
-    relative tolerance (fast path: bit-identical), channels missing in some
-    inputs are dropped with a warning, and the windows are concatenated in
-    time-sorted order (duplicate/overlapping window times warn). Level sets
-    are unioned — a level missing in some inputs merges the rest.
+    container. Levels are keyed by their ACTUAL sample rate (from the
+    ``sample_rate`` attr), not by decimation level index: a burst archive
+    mixes rate families (2400 Hz slots + 150 Hz slots + 15 Hz continuous),
+    whose cascade levels do not correspond by index — the merged output is
+    re-keyed to consecutive ints in DESCENDING rate order (level 0 = the
+    highest rate; single-rate inputs reproduce the input indices exactly).
+    Contributing inputs at one rate should share the window settings
+    (warning — mixed settings change the banding); the frequency axes are
+    intersected with a small relative tolerance (fast path: bit-identical),
+    channels missing in some inputs are dropped with a warning, and the
+    windows are concatenated in time-sorted order (duplicate/overlapping
+    window times warn). Levels missing in some inputs merge the rest.
 
-    Returns ``{level: xr.Dataset}`` with the first input's attrs (per level).
+    Returns ``{level: xr.Dataset}`` with the first contributor's attrs.
     """
     import xarray as xr
 
@@ -1818,23 +1823,25 @@ def merge_fc_containers(containers):
             norm.append({0: c})
     if not norm:
         raise ValueError("no fc to merge")
+    # re-key by actual sample rate: the rate — not the decimation level
+    # index — is the identity that makes cascades from different rate
+    # families commensurable (DESIGN §24.8)
+    by_rate: dict[float, list[xr.Dataset]] = {}
+    for c in norm:
+        for ds in c.values():
+            by_rate.setdefault(
+                round(float(ds.attrs.get("sample_rate", 0.0)), 9), []).append(ds)
     out: dict[int, xr.Dataset] = {}
-    for lv in sorted({lv for c in norm for lv in c}):
-        parts = [c[lv] for c in norm if lv in c]
+    for i, rate in enumerate(sorted(by_rate, reverse=True)):
+        parts = by_rate[rate]
         base = parts[0]
-        sr = float(base.attrs.get("sample_rate", 0.0))
         for j, p in enumerate(parts[1:], start=2):
-            sr_j = float(p.attrs.get("sample_rate", 0.0))
-            if abs(sr_j - sr) > 1e-9 * max(sr, sr_j, 1.0):
-                raise ValueError(
-                    f"merge fc: input {j} level {lv} has sample_rate "
-                    f"{sr_j} != {sr} — decimation levels do not correspond")
             for key in ("num_samples_window", "overlap", "window_type"):
                 if str(p.attrs.get(key, "")) != str(base.attrs.get(key, "")):
                     _log.warning(
-                        "merge fc: input %d level %d %s=%r differs from "
+                        "merge fc: rate %g contributor %d %s=%r differs from "
                         "%r — mixed window settings change the banding",
-                        j, lv, key, p.attrs.get(key), base.attrs.get(key))
+                        rate, j, key, p.attrs.get(key), base.attrs.get(key))
         vars0 = [str(v) for v in base.data_vars]
         common = set(vars0)
         for p in parts[1:]:
@@ -1864,11 +1871,11 @@ def merge_fc_containers(containers):
             if n_kept == 0:
                 raise ValueError(
                     "merge fc: input frequency grids do not intersect at "
-                    f"level {lv}")
+                    f"rate {rate}")
             if n_kept < f0.size:
                 _log.warning(
-                    "merge fc: level %d frequency grids differ — intersected "
-                    "to %d of %d bins (mixed window settings?)", lv, n_kept,
+                    "merge fc: rate %g frequency grids differ — intersected "
+                    "to %d of %d bins (mixed window settings?)", rate, n_kept,
                     f0.size)
             f0 = f0[keep]
             for p, g in zip(parts, freqs):
@@ -1888,7 +1895,7 @@ def merge_fc_containers(containers):
                 if not np.all(np.isclose(f0, g[pi], rtol=1e-3, atol=0.0)):
                     raise ValueError(
                         "merge fc: input frequency grids do not intersect "
-                        f"at level {lv}")
+                        f"at rate {rate}")
                 sliced.append(
                     p.isel(frequency=pi).assign_coords(frequency=f0))
         merged = xr.concat(sliced, dim="time")
@@ -1896,11 +1903,11 @@ def merge_fc_containers(containers):
         times = merged["time"].values
         if times.size > 1 and np.any(np.diff(times) == np.timedelta64(0)):
             _log.warning(
-                "merge fc: level %d has duplicate/overlapping window times "
-                "across inputs", lv)
+                "merge fc: rate %g has duplicate/overlapping window times "
+                "across inputs", rate)
         merged = merged[keep_vars]
         merged.attrs = dict(base.attrs)
-        out[lv] = merged
+        out[i] = merged
     return out
 
 

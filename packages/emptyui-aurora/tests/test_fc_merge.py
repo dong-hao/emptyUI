@@ -116,13 +116,22 @@ def test_merge_fc_drops_missing_channels(caplog):
                              _fc(t, f, chans=("hz",), seed=12)])
 
 
-def test_merge_fc_sample_rate_mismatch_errors():
+def test_merge_fc_mixed_rates_rekey_by_rate():
+    """Levels are keyed by ACTUAL sample rate, not decimation index: a
+    burst archive's rate families (whose cascade levels do not correspond
+    by index) merge into consecutive int levels in DESCENDING rate order
+ (DESIGN §24.8)."""
     t = pd.date_range("2024-01-01", periods=2, freq="s")
     f = _freqs()
     a = _fc(t, f, sr=8.0, seed=13)
     b = _fc(t, f, sr=2.0, seed=14)
-    with pytest.raises(ValueError, match="sample_rate"):
-        merge_fc_containers([a, b])
+    merged = merge_fc_containers([a, b])
+    assert sorted(merged) == [0, 1]
+    assert merged[0].attrs["sample_rate"] == 8.0
+    assert merged[1].attrs["sample_rate"] == 2.0
+    # single-rate inputs reproduce the input indices exactly
+    merged2 = merge_fc_containers([a, a.isel(time=slice(0, 1))])
+    assert sorted(merged2) == [0]
 
 
 def test_merge_fc_requires_input():
