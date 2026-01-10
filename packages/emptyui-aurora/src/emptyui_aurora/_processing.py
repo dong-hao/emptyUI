@@ -1572,10 +1572,12 @@ def _period_bands(fc, periods_per_octave=4):
 
 def _container_geometry(levels):
     """Common per-level geometry of a multi-level fc container, or ``None``
-    when it cannot be derived (missing attrs, non-uniform level ratios,
-    non-constant window). Returns a list (shallow→deep) of dicts with
-    ``fs`` (level sample rate), ``df`` (bin spacing), ``f_ceil`` (Fs/4) and
-    ``f_floor`` (window/4) plus the cascade ``factor``."""
+    when it cannot be derived (missing attrs, non-constant window). Returns
+    a list (shallow→deep) of dicts with ``fs`` (level sample rate), ``df``
+    (bin spacing), ``f_ceil`` (Fs/4) and ``f_floor`` (window/4) plus the
+    cascade ``factor`` (None for non-uniform rate steps — burst archives
+    mix rate families whose ratios are not the cascade factor; the
+    template still applies per level through each level's own df)."""
     items = sorted(levels.items())
     infos = []
     window = None
@@ -1595,13 +1597,14 @@ def _container_geometry(levels):
             return None
         infos.append({"fs": fs, "df": fs / n,
                       "f_ceil": fs / 4.0, "f_floor": 4.0 * fs / n})
-    factor = 1
+    factor = None
     rates = [i["fs"] for i in infos]
     if len(rates) > 1:
-        ratios = [round(r / s) for r, s in pairwise(rates)]
-        if len(set(ratios)) != 1 or ratios[0] < 2:
-            return None
-        factor = ratios[0]
+        ratios = [r / s for r, s in pairwise(rates)]
+        if (all(abs(r - round(r)) < 1e-6 for r in ratios)
+                and len({round(r) for r in ratios}) == 1
+                and round(ratios[0]) >= 2):
+            factor = int(round(ratios[0]))
     return {"levels": [lv for lv, _ in items], "infos": infos,
             "factor": factor, "window": window}
 
@@ -1729,7 +1732,64 @@ def _l2u_band_table(levels, min_bins_per_band=40.0, t_short=None):
         # shortest → longest period (descending k), like the template path
         chosen = sorted(chosen, reverse=True)
         out[lv] = [((k2 + 0.5) * df, (k1 - 0.5) * df) for k1, k2 in chosen]
+    out = _resolve_cross_level_claims(out, levels)
     return _clip_head_bands(out, t_short)
+
+
+def _resolve_cross_level_claims(out, levels):
+    """Deepest-rate-first period tiling across decimation levels (DESIGN
+    §24.8): on aligned single-rate cascades the template's level spans
+    already abut (nothing to resolve), but a burst archive's rate families
+    are NOT related by the cascade factor (150/15 = 10) — their level spans
+    overlap and the same periods would be estimated twice with slightly
+    different band centers (the duplicate/overlapping long-period points).
+    The same deepest-wins rule ``merge_tf_levels`` applies, applied here at
+    the SOURCE so the sort diagnostics and the estimate share one table: a
+    period is estimated by the deepest (lowest-rate) level that covers it;
+    shallower levels' bands are clipped to the unclaimed remainder (a band
+    straddling a claim keeps only its unclaimed part; fully-claimed bands
+    are dropped)."""
+    def rate_of(lv):
+        return float(levels[lv].attrs.get("sample_rate", np.inf))
+
+    claimed = []  # merged ascending period intervals
+    for lv in sorted(out, key=rate_of):  # deepest (lowest rate) first
+        kept = []
+        for f_hi, f_lo in out[lv]:
+            t_lo, t_hi = 1.0 / f_hi, 1.0 / f_lo  # band's period span
+            # subtract the claimed intervals
+            seg = [(t_lo, t_hi)]
+            for c0, c1 in claimed:
+                nxt = []
+                for a, b in seg:
+                    if c1 <= a or c0 >= b:
+                        nxt.append((a, b))
+                        continue
+                    if c0 > a:
+                        nxt.append((a, c0))
+                    if c1 < b:
+                        nxt.append((c1, b))
+                seg = nxt
+                if not seg:
+                    break
+            if not seg:
+                continue  # fully claimed by deeper levels
+            center = 1.0 / np.sqrt(f_hi * f_lo)
+            piece = (min(seg, key=lambda p: abs(0.5 * (p[0] + p[1]) - center))
+                     if len(seg) > 1 else seg[0])
+            kept.append((1.0 / piece[0], 1.0 / piece[1]))
+            # claim this band's span (merged with touching claims)
+            new = (t_lo, t_hi)
+            merged_claims, pending = [], new
+            for c0, c1 in claimed:
+                if pending[1] < c0 or pending[0] > c1:
+                    merged_claims.append((c0, c1))
+                else:
+                    pending = (min(pending[0], c0), max(pending[1], c1))
+            merged_claims.append(pending)
+            claimed = sorted(merged_claims)
+        out[lv] = kept
+    return out
 
 
 def _clip_head_bands(owned, t_short):
@@ -2429,6 +2489,7 @@ def estimate_tf_levels(
             "input_channels": list(input_channels),
             "output_channels": list(output_channels),
             "channel_nomenclature": keyword,
+            "periods_per_octave": periods_per_octave,
         }
         entry.update(_identity_attrs(fc))
         result[int(level)] = entry
@@ -2449,12 +2510,17 @@ def merge_tf_levels(per_level):
     """Merge per-decimation-level TF estimates into a single broadband
     (periods, Z, Z_err).
 
-    Levels now share a common octave grid and overlap (each covers from Fs/4 up
-    to window/4), so the same period can be estimated by several levels. Because
-    a deeper level has a longer window (more cycles of a long period), for each
-    period we keep the estimate from the **deepest** level that covers it;
-    degenerate (all-zero) bands are dropped. The resulting grid is strictly
-    ascending and free of duplicates.
+    Levels overlap (each covers from Fs/4 up to window/4), so the same
+    period can be estimated by several levels. Because a deeper level has
+    a longer window (more cycles of a long period), for each period we
+    keep the estimate from the **deepest** level that covers it;
+    degenerate (all-zero) bands are dropped. Dedup is tolerance-based on
+    the shared octave grid (within half the level's center spacing,
+    1/(2·ppo) octaves): aligned cascades collide exactly (legacy exact
+    dedup), while a burst archive's misaligned rate families interleave
+    near-duplicate centers that must also resolve to one estimate (DESIGN
+    §24.8). The resulting grid is strictly ascending and free of
+    duplicates.
     """
     merged: dict[float, np.ndarray] = {}
     merged_err: dict[float, np.ndarray] = {}
@@ -2472,10 +2538,14 @@ def merge_tf_levels(per_level):
             if err.ndim == 0:
                 err = np.full(len(Z), float(err))
         ok = ~np.all(np.abs(Z).reshape(len(Z), -1) == 0, axis=1)
+        ppo = float(per_level[lv].get("periods_per_octave", 3) or 3)
+        half_w = 0.5 / ppo  # half the level's center spacing, in octaves
         for p, z, e in zip(P[ok], Z[ok], err[ok]):
-            key = round(float(np.log2(p)), 8)  # shared log2 grid -> exact dedup
-            merged.setdefault(key, z)
-            merged_err.setdefault(key, e)
+            lp = float(np.log2(p))
+            if any(abs(lp - k) < half_w for k in merged):
+                continue  # already estimated by a deeper level
+            merged[round(lp, 8)] = z
+            merged_err[round(lp, 8)] = e
     if not merged:
         raise ValueError("no non-degenerate TF bands to merge")
     keys = sorted(merged)

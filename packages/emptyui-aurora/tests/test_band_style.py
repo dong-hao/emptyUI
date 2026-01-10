@@ -561,3 +561,82 @@ def test_estimate_tf_manual_parity():
     from emptyui_aurora._processing import _resolve_period_bands
     with pytest.raises(ValueError, match="requires an explicit per-level band table"):
         _resolve_period_bands(fc, 4, "manual")
+
+
+def _burst_container():
+    """Minimal multi-family fc container (attrs only — the table builder
+    works from attrs + sizes): the official MTU-5A MT-mode rate ladder."""
+    import xarray as xr
+
+    rates = [2400.0, 600.0, 150.0, 37.5, 15.0, 3.75, 0.9375, 0.234375]
+    out = {}
+    for lv, fs in enumerate(rates):
+        out[lv] = xr.Dataset(
+            {"hx": (("frequency", "time"), np.zeros((129, 100), complex))},
+            coords={"frequency": np.arange(1, 130) * (fs / 256),
+                    "time": np.arange(100)},
+            attrs={"sample_rate": fs, "num_samples_window": 256})
+    return out
+
+
+def test_l2u_cross_level_claims_tile_burst_families():
+    """Multi-family burst container: the level spans overlap (the rate
+    families are not related by the cascade factor — 150/15 = 10), so the
+    same periods would be estimated twice with slightly different centers.
+    The claim pass tiles the table deepest-rate-first: no band span
+    overlaps another level's, every level keeps bands."""
+    from emptyui_aurora._processing import _l2u_band_table
+
+    levels = _burst_container()
+    tbl = _l2u_band_table(levels, min_bins_per_band=20.0)
+    assert tbl is not None
+    assert all(tbl[lv] for lv in tbl)
+    spans = sorted((1.0 / lo, 1.0 / hi)
+                   for lv in tbl for hi, lo in tbl[lv])
+    for a, b in pairwise(spans):
+        assert b[0] >= a[1] - 1e-12, (a, b)  # no cross-level overlap
+
+
+def test_l2u_claims_leave_aligned_cascades_unchanged():
+    """A uniform single-rate cascade's template spans abut — the claims
+    never bite (the pre-burst l2u table is reproduced exactly)."""
+    from emptyui_aurora._processing import _container_geometry, _l2u_band_table
+
+    levels = {}
+    for lv in range(4):
+        fs = 150.0 / 4**lv
+        levels[lv] = _burst_container()[0].assign_attrs(
+            sample_rate=fs)
+    g = _container_geometry(levels)
+    assert g is not None and g["factor"] == 4  # uniform cascade detected
+    tbl = _l2u_band_table(levels, min_bins_per_band=0)
+    # the template survives on every level (no bands claimed away)
+    counts = {len(v) for v in tbl.values()}
+    assert len(counts) == 1
+
+
+def test_merge_tf_levels_tolerance_dedup_misaligned_families():
+    """merge_tf_levels resolves near-duplicate centers from misaligned
+    rate families (deepest wins within half the center spacing), while
+    aligned cascades keep exact collisions and distinct neighbors."""
+    from emptyui_aurora._processing import merge_tf_levels
+
+    def _entry(periods, ppo=3):
+        n = len(periods)
+        return {"periods": np.asarray(periods, float),
+                "Z": np.ones((n, 2, 2), complex),
+                "Z_err": np.full(n, 0.1),
+                "periods_per_octave": ppo}
+
+    # deeper level (key 1) estimates 0.95/1.9/3.8 s; shallower (key 0)
+    # 1.0/2.0/4.0 s — every center within half a spacing (1/6 oct) of a
+    # deeper one must be dropped
+    per_level = {0: _entry([1.0, 2.0, 4.0]),
+                 1: _entry([0.95, 1.9, 3.8])}
+    p, _Z, _e = merge_tf_levels(per_level)
+    np.testing.assert_allclose(p, [0.95, 1.9, 3.8])
+    # distinct neighbors survive: ppo=6 spacing (0.167 oct) > half-width
+    per_level = {0: _entry([1.0, 1.122, 1.26], ppo=6),
+                 1: _entry([2.0, 2.24, 2.52], ppo=6)}
+    p, _Z, _e = merge_tf_levels(per_level)
+    assert p.size == 6
