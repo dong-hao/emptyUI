@@ -2732,17 +2732,44 @@ segmented readers track per-segment GPS time, `missing_count` and
 saturation counts in a sub-header — the analog of our per-block tags,
 relevant for the later 5C loader.
 
-**Performance note (2026-09-14).** Parsing is NOT the bottleneck: the
-full real-corpus ingestion profiled at ~137 s of which **~120 s was the
-MTH5 archive write** (244 `from_runts` calls, each running mt_metadata
-validation). Fixes applied: single pass per file (tags feed the quality
-aggregation, samples the segment grouping), `run_metadata` passed into
-the `RunTS` constructor (avoids the per-run validation churn and its
-warning spam), and the real-corpus test reshaped to parse-only
-assertions plus a single-rate archive round trip (test time 166 s →
-16 s). Known production cost: archive writes scale ~0.5 s/run — a
-future optimization target if slot counts reach thousands (batch
-channel writes / skip validation).
+**Performance note (2026-09-14, updated after the browser e2e).** The
+real-browser e2e (workflow: load all rates → Build FC → sort → estimate →
+plot) exposed two mth5/mt_metadata cost centers far beyond parsing:
+
+- **`RunGroup.to_runts` ≈ 7 s per run** — a pydantic
+  `validate_assignment` + deepcopy storm (2M deepcopy calls per run,
+  station metadata re-copied per channel). Build FC bypasses it:
+  channels are read via `ChannelDataset.to_xarray` (0.17 s for 5
+  channels — `metadata.to_dict` without validation) and wrapped in a
+  duck payload (`.dataset`/`.sample_rate`/`.start`); ~40x faster.
+- **`StationGroup.metadata` ≈ 20 s per access** on a burst archive (full
+  HDF5 metadata rebuild incl. pyproj datum validation per attribute) —
+  Build FC originally touched it once per run (~80 min for 244 runs:
+  the "never finishes" report). Fixed by hoisting the access out of the
+  run loop; per-run rate/start come from the channel attrs/time coords.
+- `RunGroup.from_runts` ≈ 0.55 s per run in the loader — replaced by
+  `add_run(run_metadata=...)` + `from_channel_ts` (5x cheaper). Ingest
+  of the full corpus is ~2.5 min (one-time; mt_metadata object churn
+  dominates — a future optimization target if slot counts reach
+  thousands).
+
+Measured pipeline (full corpus, user params: window 256, 3 decimation
+levels, hanning + deep taper from L3, first-difference PW, epoch anchor):
+ingest 159 s; **Build FC 265 s** (244 runs); Coherence Sort (per_bin)
+7.4 s; Estimate TF 0.8 s → 78 periods. The merged FC database carries
+**8 rate-keyed levels** (2400 / 600 / 150 / 37.5 / 15 / 3.75 / 0.9375 /
+0.234 Hz) — the cross-family union assembling exactly as designed.
+
+**Mixed-rate merge correctness (fixed 2026-09-14).** The first e2e
+attempt crashed in `merge_fc_containers`: decimation-level INDICES do
+not correspond across rate families (a 150 Hz run's L0 is 150 Hz while a
+2400 Hz run's L2 is also 150 Hz; alphabetical run order interleaves
+`sr15`/`sr150`/`sr2400` families arbitrarily). Levels are now keyed by
+their ACTUAL sample rate (the only commensurable identity across
+cascades) and the output re-keyed to consecutive ints in DESCENDING
+rate order — single-rate inputs reproduce the input indices exactly
+(backward compatible; the old same-index rate-mismatch error is
+superseded: mixing rates is the feature, not an error).
 
 **Open decisions — resolved (2026-09-14).** (a) run ids follow the mth5
 convention `sr{rate}_{NNNN:04d}`; (b) Build FC persists per-run FCs OFF
@@ -2768,3 +2795,61 @@ runs, skipif absent); Build FC node tests (epoch-anchored merged grid,
 identity attrs, Estimate TF flow). Full suite 385 passing. The tz
 alignment fix in `_clock_zero_head_skip` (naive epoch vs aware/naive
 payload starts) came out of the Build FC tests.
+
+**Browser e2e round (2026-09-15): speed + duplicate-period fixes.** The
+user's e2e (load all rates → Build FC → sort → estimate) reported
+hundreds of seconds for the load and >10 min without finishing for
+Build FC. Root causes — upstream mt_metadata/mth5 pathologies plus one
+burst-specific correctness bug:
+
+- **pyproj CRS rebuild storm (the big one)**: mt_metadata's datum
+  validator (`Location.validate_datum`) constructs a fresh
+  `pyproj.CRS` on essentially EVERY metadata attribute update — 25,625
+  CRS constructions (75 s) for a single Build FC pass over 121 slot
+  runs, triggered by mth5's uncached `get_channel`/`metadata`/recache
+  paths. Fix: `emptyui_mth5._compat.apply_crs_cache()` LRU-caches
+  `pyproj.CRS.from_user_input` (CRS objects are immutable, datum strings
+  repeat exhaustively; applied at package import). Build FC 5 slots:
+  126 s → 22 s.
+- **`RunGroup.to_runts` ≈ 7 s/run** (deepcopy + validation storm,
+  station metadata re-copied per channel): Build FC reads channels via
+  `ChannelDataset.to_xarray` (0.17 s/run) wrapped in a duck payload.
+- **`StationGroup.metadata` ≈ 20 s per access** (full HDF5 metadata
+  rebuild incl. pyproj): hoisted out of Build FC's run loop; per-run
+  rate/start come from the channel attrs/time coords.
+- **`RunGroup.from_runts` ≈ 0.55 s/run** in the loader →
+  `add_run(run_metadata=...)` + `from_channel_ts` (5x cheaper).
+- Ingest 160 → 48 s; Build FC 265 → 72 s; total pipeline ~2 min.
+
+**Duplicate/overlapping long-period points (fixed).** A rigorous
+cascade should tile the spectrum without duplicates; two causes: (a)
+`_container_geometry` bailed (→ the l2u table silently fell back to the
+per-level bin walk) because the burst families' rate steps are not a
+single uniform cascade (37.5/15 = 2.5) — the geometry now only requires
+a constant window and per-level df (the template applies per level
+anyway; `factor` is None for non-uniform steps); (b) the misaligned
+families (150/15 = 10, not a power of 2) interleave near-duplicate band
+centers that the exact log2 dedup could not collide. Fixes at the
+source: `_l2u_band_table` gains `_resolve_cross_level_claims` —
+deepest-rate-first period tiling (a period is estimated by the deepest
+level that covers it; shallower bands are clipped to the unclaimed
+remainder), the same deepest-wins rule as the merge, applied so sort
+diagnostics and estimate share one table — and `merge_tf_levels` dedups
+tolerance-based within half the level's center spacing (1/(2·ppo)
+octaves; aligned cascades still collide exactly). Aligned single-rate
+cascades are untouched (the template's level spans abut — claims never
+bite; SDG31 parity uses manual-band overrides anyway).
+
+**Per-family decimation trim (user scheme, implemented).** The
+continuous (lowest-rate) family carries the full `decimation_levels`
+cascade; higher-rate families decimate only until their rate would
+reach the next family's native rate (`d_max = ceil(log2(r/r_next)/
+log2(factor)) − 1`): 2400 Hz slots decimate once (→ 600), 150 Hz slots
+once (→ 37.5), the 15 Hz stream takes the full parameter. Beyond the
+compute saving this prevents same-rate levels computed from different
+families from double-covering identical acquisition windows.
+
+Measured e2e (full corpus, user params): ingest 48 s; Build FC 72 s (8
+rate-keyed levels); sort + estimate 7 s → 46 periods, strictly
+monotonic, min gap 0.263 octave (the template's own ladder spacing — no
+near-duplicates).
