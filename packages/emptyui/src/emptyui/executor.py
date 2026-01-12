@@ -499,6 +499,19 @@ class Executor:
                     elif param.default is not None:
                         kwargs.setdefault(param.name, param.default)
 
+                # stale params (§24.9): a saved workflow may carry params a
+                # node no longer declares (removed/refactored options) —
+                # they are ignored, but silently, so warn once per node
+                stale = sorted(set(wnode.params) - {p.name for p in manifest.params})
+                if stale:
+                    emit({
+                        "event": "node_progress",
+                        "node": node_id,
+                        "frac": 0.0,
+                        "msg": f"ignoring params not declared by node type "
+                               f"'{wnode.type}': {', '.join(stale)}",
+                    })
+
                 # remote-mode path confinement (§17.2): inputs stay inside
                 # the data root, outputs resolve into this run's workspace
                 if data_root is not None:

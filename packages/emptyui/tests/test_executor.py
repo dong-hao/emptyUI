@@ -442,3 +442,50 @@ def test_ts_summary_kind_field_and_mt_getattr_safety():
 
     assert _ts_summary(Tricky()) is None
     assert _ts_summary(42) is None
+
+
+def test_stale_params_warn_and_are_ignored():
+    """§24.9: saved workflows may carry params a node no longer declares —
+    execution proceeds with the manifest params only, and the stale ones
+    surface as a node-level progress note (not a silent no-op)."""
+    from emptyui import Input, Node, Output, Param
+
+    reg = Registry()
+
+    class Source(Node):
+        type = "test.source2"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            return {"data": [1.0, 2.0, 3.0]}
+
+    class Scale(Node):
+        type = "test.scale2"
+        inputs = (Input("data", "ts.run"),)
+        outputs = (Output("scaled", "ts.run"),)
+        params = (Param("factor", "number", default=2.0),)
+
+        def execute(self, ctx, data, factor=2.0):
+            return {"scaled": [v * factor for v in data]}
+
+    reg.add(Source)
+    reg.add(Scale)
+    ex = Executor(reg)
+    events = []
+    wf = Workflow(
+        nodes=[
+            WorkflowNode(id="n1", type="test.source2"),
+            WorkflowNode(id="n2", type="test.scale2",
+                         params={"factor": 10.0, "band_style": "l2u",
+                                 "coherence_trim": True}),
+        ],
+        edges=[Edge(id="e1", source="n1", source_port="data", target="n2", target_port="data")],
+    )
+    summary = ex.run(wf, emit=events.append)
+    assert summary["status"] == "completed"
+    stale = [e for e in events
+             if e["event"] == "node_progress"
+             and "not declared" in str(e.get("msg", ""))]
+    assert len(stale) == 1, stale
+    assert "band_style" in stale[0]["msg"]
+    assert "coherence_trim" in stale[0]["msg"]
