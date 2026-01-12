@@ -318,21 +318,24 @@ def test_l2u_is_the_default_style():
                                np.asarray(per_l2u[0]["periods"]))
 
 
-def test_coherence_sort_fc_accepts_both_styles():
-    """Smoke: coherence_sort_fc runs end-to-end with both schemes."""
+def test_coherence_sort_fc_no_band_geometry():
+    """§24.9: the sort's API is band-free — legacy band-geometry kwargs are
+    rejected rather than silently accepted."""
     source = synthetic_source(2)
     runts = synthetic_runts(source, seed=2)
     fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
-    for style in ("uniform", "l2u"):
-        out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
-                                         coherence_min=0.25,
-                                         coherence_max=0.98, mode="weight",
-                                         band_style=style)
-        assert rows
-        assert np.isfinite(out["ex"].values).any()
+    with pytest.raises(TypeError):
+        coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                          coherence_min=0.25, coherence_max=0.98,
+                          mode="weight", band_style="uniform")
+    out, _, rows = coherence_sort_fc(fc, None, ["hx", "hy"], ["ex", "ey"],
+                                     coherence_min=0.25,
+                                     coherence_max=0.98, mode="weight")
+    assert rows
+    assert np.isfinite(out["ex"].values).any()
 
 
-def test_node_estimate_tf_and_coherence_sort_accept_band_style(tmp_path):
+def test_node_estimate_tf_accepts_band_style(tmp_path):
     from emptyui.context import RunContext
     from emptyui.store import DataStore
     from emptyui_aurora.process import CoherenceSort, EstimateTF
@@ -349,8 +352,11 @@ def test_node_estimate_tf_and_coherence_sort_accept_band_style(tmp_path):
     source = synthetic_source(3)
     cs_runts = synthetic_runts(source, seed=3)
     cs_fc = synthetic_fc(cs_runts, ["hx", "hy"], ["ex", "ey"])
-    cs_result = CoherenceSort().execute(ctx, cs_fc, band_style="uniform")
-    assert 0 in cs_result["fc"]
+    # §24.9: the sort node declares no banding params — passing the removed
+    # kwarg is a signature error (the executor ignores stale params from
+    # saved workflows, but the node API itself is band-free)
+    with pytest.raises(TypeError):
+        CoherenceSort().execute(ctx, cs_fc, band_style="uniform")
 
 
 # --- §14.9 frequency-grid determination: l2u coarsening + head clip ---
@@ -439,22 +445,6 @@ def test_head_clip_applies_to_l2u_fallback():
     assert per
     for entry in per.values():
         assert np.all(np.asarray(entry["periods"]) >= 30.0 - 1e-9)
-
-
-def test_coherence_sort_fc_head_clip_uniform():
-    """Coherence Sort honors t_short under the uniform scheme (it shares the
-    band-resolution choke point): no diagnostic row carries a shorter
-    period."""
-    source = synthetic_source(2)
-    runts = synthetic_runts(source, seed=2)
-    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
-    out, _, rows = coherence_sort_fc(
-        fc, None, ["hx", "hy"], ["ex", "ey"], coherence_min=0.25,
-        coherence_max=0.98, mode="weight", band_style="uniform",
-        t_short=4.0)
-    assert rows
-    assert all(r["period"] >= 4.0 - 1e-9 for r in rows)
-    assert np.isfinite(out["ex"].values).any()
 
 
 def test_head_clip_zero_is_noop_for_both_schemes():

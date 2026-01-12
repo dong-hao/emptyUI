@@ -180,8 +180,7 @@ def run_variant(reg, ctx, local, remote, freqs_off, window=128,
                 [str(c) for c in sample.data_vars], None)
             fc_l, fc_r, _ = coherence_sort_fcs(
                 fc_l, fc_r, ins, outs, coherence_min=0.25,
-                coherence_max=0.98, mode=sort_mode, trim=True,
-                periods_per_octave=3, band_style="l2u")
+                coherence_max=0.98, mode=sort_mode)
     sample = next(iter(fc_l.values()))
     ins, outs, kw = classify_channels(
         [str(c) for c in sample.data_vars], None)

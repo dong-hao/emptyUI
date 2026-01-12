@@ -1,6 +1,6 @@
-"""Plot Coherency node (DESIGN §20.1): fc-direct per-band multiple
-coherence — numerically identical to the Coherence Sort statistic (shared
-`_band_coherence` helper)."""
+"""Plot Coherency node (DESIGN §20.1/§24.9): fc-direct per-frequency-bin
+window-ensemble coherence — the exact statistic Coherence Sort applies
+(shared `_per_bin_coherence` helper). No band geometry anywhere."""
 
 from __future__ import annotations
 
@@ -28,46 +28,47 @@ def _levels(seed=13):
 
 
 def test_plot_matches_coherence_sort_numerically(tmp_path):
-    """The plotted medians equal the sort's diagnostics medians band by band
-    (shared helper — the plot is honest about the statistic the sort uses)."""
+    """The plotted medians equal the sort's per-bin diagnostics (shared
+    `_per_bin_coherence` helper — the plot is honest about the statistic
+    the sort uses)."""
     levels = _levels()
     from emptyui_aurora._processing import (
-        _band_coherence,
-        _bands_from_freq_pairs,
-        _l2u_band_table,
+        _normalize_fc_layout,
+        _per_bin_coherence,
     )
     from emptyui_aurora.process import CoherenceSort
 
-    # recompute the plotted medians through the shared helper (with the
-    # sort's degenerate-band cap, as the node applies it)
-    bands = _l2u_band_table(levels, min_bins_per_band=40.0)
     sample = next(iter(levels.values()))
     ins = [c.strip() for c in sample.attrs["input_channels"].split(",")]
     outs = [c.strip() for c in sample.attrs["output_channels"].split(",")]
-    helper_medians = {}
-    for level, lfc in sorted(levels.items()):
-        lfc = _normalize_fc_layout(lfc)
-        periods, bins_list = _bands_from_freq_pairs(lfc, bands.get(level, []))
-        for p, bins in zip(periods, bins_list):
-            if bins.size == 0:
-                continue
-            coh_e, _ = _band_coherence(lfc, None, ins, outs, bins)
-            if bins.size < len(ins) + 1:
-                coh_e = np.minimum(coh_e, 0.98 - 1e-9)
-            helper_medians[round(float(p), 6)] = float(np.median(coh_e))
 
-    # the sort's diagnostics must carry the identical medians (band
-    # statistic — the per-bin default's diagnostics aggregate differently)
+    res = PlotCoherency().execute(
+        RunContext(workspace=tmp_path, store=DataStore()), levels)
+    assert Path(res["plot"]["path"]).stat().st_size > 1000
+
+    # the sort's per-bin diagnostics carry the identical medians (shared
+    # statistic — per (bin, window) window-ensemble coherence), checked on
+    # one level bin-by-bin
     res2 = CoherenceSort().execute(
-        RunContext(workspace=tmp_path, store=DataStore()), levels,
-        periods_per_octave=4, band_style="l2u", min_bins_per_band=40.0,
-        t_short=0.0, statistic="band")
+        RunContext(workspace=tmp_path, store=DataStore()), levels)
     rows = json.loads(Path(res2["table"]["path"]).read_text())
     assert rows, "sort diagnostics empty"
-    for r in rows:
-        key = round(r["period"], 6)
-        assert key in helper_medians
-        assert helper_medians[key] == pytest.approx(r["median_coherence"])
+
+    lfc = _normalize_fc_layout(levels[0])
+    coh_e, _coh_x = _per_bin_coherence(
+        lfc, None, ins, outs, ensemble_windows=16)
+    freq0 = lfc["frequency"].values
+    rows_l0 = [r for r in rows if r["decimation_level"] == 0]
+    idx = 0
+    for i, fv in enumerate(freq0):
+        if fv <= 0.0:
+            continue  # DC bin — no diagnostics row
+        row = rows_l0[idx]
+        idx += 1
+        med = (float(np.nanmedian(coh_e[i, :]))
+               if np.isfinite(coh_e[i, :]).any() else None)
+        assert row["period"] == pytest.approx(1.0 / fv)
+        assert row["median_coherence_e"] == med
 
 
 def test_node_renders_png_single_and_two_fc(tmp_path):
@@ -90,36 +91,32 @@ def test_node_renders_png_single_and_two_fc(tmp_path):
     assert len(Path(res2["plot"]["path"]).read_bytes()) > 1000
 
 
-def test_inherit_map_matches_estimate_tf():
-    """Same inherit-from-sort declaration as Estimate TF (DESIGN §18.2)."""
+def test_plot_has_no_banding_params():
+    """§24.9: no band-geometry params (or inherit-from-sort) on the plot —
+    it renders the sort's per-bin statistic, not a band aggregation."""
     from emptyui_aurora.plots import PlotCoherency
-    from emptyui_aurora.process import EstimateTF
 
-    assert PlotCoherency().manifest()["inherit"] == EstimateTF().manifest()["inherit"]
+    declared = {p.name for p in PlotCoherency.params}
+    assert declared == {"coherence_min", "coherence_max",
+                        "ensemble_windows", "smooth_bins"}
+    assert not PlotCoherency().manifest()["inherit"]
+    assert not hasattr(PlotCoherency, "inherit") or not getattr(
+        PlotCoherency, "inherit", None)
 
 
-def test_no_bands_raises(tmp_path):
+def test_no_usable_bins_raises(tmp_path):
+    """An fc with no usable electric outputs is refused, not plotted."""
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    fc = synthetic_fc(synthetic_runts(synthetic_source(14), seed=14),
-                      ["hx", "hy"], ["ex", "ey"])
-    fc = _normalize_fc_layout(fc)
-    # a window starved to nothing: t_short beyond the longest band clips all
-    with pytest.raises(ValueError, match="no usable frequency bands"):
-        PlotCoherency().execute(ctx, fc, periods_per_octave=4,
-                                band_style="l2u", min_bins_per_band=0.0,
-                                t_short=1e9)
+    from _synthetic import synthetic_runts, synthetic_source
 
-
-def test_uniform_head_clip_raises_when_all_clipped(tmp_path):
-    """The uniform scheme honors t_short (previously ignored): clipping
-    every band must raise the same 'no usable frequency bands' error the
-    l2u path raises — before the fix, uniform + t_short=1e9 silently
-    plotted the unclipped head."""
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    fc = synthetic_fc(synthetic_runts(synthetic_source(14), seed=14),
-                      ["hx", "hy"], ["ex", "ey"])
-    fc = _normalize_fc_layout(fc)
-    with pytest.raises(ValueError, match="no usable frequency bands"):
-        PlotCoherency().execute(ctx, fc, periods_per_octave=4,
-                                band_style="uniform", min_bins_per_band=0.0,
-                                t_short=1e9)
+    remote = compute_fc_levels(
+        synthetic_runts(synthetic_source(16), with_e=False, seed=16),
+        ["hx", "hy"], "", num_decimations=2, factor=4,
+        num_samples_window=256, overlap=0.5, window_type="hamming")
+    # drop the attrs the node uses to classify outputs — with no electric
+    # channel in the container and no attrs hint, the node must refuse
+    for fc in remote.values():
+        fc.attrs.pop("output_channels", None)
+    with pytest.raises(ValueError):
+        PlotCoherency().execute(
+            RunContext(workspace=tmp_path, store=DataStore()), remote)

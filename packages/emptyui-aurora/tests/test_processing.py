@@ -517,22 +517,21 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
     assert np.all(np.isfinite(fc["ex"].values))
 
 
-def test_estimate_tf_inherits_banding_and_remote_reference_rule():
-    """Manifest-level contracts (DESIGN §18.2 + §4 `enabled_when`):
-    - Estimate TF declares chain-walking inherit of the banding params from
-      the fc chain (an upstream Coherence Sort supplies them);
+def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
+    """Manifest-level contracts (DESIGN §24.9 + §4 `enabled_when`):
+    - Estimate TF declares NO chain-walking inherit of banding params from
+      the fc chain (§24.9 — the sort is band-free; the estimator owns
+      banding);
     - remote_reference declares its estimator condition instead of the
       frontend string-sniffing the engine value."""
-    from emptyui_aurora.process import EstimateTF
+    from emptyui_aurora.process import EstimateTF, CoherenceSort
 
     m = EstimateTF().manifest()
-    inherit = m["inherit"]["fc"]
-    for name in ("band_style", "periods_per_octave",
-                 "min_bins_per_band", "t_short"):
-        assert inherit[name] == name
-        # the inherited param exists on the upstream Coherence Sort too
-        from emptyui_aurora.process import CoherenceSort
-        assert any(p["name"] == name for p in CoherenceSort().manifest()["params"])
+    assert not m["inherit"], "banding inherit from the sort must be gone"
+    # the upstream sort indeed declares none of the banding params anymore
+    sort_params = {p["name"] for p in CoherenceSort().manifest()["params"]}
+    assert not ({"band_style", "periods_per_octave",
+                 "min_bins_per_band", "t_short"} & sort_params)
 
     rr = next(p for p in m["params"] if p["name"] == "remote_reference")
     assert rr["enabled_when"] == {

@@ -83,8 +83,7 @@ def sorted_levels(fc_l, fc_r, ins, outs, bands, mode, coherence_min):
     for lv in sorted(fc_l):
         l_out, r_out, rows = coherence_sort_fc(
             fc_l[lv], fc_r.get(lv), ins, outs,
-            coherence_min=coherence_min, coherence_max=1.0, mode=mode,
-            band_style="l2u", bands_override=bands.get(lv, []))
+            coherence_min=coherence_min, coherence_max=1.0, mode=mode)
         out_l[lv] = l_out
         out_r[lv] = r_out
         diag[lv] = rows

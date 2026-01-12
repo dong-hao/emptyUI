@@ -272,7 +272,11 @@ class BuildFC(Node):
         Param("input_channels", "string", default="", optional=True),
         Param("output_channels", "string", default="", optional=True),
         Param("channel_nomenclature", "select", label="Channel nomenclature",
-              options=("auto", "lemi12", "lemi34"), default="auto"),
+              options=_NOMENCLATURE_OPTIONS, default="auto",
+              description="mt_metadata CHANNEL_MAPS keyword: maps standard "
+                          "components (ex/ey/hx/hy/hz) to the instrument's "
+                          "actual channel names and derives magnetic units",
+              cascade={k: list(v) for k, v in _NOMENCLATURE_PRESETS.items()}),
         Param("magnetic_unit", "select", label="Magnetic unit",
               options=("auto", "h", "b"), default="auto"),
         Param("e_dipole_length_m", "number", label="E dipole length (m)",
@@ -468,7 +472,7 @@ class CoherenceSort(Node):
     tooltip = "Down-weight or drop low-coherence FC windows before TF estimation."
     description = (
         "EMTF-style coherence sort: down-weight (or drop) Fourier-coefficient "
-        "windows whose per-window multiple coherence falls outside "
+        "windows whose per-frequency window-ensemble coherence falls outside "
         "[coherence_min, coherence_max] — low coherence = noise-dominated "
         "windows; coherence ≈ 1 can be an overfit/coherent-noise signature. "
         "With a remote 'ref fc', the criterion is the conservative minimum of "
@@ -476,12 +480,9 @@ class CoherenceSort(Node):
         "transfer coherence (remote reference replaces the local magnetic "
         "channels, so local E/H coherence is the wrong measure), and the "
         "single shared weight is applied to both FCs (exact weighted-LS "
-        "semantics for RME_RR). Semantics note: the criterion is a "
-        "per-window multiple coherence over the band's frequency-bin "
-        "ensemble (a conservative broadband QC heuristic), not EMTF's "
-        "window-ensemble coherence at each frequency — a true EMTF-style "
-        "variant is a planned M4 item. Optional band-edge trimming removes "
-        "bands whose retained windows are still below the lower bound."
+        "semantics for RME_RR). The weights are per (frequency bin, window) "
+        "and independent of band geometry: band construction is Estimate "
+        "TF's concern (DESIGN §24.9)."
     )
     category = "Processing"
     inputs = (
@@ -507,67 +508,21 @@ class CoherenceSort(Node):
               description="weight = smooth down-weighting outside the bounds "
                           "(rows scaled by √w); drop = exclude windows "
                           "outside the bounds (NaN); off = no sorting."),
-        Param("coherence_trim", "boolean", label="Band-edge trimming",
-              default=False,
-              description="Remove bands whose retained-window median "
-                          "coherence is below the lower bound (NaN)."),
-        Param("periods_per_octave", "integer", label="Periods per octave",
-              default=3, min=1,
-              description="Band geometry (diagnostics aggregation; the "
-                          "per-bin weighting is band-independent) — must "
-                          "match the 'Estimate TF' setting for the same "
-                          "banding."),
-        Param("band_style", "select", label="Band style",
-              options=("l2u", "uniform"), default="l2u",
-              description="Band construction scheme — must match 'Estimate "
-                          "TF' for consistent banding. 'l2u' (default) is "
-                          "the reference-template table with log-uniform "
-                          "window-starvation coarsening: the same fixed "
-                          "band template at every decimation level, "
-                          "window-starved levels rebuilt as a coarser "
-                          "uniform grid (DESIGN.md §14.9). 'uniform' is "
-                          "the uniform log2-grid partition with "
-                          "merge-based level combination."),
-        Param("min_bins_per_band", "number", label="Min bins per band",
-              default=20.0, min=0,
-              description="Window-starvation coarsening threshold "
-                          "(DESIGN.md §14.9) — must match the 'Estimate "
-                          "TF' setting for the same banding: a level where "
-                          "any band has fewer than this many total samples "
-                          "(windows × band width) is rebuilt as a coarser "
-                          "uniform grid. 0 disables coarsening."),
-        Param("t_short", "number", label="Shortest period (s)",
-              default=0.0, min=0,
-              description="Head clip (DESIGN.md §14.9) — must match the "
-                          "'Estimate TF' setting for the same banding: "
-                          "bands shorter than this are not evaluated. 0 "
-                          "starts at the template's shortest band."),
         Param("apply_below_period", "number", label="Apply below period (s)",
               default=0.0, min=0, optional=True,
-              description="Scope the sorting to the noise-floor head: band "
-                          "center periods at/above this value pass through "
+              description="Scope the sorting to the noise-floor head: bin "
+                          "periods at/above this value pass through "
                           "unsorted (the deep tail is healthy and weighting "
                           "it only perturbs the estimate). 0 = sort all "
-                          "bands."),
-        Param("statistic", "select", label="Statistic",
-              options=("band", "per_bin"), default="per_bin",
-              description="band (legacy): per-window multiple coherence "
-                          "over the estimate's band bins — banding-dependent. "
-                          "per_bin: EMTF-style per-frequency window-ensemble "
-                          "coherence (sliding ±ensemble windows, adjusted-R² "
-                          "bias-corrected) — weights per (bin, window), "
-                          "INDEPENDENT of the band-average method (M4 #7). "
-                          "Plot Coherency renders the band statistic."),
+                          "bins."),
         Param("ensemble_windows", "integer", label="Ensemble windows",
               default=16, min=1,
-              enabled_when=("statistic", ("per_bin",)),
               description="Sliding window-ensemble half-width for the "
                           "per-bin statistic: coherence at each (bin, "
                           "window) is estimated over ±this many windows "
                           "(center included). Larger = smoother/more dof."),
         Param("smooth_bins", "integer", label="Frequency smoothing (bins)",
               default=0, min=0,
-              enabled_when=("statistic", ("per_bin",)),
               description="Pool ±this many adjacent bins into the per-bin "
                           "ensemble (a FIXED smoothing scale, not the "
                           "estimate's band table) — restores dof where "
@@ -576,13 +531,8 @@ class CoherenceSort(Node):
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
-                mode: str = "weight", coherence_trim: bool = False,
-                periods_per_octave: int = 3,
-                band_style: str = "l2u",
-                min_bins_per_band: float = 20.0,
-                t_short: float = 0.0,
+                mode: str = "weight",
                 apply_below_period: float = 0.0,
-                statistic: str = "per_bin",
                 ensemble_windows: int = 16,
                 smooth_bins: int = 0) -> dict[str, Any]:
         import json
@@ -595,26 +545,18 @@ class CoherenceSort(Node):
         out_levels, out_ref, rows = coherence_sort_fcs(
             levels, ref_levels, ins, outs,
             coherence_min=coherence_min, coherence_max=coherence_max,
-            mode=mode, trim=coherence_trim,
-            periods_per_octave=periods_per_octave,
-            band_style=band_style,
-            min_bins_per_band=min_bins_per_band,
-            t_short=t_short or None,
-            apply_below_period=apply_below_period or None,
-            statistic=statistic,
-            ensemble_windows=ensemble_windows,
-            smooth_bins=smooth_bins,
+            mode=mode, apply_below_period=apply_below_period or None,
+            ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
         artifact = ctx.publish_artifact(path, kind="table")
         retained = sum(r["n_retained"] for r in rows)
         total = sum(r["n_windows"] for r in rows)
-        trimmed = sum(1 for r in rows if r["trimmed"])
         ctx.progress(
             1.0,
-            f"coherence sort: {retained}/{total} windows kept, "
-            f"{trimmed} band(s) trimmed",
+            f"coherence sort: {retained}/{total} samples kept "
+            f"({len(rows)} frequency bins)",
         )
         result: dict[str, Any] = {"fc": out_levels, "table": artifact}
         if ref_fc is not None:
@@ -763,6 +705,7 @@ class EstimateTF(Node):
             bands_override=manual,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
+        offered = sum(len(e["periods"]) for e in per_level.values())
         notes = (
             f"estimator={estimator_engine}; remote_reference={remote_reference}; "
             f"levels={len(levels)}; "
@@ -770,7 +713,8 @@ class EstimateTF(Node):
             f"min_bins_per_band={min_bins_per_band}; t_short={t_short}; "
             + (f"manual_bands={len(band_centers.split(','))} centers; "
                if manual else "")
-            + f"nomenclature={kw or 'auto'}"
+            + f"nomenclature={kw or 'auto'}; "
+            + f"band_periods_offered={offered}; merged_periods={len(periods)}"
         )
         tf = build_tf(
             periods, Z, ins, outs, channel_nomenclature=kw, Z_err=Z_err,
@@ -786,21 +730,14 @@ class EstimateTF(Node):
         ctx.progress(
             1.0,
             f"estimated TF ({estimator_engine}) over {len(levels)} level(s), "
-            f"{len(periods)} merged periods",
+            f"{len(periods)}/{offered} merged periods",
         )
         return {"tf": tf, "tf_levels": per_level}
 
-    #: Banding parameters auto-fill from an upstream Coherence Sort (DESIGN
-    #: §18.2): the sort's weights/trimming must be applied on the same band
-    #: table the estimator uses, so the estimator inherits the sort's banding
-    #: (chain-walking §4 inherit; explicit user choices on Estimate TF are
-    #: never overridden — the auto-fill only touches unset/default values).
-    inherit: ClassVar[dict[str, dict[str, str]]] = {
-        "fc": {"band_style": "band_style",
-               "periods_per_octave": "periods_per_octave",
-               "min_bins_per_band": "min_bins_per_band",
-               "t_short": "t_short"},
-    }
+    #: Banding is Estimate TF's own concern (DESIGN §24.9): no inherit from
+    #: an upstream Coherence Sort — the sort's per-(bin, window) weights are
+    #: band-independent, so there is no banding parameter to auto-fill (and
+    #: no duplicated banding param set on the sort node).
 
 
 class MergeFC(Node):

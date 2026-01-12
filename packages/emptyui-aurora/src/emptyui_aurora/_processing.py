@@ -1098,14 +1098,12 @@ def _coherence_weight_array(coh, lo, hi, mode, ramp=0.05):
 
 
 def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
-                  coherence_min, coherence_max, mode, trim,
-                  apply_below_period, ensemble_windows, smooth_bins,
-                  band_style, periods_per_octave, bands_override, t_short):
-    """The ``statistic="per_bin"`` sort body (DESIGN §24.6): per-(bin,
-    window) weights from :func:`_per_bin_coherence` — no band table in the
-    weighting; the band table only aggregates the diagnostics rows. The
-    period scope, trim and NaN-row grammar follow the band statistic's
-    semantics."""
+                  coherence_min, coherence_max, mode,
+                  apply_below_period, ensemble_windows, smooth_bins):
+    """The per-frequency sort body (DESIGN §24.6, §24.9): per-(bin, window)
+    weights from :func:`_per_bin_coherence` — banding-independent weighting,
+    per-frequency-bin diagnostic rows (one row per bin). The period scope
+    and NaN-row grammar follow §24.5 P3."""
     import numpy as np
 
     freq_vals = np.asarray(local["frequency"].values, dtype=float)
@@ -1135,115 +1133,55 @@ def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
         if ref_out is not None:
             for ic in ins:
                 ref_out[ic].values[:] = ref_out[ic].values * scale
-    # diagnostics: aggregate per band (the band table is ONLY a view here)
-    if bands_override is not None:
-        periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
-    else:
-        periods, band_bins_list = _resolve_period_bands(
-            local, periods_per_octave, band_style, t_short=t_short)
+    # diagnostics: one row per frequency bin — banding is Estimate TF's
+    # concern (§24.9); the sort reports exactly what it weighted
     rows = []
-    for b in range(len(periods)):
-        band_bins = band_bins_list[b]
-        if band_bins.size == 0:
-            continue
-        band_coh = coh[band_bins, :]
-        finite = np.isfinite(band_coh)
-        sc = scale[band_bins, :]
-        trimmed_band = False
-        if mode != "off" and trim:
-            med = float(np.nanmedian(band_coh)) if finite.any() else np.nan
-            if (not finite.any()) or med < coherence_min:
-                trimmed_band = True
-                for oc in outs + ins:
-                    local_out[oc].values[band_bins, :] = np.nan
-                if ref_out is not None:
-                    for ic in ins:
-                        ref_out[ic].values[band_bins, :] = np.nan
+    W = coh.shape[1]
+    for i, fv in enumerate(freq_vals):
+        if not np.isfinite(fv) or fv <= 0.0:
+            continue  # DC bin — no period, never weighted
         rows.append({
-            "period": float(periods[b]),
-            "n_windows": int(band_coh.size),
-            "n_retained": int(np.count_nonzero(sc > 0)),
-            "median_coherence_e": (float(np.nanmedian(coh_e[band_bins, :]))
-                                   if np.isfinite(coh_e[band_bins, :]).any() else None),
-            "median_coherence_transfer": (float(np.nanmedian(coh_x[band_bins, :]))
+            "period": float(1.0 / fv),
+            "n_windows": int(W),
+            "n_retained": (int(np.count_nonzero(scale[i, :] > 0))
+                           if mode != "off" else int(W)),
+            "median_coherence_e": (float(np.nanmedian(coh_e[i, :]))
+                                   if np.isfinite(coh_e[i, :]).any() else None),
+            "median_coherence_transfer": (float(np.nanmedian(coh_x[i, :]))
                                           if ref is not None and
-                                          np.isfinite(coh_x[band_bins, :]).any() else None),
-            "median_coherence": (float(np.nanmedian(band_coh))
-                                 if finite.any() else None),
-            "trimmed": trimmed_band,
-            "unsorted": bool(thr and periods[b] >= thr),
+                                          np.isfinite(coh_x[i, :]).any() else None),
+            "median_coherence": (float(np.nanmedian(coh[i, :]))
+                                 if np.isfinite(coh[i, :]).any() else None),
+            "unsorted": bool(thr and 1.0 / fv >= thr),
         })
     return local_out, ref_out, rows
 
 
-def _band_coherence(local, ref, ins, outs, band_bins):
-    """Per-window multiple coherence for one frequency band (DESIGN §16.2/§20).
-
-    Returns ``(coh_e, coh_x)``: per-window multiple coherence² of each
-    output on the predicted-H ensemble (remote H when ``ref`` is given,
-    else local) — minimum across outputs — and, two-FC, the local↔remote
-    magnetic transfer coherence (1.0 in single-FC mode).
-
-    Shared by **Coherence Sort** and **Plot Coherency** so the two agree
-    numerically by construction (§20.1): the plot shows exactly the
-    statistic the sort applies.
-    """
-    E = np.stack([local[oc].values[band_bins, :] for oc in outs], axis=0)
-    H_local = np.stack([local[ic].values[band_bins, :] for ic in ins], axis=0)
-    n_win = E.shape[2]
-    coh_e = np.zeros(n_win)  # E on local-H (single-FC) or remote-H (two-FC)
-    coh_x = np.full(n_win, 1.0)  # local↔remote magnetic transfer
-    for w in range(n_win):
-        H_local_w = H_local[:, :, w]
-        H_pred_w = H_local_w
-        if ref is not None:
-            H_pred_w = np.stack(
-                [ref[ic].values[band_bins, w] for ic in ins], axis=0
-            )
-        ce = _multiple_coherence(E[:, :, w], H_pred_w)
-        coh_e[w] = float(ce.min()) if ce.size else 0.0
-        if ref is not None:
-            R = np.stack([ref[ic].values[band_bins, w] for ic in ins], axis=0)
-            cx = _multiple_coherence(H_local_w, R)
-            coh_x[w] = float(cx.min()) if cx.size else 0.0
-    return coh_e, coh_x
-
-
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
-                      trim=False, periods_per_octave=3, band_style="l2u",
-                      bands_override=None, t_short=None,
-                      apply_below_period=None, statistic="per_bin",
+                      apply_below_period=None,
                       ensemble_windows=16, smooth_bins=0):
-    """EMTF-style coherence sort of one decimation level's FC (DESIGN §16.2).
+    """EMTF-style per-frequency coherence sort of one decimation level's FC
+    (DESIGN §16.2, §24.9).
 
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
-    per-window coherence weights applied (``weight``: multiplied by √w;
-    ``drop``/``trim``: excluded samples set to NaN), plus diagnostic rows.
-    In two-FC mode the criterion is the **conservative minimum** of the
-    E–remote-H signal coherence and the local↔remote magnetic transfer
+    per-(bin, window) coherence weights applied (``weight``: multiplied by
+    √w; ``drop``: excluded samples set to NaN), plus per-bin diagnostic
+    rows. In two-FC mode the criterion is the **conservative minimum** of
+    the E–remote-H signal coherence and the local↔remote magnetic transfer
     coherence (aurora's RME_RR signal-covariance estimate degrades when the
     local and remote magnetic fields are uncorrelated), and a single shared
     weight per row is applied to **both** FCs (exact weighted-LS semantics).
 
-    ``band_style`` selects the band-construction scheme (DESIGN.md §14.9,
-    shared with :func:`estimate_tf`): ``"l2u"`` (default) uses the
-    reference-template table (``bands_override`` holds this level's
-    ``(f_hi, f_lo)`` pairs); ``"uniform"`` is the uniform log2-grid
-    partition. It should match the ``band_style`` used on the corresponding
-    ``Estimate TF`` call for consistent banding, exactly like
-    ``periods_per_octave``.
-
-    ``statistic`` (DESIGN §24.6): ``"per_bin"`` (default) — the EMTF-style
-    per-frequency window-ensemble coherence over a sliding
-    ±``ensemble_windows`` window ensemble (center included) with optional
-    ±``smooth_bins`` frequency pooling: weights become per (bin, window),
-    the banding parameters are irrelevant to the weighting (the band table
-    only aggregates the diagnostics), and the sample-coherence bias is
-    adjusted-R²-corrected. ``"band"`` (legacy) — the per-window multiple
-    coherence over the band's bin ensemble (banding-DEPENDENT).
-    Note Plot Coherency renders the *band* statistic — the per-bin mode's
-    plot counterpart is pending.
+    The statistic is the EMTF-style per-frequency window-ensemble coherence
+    over a sliding ±``ensemble_windows`` window ensemble (center included)
+    with optional ±``smooth_bins`` frequency pooling; the sample-coherence
+    bias is adjusted-R²-corrected. Banding is deliberately absent — the
+    weights are per (bin, window), so band construction belongs to
+    ``Estimate TF`` alone (§24.9): the sort's diagnostics are one row per
+    frequency bin. The legacy band-aggregated statistic was removed with
+    the per-bin flip (§24.6): no consumer ever weighted with it after the
+    default flip, and its banding parameters duplicated the estimator's.
     """
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
@@ -1263,118 +1201,25 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     local_out = local.copy(deep=True)
     ref_out = ref.copy(deep=True) if ref is not None else None
 
-    if str(statistic) == "per_bin":
-        return _per_bin_sort(
-            local, ref, local_out, ref_out, ins, outs,
-            coherence_min=coherence_min, coherence_max=coherence_max,
-            mode=mode, trim=trim, apply_below_period=apply_below_period,
-            ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
-            band_style=band_style, periods_per_octave=periods_per_octave,
-            bands_override=bands_override, t_short=t_short)
-
-    if bands_override is not None:
-        periods, band_bins_list = _bands_from_freq_pairs(local, bands_override)
-    else:
-        periods, band_bins_list = _resolve_period_bands(
-            local, periods_per_octave, band_style, t_short=t_short)
-    rows = []
-    for b in range(len(periods)):
-        band_bins = band_bins_list[b]
-        if band_bins.size == 0:
-            continue
-        # period scope (§24.5 P3): bands at/above the threshold pass through
-        # unsorted — the noise-floor remedy belongs at the head; weighting
-        # the deep tail only perturbs healthy long-period estimates.
-        unsorted_band = (apply_below_period is not None
-                         and str(apply_below_period) != ""
-                         and float(apply_below_period) > 0
-                         and float(periods[b]) >= float(apply_below_period))
-        if unsorted_band:
-            rows.append({
-                "period": float(periods[b]),
-                "n_windows": int(local_out[outs[0]].values.shape[1]) if outs else 0,
-                "n_retained": int(local_out[outs[0]].values.shape[1]) if outs else 0,
-                "median_coherence_e": None,
-                "median_coherence_transfer": None,
-                "median_coherence": None,
-                "trimmed": False,
-                "unsorted": True,
-            })
-            continue
-        coh_e, coh_x = _band_coherence(local, ref, ins, outs, band_bins)
-        n_win = coh_e.size
-        coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
-        # degenerate bands (fewer bins than inputs+1): the ensemble statistic
-        # falls back to the minimum pairwise coherence there (not the
-        # regression fit, which is exact) — cap it at coherence_max so the
-        # "coh ≈ 1 is suspicious" rule does not unconditionally drop the
-        # longest-period bands; the lower bound still applies (conservative).
-        if band_bins.size < len(ins) + 1:
-            coh = np.minimum(coh, coherence_max - 1e-9)
-        weights = np.array([_coherence_weight(c, coherence_min, coherence_max, mode)
-                            for c in coh])
-        trimmed = False
-        if mode != "off" and trim:
-            keep = weights > 0
-            if keep.sum() == 0:
-                trimmed = True  # nothing retained in this band
-            elif float(np.median(coh[keep])) < coherence_min:
-                trimmed = True
-        if mode != "off" and not trimmed:
-            scale = np.sqrt(weights)
-            # fully down-weighted samples are excluded (NaN) rather than
-            # zeroed — zero rows would inflate the regression degrees of
-            # freedom; estimate_tf skips non-finite rows.
-            scale[scale <= 0.0] = np.nan
-            for oc in outs + ins:
-                vals = local_out[oc].values
-                vals[band_bins, :] = vals[band_bins, :] * scale[None, :]
-            if ref_out is not None:
-                for ic in ins:
-                    vals = ref_out[ic].values
-                    vals[band_bins, :] = vals[band_bins, :] * scale[None, :]
-        if trimmed:
-            for oc in outs + ins:
-                local_out[oc].values[band_bins, :] = np.nan
-            if ref_out is not None:
-                for ic in ins:
-                    ref_out[ic].values[band_bins, :] = np.nan
-        rows.append({
-            "period": float(periods[b]),
-            "n_windows": int(n_win),
-            "n_retained": int(np.count_nonzero(weights > 0)) if mode != "off" else int(n_win),
-            "median_coherence_e": float(np.median(coh_e)),
-            "median_coherence_transfer": float(np.median(coh_x)) if ref is not None else None,
-            "median_coherence": float(np.median(coh)),
-            "trimmed": trimmed,
-        })
-    return local_out, ref_out, rows
+    return _per_bin_sort(
+        local, ref, local_out, ref_out, ins, outs,
+        coherence_min=coherence_min, coherence_max=coherence_max,
+        mode=mode, apply_below_period=apply_below_period,
+        ensemble_windows=ensemble_windows, smooth_bins=smooth_bins)
 
 
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
-                       trim=False, periods_per_octave=3, band_style="l2u",
-                       min_bins_per_band=20.0, t_short=None,
-                       apply_below_period=None, statistic="per_bin",
+                       apply_below_period=None,
                        ensemble_windows=16, smooth_bins=0):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
     same-shaped container (or a single fc) for the remote station. Returns
     ``(levels_out, ref_levels_out, rows)`` where the rows carry the
-    decimation level for the diagnostics table. For ``band_style="l2u"``
-    the reference-template band table is derived once for the whole
-    container (like :func:`estimate_tf_levels`) so the sort's banding
-    matches the subsequent ``Estimate TF`` call — pass the **same**
-    ``min_bins_per_band`` and ``t_short`` values as the estimator
-    (2026-09-11 review: these refine the l2u table and were previously
-    hard-coded/missing here, silently banding differently from Estimate TF).
+    decimation level for the diagnostics table (one row per frequency bin
+    per level — no band geometry: banding belongs to Estimate TF, §24.9).
     """
-    bands_override = None
-    style = _resolve_band_style(band_style)
-    if style == "l2u":
-        bands_override = _l2u_band_table(
-            levels, min_bins_per_band=min_bins_per_band, t_short=t_short)
     out_levels: dict[int, object] = {}
     out_ref: dict[int, object] = {} if ref_levels is not None else None
     rows: list[dict] = []
@@ -1383,15 +1228,8 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
         l_out, r_out, level_rows = coherence_sort_fc(
             fc, ref, input_channels, output_channels,
             coherence_min=coherence_min, coherence_max=coherence_max,
-            mode=mode, trim=trim, periods_per_octave=periods_per_octave,
-            band_style=band_style,
-            bands_override=None if bands_override is None
-            else bands_override.get(level, []),
-            t_short=t_short,
-            apply_below_period=apply_below_period,
-            statistic=statistic,
-            ensemble_windows=ensemble_windows,
-            smooth_bins=smooth_bins,
+            mode=mode, apply_below_period=apply_below_period,
+            ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
         )
         out_levels[int(level)] = l_out
         if ref_levels is not None:
@@ -1399,14 +1237,6 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
         for r in level_rows:
             r["decimation_level"] = int(level)
             rows.append(r)
-    trimmed_periods = [r["period"] for r in rows if r["trimmed"]]
-    if trimmed_periods:
-        _log.warning(
-            "coherence trim: %d band(s) with median coherence below "
-            "coherence_min=%s NaNed (periods, s): %s",
-            len(trimmed_periods), coherence_min,
-            ", ".join(f"{p:.3g}" for p in trimmed_periods),
-        )
     return out_levels, out_ref, rows
 
 
@@ -1503,10 +1333,12 @@ def estimate_tf(
     # vertical channel is included.
     Zout = np.zeros((nbands, n_out, n_in), dtype=complex)
     Zerr = np.zeros((nbands, n_out, n_in), dtype=float)
+    skipped: list[str] = []
 
     for b in range(nbands):
         band_bins = band_bins_list[b]
         if band_bins.size == 0:
+            skipped.append(f"T={periods_out[b]:.4g}s (no bins)")
             continue
         # gather samples across selected frequencies and all windows
         H = []  # inputs  -> [n, n_in]
@@ -1540,8 +1372,20 @@ def estimate_tf(
             if R_band is not None:
                 R_band = R_band[ok]
         if H.shape[0] <= len(input_channels):
+            skipped.append(
+                f"T={periods_out[b]:.4g}s (only {H.shape[0]} retained "
+                f"sample row(s), need > {len(input_channels)})"
+            )
             continue
         Zout[b], Zerr[b] = _solve_band(H, E, R_band, input_channels, output_channels, engine)
+
+    if skipped:
+        _log.warning(
+            "Estimate TF: %d band(s) had no usable samples and were skipped "
+            "— typically every window was down-weighted to zero by coherence "
+            "sorting: %s",
+            len(skipped), "; ".join(skipped),
+        )
 
     # All estimators now come from aurora and share aurora's impedance
     # convention, so no sign/phase rotation is applied.
@@ -2567,6 +2411,15 @@ def merge_tf_levels(per_level):
         ok = ~np.all(np.abs(Z).reshape(len(Z), -1) == 0, axis=1)
         ppo = float(per_level[lv].get("periods_per_octave", 3) or 3)
         half_w = 0.5 / ppo  # half the level's center spacing, in octaves
+        degenerate = P[~ok]
+        if degenerate.size:
+            _log.warning(
+                "Merge TF levels: level %d contributed no estimate at %d "
+                "band(s) (all-zero/degenerate — often coherence sort removed "
+                "every window there): %s",
+                lv, degenerate.size,
+                "; ".join(f"T={p:.4g}s" for p in degenerate[:8]),
+            )
         for p, z, e in zip(P[ok], Z[ok], err[ok]):
             lp = float(np.log2(p))
             if any(abs(lp - k) < half_w for k in merged):

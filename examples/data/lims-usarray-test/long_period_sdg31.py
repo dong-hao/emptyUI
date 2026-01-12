@@ -67,8 +67,7 @@ def chain(local, remote, bands, ins, outs, *, taper="boxcar",
         for lv in sorted(fc_l):
             fc_l[lv], fc_r[lv], _ = coherence_sort_fc(
                 fc_l[lv], fc_r.get(lv), ins, outs, coherence_min=coh_min,
-                coherence_max=1.0, mode="weight", band_style="l2u",
-                bands_override=bands.get(lv, []))
+                coherence_max=1.0, mode="weight")
     per = {}
     for lv in sorted(fc_l):
         if levels is not None and lv not in levels:

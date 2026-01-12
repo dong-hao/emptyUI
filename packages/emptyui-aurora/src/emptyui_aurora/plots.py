@@ -1,7 +1,7 @@
 """Display nodes for the frequency-domain QC products (DESIGN §20.1).
 
-Plot Coherency renders the per-band multiple coherence of an fc — the
-exact statistic Coherence Sort applies (shared `_band_coherence` helper) —
+Plot Coherency renders the per-frequency coherence of an fc — the exact
+statistic Coherence Sort applies (shared `_per_bin_coherence` helper) —
 so the figure is a one-glance QC view of what the sort would do.
 """
 
@@ -13,12 +13,8 @@ import numpy as np
 from emptyui import Input, Node, Output, Param
 
 from ._processing import (
-    _band_coherence,
-    _bands_from_freq_pairs,
-    _l2u_band_table,
     _normalize_fc_layout,
-    _resolve_band_style,
-    _resolve_period_bands,
+    _per_bin_coherence,
 )
 from .process import _fc_io_channels
 
@@ -26,16 +22,16 @@ from .process import _fc_io_channels
 class PlotCoherency(Node):
     type = "aurora.plot.coherency"
     title = "Plot Coherency"
-    tooltip = "Per-band multiple coherence of an fc vs period (the Coherence Sort statistic)."
+    tooltip = "Per-frequency window-ensemble coherence of an fc vs period (the Coherence Sort statistic)."
     description = (
-        "Per-band multiple coherence vs period — the exact statistic "
-        "Coherence Sort applies (per-window multiple coherence over each "
-        "band's frequency-bin ensemble, DESIGN.md §20.1): the E–H signal "
-        "coherence (remote H when a 'ref fc' is connected) and, two-FC, the "
-        "local↔remote magnetic transfer coherence. Shaded guidance band at "
-        "[coherence_min, coherence_max] (the sort's default bounds). This "
-        "is a broadband QC heuristic, not EMTF's per-frequency window-"
-        "ensemble coherence (DESIGN.md §16.2/§18.2)."
+        "Per-frequency coherence vs period — the exact statistic "
+        "Coherence Sort applies (EMTF-style window-ensemble coherence at "
+        "each frequency bin, median across the sliding window ensemble, "
+        "DESIGN.md §20.1/§24.6): the E–H signal coherence (remote H when a "
+        "'ref fc' is connected) and, two-FC, the local↔remote magnetic "
+        "transfer coherence. Shaded guidance band at [coherence_min, "
+        "coherence_max] (the sort's default bounds). Each decimation level "
+        "plots as its own series."
     )
     category = "Display"
     inputs = (
@@ -51,41 +47,22 @@ class PlotCoherency(Node):
         Param("coherence_max", "number", label="Coherence max",
               default=0.98, min=0.0, max=1.0,
               description="Upper reference bound — the Coherence Sort default."),
-        Param("periods_per_octave", "integer", label="Periods per octave",
-              default=3, min=1,
-              description="Band geometry — inherited from an upstream "
-                          "Coherence Sort when connected."),
-        Param("band_style", "select", label="Band style",
-              options=("l2u", "uniform"), default="l2u",
-              description="Band construction scheme (DESIGN.md §14.9) — "
-                          "inherited from an upstream Coherence Sort when "
-                          "connected."),
-        Param("min_bins_per_band", "number", label="Min bins per band",
-              default=20.0, min=0,
-              description="Window-starvation coarsening threshold (DESIGN.md "
-                          "§14.9) — inherited from an upstream Coherence Sort."),
-        Param("t_short", "number", label="Shortest period (s)",
-              default=0.0, min=0,
-              description="Head clip (DESIGN.md §14.9) — inherited from an "
-                          "upstream Coherence Sort. 0 starts at the "
-                          "template's shortest band."),
+        Param("ensemble_windows", "integer", label="Ensemble windows",
+              default=16, min=1,
+              description="Sliding window-ensemble half-width of the "
+                          "per-bin statistic — match the upstream "
+                          "Coherence Sort setting."),
+        Param("smooth_bins", "integer", label="Frequency smoothing (bins)",
+              default=0, min=0,
+              description="Adjacent-bin pooling of the per-bin statistic — "
+                          "match the upstream Coherence Sort setting."),
     )
-    #: same inherit-from-sort declaration as Estimate TF (DESIGN §18.2): the
-    #: plot must band exactly like the sort/estimator it QC's
-    inherit: ClassVar[dict[str, dict[str, str]]] = {
-        "fc": {"band_style": "band_style",
-               "periods_per_octave": "periods_per_octave",
-               "min_bins_per_band": "min_bins_per_band",
-               "t_short": "t_short"},
-    }
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
 
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
-                periods_per_octave: int = 3,
-                band_style: str = "l2u",
-                min_bins_per_band: float = 20.0,
-                t_short: float = 0.0) -> dict[str, Any]:
+                ensemble_windows: int = 16,
+                smooth_bins: int = 0) -> dict[str, Any]:
         import matplotlib
 
         matplotlib.use("Agg")
@@ -97,14 +74,6 @@ class PlotCoherency(Node):
             {0: ref_fc} if ref_fc is not None else None)
         sample = next(iter(levels.values()))
         ins, outs, _ = _fc_io_channels(sample)
-
-        # banding identical to Coherence Sort / Estimate TF (shared helpers)
-        style = _resolve_band_style(band_style)
-        bands_override = None
-        if style == "l2u":
-            bands_override = _l2u_band_table(
-                levels, min_bins_per_band=min_bins_per_band,
-                t_short=t_short or None)
 
         rows: list[dict[str, Any]] = []
         for level, lfc in sorted(levels.items()):
@@ -120,32 +89,26 @@ class PlotCoherency(Node):
                     )
                 ref = _normalize_fc_layout(ref)
             lfc = _normalize_fc_layout(lfc)
-            if bands_override is not None:
-                periods, band_bins_list = _bands_from_freq_pairs(
-                    lfc, bands_override.get(level, []))
-            else:
-                periods, band_bins_list = _resolve_period_bands(
-                    lfc, periods_per_octave, style, t_short=t_short or None)
-            for b in range(len(periods)):
-                band_bins = band_bins_list[b]
-                if band_bins.size == 0:
+            # the exact statistic the sort applies (shared helper, §20.1)
+            coh_e, coh_x = _per_bin_coherence(
+                lfc, ref, ins, outs, ensemble_windows=ensemble_windows,
+                smooth_bins=smooth_bins)
+            freq = np.asarray(lfc["frequency"].values, dtype=float)
+            for i, fv in enumerate(freq):
+                if not np.isfinite(fv) or fv <= 0.0:
                     continue
-                coh_e, coh_x = _band_coherence(lfc, ref, ins, outs, band_bins)
-                # degenerate-band cap: identical to Coherence Sort's policy —
-                # a band with fewer bins than inputs+1 fits the regression
-                # exactly, so its coherence is trivially 1.0 and the "coh ≈ 1
-                # is suspicious" rule must not flag it (§16.2)
-                if band_bins.size < len(ins) + 1:
-                    cap = coherence_max - 1e-9
-                    coh_e = np.minimum(coh_e, cap)
-                    coh_x = np.minimum(coh_x, cap)
-                rows.append({"period": float(periods[b]),
-                             "coherence_signal": float(np.median(coh_e)),
-                             "coherence_transfer": (float(np.median(coh_x))
-                                                    if ref is not None else None)})
+                rows.append({
+                    "period": float(1.0 / fv),
+                    "decimation_level": int(level),
+                    "coherence_signal": (float(np.nanmedian(coh_e[i, :]))
+                                         if np.isfinite(coh_e[i, :]).any() else None),
+                    "coherence_transfer": (float(np.nanmedian(coh_x[i, :]))
+                                           if ref is not None and
+                                           np.isfinite(coh_x[i, :]).any() else None),
+                })
 
         if not rows:
-            raise ValueError("no usable frequency bands to plot")
+            raise ValueError("no usable frequency bins to plot")
 
         rows.sort(key=lambda r: r["period"])
         period = np.array([r["period"] for r in rows])
@@ -156,11 +119,11 @@ class PlotCoherency(Node):
         apply_style(fig, (ax,))
         ax.axhspan(coherence_min, coherence_max, color="0.85", zorder=0,
                    label=f"sort bounds [{coherence_min:.2f}, {coherence_max:.2f}]")
-        ax.plot(period, sig, "o-", color="#1f77b4", markersize=4,
+        ax.plot(period, sig, "o-", color="#1f77b4", markersize=3,
                 label="signal coherence (E–H)"
                 if ref_fc is None else "signal coherence (E–remote H)")
         if ref_fc is not None:
-            ax.plot(period, xfer, "s--", color="#d62728", markersize=4,
+            ax.plot(period, xfer, "s--", color="#d62728", markersize=3,
                     label="local↔remote transfer coherence")
         ax.set_xscale("log")
         ax.set_xlabel("Period (s)")
@@ -173,7 +136,7 @@ class PlotCoherency(Node):
         path = ctx.artifact_path("coherency", ".png")
         fig.savefig(path)
         plt.close(fig)
-        ctx.progress(1.0, f"coherency: {len(rows)} bands")
+        ctx.progress(1.0, f"coherency: {len(rows)} frequency bins")
         return {"plot": ctx.publish_artifact(path, kind="image")}
 
 
