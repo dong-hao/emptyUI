@@ -553,7 +553,9 @@ def _channel_units(value):
 
     Returns ``{channel: units}`` for payloads that carry units (mth5 RunTS
     xarray attrs — real archives say ``nanoTesla`` / ``milliVolt per
-    kilometer``; synthetic/core payloads usually carry none, so ``{}``).
+    kilometer``; core TimeSeries payloads carry a ``units`` dict coerced
+    from those attrs at ``coerce_run``; synthetic/core payloads usually
+    carry none, so ``{}``).
     """
     if hasattr(value, "dataset"):
         ds = value.dataset
@@ -563,7 +565,30 @@ def _channel_units(value):
             if u:
                 out[str(name)] = str(u)
         return out
+    units = getattr(value, "units", None)
+    if isinstance(units, dict):
+        return {str(k): str(v) for k, v in units.items() if v}
     return {}
+
+
+#: Units that identify raw instrument counts — the un-calibrated output of
+#: a digitizer. Counts carry no physical scale (the scale factor lives in
+#: the instrument response), so any FC/TF built from them is garbage with a
+#: plausible-looking shape. mth5 archives built from FDSN store raw counts
+#: with the response attached — a Calibrate step is mandatory before
+#: Compute FC (DESIGN §16.4).
+_COUNT_UNITS = ("digital counts", "count", "counts")
+
+
+def _reject_counts(x, comp, units, where):
+    u = str((units or {}).get(comp, "")).strip().lower()
+    if u in _COUNT_UNITS:
+        raise ValueError(
+            f"{where}: channel '{comp}' carries raw instrument counts "
+            f"(unit attrs {u!r}) — the FC/TF would be meaningless. Connect "
+            "a Calibrate node first (FDSN-built mth5 archives store raw "
+            "counts with the instrument response attached)."
+        )
 
 
 def _magnetic_to_h(x, comp, b_to_h, units):
@@ -576,6 +601,7 @@ def _magnetic_to_h(x, comp, b_to_h, units):
     already in A/m (or carries no unit info at all, e.g. synthetic tests,
     which pass mode 'h' for unit-neutral A/m data).
     """
+    _reject_counts(x, comp, units, "Compute FC")
     if b_to_h:
         return x * 1e-9 / MU0
     u = str((units or {}).get(comp, "")).lower()
@@ -628,6 +654,7 @@ def _electric_to_vm(x, comp, e_scale, units):
           fixtures and core payloads; emptyui's LEMI reader writes mV/km)
     """
     u = (_canonical_unit((units or {}).get(comp, "")) or "").lower()
+    _reject_counts(x, comp, units, "Compute FC")
     if e_scale is not None:
         if u and "per kilometer" in u:
             _log.warning(

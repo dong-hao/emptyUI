@@ -348,6 +348,13 @@ def _channel_units_from(source):
             u = source.dataset[name].attrs.get("units")
             if u:
                 units[str(name)] = str(u)
+    if not units:
+        # core TimeSeries payloads carry the units dict coerced from the
+        # RunTS attrs at coerce_run (core filter nodes preserve it)
+        try:
+            units = getattr(source, "units", None) or {}
+        except (AttributeError, NameError):
+            units = {}
     return units
 
 

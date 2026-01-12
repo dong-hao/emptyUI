@@ -31,6 +31,11 @@ class TimeSeries:
     station: str = ""
     run: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
+    #: per-channel physical units (e.g. ``nanoTesla`` / ``milliVolt per
+    #: kilometer``). Coerced from mth5 RunTS dataset attrs and carried
+    #: through the core filter nodes so Compute FC's instrument-unit
+    #: normalization survives a core node in the chain (DESIGN §19).
+    units: dict[str, str] = field(default_factory=dict)
 
     @property
     def n_samples(self) -> int:
@@ -46,6 +51,7 @@ class TimeSeries:
             station=self.station,
             run=self.run,
             meta=dict(self.meta),
+            units=dict(self.units),
         )
 
 
@@ -113,6 +119,11 @@ def coerce_run(value):
             str(k): np.ascontiguousarray(ds[k].values, dtype=np.float64)
             for k in ds.data_vars
         }
+        units = {
+            str(k): str(ds[k].attrs["units"])
+            for k in ds.data_vars
+            if ds[k].attrs.get("units")
+        }
         return TimeSeries(
             channels=channels,
             sample_rate=sample_rate,
@@ -120,6 +131,7 @@ def coerce_run(value):
             survey=_meta_id(getattr(value, "survey_metadata", None)),
             station=_meta_id(getattr(value, "station_metadata", None)),
             run=_meta_id(getattr(value, "run_metadata", None)),
+            units=units,
         )
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
         return value

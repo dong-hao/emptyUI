@@ -65,6 +65,7 @@ class Bandpass(Node):
             start_datetime=data.start_datetime,
             survey=data.survey, station=data.station, run=data.run,
             meta={**data.meta, "filter": "bandpass"},
+            units=dict(data.units),
         )}
 
 
@@ -108,6 +109,7 @@ class Detrend(Node):
                                    start_datetime=data.start_datetime,
                                    survey=data.survey, station=data.station,
                                    run=data.run,
-                                   meta=dict(data.meta))}
+                                   meta=dict(data.meta),
+                                   units=dict(data.units))}
 
 

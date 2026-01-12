@@ -2853,3 +2853,69 @@ Measured e2e (full corpus, user params): ingest 48 s; Build FC 72 s (8
 rate-keyed levels); sort + estimate 7 s → 46 periods, strictly
 monotonic, min gap 0.263 octave (the template's own ladder spacing — no
 near-duplicates).
+
+### 24.9 Unit-chain regression (NIMS/SDG31 UI workflow) + sort simplification (2026-09-15)
+
+**Unit-chain regression (user report).** A hand-built SDG31 node graph
+(no Calibrate, core Detrend in the chain) produced apparent resistivities
+anywhere between 10^-6 and 10^8 ohm-m depending on `magnetic_unit` —
+never right. Two compounding defects, both fixed:
+
+- **Units stripped at the core-node boundary.** `coerce_run` (RunTS →
+  core TimeSeries) dropped the per-channel `units` attrs, and the core
+  filter nodes rebuilt payloads without them — Compute FC then ran blind
+  (electric counts hit the legacy ×1e-6 "mV/km assumed"; magnetic counts
+  stayed untouched). Fix: `TimeSeries` carries a `units` dict, `coerce_run`
+  extracts it from the RunTS dataset attrs, Detrend/Bandpass preserve it,
+  Align re-stamps it on its RunTS outputs, Compute FC reads it.
+- **Raw counts passed through with only a log warning.** FDSN-built mth5
+  archives store raw counts with the response attached (Calibrate
+  mandatory); Compute FC's unrecognized-units branch warned and passed
+  counts through. Fix: `_reject_counts` hard-errors on count-family units
+  ("digital counts"/"count"/"counts") with an actionable message. The
+  unitless path (synthetic fixtures, core payloads) is unchanged — LEMI
+  workflows are unaffected (LEMI data arrive in physical units).
+
+Reproduced magnitudes (Executor, the user's exact graph): mag=auto/h →
+ρ max 111 (accidental counts/counts partial cancellation, ~0.1× low);
+mag=b → ρ max 1.75e8 (mode 'b' force-converts counts as if nT → H ÷1.26e9
+→ ρ ×1.6e17 vs the counts passthrough). With Calibrate inserted:
+ρ 82–1.06e3, matching the official SDG31 maximum (~1e3).
+
+**Coherence sort simplification: band-free sort (user decision, §24.9).**
+The per-bin statistic is the common convention (EMTF et al.) and has been
+the default since the §24.6 flip — the band-aggregated statistic had no
+remaining weighting consumer. Removed: the `statistic` param (per-bin is
+the only behavior), `periods_per_octave`, `band_style`,
+`min_bins_per_band`, `t_short` (all band-geometry — the estimator owns
+banding), and `coherence_trim` (band-level trimming is meaningless
+without sort-side banding; hard per-window exclusion is `mode="drop"`).
+The sort node surface shrinks to coherence_min/coherence_max/mode/
+apply_below_period/ensemble_windows/smooth_bins. Estimate TF drops its
+chain-walking inherit of band params from the sort — banding is the
+estimator's concern, one parameter set, no duplication.
+
+**Silent-drop grammar made loud (user report).** The sort never removes
+bins from the FC (grid verified preserved), but a band whose every sample
+was fully down-weighted (per-bin ensemble collapses to ≤ n_in valid
+windows on starved levels → statistic scores 0 → weight 0 → NaN) left
+the band regression with no usable rows: estimate_tf skipped it and
+merge_tf_levels dropped the all-zero band silently — the TF just lacked
+period points. Now: estimate_tf warns naming the skipped band periods
+and retained-row counts; merge_tf_levels warns naming dropped degenerate
+bands; the Estimate TF progress line reports merged/offered band-periods
+and the processing notes record both counts. Kill + warn semantics
+confirmed as the desired policy (a "can't estimate → pass through"
+alternative rejected: it would re-admit un-QC'd data).
+
+**Plot Coherency reworked to per-bin rendering** (per (bin, window)
+window-ensemble coherence, median across windows, guidance band at the
+sort bounds; one series per decimation level) — it renders exactly the
+statistic the sort applies, per §20.1, and loses its duplicated banding
+params and inherit declaration.
+
+**Executor: stale params warn (user decision).** Saved workflows carrying
+params a node no longer declares are processed unchanged — the executor
+resolves only manifest params — but each stale param now emits a
+node-level progress note ("ignoring params not declared by node type…")
+instead of failing silently.
