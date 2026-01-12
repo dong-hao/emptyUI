@@ -47,6 +47,24 @@ cd packages/web && npm run dev
 ./scripts/dev.sh
 ```
 
+### Commit-log convention
+
+```
+Type: one-line summary — the what and where (DESIGN §ref)
+
+Short paragraph: the problem/motivation — why the change exists.
+
+- bullet: the substantive change (mechanism, not narration)
+- bullet: …one per logical step
+
+Tests: what covers the change (test names/cases, or "none needed" for
+message-only/docs chores + why).
+```
+
+`Type` is one of `Feat:`, `Fix:`, `Perf:`, `Chore:`, `Docs:`. Keep the
+subject under ~72 characters where possible; the DESIGN.md section
+reference anchors the change to the design record.
+
 ## Browser end-to-end tests (Playwright)
 
 Headless full-stack regression tests live in `packages/web/e2e/` (Playwright
