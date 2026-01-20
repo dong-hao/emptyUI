@@ -2919,3 +2919,136 @@ params a node no longer declares are processed unchanged — the executor
 resolves only manifest params — but each stale param now emits a
 node-level progress note ("ignoring params not declared by node type…")
 instead of failing silently.
+
+### 24.10 MTU-5A calibration — TBL scalar constants verified, per-coil response gap (2026-09-15)
+
+Groundwork for frequency-domain calibration of the MTU-5A system: the
+TBL's calibration contents were decoded and cross-checked end to end on
+the official IAGA corpus (`1690C16C.TBL`, site 10441W10, logger serial
+1690, cugb, 41°00.388'N 104°00.536'E, 1304 m).
+
+**What the TBL stores (verified values).**
+
+- Magnetic (coil) chain: `FSCV=6.4` V (ADC full scale), `HGN=12` (final
+  H gain), `HATT=0.233` (H attenuation), `HNOM=1000` mA/nT (coil
+  normalization), `HTIM=000000000000` (H calibration time — zero
+  placeholder: no in-field coil calibration recorded).
+- Electric chain: `EGN=40`, `EXLN=EYLN=100.0` m, `TSTV=2.5e-3` V.
+- Per-channel gain-control `EGNC=HGNC=2`; per-channel AC/DC tags
+  `HXAC/HXDC`, `HYAC/HYDC`, `HZAC/HZDC`, `EXAC/EXDC`, `EYAC/EYDC`
+  (e.g. HXAC=1.478e-3, HXDC=0.0139, EXDC=-9.348e-3 V-ish) — per-channel
+  gain/offset corrections, terse descriptions, currently NOT applied by
+  the ingest.
+- `STDE`/`STDH` are 2.12e-314 subnormals — placeholder zeros.
+
+**Derived scalar calibrations** (formulas as implemented upstream and
+used by the ingest via `MTUTable.read_tbl()`; verified identical):
+
+- magnetic: nT/count = FSCV/2²³ × 1000/(HGN × HATT × HNOM)
+  = 7.6294e-7 × 1000/2796 = **2.7287e-7 nT/count** (3.665e6 counts/nT;
+  full scale ±2.29 nT — plausible for the high-gain HGN=12 long-period
+  stream)
+- electric: mV/km/count = FSCV/2²³ /EGN /EXLN × 1e6 = 1.9073e-4
+  (full scale ±1600 mV/km)
+
+**Magnitude sanity (end-to-end, first 100 TS5 blocks, 15 Hz):** hx
+0.053–0.060 nT, hy 0.094–0.108 nT — quiet-site sub-nT fluctuations;
+ex −141…−139 mV/km — a ~−140 mV/km self-potential offset with ±1 mV/km
+variation (handled downstream by detrending). Physically sensible.
+
+**Findings / gaps for the frequency-response calibration work.**
+
+1. **One scalar chain, three physical coils.** The TBL carries a single
+   HGN/HATT/HNOM chain shared by hx/hy/hz, but the three channels use
+   three different coils (`HXSN=coil1693`, `HYSN=coil1694`,
+   `HZSN=coil1695`). The scalar nT is a nominal normalization; the true
+   per-coil response is complex and frequency-dependent (induction coils
+   measure dB/dt) and is NOT in the TBL — manufacturer data keyed by coil
+   serial is required (the MTU-5C analog is CAL files).
+2. **`HTIM` is a zero placeholder** on this unit — nothing
+   frequency-dependent to recover from the TBL itself.
+3. **Per-channel AC/DC tags exist and the ingest ignores them** (see
+   above); the DC offsets are handled downstream by detrending, the AC
+   factors may belong in the calibration chain.
+4. Decision (c) refined: the TBL scalar stays applied at ingest (units
+   mV/km / nT stamped); the frequency-dependent box+coil responses the
+   user is converting from proprietary formats to ASCII land in the
+   Calibrate route (FAP-style filters attached to the mth5 channels) —
+   the same framework as the LEMI FAP support (§16.1), keyed per channel
+   with the per-coil serials as the match key.
+
+### 24.11 Second MTU-5A corpus (1690618B) validated + night-window test extraction plan (2026-09-16)
+
+**Second corpus validated.** The user replaced the IAGA corpus with an
+own-station recording (`1690618B.TBL/TS3/TS4/TS5`) and copied the box +
+coil calibration responses as ASCII (`COIL1620_CLC`, `COIL2417_CLC`,
+`COIL2418_CLC`, box `MTU-1690_CLB` — filenames carry a stray space before
+`.asc`, to be renamed before parsing). Findings:
+
+- **TBL format correct**: 3000 bytes = exactly 120 × 25-byte blocks (one
+  more than the IAGA file — fine). All 65 registry-typed tags decode
+  cleanly; the ~55 untyped blocks (SGIN/ACDC/TXPR/…) behave identically
+  to the verified corpus. `MTUTable.read_tbl()` → 120 entries.
+- **Identity**: site `B0940330`, logger serial 1690 (same box as §24.10),
+  33°01.241'N 94°01.012'E, 4869 m, same firmware `3100E6`.
+- **Coil serials match the ASC response files**: HX=`COIL2417`,
+  HY=`COIL1620`, HZ=`COIL2418` — the TBL `HXSN/HYSN/HZSN` fields are the
+  match key for the per-coil frequency responses.
+- **Different gains → new derived scalars**: `EGN=10` (was 40),
+  `HGN=3` (was 12), `HATT=0.233`, `HNOM=1000`, `FSCV=6.4` →
+  7.629e-4 mV/km/count (±6400 mV/km full scale) and
+  1.0915e-6 nT/count (±9.16 nT full scale, 4× looser than §24.10's
+  ±2.29 nT — consistent with the ~3% saturated blocks observed).
+  `HTIM` is again a 2000-01-01 placeholder; STIM/ETIM placeholders as
+  before.
+- **Schedule (block-tag contiguity walk)**: 506 slots — 2 s @ 2400 Hz
+  (`L3NS=2`) and 16 s @ 150 Hz (`L4NS=16`), ~600 s spacing — plus 84.4 h
+  continuous @ 15 Hz; all three rates span the same 3.5 days
+  (2026-06-18 07:25 → 06-21 19:35 UTC). Shape differences vs the IAGA
+  corpus (denser slots; TS4 written as sixteen 1-s blocks per slot
+  instead of one 16-s block) are handled by `_group_segments` unchanged.
+- **End-to-end ingest works**: `read_phoenix_mtu` → 1013 runs
+  (506 `sr2400` × 4800 samples, 506 `sr150` × 2400, 1 `sr15` × 4.56M)
+  in 186.6 s; warnings for per-block clock status [3, 4] (GPS lock
+  events) and 9641 saturated blocks (~3%, expected at the looser full
+  scale).
+
+**Night-window test extraction (plan, user decision).** The 3.5-day
+corpus makes Build FC assembly slow; tests should use a ~12 h quiet
+window. Local night time in Tibet (UTC+8, no DST): 19:00–07:00 local ≡
+**11:00–23:00 UTC** same day. Plan:
+
+- **Filter at ingest, not downstream**: add `start`/`end` params (UTC ISO
+  or epoch, empty = full recording) to `LoadPhoenixMtu` /
+  `read_phoenix_mtu`. Implementation: filter BLOCKS by per-block tag
+  start ∈ [start, end) before `_group_segments` — per-second granularity
+  (every MTU-5A block is ≤ 1 s of data), so slots and the continuous
+  stream crop cleanly at the window edges; partial slots become short
+  runs (time periods from the tags, as always).
+- **Expected yield for 2026-06-18 11:00–23:00 UTC** (first full night;
+  recording starts 07:25 UTC): 72 slots per rate (11:05:00 → 22:55:00 =
+  144 s @ 2400 Hz, 1152 s @ 150 Hz) + 12 h continuous @ 15 Hz
+  (~648k samples/channel) → ~145 runs vs 1013; ~7× less decode+archive
+  work and ~7× less 15 Hz decimation cost in Build FC.
+- **Archive hygiene**: write the windowed set to a separate archive
+  (e.g. `from_phoenix_mtu_night.mth5`) — the original corpus stays
+  intact; station id unchanged (`B0940330`), the window is a subset.
+- **Deep-level adequacy**: 12 h @ 15 Hz with the user's e2e parameters
+  (window 256, 3 decimation levels) gives ~39 windows at the deepest
+  level (rate 0.234 Hz) — enough for a smoke test, deliberately short of
+  the 3.5-day statistics.
+- Clock zero stays "epoch" (Build FC default): the windowed subset
+  anchors on the same absolute grid as any other subset, so
+  remote-reference slot pairing is unaffected.
+- The ASC calibration responses are independent of the window and land
+  in the Calibrate route per §24.10 decision (c).
+
+**Repo data hygiene note (2026-09-16, user decision).** The heavy raw
+corpora stay out of the repo (gitignored, regenerable): the 3.5-day MTU
+corpus (~130 MB), the BGS LEMI and USArray SDG31/SDH28 archives. Once MTU
+testing is finished, commit ONLY a small in-repo smoke dataset — a ~2 h
+night-window extract (e.g. 2026-06-18 12:00–14:00 UTC: 12 slots per rate
+≈ 24 runs + 108k continuous samples, well under a few MB as an mth5
+archive) — so the MTU-5A path keeps CI coverage without carrying the full
+recording. The same policy already applies to the other instruments
+(gitignored raw data + committed synthetic/extracted fixtures; §24.7).

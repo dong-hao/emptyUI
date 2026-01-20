@@ -184,6 +184,15 @@ full architecture, contracts and verification records are in
   (121 × 1 s @ 2400 Hz slots, 122 × 16 s @ 150 Hz slots, 20.3 h
   continuous @ 15 Hz) with a CI-safe synthetic-corpus test suite. MTU-5C
   loader follows once the procedure is proven.
+- **MTU-5A TBL calibration constants verified; per-coil response gap mapped
+  (DESIGN.md §24.10, 2026-09-15)**: the TBL's magnetic chain (FSCV=6.4 V,
+  HGN=12, HATT=0.233, HNOM=1000 mA/nT → 2.729e-7 nT/count, ±2.29 nT full
+  scale) and electric chain (EGN=40, 100 m dipoles → 1.907e-4 mV/km/count)
+  verified end to end with physically sensible sample magnitudes. Key gap:
+  one scalar chain serves three different coils (serials coil1693/94/95);
+  the per-coil frequency responses are being converted from proprietary
+  formats to ASCII to land in the Calibrate route (FAP-style, keyed by coil
+  serial) — the scalar stays at ingest, per decision (c).
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 
@@ -208,13 +217,17 @@ radio/datalist DOM id collisions, unvalidated workflow load (format/version
   `NodeCache` pins payloads by reference and keeps stale entries. (Decision
   2026-09-12: TTL only for now; a portable local disk cache is a later
   design.)
-- **Coherence Sort statistic default is per-bin (2026-09-14)** — the EMTF-style
-  per-frequency window-ensemble multiple coherence (`statistic="per_bin"`,
-  sliding ±16 windows, adjusted-R² debiased), **independent of the band-average
-  method**; the legacy per-window band statistic (`statistic="band"`) remains
-  available and is what Plot Coherency renders (DESIGN.md §24.6, M4 #7).
-  Band-geometry defaults follow the SDG31 recipe (3 periods/octave, 20 min
-  bins per band).
+- **Coherence Sort statistic default is per-bin (2026-09-14) — now the only
+  behavior (2026-09-15)** — the EMTF-style per-frequency window-ensemble
+  multiple coherence (sliding ±16 windows, adjusted-R² debiased), fully
+  band-independent: the sort node is band-free (no
+  `statistic`/`periods_per_octave`/`band_style`/`min_bins_per_band`/
+  `t_short`/`coherence_trim` params — banding belongs to Estimate TF,
+  DESIGN.md §24.9), diagnostics are per frequency bin, and Plot Coherency
+  renders the same per-bin statistic (§20.1). The executor warns on stale
+  params in saved workflows instead of silently ignoring them.
+  Band-geometry defaults stay on Estimate TF (3 periods/octave, 20 min bins
+  per band).
 - Viewer bodies stay **deliberately literal** (ComfyUI parity, decided
   2026-09-12): producers emit `plot` ports and stay compact — previewing is
   a user choice via the Preview/Save/View Table utility nodes; generalizing
