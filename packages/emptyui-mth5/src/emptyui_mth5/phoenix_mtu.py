@@ -214,6 +214,62 @@ def _apply_tbl_calibration(
     return x, ""
 
 
+def _prepare_asc_calibration(
+    data_path: Path, calibration_folder: str | Path, table, warnings: list[str],
+) -> dict[str, list]:
+    """Resolve + parse the ASC box/coil calibration tables (§24.12).
+
+    The TBL serials are the match keys (``SNUM`` -> ``*_CLB.asc``,
+    ``HXSN``/``HYSN``/``HZSN`` -> ``*_CLC.asc``); an empty folder means the
+    data directory itself (the manufacturer files usually sit next to the
+    recording). Returns ``{comp: [FrequencyResponseTableFilter, ...]}`` in
+    chain order (box first, coil second); unmatched tables are warnings —
+    the TBL scalar calibration still applies, only the shape correction is
+    missing.
+    """
+    from .phoenix_calibration import (
+        build_phoenix_filters,
+        find_asc_calibrations,
+        parse_asc_calibration,
+    )
+
+    folder = (Path(str(calibration_folder)).expanduser()
+              if str(calibration_folder).strip() else data_path)
+    if not any(p.suffix.lower() == ".asc" for p in folder.iterdir()
+               if p.is_file()):
+        return {}  # no ASC tables provided at all — stay silent
+    box_serial = str(table.tbl_dict.get("SNUM", "")).strip()
+    coil_serials = {c: str(table.tbl_dict.get(t, "")).strip()
+                    for c, t in (("hx", "HXSN"), ("hy", "HYSN"), ("hz", "HZSN"))}
+    found = find_asc_calibrations(folder, box_serial=box_serial,
+                                  coil_serials=coil_serials)
+    chains: dict[str, list] = {}
+    box_file = found.get("box")
+    if box_file is not None:
+        box = parse_asc_calibration(box_file)
+        comp_map = {int(n): c for c, n in table.channel_keys.items()}
+        for comp, fap in build_phoenix_filters(box, comp_map=comp_map).items():
+            chains.setdefault(comp, []).append(fap)
+    else:
+        warnings.append(
+            f"no box calibration (*_CLB.asc matching serial {box_serial!r}) "
+            f"in {folder} — the frequency-dependent shape correction is "
+            "missing (the TBL scalar calibration still applies)")
+    for comp, serial in coil_serials.items():
+        path = found.get(comp)
+        if path is None:
+            if serial:
+                warnings.append(
+                    f"no coil calibration for {comp} (*_CLC.asc matching "
+                    f"serial {serial!r}) in {folder} — its shape correction "
+                    "is missing (the TBL scalar calibration still applies)")
+            continue
+        coil = parse_asc_calibration(path)
+        filters = build_phoenix_filters(coil, comp_map={1: comp})
+        chains.setdefault(comp, []).extend(filters.values())
+    return chains
+
+
 def read_phoenix_mtu(
     data_path: str | Path,
     sample_rates: list[int] | None = None,
@@ -223,6 +279,7 @@ def read_phoenix_mtu(
     mth5_filename: str = "from_phoenix_mtu.mth5",
     start: str | float = "",
     end: str | float = "",
+    calibration_folder: str | Path = "",
 ) -> dict[str, Any]:
     """Convert a legacy Phoenix MTU-5A recording (TBL + TSn files) into an
     mth5 archive with one run per maximal contiguous segment.
@@ -240,8 +297,17 @@ def read_phoenix_mtu(
     slots become short runs with tag-truth time periods. Use this to
     extract a quiet night window for fast smoke tests.
 
+    ``calibration_folder`` (§24.12): directory holding the manufacturer ASC
+    tables (``*_CLB.asc`` box + ``*_CLC.asc`` coils). Empty searches the
+    data directory itself. Files are matched by the TBL serials (``SNUM``,
+    ``HXSN``/``HYSN``/``HZSN``) and registered in the archive's
+    ``/Survey/Filters`` layer as un-applied-to-FC FAP shape corrections —
+    the Compute FC node divides the Fourier coefficients by their chained
+    complex response (frequency-domain calibration); unmatched tables only
+    warn.
+
     Returns ``{"path": archive_path, "runs": [(run_id, rate, n_samples)],
-    "warnings": [str]}``.
+    "warnings": [str], "calibration": {comp: [filter names]}}``.
     """
     data_path = Path(data_path).expanduser().resolve()
     if not data_path.is_dir():
@@ -263,10 +329,12 @@ def read_phoenix_mtu(
     survey_id = (survey_id or str(table.tbl_dict.get("SRVY", "")).strip()
                  or "survey")
     channel_keys = table.channel_keys
+    warnings: list[str] = []
+    chains = _prepare_asc_calibration(data_path, calibration_folder, table,
+                                      warnings)
 
     runs: list[tuple[str, Any, list]] = []  # (run_id, run_metadata, ChannelTS list)
     n_samples_by_run: list[int] = []
-    warnings: list[str] = []
     statuses: set[int] = set()
     max_clock_error = 0.0
     n_saturated = 0
@@ -332,6 +400,17 @@ def read_phoenix_mtu(
                 x, unit = _apply_tbl_calibration(comp, x, table)
                 if unit:
                     meta.units = unit
+                refs = chains.get(comp) or []
+                if refs:
+                    from mt_metadata.timeseries.filtered import AppliedFilter
+
+                    # applied=True: the ASC shape response IS part of the
+                    # recorded data (aurora semantics — calibrate removes
+                    # it); stage order = chain order (box first, coil second)
+                    meta.filters = [
+                        AppliedFilter(name=fap.name, applied=True, stage=i)
+                        for i, fap in enumerate(refs, 1)
+                    ]
                 array_list.append(ChannelTS(
                     "electric" if comp.startswith("e") else "magnetic",
                     data=x,
@@ -373,6 +452,12 @@ def read_phoenix_mtu(
     with MTH5() as m:
         m.open_mth5(str(target), "w")
         survey_group = m.add_survey(survey_id)
+        registered: set[str] = set()
+        for refs in chains.values():
+            for fap in refs:
+                if fap.name not in registered:
+                    survey_group.filters_group.add_filter(fap)
+                    registered.add(fap.name)
         station_group = survey_group.stations_group.add_station(
             station_id, station_metadata=table.station_metadata)
         station_group.metadata.id = station_id
@@ -388,6 +473,8 @@ def read_phoenix_mtu(
         "runs": [(rid, float(meta.sample_rate), n)
                  for (rid, meta, _chs), n in zip(runs, n_samples_by_run)],
         "warnings": warnings,
+        "calibration": {comp: [fap.name for fap in refs]
+                        for comp, refs in chains.items()},
     }
 
 
@@ -405,7 +492,10 @@ class LoadPhoenixMtu(Node):
         "concatenates and compresses the slots (DESIGN §24.8). TBL scalar "
         "calibrations are applied at ingest (units mV/km / nT); run time "
         "periods come from the actual block timestamps, never the TBL's "
-        "placeholder schedule times."
+        "placeholder schedule times. Manufacturer ASC calibration tables "
+        "(box CLB + coil CLC) are auto-matched by the TBL serials and "
+        "registered as FAP shape corrections that Compute FC removes "
+        "frequency-domain-wise (DESIGN §24.12)."
     )
     category = "Data I/O"
     inputs = ()
@@ -434,13 +524,23 @@ class LoadPhoenixMtu(Node):
               placeholder="empty = recording end",
               description="Ingest window end (half-open): UTC ISO datetime "
                           "or epoch seconds."),
+        Param("calibration_folder", "directory",
+              label="Calibration folder (ASC)", default="", optional=True,
+              path_kind="in",
+              placeholder="empty = the data directory",
+              description="Directory with the manufacturer ASC calibration "
+                          "tables (*_CLB.asc box, *_CLC.asc coils). Files "
+                          "are matched by the TBL serials (SNUM, HXSN/HYSN/"
+                          "HZSN) and registered as FAP shape corrections — "
+                          "Compute FC removes them frequency-domain-wise "
+                          "(§24.12). Unmatched tables only warn."),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "",
                 station_id: str = "", sample_rates: str = "",
                 mth5_filename: str = "from_phoenix_mtu.mth5",
                 save_path: str = "", start: str = "",
-                end: str = "") -> dict[str, Any]:
+                end: str = "", calibration_folder: str = "") -> dict[str, Any]:
         rates = ([int(x) for x in str(sample_rates).split(",") if x.strip()]
                  if str(sample_rates).strip() else None)
         res = read_phoenix_mtu(
@@ -452,9 +552,16 @@ class LoadPhoenixMtu(Node):
             mth5_filename=mth5_filename,
             start=start,
             end=end,
+            calibration_folder=calibration_folder,
         )
         for w in res["warnings"]:
             ctx.logger.warning(w)
+        cal = res.get("calibration") or {}
+        if cal:
+            ctx.logger.info(
+                "ASC calibration attached: %s",
+                "; ".join(f"{c}={'+'.join(ns)}" for c, ns in sorted(cal.items())),
+            )
         from mth5.mth5 import MTH5
 
         archive = MTH5()

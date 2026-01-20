@@ -3052,3 +3052,93 @@ night-window extract (e.g. 2026-06-18 12:00–14:00 UTC: 12 slots per rate
 archive) — so the MTU-5A path keeps CI coverage without carrying the full
 recording. The same policy already applies to the other instruments
 (gitignored raw data + committed synthetic/extracted fixtures; §24.7).
+
+### 24.12 Calibration placement decision — frequency-domain, inside Compute FC (2026-09-16)
+
+**Decision (user): calibrate in the frequency domain, inside Compute FC** —
+not a separate downstream node, not the time-domain route. Rationale: the
+conventional MT approach calibrates in the frequency domain (matching
+aurora's `calibrate_stft_obj`, which divides the STFT coefficients by the
+chained complex response between STFT and estimation); classical EMTF got
+away with time-domain/flat treatment because long-period stations used
+nearly-flat fluxgates. The MTU-5A makes the time-domain route impractical:
+(a) the induction-coil response falls off steeply in log domain at long
+periods (the correction factor grows without bound — synthesizing it in
+time domain gets progressively harder); (b) the burst archive has ~1000
+short slots — per-slot FFT/iFFT round trips are wasteful; (c) long-period
+calibration in time domain would require decimation or very long windows,
+while per-frequency division is trivial at every decimation level. Also
+mathematically: STFT, prewhitening/recolor, and response division are all
+linear frequency-domain operations — they commute.
+
+**Mechanism.** Compute FC applies the response right after the STFT,
+before returning/persisting the FCs — mirroring aurora exactly (their
+calibration point is inside FC production; persisted FCs are calibrated).
+No new port: the mth5 convention puts the response on the channel
+metadata (`AppliedFilter(name, applied, stage)` -> `/Survey/Filters`,
+typed filter objects: ZPK / FAP / coefficient / time delay / FIR, all
+evaluated as `complex_response(f)`), which the ts.run payloads already
+carry — Compute FC resolves the response the same way it resolves units
+(`_channel_units` precedent). Applied-flag semantics prevent
+double-calibration: only filters with `applied=False` are removed; a
+prior time-domain Calibrate flips the flags, so both routes coexist (the
+time-domain Calibrate node remains for the classical route and explicit
+control). The FC records the applied calibration in its attrs.
+
+**Response input for the MTU-5A loader (user decisions):**
+
+- `Load Phoenix MTU-5A` gains a calibration-folder param: when the TBL is
+  readable, the loader extracts the box/coil serial numbers (TBL
+  `HXSN/HYSN/HZSN` are the match key — §24.10/§24.11) and auto-picks the
+  matching calibration files from the folder; manual per-file selection
+  remains as the fallback.
+- The Phoenix response tables are NORMALIZED (per-frequency gain and
+  phase shift — directly applicable to complex FCs), not absolute
+  transductions; the TBL scalar chain (decision (c)) carries the
+  absolute scale. (Double-counting check pending the actual file
+  structure.)
+- Frequency coverage extends down to 4.196167e-04 Hz — well below
+  conventional BBMT ranges, so the FAP tables cover the deep levels
+  without extrapolation concerns at the long-period end (the FAPFilter
+  constant-extrapolation-below-table caveat is moot for these tables).
+- Calibration is PER CHANNEL: the box calibration (CLB) applies to all
+  five MTU channels; the coil calibration (CLC) applies per magnetic
+  channel (one coil each, hx/hy/hz). Magnetic channels therefore take a
+  TWO-pass chain (box -> coil, units-chained), electric channels a
+  ONE-pass chain (box only). mth5's `ChannelResponse` units-chaining
+  supports composing these as a filter list per channel.
+
+Remaining open questions deferred until the calibration files are parsed
+and their structure is understood: the exact normalization reference of
+the gain/shift tables, how the CLB/CLC composition orders with the TBL
+scalar, and the file-matching rules for the calibration folder.
+
+**ASC calibration file structure (parsed 2026-09-16).** Files (renamed,
+trailing spaces removed): `MTU-1690_CLB.asc` (box), `COIL1620/2417/
+2418_CLC.asc` (one file per coil). Format: 3 header lines + rows of
+`<channel> <freq Hz> <mV/mV> <degrees>`:
+
+- **CLB (box)**: 5 channels x 99 frequencies, ASCENDING 1.3113e-05 ->
+  317.647 Hz; amplitude 0.00266-1.448, phase -3..+90 deg. Header 2
+  carries the normalizing gains `E-gain: 10  H-gain: 3` — matching this
+  corpus's TBL `EGN=10/HGN=3` exactly. Channel numbering matches the TBL
+  `channel_keys` (ex:1, ey:2, hx:3, hy:4, hz:5). At the lowest
+  frequencies ALL channels (electric included) show +90 deg phase — the
+  box's AC-coupled low-frequency roll-off.
+- **CLC (coil)**: one coil per file, single channel column; frequencies
+  DESCENDING (Phoenix convention difference), range 1.3113e-05 Hz
+  (COIL2417) / 4.196e-04 Hz (COIL1620, COIL2418) -> 317.6/388.2 Hz;
+  amplitude 5.9e-5-1.18, phase -90..+91 deg. Header 2 carries the
+  normalizing factor `1000.0 mV/nT` — the TBL `HNOM=1000` expressed in
+  mV (the 1000 mA/nT feedback current through the 1 ohm resistor). The
+  low-frequency behavior is exactly the dB/dt induction response:
+  amplitude -> 0 proportional to f with +90 deg phase.
+- **Composition hypothesis (to be verified empirically)**: the tables
+  are SHAPE corrections — normalized to the TBL constants, so
+  true_field = TBL_scalar_field / [CLB(f) x CLC(f)] for magnetic channels
+  and / CLB(f) for electric channels (FC complex division,
+  amp*exp(i*phase)). The shape is gain-independent (linear amplifier):
+  for a corpus whose recording gains differ from the CLB normalizing
+  gains, the TBL scalar (which uses the ACTUAL gains) already absorbs
+  the ratio. Parser must not assume frequency ordering (CLB ascending,
+  CLC descending).

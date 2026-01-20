@@ -373,3 +373,126 @@ def test_real_corpus_structure(tmp_path):
                              start="2026-06-18T12:00:00",
                              end="2026-06-18T14:00:00")
     assert res_w["runs"][0][2] == 2 * 3600 * 15
+
+
+# --- ASC calibration ingest (§24.12) --------------------------------------
+
+_CLB_MIN = """\
+C:\\test\\new\\MTU-1234_CLB : Instrument Calibrations
+MTU-1234.CLB    Normalizing  E-gain: 2  H-gain: 2
+
+        Channel      Freq (Hz)        mV / mV        Degrees
+              1         1.0            1.010             -1
+              2         1.0            1.020             -1
+              3         1.0            1.100              0
+              4         1.0            1.110              0
+              5         1.0            1.120              0
+              1        10.0            1.000              0
+              2        10.0            1.000              0
+              3        10.0            1.000              0
+              4        10.0            1.000              0
+              5        10.0            1.000              0
+"""
+
+_CLC_MIN = """\
+C:\\test\\new\\COIL111_CLC : Coil Calibrations
+COIL111.CLC    Normalizing Factor: 1000.0 mV/nT
+
+        Channel      Freq (Hz)        mV / mV        Degrees
+              1        10.0            1.000              0
+              1         1.0            1.050              2
+"""
+
+
+def _write_cal_files(directory, box=True, coils=("COIL111",)):
+    from pathlib import Path
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    if box:
+        (directory / "MTU-1234_CLB.asc").write_text(_CLB_MIN)
+    for s in coils:
+        (directory / f"{s}_CLC.asc").write_text(_CLC_MIN.replace("COIL111", s))
+    return directory
+
+
+def test_read_phoenix_mtu_asc_calibration(tmp_path):
+    """ASC box+coil tables matched by TBL serials, registered in
+    /Survey/Filters, referenced per channel (box stage 1, coil stage 2),
+    and restored by to_runts (objects + applied flags)."""
+    _synthetic_corpus(tmp_path)
+    _write_tbl(tmp_path / "SYNTH01.TBL", HXSN="COIL111", HYSN="COIL222",
+               HZSN="COIL333")
+    _write_cal_files(tmp_path, box=True, coils=("COIL111",))
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    assert res["calibration"] == {
+        "ex": ["phoenix_clb_mtu-1234_ex"],
+        "ey": ["phoenix_clb_mtu-1234_ey"],
+        "hx": ["phoenix_clb_mtu-1234_hx", "phoenix_clc_coil111_hx"],
+        "hy": ["phoenix_clb_mtu-1234_hy"],
+        "hz": ["phoenix_clb_mtu-1234_hz"],
+    }
+    # only the missing-coil warnings for hy/hz; no box warning
+    assert not any("_CLB" in w for w in res["warnings"])
+    assert sum("coil calibration" in w for w in res["warnings"]) == 2
+
+    from mth5.mth5 import MTH5
+    from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
+
+    with MTH5() as m:
+        m.open_mth5(res["path"], "r")
+        from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+        survey = _resolve_survey(m, "")
+        fg = survey.filters_group
+        hx_filters = [
+            fg.to_filter_object(n) for n in res["calibration"]["hx"]
+        ]
+        assert all(isinstance(f, FrequencyResponseTableFilter)
+                   for f in hx_filters)
+        station = _resolve_station(survey, "")
+        rg = station.get_run("sr15_0001")
+        hx = rg.get_channel("hx")
+        refs = [(f.name, f.applied, f.stage) for f in hx.metadata.filters]
+        assert refs == [("phoenix_clb_mtu-1234_hx", True, 1),
+                        ("phoenix_clc_coil111_hx", True, 2)]
+        ex_refs = [f.name for f in rg.get_channel("ex").metadata.filters]
+        assert ex_refs == ["phoenix_clb_mtu-1234_ex"]
+        runts = rg.to_runts()
+        assert set(runts.filters) >= {
+            "phoenix_clb_mtu-1234_hx", "phoenix_clc_coil111_hx"}
+        attrs = runts.dataset["hx"].attrs.get("filters")
+        assert [d["applied_filter"]["name"] for d in attrs] == \
+            res["calibration"]["hx"]
+        assert all(d["applied_filter"]["applied"] for d in attrs)
+
+
+def test_read_phoenix_mtu_asc_calibration_missing_warns(tmp_path):
+    """Missing box / mismatched coil serials warn but never fail the
+    ingest — the TBL scalar calibration still applies."""
+    _synthetic_corpus(tmp_path)
+    _write_tbl(tmp_path / "SYNTH01.TBL", HXSN="COIL111", HYSN="COIL222",
+               HZSN="COIL333")
+    _write_cal_files(tmp_path, box=False, coils=("COIL999",))
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    assert res["calibration"] == {}  # nothing matched the TBL serials
+    assert any("box calibration" in w for w in res["warnings"])
+    assert any("COIL111" in w and "hx" in w for w in res["warnings"])
+    assert any("COIL222" in w and "hy" in w for w in res["warnings"])
+    assert any("COIL333" in w and "hz" in w for w in res["warnings"])
+
+
+def test_read_phoenix_mtu_asc_calibration_explicit_folder(tmp_path):
+    """An explicit calibration folder overrides the data-directory search."""
+    _synthetic_corpus(tmp_path)
+    _write_tbl(tmp_path / "SYNTH01.TBL", HXSN="COIL111", HYSN="COIL222",
+               HZSN="COIL333")
+    cal_dir = _write_cal_files(tmp_path / "cal", box=True,
+                               coils=("COIL111", "COIL222", "COIL333"))
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                           calibration_folder=cal_dir)
+    assert res["calibration"]["hy"] == ["phoenix_clb_mtu-1234_hy",
+                                        "phoenix_clc_coil222_hy"]
+    assert res["calibration"]["hz"] == ["phoenix_clb_mtu-1234_hz",
+                                        "phoenix_clc_coil333_hz"]
+    assert not any("calibration" in w for w in res["warnings"])
