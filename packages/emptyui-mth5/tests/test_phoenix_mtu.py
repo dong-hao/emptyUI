@@ -278,26 +278,98 @@ def test_read_phoenix_mtu_no_tbl(tmp_path):
         read_phoenix_mtu(tmp_path, save_path=tmp_path)
 
 
-# --- real-corpus test (IAGA mth5-test-data phoenix_mtu) ------------------
+# --- ingest time window (§24.11 night-window smoke tests) ----------------
+
+def test_window_full_matches_unfiltered(tmp_path):
+    """A window spanning the whole recording is identical to no filter."""
+    _synthetic_corpus(tmp_path)
+    res0 = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    res1 = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                            start="2009-12-16T00:00:00",
+                            end="2009-12-17T00:00:00")
+    assert res0["runs"] == res1["runs"]
+
+
+def test_window_crops_blocks_by_tag_time(tmp_path):
+    """Blocks are filtered by per-block tag start BEFORE grouping: slots
+    inside the window stay full, streams crop at the edges, outside slots
+    vanish (§24.11)."""
+    _synthetic_corpus(tmp_path)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                           start="2009-12-16T07:47:00",
+                           end="2009-12-16T08:03:00")
+    by_rate = {}
+    for rid, rate, n in res["runs"]:
+        by_rate.setdefault(int(rate), []).append((rid, n))
+    # TS3 (1-s slots at 07:55, 08:05): only the 07:55 slot survives, full
+    assert by_rate[2400] == [("sr2400_0001", 2400)]
+    # TS4 (16-s slots at 07:50, 08:00): both slots lie inside the window
+    # (the 08:00 slot spans 08:00:00-08:00:16, window ends 08:03) — full
+    assert by_rate[150] == [("sr150_0001", 2400), ("sr150_0002", 2400)]
+    # TS5 (07:46:52 -> 07:48:32): head crop at 07:47 -> 92 s = 1380 samples
+    assert by_rate[15] == [("sr15_0001", 1380)]
+    # the window drop is reported
+    text = " ".join(res["warnings"])
+    assert "ingest window" in text and "dropped" in text
+    # surviving segments are not schedule anomalies
+    assert not any("TBL schedule says" in w for w in res["warnings"])
+
+
+def test_window_accepts_epoch_seconds(tmp_path):
+    """Epoch-seconds windows parse (naive/aware ISO both fine too)."""
+    _synthetic_corpus(tmp_path)
+    import pandas as pd
+
+    t0 = pd.Timestamp("2009-12-16T07:47:00").timestamp()
+    t1 = pd.Timestamp("2009-12-16T08:03:00").timestamp()
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path, start=t0, end=t1)
+    assert sum(1 for r in res["runs"] if r[1] == 150) == 2
+
+
+def test_window_outside_data_raises(tmp_path):
+    _synthetic_corpus(tmp_path)
+    with pytest.raises(ValueError, match="no MTU-5A blocks fall within"):
+        read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                         start="2020-01-01T00:00:00",
+                         end="2020-01-02T00:00:00")
+
+
+def test_window_invalid_args_raise(tmp_path):
+    _synthetic_corpus(tmp_path)
+    with pytest.raises(ValueError, match="not an ISO"):
+        read_phoenix_mtu(tmp_path, save_path=tmp_path, start="not-a-time")
+    with pytest.raises(ValueError, match="end .*<= start"):
+        read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                         start="2009-12-16T08:00:00",
+                         end="2009-12-16T07:00:00")
+
+
+# --- real-corpus test (user station 1690618B; §24.11) --------------------
 
 @pytest.mark.skipif(not REAL_DIR.exists(), reason="MTU-5A corpus not on disk")
 def test_real_corpus_structure(tmp_path):
-    """The official 1690C16C recording: TS3 -> 121 x 1 s, TS4 -> 122 x 16 s,
-    TS5 -> 1 x 73036 s (DESIGN §24.8 dry-run numbers). Parse-only (the
-    244-run archive write costs ~2 min — its mechanics are covered by the
+    """The 1690618B recording: TS3 -> 506 x 2 s, TS4 -> 506 x 16 s,
+    TS5 -> 1 x 84.4 h continuous (DESIGN §24.11 block-tag walk numbers).
+    All three rates span the same 3.5 days. Parse-only (the 1013-run
+    archive write costs ~3 min — its mechanics are covered by the
     synthetic tests); a single-rate archive build keeps an end-to-end
     round trip in the test without the write cost."""
-    for ext, rate, n_blocks in (("TS3", 2400, 121), ("TS4", 150, 1952),
-                                ("TS5", 15, 73036)):
-        segs = _group_segments(_iter_blocks(REAL_DIR / f"1690C16C.{ext}"))
-        assert len(segs) == (1 if ext == "TS5" else {2400: 121, 150: 122}[rate])
+    for ext, rate, n_blocks in (("TS3", 2400, 1012), ("TS4", 150, 8096),
+                                ("TS5", 15, 303742)):
+        segs = _group_segments(_iter_blocks(REAL_DIR / f"1690618B.{ext}"))
+        assert len(segs) == (1 if ext == "TS5" else {2400: 506, 150: 506}[rate])
         assert sum(s.n_blocks for s in segs) == n_blocks
         assert all(s.rate == rate for s in segs)
         if ext == "TS4":
             assert all(s.n_blocks == 16 for s in segs)
         if ext == "TS3":
-            assert all(s.n_blocks == 1 for s in segs)
+            assert all(s.n_blocks == 2 for s in segs)
     # end-to-end archive round trip at the continuous rate only (1 run)
     res = read_phoenix_mtu(REAL_DIR, sample_rates=[15], save_path=tmp_path)
     assert [r[0] for r in res["runs"]] == ["sr15_0001"]
-    assert res["runs"][0][2] == 73036 * 15
+    assert res["runs"][0][2] == 303742 * 15
+    # the ingest window (§24.11): a 2 h night sub-window crops the stream
+    res_w = read_phoenix_mtu(REAL_DIR, sample_rates=[15], save_path=tmp_path,
+                             start="2026-06-18T12:00:00",
+                             end="2026-06-18T14:00:00")
+    assert res_w["runs"][0][2] == 2 * 3600 * 15

@@ -155,6 +155,42 @@ def _file_rate(path: Path) -> int:
         return int.from_bytes(fid.read(32)[18:20], "little")
 
 
+def _window_bounds(start: str | float | None,
+                   end: str | float | None) -> tuple[pd.Timestamp | None,
+                                                     pd.Timestamp | None]:
+    """Parse the ingest time window (§24.11): UTC ISO datetime or epoch
+    seconds; naive stamps are localized to UTC (the block tags are UTC).
+    Returns ``(start, end)`` as tz-aware UTC timestamps or ``None``.
+    """
+    def parse(value, label):
+        if value in (None, ""):
+            return None
+        s = str(value).strip()
+        ts = None
+        try:
+            f = float(s)
+            if np.isfinite(f):
+                ts = pd.Timestamp(f, unit="s")
+        except ValueError:
+            pass
+        if ts is None:
+            try:
+                ts = pd.Timestamp(s)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"MTU-5A window {label}={value!r} is not an ISO "
+                    "datetime or epoch seconds") from exc
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        return ts.tz_convert("UTC")
+
+    lo, hi = parse(start, "start"), parse(end, "end")
+    if lo is not None and hi is not None and hi <= lo:
+        raise ValueError(
+            f"MTU-5A window is empty: end ({hi}) <= start ({lo})")
+    return lo, hi
+
+
 def _ts_files(data_path: Path, sample_rates: list[int] | None) -> list[Path]:
     files = sorted(
         p for p in data_path.iterdir()
@@ -185,6 +221,8 @@ def read_phoenix_mtu(
     station_id: str = "",
     save_path: str | Path | None = None,
     mth5_filename: str = "from_phoenix_mtu.mth5",
+    start: str | float = "",
+    end: str | float = "",
 ) -> dict[str, Any]:
     """Convert a legacy Phoenix MTU-5A recording (TBL + TSn files) into an
     mth5 archive with one run per maximal contiguous segment.
@@ -193,6 +231,14 @@ def read_phoenix_mtu(
     (§24.7); run time periods come from the per-block tag timestamps —
     never the TBL's placeholder STIM/ETIM. TBL scalar calibrations are
     applied at ingest and units stamped (mV/km, nT).
+
+    ``start``/``end`` (§24.11) restrict the ingest to a time window
+    (UTC ISO datetime or epoch seconds; naive stamps read as UTC): blocks
+    are filtered by their per-block tag start *before* segment grouping —
+    per-second granularity (every MTU-5A block is ≤ 1 s of data), so slots
+    and the continuous stream crop cleanly at the window edges and partial
+    slots become short runs with tag-truth time periods. Use this to
+    extract a quiet night window for fast smoke tests.
 
     Returns ``{"path": archive_path, "runs": [(run_id, rate, n_samples)],
     "warnings": [str]}``.
@@ -205,6 +251,7 @@ def read_phoenix_mtu(
         raise ValueError(
             f"expected exactly one TBL in {data_path}, found "
             f"{[p.name for p in tbls]}")
+    win_start, win_end = _window_bounds(start, end)
     from mth5.mth5 import MTH5
     from mt_io.phoenix.readers.mtu.mtu_table import MTUTable
     from mt_timeseries import ChannelTS
@@ -229,12 +276,25 @@ def read_phoenix_mtu(
         # samples feed the segment grouping (re-reading 20 h of 15 Hz data
         # per pass measurably slows ingestion)
         blocks = list(_iter_blocks(path, warnings))
+        if win_start is not None or win_end is not None:
+            n0 = len(blocks)
+            blocks = [
+                (t, s) for (t, s) in blocks
+                if (win_start is None or t.start >= win_start)
+                and (win_end is None or t.start < win_end)
+            ]
+            msg = (f"{path.name}: ingest window [{win_start}, {win_end}) "
+                   f"dropped {n0 - len(blocks)}/{n0} block(s)")
+            _log.info(msg)
+            warnings.append(msg)
         for tag, _samples in blocks:
             statuses.add(tag.clock_status)
             max_clock_error = max(max_clock_error, abs(tag.clock_error_s))
             n_saturated += tag.saturated
         segs = _group_segments(iter(blocks))
-        # schedule cross-check (loose): slot lengths vs the TBL schedule
+        # schedule cross-check (loose): slot lengths vs the TBL schedule;
+        # window-cropped edge segments are exempt (they legitimately span
+        # less than the slot length)
         for lv, rate_tag in _RATE_TAGS.items():
             expected_rate = int(table.tbl_dict.get(rate_tag, 0) or 0)
             if expected_rate != _file_rate(path):
@@ -244,6 +304,12 @@ def read_phoenix_mtu(
             for seg in segs:
                 got = (seg.end - seg.start).total_seconds()
                 if expected_len and abs(got - expected_len) > 1e-6:
+                    at_edge = (
+                        (win_start is not None and seg.start == win_start)
+                        or (win_end is not None and seg.end == win_end))
+                    if win_start is not None or win_end is not None:
+                        if at_edge:
+                            continue  # window crop, not a schedule anomaly
                     warnings.append(
                         f"{path.name}: segment {seg.start} spans {got:g} s, "
                         f"TBL schedule says {expected_len:g} s ({slot_tag})")
@@ -278,6 +344,12 @@ def read_phoenix_mtu(
             runs.append((run_id, run_meta, array_list))
             n_samples_by_run.append(array_list[0].ts.size)
         blocks = None  # free the sample chunks
+
+    if not runs:
+        raise ValueError(
+            "no MTU-5A blocks fall within the requested ingest window "
+            f"[{win_start}, {win_end}) — check start/end against the "
+            "recording (the per-block tags carry the true UTC times)")
 
     if len(statuses) > 1:
         warnings.append(
@@ -352,12 +424,23 @@ class LoadPhoenixMtu(Node):
               default="from_phoenix_mtu.mth5"),
         Param("save_path", "directory", label="Output directory", default="",
               optional=True, path_kind="out"),
+        Param("start", "string", label="Start (UTC)", default="", optional=True,
+              placeholder="empty = recording start",
+              description="Ingest window start (§24.11): UTC ISO datetime "
+                          "or epoch seconds; blocks are filtered by their "
+                          "per-block tag start before segment grouping — "
+                          "use a quiet night window for fast smoke tests."),
+        Param("end", "string", label="End (UTC)", default="", optional=True,
+              placeholder="empty = recording end",
+              description="Ingest window end (half-open): UTC ISO datetime "
+                          "or epoch seconds."),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "",
                 station_id: str = "", sample_rates: str = "",
                 mth5_filename: str = "from_phoenix_mtu.mth5",
-                save_path: str = "") -> dict[str, Any]:
+                save_path: str = "", start: str = "",
+                end: str = "") -> dict[str, Any]:
         rates = ([int(x) for x in str(sample_rates).split(",") if x.strip()]
                  if str(sample_rates).strip() else None)
         res = read_phoenix_mtu(
@@ -367,6 +450,8 @@ class LoadPhoenixMtu(Node):
             station_id=station_id,
             save_path=save_path or None,
             mth5_filename=mth5_filename,
+            start=start,
+            end=end,
         )
         for w in res["warnings"]:
             ctx.logger.warning(w)
