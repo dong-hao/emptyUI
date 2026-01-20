@@ -194,6 +194,22 @@ full architecture, contracts and verification records are in
   formats to ASCII to land in the Calibrate route (FAP-style, keyed by coil
   serial) — the scalar stays at ingest, per decision (c).
 
+- **MTU-5A ASC calibration delivered end to end (DESIGN.md §24.12,
+  2026-09-17)**: the manufacturer ASC tables (box `*_CLB.asc`, one coil file
+  per `*_CLC.asc`) are normalized shape corrections — their headers carry
+  exactly the TBL constants (E-gain/H-gain, 1000 mV/nT), so the TBL scalar
+  stays the absolute scale and the ASC filters correct the frequency
+  response on top. `Load Phoenix MTU-5A` auto-matches the tables by the TBL
+  serials (SNUM, HXSN/HYSN/HZSN), registers them in `/Survey/Filters/fap`
+  and references them per channel (box stage 1, coil stage 2,
+  `applied=True` = the response is in the recorded data); Compute FC now
+  divides the Fourier coefficients by the chained complex response
+  (aurora-style, applied-flag-aware, DC column NaN when the response
+  vanishes there) — the chains ride the payload through the core nodes and
+  Align Runs, and compose safely with the time-domain Calibrate node.
+  Verified end to end on the 1690618B corpus (all three coils + box
+  matched, zero warnings).
+
 ### Current issues (known problems, from the 2026-09-11 code review)
 
 Fixed by the review batches (each with a regression test): Rotate TF

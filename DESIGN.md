@@ -3142,3 +3142,56 @@ trailing spaces removed): `MTU-1690_CLB.asc` (box), `COIL1620/2417/
   gains, the TBL scalar (which uses the ACTUAL gains) already absorbs
   the ratio. Parser must not assume frequency ordering (CLB ascending,
   CLC descending).
+
+**Implementation (2026-09-17).** Delivered in three pieces:
+
+- **ASC parser** (`emptyui_mth5/phoenix_calibration.py`): `parse_asc_calibration`
+  returns a `PhoenixCalibration` (kind CLB/CLC from the `.CLB/.CLC` marker,
+  serial + normalizing constants from the second header line, per-channel
+  tables sorted ascending — CLC files list frequencies descending);
+  `find_asc_calibrations(folder, box_serial, coil_serials)` substring-matches
+  the TBL serials (`SNUM` -> `*_CLB.asc`, `HXSN/HYSN/HZSN` -> `*_CLC.asc`,
+  case-insensitive); `build_phoenix_filters` builds one FAP filter per
+  channel (`phoenix_clb_<serial>_<comp>` / `phoenix_clc_<serial>_<comp>`)
+  with `units_in == units_out` = the archived physical units (mV/km, nT),
+  gain 1 — a SHAPE filter whose removal is the per-frequency complex
+  division. Phases are passed to mt_metadata in RADIANS: its constructor
+  applies a max(|phase|) > 6*pi degrees->radians heuristic that silently
+  misreads small-phase tables. Low-frequency extension below the measured
+  range (`extend_below`): "linear" (default) prepends f_min/1000 with
+  amplitude/f_min and the lowest phase held — the exact dB/dt (coil) and
+  AC-coupling (box) laws, and the subsequent interp1d extrapolation follows
+  the same proportional law arbitrarily deep; "flat" keeps the repo-wide FAP
+  convention (§16.1). Above the measured range the mt_metadata linear
+  extrapolation is kept (aurora parity; only the 2400 Hz level's > 317 Hz
+  bins extrapolate, outside the MT band of interest).
+- **Loader** (`read_phoenix_mtu(calibration_folder=...)` + Load Phoenix
+  MTU-5A param): empty = the data directory (the manufacturer files usually
+  sit next to the recording); a folder with no .asc files at all stays
+  silent. Matched tables are registered in `/Survey/Filters/fap` and
+  referenced per channel via `AppliedFilter(applied=True, stage=k)`
+  (box stage 1, coil stage 2) in the channel metadata — the archive round
+  trip restores both the refs and the objects (verified: `to_runts`
+  resolves `channel_response` and the dataset attrs carry the applied
+  flags). Unmatched/mismatched serials warn, never fail the ingest; the
+  TBL scalar calibration still applies (the ASC filters only correct the
+  shape on top).
+- **Compute FC** (`_calibrate_stft_vars` in emptyui_aurora._processing):
+  after the STFT of each decimation level, each channel's FCs are divided
+  by the chained complex response of its applied filters (column
+  broadcast); a zero/near-zero DC response (induction-coil tables padded
+  with the linear extension extrapolate to ~0 at DC within float error)
+  gets divisor 1 and a NaN DC column, aurora-style. The per-channel chain
+  is recorded in the fc attrs as `calibration_applied`
+  (`"hx=box+coil; ex=box"`). No new node, no new port: the chains travel
+  with the payload — core `TimeSeries.calibration`
+  (`{channel: [(filter, applied), ...]}`) coerced from the RunTS dataset
+  attrs + object registry (`channel_calibration`), preserved by
+  TimeSeries.copy, the core Detrend/Bandpass nodes, and rebuilt on the
+  Align Runs / Split Channels -> Merge Channels outputs (ChannelTS
+  `channel_response` + metadata refs; the refs must be set AFTER
+  `channel_response` — the setter clobbers flags when `filter_names`
+  mismatch). Composition with the time-domain Calibrate node is safe by
+  the applied-flag semantics: RunTS.calibrate divides by all chain filters
+  and flips them to applied=False, after which Compute FC divides by
+  nothing.

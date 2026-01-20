@@ -209,12 +209,26 @@ def _get_channel(data, name: str):
     a component that is absent (mt_timeseries raises NameError)."""
     if hasattr(data, "dataset") and not isinstance(data, dict):
         return getattr(data, name)
+    from mt_metadata.timeseries.filters import ChannelResponse
+    from mt_metadata.timeseries.filtered import AppliedFilter
     from mt_timeseries import ChannelTS
+
+    from emptyui_core_nodes.types import channel_calibration
 
     arr = _payload(data)[0][name]
     ch = ChannelTS("electric" if is_electric_name(name) else "magnetic",
                    data=arr)
     ch.component = name
+    pairs = channel_calibration(data).get(str(name)) or []
+    if pairs:
+        # keep the response chain on the wrapper so Merge Channels rebuilds
+        # a RunTS that still carries it (§24.12)
+        ch.channel_response = ChannelResponse(
+            filters_list=[obj for obj, _ in pairs])
+        ch.channel_metadata.filters = [
+            AppliedFilter(name=str(obj.name), applied=bool(applied), stage=i)
+            for i, (obj, applied) in enumerate(pairs, 1)
+        ]
     return ch
 
 
@@ -366,10 +380,15 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
     display/filter nodes via ``coerce_run`` — accept them. The absolute start
     is stamped so downstream FC time grids are identical for both runs.
     """
+    from mt_metadata.timeseries.filters import ChannelResponse
+    from mt_metadata.timeseries.filtered import AppliedFilter
     from mt_timeseries import ChannelTS
     from mth5.timeseries import RunTS
 
+    from emptyui_core_nodes.types import channel_calibration
+
     units = _channel_units_from(source)
+    calibration = channel_calibration(source)
     pieces = []
     for name, arr in channels.items():
         seg = np.asarray(arr, dtype=float)[start_idx:start_idx + n_common].copy()
@@ -382,13 +401,27 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
         u = units.get(str(name))
         if u:
             ch.channel_metadata.units = u
+        pairs = calibration.get(str(name)) or []
+        if pairs:
+            # carry the response chain across the crop (§24.12): objects
+            # via channel_response (RunTS registers them), refs via channel
+            # metadata (the archive round trip restores them). The refs are
+            # set AFTER channel_response — the setter would clobber flags.
+            ch.channel_response = ChannelResponse(
+                filters_list=[obj for obj, _ in pairs])
+            ch.channel_metadata.filters = [
+                AppliedFilter(name=str(obj.name), applied=bool(applied),
+                              stage=i)
+                for i, (obj, applied) in enumerate(pairs, 1)
+            ]
         pieces.append(ch)
     kwargs = {}
     for attr in ("run_metadata", "station_metadata", "survey_metadata"):
         meta = getattr(source, attr, None)
         if meta is not None:
             kwargs[attr] = meta
-    return RunTS(array_list=pieces, **kwargs)
+    out = RunTS(array_list=pieces, **kwargs)
+    return out
 
 
 class AlignRuns(Node):

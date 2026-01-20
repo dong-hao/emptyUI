@@ -66,6 +66,7 @@ class Bandpass(Node):
             survey=data.survey, station=data.station, run=data.run,
             meta={**data.meta, "filter": "bandpass"},
             units=dict(data.units),
+            calibration={k: list(v) for k, v in data.calibration.items()},
         )}
 
 
@@ -110,6 +111,8 @@ class Detrend(Node):
                                    survey=data.survey, station=data.station,
                                    run=data.run,
                                    meta=dict(data.meta),
-                                   units=dict(data.units))}
+                                   units=dict(data.units),
+                                   calibration={k: list(v) for k, v in
+                                                data.calibration.items()})}
 
 

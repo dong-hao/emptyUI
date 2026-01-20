@@ -70,6 +70,7 @@ def test_align_restamps_units_from_core_series(tmp_path):
     node = AlignRuns()
     out = node.execute(RunContext(workspace=tmp_path, store=DataStore()), a, b)
     for key in ("data1", "data2"):
+        import sys; print('DBG test:', key, out[key].dataset['hx'].attrs.get('filters'), file=sys.stderr)
         ds = out[key].dataset
         assert ds["hx"].attrs.get("units") == "nanoTesla"
         assert ds["ex"].attrs.get("units") == "milliVolt per kilometer"
@@ -122,3 +123,97 @@ def test_counts_impedance_would_be_meaningless(tmp_path):
     with pytest.raises(ValueError, match="raw instrument counts"):
         compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=2,
                           factor=4, num_samples_window=128)
+
+
+# --- §24.12: instrument response chains survive the payload path ----------
+
+def _fap(name="t_fap"):
+    from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
+
+    import numpy as np
+
+    fap = FrequencyResponseTableFilter(
+        frequencies=np.array([1e-3, 1e3]),
+        amplitudes=np.array([2.0, 2.0]),
+        phases=np.deg2rad(np.array([90.0, 90.0])),
+        units_in="nanoTesla", units_out="nanoTesla", gain=1.0)
+    fap.name = name
+    return fap
+
+
+def _attach_calibration(runts, chains):
+    ds = runts.dataset
+    registry = {}
+    for comp, pairs in chains.items():
+        refs = []
+        for obj, applied in pairs:
+            registry[obj.name] = obj
+            refs.append({"applied_filter": {"name": obj.name,
+                                            "applied": applied}})
+        ds[comp].attrs["filters"] = refs
+    runts.filters = registry
+    return runts
+
+
+def test_coerce_run_carries_calibration():
+    from emptyui_core_nodes.types import channel_calibration, coerce_run
+
+    runts = _attach_calibration(
+        _runts(*_field(np.random.default_rng(21))),
+        {"hx": [(_fap(), True)]})
+    core = _core_series(runts)
+    pairs = channel_calibration(core)["hx"]
+    assert pairs[0][0].name == "t_fap" and pairs[0][1] is True
+    # TimeSeries.copy preserves the chains (the core filter nodes rely on it)
+    copied = channel_calibration(core.copy())["hx"]
+    assert copied == pairs
+
+
+def test_align_preserves_calibration(tmp_path):
+    """Align Runs' rebuilt RunTS keeps the response chain: refs in the
+    dataset attrs and the objects registered (Compute FC's inputs)."""
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_core_nodes.types import channel_calibration
+    from emptyui_mth5.runs import AlignRuns
+
+    rng = np.random.default_rng(22)
+    a = _attach_calibration(_runts(*_field(rng, n=4096)),
+                            {"hx": [(_fap("box_hx"), True),
+                                    (_fap("coil_hx"), True)]})
+    b = _runts(*_field(np.random.default_rng(22), n=4096))
+    node = AlignRuns()
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = node.execute(ctx, _core_series(a), _core_series(b))
+    ds = out["data1"].dataset
+    names = [d["applied_filter"]["name"]
+             for d in ds["hx"].attrs.get("filters") or []]
+    assert names == ["box_hx", "coil_hx"]
+    assert all(d["applied_filter"]["applied"] for d in
+               ds["hx"].attrs.get("filters"))
+    pairs = channel_calibration(out["data1"])["hx"]
+    assert [p[0].name for p in pairs] == ["box_hx", "coil_hx"]
+    assert [p[1] for p in pairs] == [True, True]
+    # data2 carries no calibration and stays clean
+    assert channel_calibration(out["data2"]) == {}
+
+
+def test_split_merge_preserve_calibration():
+    """Split Channels -> Merge Channels round trip keeps the response chain
+    (the legacy non-align workflow path)."""
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_core_nodes.types import channel_calibration
+    from emptyui_mth5.runs import MergeChannels, SplitChannels
+
+    ctx = RunContext(workspace="/tmp/split_merge_dbg", store=DataStore())
+    runts = _attach_calibration(
+        _runts(*_field(np.random.default_rng(23))),
+        {"hx": [(_fap("box_hx"), True), (_fap("coil_hx"), True)]})
+    split = SplitChannels().execute(ctx, _core_series(runts))
+    merged = MergeChannels().execute(
+        ctx, ex=split["ex"], ey=split["ey"], hx=split["hx"], hy=split["hy"],
+        hz=split["hz"])["data"]
+    pairs = channel_calibration(merged)["hx"]
+    assert [p[0].name for p in pairs] == ["box_hx", "coil_hx"]
+    assert all(p[1] for p in pairs)

@@ -36,6 +36,15 @@ class TimeSeries:
     #: through the core filter nodes so Compute FC's instrument-unit
     #: normalization survives a core node in the chain (DESIGN §19).
     units: dict[str, str] = field(default_factory=dict)
+    #: per-channel instrument response chains (DESIGN §24.12):
+    #: ``{channel: [(filter_object, applied: bool), ...]}`` in stage order.
+    #: Compute FC divides the Fourier coefficients by the chained complex
+    #: response of every *applied* filter (aurora semantics: ``applied=True``
+    #: means the response is part of the recorded data and must be removed;
+    #: a time-domain Calibrate flips the flags, so the two paths compose
+    #: without double application). Coerced from an mth5 RunTS's per-channel
+    #: ``filters`` attrs + its ``filters`` object registry.
+    calibration: dict[str, list] = field(default_factory=dict)
 
     @property
     def n_samples(self) -> int:
@@ -52,6 +61,7 @@ class TimeSeries:
             run=self.run,
             meta=dict(self.meta),
             units=dict(self.units),
+            calibration={k: list(v) for k, v in self.calibration.items()},
         )
 
 
@@ -103,6 +113,51 @@ def ensure_finite(channels, where: str) -> None:
         )
 
 
+def channel_calibration(value) -> dict[str, list]:
+    """Per-channel instrument response chains from a ts.run payload (§24.12).
+
+    Returns ``{channel: [(filter_object, applied: bool), ...]}`` in stage
+    order. Sources:
+
+    - an mth5 RunTS: the per-channel dataset attrs ``filters`` (applied-filter
+      refs) resolved against the run's ``filters`` object registry — the
+      shape the archive round trip restores;
+    - a core :class:`TimeSeries`: its ``calibration`` dict as-is.
+
+    Refs whose object is missing from the registry are dropped with a
+    warning (a partial chain would silently mis-calibrate); payloads with
+    no response info yield ``{}``.
+    """
+    _log = logging.getLogger("emptyui")
+    if hasattr(value, "dataset") and not isinstance(value, dict):  # mth5 RunTS
+        registry = dict(getattr(value, "filters", None) or {})
+        out: dict[str, list] = {}
+        for name in value.dataset.data_vars:
+            refs = value.dataset[name].attrs.get("filters") or []
+            pairs: list = []
+            for ref in refs:
+                try:
+                    info = ref["applied_filter"]
+                    obj = registry.get(info["name"])
+                except (TypeError, KeyError, IndexError):
+                    continue
+                if obj is None:
+                    _log.warning(
+                        "channel '%s' references filter '%s' that is not "
+                        "registered on the payload — skipping it (FC-level "
+                        "calibration would be incomplete)", name,
+                        info.get("name"))
+                    continue
+                pairs.append((obj, bool(info.get("applied", True))))
+            if pairs:
+                out[str(name)] = pairs
+        return out
+    cal = getattr(value, "calibration", None)
+    if isinstance(cal, dict):
+        return {str(k): list(v) for k, v in cal.items() if v}
+    return {}
+
+
 def coerce_run(value):
     """Normalize any ts.run payload to a core :class:`TimeSeries`.
 
@@ -132,6 +187,7 @@ def coerce_run(value):
             station=_meta_id(getattr(value, "station_metadata", None)),
             run=_meta_id(getattr(value, "run_metadata", None)),
             units=units,
+            calibration=channel_calibration(value),
         )
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
         return value

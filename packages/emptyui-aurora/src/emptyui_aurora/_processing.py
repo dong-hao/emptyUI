@@ -14,6 +14,7 @@ from itertools import pairwise
 import numpy as np
 import pandas as pd
 from emptyui_core_nodes.types import (
+    channel_calibration,
     ensure_finite,
     is_unknown_start,
     warn_placeholder_start,
@@ -314,6 +315,7 @@ def compute_fc(
             "start)", clock_zero)
         clock_zero = ""
     units = _channel_units(value)
+    calibration = channel_calibration(value)
     nperseg = max(8, int(window_length_s * sample_rate))
     noverlap = int(nperseg * overlap)
     n_skip, off = _clock_zero_head_skip(start_ts, sample_rate, nperseg,
@@ -359,6 +361,7 @@ def compute_fc(
         converted, sample_rate, nperseg, overlap, window_type,
         input_channels, output_channels,
         prewhitening=prewhitening, per_window_detrend=per_window_detrend)
+    cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
 
     time_coord = t + off
     start_iso = ""
@@ -383,6 +386,7 @@ def compute_fc(
             "electric_scaling": "; ".join(sorted(e_labels)) if e_labels else "none",
             "channel_nomenclature": keyword,
             "e_dipole_length_m": e_dipole_length_m or 0.0,
+            "calibration_applied": cal_note,
             "start_datetime": start_iso,
         },
     )
@@ -446,6 +450,7 @@ def compute_fc_levels(
     if start_datetime is None:
         start_datetime = start_dt
     units = _channel_units(value)
+    calibration = channel_calibration(value)
     input_channels, output_channels, keyword = _resolve_io_channels(
         list(channels), channel_nomenclature, input_channels, output_channels
     )
@@ -511,6 +516,7 @@ def compute_fc_levels(
             prewhitening=prewhitening,
             per_window_detrend=per_window_detrend,
         )
+        cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
         start_iso = ""
         if start_ts is not None:
             time_coord = start_ts + pd.to_timedelta(t + off, unit="s")
@@ -536,6 +542,7 @@ def compute_fc_levels(
                 "electric_scaling": e_scaling,
                 "channel_nomenclature": keyword,
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
+                "calibration_applied": cal_note,
                 "start_datetime": start_iso,
             },
         )
@@ -819,6 +826,54 @@ def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
 def _window(name: str) -> str:
     """Map our window_type vocabulary to scipy window names."""
     return {"hanning": "hann"}.get(name, name)
+
+
+def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
+    """Divide the per-channel FCs by their instrument response (§24.12).
+
+    Frequency-domain calibration inside Compute FC, aurora-style: after the
+    STFT, each channel's Fourier coefficients are divided by the chained
+    complex response of the filters whose applied flag is ``True`` (aurora
+    semantics: ``applied=True`` means the response IS part of the recorded
+    data; a prior time-domain Calibrate flips the flags to ``False``, so the
+    two paths compose without double application). A DC response of exactly
+    zero is treated aurora-style: the divisor becomes 1 there and the DC
+    column is set to NaN (undefined calibration at 0 Hz).
+    """
+    note: list[str] = []
+    for comp, pairs in calibration.items():
+        if comp not in fc_vars:
+            continue  # auxiliary channel — was not STFT'd
+        resp = None
+        names: list[str] = []
+        for obj, applied in pairs:
+            if not applied:
+                continue
+            r = np.asarray(obj.complex_response(f), dtype=complex)
+            resp = r if resp is None else resp * r
+            names.append(str(obj.name))
+        if not names:
+            continue
+        resp = resp.astype(complex)
+        # Aurora treats a DC calibration response of exactly 0 as "undefined
+        # at DC" (divisor 1, DC column NaN). Induction-coil tables padded
+        # with the linear-in-f low-frequency extension extrapolate to ~0 at
+        # DC within float error (not exactly 0), so a near-zero check is
+        # needed too — otherwise the DC bin would carry ~1e15 garbage.
+        if resp[0] == 0 or abs(resp[0]) < 1e-12 * np.max(np.abs(resp[1:])):
+            resp[0] = 1.0
+            dc_zero = True
+        else:
+            dc_zero = False
+        dims, zi = fc_vars[comp]
+        zi = zi / resp[:, None]
+        if dc_zero:
+            zi[:, 0] = np.nan + 1j * np.nan
+        fc_vars[comp] = (dims, zi)
+        note.append(f"{comp}={'+'.join(names)}")
+        _log.debug("%s: channel '%s' calibrated by %s", where, comp,
+                   "+".join(names))
+    return "; ".join(note) if note else "none"
 
 
 def _resolve_estimator(estimator_engine, remote_reference) -> str:
