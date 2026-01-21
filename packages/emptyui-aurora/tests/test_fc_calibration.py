@@ -12,6 +12,7 @@ registry) and survive the core-node detour and Align Runs.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from test_magnetic_units import _field, _runts
@@ -197,3 +198,74 @@ def test_channel_calibration_drops_unresolvable_refs(caplog):
         cal = channel_calibration(runts)
     assert cal == {}
     assert any("missing_filter" in r.message for r in caplog.records)
+
+
+# --- §24.12 saturation QC: saturated FC windows are zero-weighted ---------
+
+def _runts_with_mask(n=4096, sr=8.0, flagged_slice=None):
+    """Fake RunTS with the standard four channels plus a binary 'saturated'
+    auxiliary var."""
+    rng = np.random.default_rng(41)
+    runts = _runts(*_field(rng, n=n, sr=sr))
+    mask = np.zeros(n)
+    if flagged_slice is not None:
+        mask[flagged_slice] = 1.0
+    runts.dataset["saturated"] = ("time", mask)
+    return runts
+
+
+def test_compute_fc_rejects_saturated_windows():
+    from emptyui_aurora._processing import (
+        _saturated_window_mask,
+        compute_fc_levels,
+    )
+
+    sr, nperseg, overlap = 8.0, 256, 0.5
+    flagged = slice(1000, 1008)  # 8 flagged samples -> 1 s at 8 Hz
+    runts = _runts_with_mask(flagged_slice=flagged)
+    levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=1,
+                               factor=4, num_samples_window=nperseg,
+                               overlap=overlap, window_type="boxcar")
+    # level 0: exactly the windows overlapping the flagged samples are NaN
+    step = int(nperseg * (1 - overlap))
+    n_win = levels[0]["hx"].values.shape[1]
+    expect = _saturated_window_mask(
+        runts.dataset["saturated"].values, nperseg, int(nperseg * overlap),
+        n_win)
+    assert expect.any()
+    for comp in ("hx", "hy", "ex", "ey"):
+        zi = levels[0][comp].values
+        assert np.all(np.isnan(zi[:, expect]))
+        assert np.all(np.isfinite(zi[:, ~expect]))
+    assert levels[0].attrs["saturated_windows_rejected"] == int(expect.sum())
+    # level 1 (max-pooled mask): the flagged region survives decimation
+    assert levels[1].attrs["saturated_windows_rejected"] > 0
+    # the rejected window times fall inside the flagged interval
+    # (the FC level's time coordinate is float seconds since the payload's
+    # time axis origin)
+    t0 = pd.DatetimeIndex(runts.dataset["time"].values)[0].value / 1e9
+    t_flag_start = t0 + flagged.start / sr
+    t_rej_s = np.asarray(levels[0]["time"].values, dtype=float)[expect]
+    assert (t_rej_s >= t_flag_start - nperseg / sr).all()
+
+
+def test_compute_fc_saturated_rejection_off():
+    from emptyui_aurora._processing import compute_fc_levels
+
+    runts = _runts_with_mask(flagged_slice=slice(1000, 1008))
+    levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=0,
+                               num_samples_window=256, overlap=0.5,
+                               window_type="boxcar", reject_saturated=False)
+    assert not np.any(np.isnan(levels[0]["hx"].values))
+    assert levels[0].attrs["saturated_windows_rejected"] == 0
+
+
+def test_payload_without_mask_unaffected():
+    from emptyui_aurora._processing import compute_fc_levels
+
+    runts = _runts(*_field(np.random.default_rng(42)))
+    levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=0,
+                               num_samples_window=256, overlap=0.5,
+                               window_type="boxcar")
+    assert not np.any(np.isnan(levels[0]["hx"].values))
+    assert levels[0].attrs["saturated_windows_rejected"] == 0

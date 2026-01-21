@@ -411,6 +411,7 @@ def compute_fc_levels(
     window_type_deep="",
     deep_from_level=None,
     clock_zero="",
+    reject_saturated=True,
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
@@ -514,6 +515,21 @@ def compute_fc_levels(
             prewhitening=prewhitening,
             per_window_detrend=per_window_detrend,
         )
+        n_sat_rejected = 0
+        if reject_saturated and "saturated" in series:
+            flags = _saturated_window_mask(
+                series["saturated"], max(8, int(num_samples_window)),
+                int(max(8, int(num_samples_window)) * overlap),
+                next(iter(fc_vars.values()))[1].shape[1])
+            n_sat_rejected = int(flags.sum())
+            if n_sat_rejected:
+                for comp, (dims, zi) in fc_vars.items():
+                    zi = zi.copy()
+                    zi[:, flags] = np.nan + 1j * np.nan
+                    fc_vars[comp] = (dims, zi)
+                _log.info(
+                    "Compute FC: level %d rejects %d/%d saturated window(s)",
+                    level, n_sat_rejected, flags.size)
         cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
         start_iso = ""
         if start_ts is not None:
@@ -541,6 +557,7 @@ def compute_fc_levels(
                 "channel_nomenclature": keyword,
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
                 "calibration_applied": cal_note,
+                "saturated_windows_rejected": n_sat_rejected,
                 "start_datetime": start_iso,
             },
         )
@@ -716,11 +733,27 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
 
 
 def _decimate_channels(channels, factor):
-    """Cascade-decimate every channel by an integer factor (scipy decimate)."""
+    """Cascade-decimate every channel by an integer factor (scipy decimate).
+
+    The binary "saturated" auxiliary channel (§24.12 QC) is max-pooled
+    instead: a group survives decimation flagged iff any of its samples was
+    flagged — scipy's IIR decimate would blur the 0/1 mask and could let a
+    saturated block fade below any threshold.
+    """
     from scipy.signal import decimate
 
     factor = max(2, int(factor))
-    return {k: np.asarray(decimate(v, factor)) for k, v in channels.items()}
+    out = {}
+    for k, v in channels.items():
+        v = np.asarray(v)
+        if k == "saturated":
+            pad = (-v.size) % factor
+            if pad:
+                v = np.pad(v, (0, pad), mode="edge")
+            out[k] = v.reshape(-1, factor).max(axis=1)
+        else:
+            out[k] = np.asarray(decimate(v, factor))
+    return out
 
 
 #: Reference instants accepted by the ``clock_zero`` option (§24.5 P1 v2b).
@@ -824,6 +857,23 @@ def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
 def _window(name: str) -> str:
     """Map our window_type vocabulary to scipy window names."""
     return {"hanning": "hann"}.get(name, name)
+
+
+def _saturated_window_mask(sat, nperseg, noverlap, n_win) -> np.ndarray:
+    """Per-FC-window saturation flags (§24.12 QC).
+
+    ``sat`` is the binary per-sample mask at the CURRENT level's rate; an FC
+    window is flagged iff it overlaps at least one flagged sample (a clipped
+    scan distorts the whole window's spectrum, so the conservative call is to
+    reject the window entirely). Returns a boolean array of length
+    ``n_win`` (the STFT's window count) aligned to the FC time axis.
+    """
+    sat = np.asarray(sat, dtype=float)
+    c = np.concatenate([[0.0], np.cumsum(sat > 0)])
+    step = max(1, nperseg - noverlap)
+    starts = np.arange(n_win) * step
+    ends = np.minimum(starts + nperseg, c.size - 1)
+    return (c[ends] - c[starts]) > 0
 
 
 def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:

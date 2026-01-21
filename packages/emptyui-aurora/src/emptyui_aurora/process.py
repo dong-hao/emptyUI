@@ -176,6 +176,12 @@ class ComputeFC(Node):
                           "tapering — keeps window-level trends out of the "
                           "low-frequency bins (aurora's per-window default); "
                           "off (default) = global Detrend node only."),
+        Param("reject_saturated", "boolean", label="Reject saturated windows",
+              default=True,
+              description="Zero-weight (NaN) every FC window overlapping a "
+                          "sample flagged saturated by the instrument (MTU-5A "
+                          "block tags byte 15, §24.12 QC). No effect on "
+                          "payloads without a 'saturated' mask."),
         Param("persist", "boolean", label="Persist to workspace", default=True,
               description="Write each level's FC into the workspace MTH5 FC layer"),
         Param("survey", "string", label="Survey id", default="", optional=True),
@@ -197,6 +203,7 @@ class ComputeFC(Node):
                 window_type_deep: str = "", deep_from_level=None,
                 clock_zero: str = "",
                 prewhitening: str = "", per_window_detrend: str = "",
+                reject_saturated: bool = True,
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
         # Channel names resolve inside compute_fc_levels (empty fields = auto
@@ -214,6 +221,7 @@ class ComputeFC(Node):
             window_type_deep=window_type_deep,
             deep_from_level=deep_from_level,
             clock_zero=clock_zero,
+            reject_saturated=reject_saturated,
         )
         from emptyui_mth5.persist import persist_fc_level, runts_context
 
@@ -309,6 +317,12 @@ class BuildFC(Node):
               options=("", "first difference")),
         Param("per_window_detrend", "select", label="Per-window detrend",
               default="", options=("", "linear")),
+        Param("reject_saturated", "boolean", label="Reject saturated windows",
+              default=True,
+              description="Zero-weight (NaN) every FC window overlapping a "
+                          "sample flagged saturated by the instrument (MTU-5A "
+                          "block tags byte 15, §24.12 QC). No effect on "
+                          "payloads without a 'saturated' mask."),
         Param("persist", "boolean", label="Persist per-run FCs", default=False,
               description="Write each run's FC levels into the workspace "
                           "MTH5 keyed by run (aurora's FC-layer pattern) — "
@@ -325,6 +339,7 @@ class BuildFC(Node):
                 window_type: str = "hamming", window_type_deep: str = "",
                 deep_from_level=None, clock_zero: str = "epoch",
                 prewhitening: str = "", per_window_detrend: str = "",
+                reject_saturated: bool = True,
                 persist: bool = False) -> dict[str, Any]:
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
 
@@ -436,6 +451,7 @@ class BuildFC(Node):
                 window_type_deep=window_type_deep,
                 deep_from_level=deep_from_level,
                 clock_zero=clock_zero,
+                reject_saturated=reject_saturated,
             )
             # the station identity travels in the attrs (DESIGN.md §15);
             # run_id is per-run, the rest comes from the hoisted station md

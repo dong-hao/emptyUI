@@ -512,3 +512,60 @@ def test_read_phoenix_mtu_asc_calibration_explicit_folder(tmp_path):
     assert res["calibration"]["hz"] == ["phoenix_clb_mtu-1234_hz",
                                         "phoenix_clc_coil333_hz"]
     assert not any("calibration" in w for w in res["warnings"])
+
+
+# --- saturation-flag QC (§24.12) ------------------------------------------
+
+def test_read_phoenix_mtu_saturated_mask(tmp_path):
+    """Saturated blocks produce a per-sample 'saturated' auxiliary channel
+    aligned to the block times; clean recordings write no mask."""
+    from datetime import timedelta
+
+    from mth5.mth5 import MTH5
+
+    from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+    _write_tbl(tmp_path / "SYNTH01.TBL")
+    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    rng = np.random.default_rng(9)
+    with open(tmp_path / "SYNTH01.TS5", "wb") as fid:
+        for k in range(4):
+            fid.write(_ts_block(t5 + timedelta(seconds=k), 15, 15, 5,
+                                saturated=1 if k == 1 else 0, rng=rng))
+    res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path)
+    assert res["runs"] == [("sr15_0001", 15.0, 60)]
+
+    with MTH5() as m:
+        m.open_mth5(res["path"], "r")
+        station = _resolve_station(_resolve_survey(m, ""), "")
+        run = station.get_run("sr15_0001")
+        assert "saturated" in run.groups_list
+        da = run.get_channel("saturated").to_xarray()
+        vals = np.asarray(da.values)
+        assert vals.size == 60
+        # block 1 (samples 15..29) flagged, others clean
+        assert vals[:15].sum() == 0
+        assert vals[15:30].sum() == 15
+        assert vals[30:].sum() == 0
+        # the mask shares the data's time axis
+        import pandas as pd
+
+        assert pd.Timestamp(da.coords["time"].values[0]) == \
+            pd.Timestamp("2009-12-16T07:46:52")
+
+
+def test_read_phoenix_mtu_clean_no_mask(tmp_path):
+    """A recording with no saturated blocks writes no auxiliary channel."""
+    from mth5.mth5 import MTH5
+
+    from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+    _write_tbl(tmp_path / "SYNTH01.TBL")
+    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 4)], seed=10)
+    res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path)
+    with MTH5() as m:
+        m.open_mth5(res["path"], "r")
+        station = _resolve_station(_resolve_survey(m, ""), "")
+        run = station.get_run("sr15_0001")
+        assert "saturated" not in run.groups_list

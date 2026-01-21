@@ -126,6 +126,10 @@ class Segment:
     rate: int
     n_blocks: int
     chunks: list[np.ndarray] = field(default_factory=list)
+    #: per-block saturated flags (tag byte 15) — a saturated block marks all
+    #: its scans (clipped ADC samples); the per-sample mask derived from this
+    #: rides the archive as the "saturated" auxiliary channel (§24.12 QC)
+    saturated: list[bool] = field(default_factory=list)
 
 
 def _group_segments(
@@ -141,10 +145,11 @@ def _group_segments(
         if cur is not None and tag.start == cur.end:
             cur.end, cur.n_blocks = end, cur.n_blocks + 1
             cur.chunks.append(samples)
+            cur.saturated.append(tag.saturated)
         else:
             if cur is not None:
                 segs.append(cur)
-            cur = Segment(tag.start, end, tag.rate, 1, [samples])
+            cur = Segment(tag.start, end, tag.rate, 1, [samples], [tag.saturated])
     if cur is not None:
         segs.append(cur)
     return segs
@@ -392,6 +397,24 @@ def read_phoenix_mtu(
             run_meta.time_period.end = (seg.end - pd.to_timedelta(
                 1.0 / seg.rate, unit="s")).isoformat()
             array_list = []
+            if any(seg.saturated):
+                # per-sample saturation mask (§24.12 QC): a saturated block
+                # marks all its scans. Rides the archive as the "saturated"
+                # auxiliary channel; Compute FC rejects every FC window
+                # overlapping a flagged sample (zero weight in the sort chain)
+                mask = np.concatenate([
+                    np.full(chunk.shape[1], float(s), dtype=float)
+                    for chunk, s in zip(seg.chunks, seg.saturated)
+                ])
+                from mt_metadata.timeseries import Auxiliary
+
+                aux_md = Auxiliary()
+                aux_md.time_period.start = seg.start.isoformat()
+                aux_md.time_period.end = seg.end.isoformat()
+                aux_md.sample_rate = float(seg.rate)
+                aux = ChannelTS("auxiliary", data=mask, channel_metadata=aux_md)
+                aux.component = "saturated"
+                array_list.append(aux)
             for comp, pos in channel_keys.items():
                 meta = getattr(table, f"{comp}_metadata")
                 meta.sample_rate = float(seg.rate)
