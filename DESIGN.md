@@ -3253,3 +3253,72 @@ user's alternative reading (the MTU-5A CLB already embeds the deployed
 coupling) would require the CLB to be flat below the corner, which it is
 not. Decision pending the user's review of the images. Reproduction:
 examples/output/clb_coupling_comparison.py (--full for the 3.5-day run).
+
+**Full-record scatter investigation (2026-09-17, user question "why is the
+full result miserable").** The one-night TF is smooth; the full 3.5-day TF
+scattered even at short periods. Diagnosis, in order of discovery:
+
+1. **(Fixed) STIM-anchored channel time axes**: the ingest set an undeclared
+   `start_time` attribute on the shared channel metadata while ChannelTS
+   anchors its time index on `time_period.start` — every archived dataset
+   started at the TBL STIM, `from_channel_ts` propagated it into the run
+   metadata, and the merged FC time axes collapsed across slot runs. Fixed
+   (commit d487658): set `time_period.start/end` per segment. Self-reference
+   estimates were never affected (a night-slot selection from the full
+   archive reproduces the night archive bit for bit).
+2. **June 21 daytime is saturated** (block tags byte 15): TS3 15/1012,
+   TS4 120/8096, TS5 4169/303742 blocks that day, peaking h07-h12 UTC
+   (653/367/304/506/766/844 blocks/h) — the instrument clipped during the
+   final day (local 12:00-21:00). Saturation also appears in every day's
+   daytime hours at lower rates (June 19 up to 342/h, June 20 up to 589/h).
+   Estimating the slot families with June 21 excluded: L0-L3 perfectly
+   smooth (rho 13->10->14, phases -114 -> -141 deg, matching the night
+   archive) — the slot machinery is sound.
+3. **The MTU cancels the self-potential offset on its slot paths but NOT on
+   the continuous stream**: TS3/TS4 ex/ey means are ~0 (AC rms 0.2-3.3
+   mV/km) while TS5 ex/ey carry raw offsets of -740 / +1360 mV/km with a
+   slow electrode drift of ~15 mV/km rms. The drift sits in the same
+   frequency band as the MT signal at 5-1000 s. On quiet night data the
+   stream TF agrees with the slot TF (L3 ~ L4 ~ L5 at 0.3-1.9 s); during
+   daytime (cultural noise + drift) the stream levels' TFs are garbage:
+   yx inflates ~10x at 0.5-10 s (Ey/Hx), xy/yx collapse at 20-2000 s, and
+   June 18 daytime is catastrophic (rho ~1e-5, phases near +/-180 deg) while
+   the same hours' slots stay clean.
+4. **Stronger coherence sorting AMPLIFIES the scatter (negative result)**:
+   with self-reference, raising coherence_min (weight 0.25 -> drop 0.5/0.7/
+   0.85) selects a biased high-coherence subset (coherent noise passes the
+   E-on-H criterion) and collapses statistics; the merged long-period TF
+   gets wilder, not cleaner. The sort as designed is not the lever for this
+   failure mode.
+5. Per-window linear detrending (aurora's per-window default) changed
+   nothing — the corruption is in the data's slow drift, not STFT leakage.
+
+Consequence: the trustworthy full-band recipe for this station is
+session-based — slots (offset-cancelled) for 0.002-10 s from all data, the
+stream only from quiet sessions for >10 s. The ingest window filter
+applies to ALL rates at once, so a per-rate session selection is a missing
+capability (candidate 24.13 feature). Decision pending user review.
+
+**Coupling decision — CLB AS-IS (2026-09-17, official-EDI discrimination).**
+The user supplied the official Phoenix MT-Editor EDI for the SAME one-night
+window (`B0940330_z.edi`: START-UP 2026/06/18 11:00:00, END-TIME 23:00:00,
+"Reference Field: Local H - Ref.", rotation 0.00). Converting our SI Z to
+EDI units (mV/km per nT = Z_SI x 1e6 x 1e-9/mu0 = x795.77) and folding the
+180-deg sign-convention flip (Phoenix EDI uses exp(+i omega t)):
+
+- **asis (full CLB table applied): median dlog10rho +0.0005 (xy) / +0.0045
+  (yx), IQR 0.015/0.027 decades; median dphi +0.21/+0.15 deg, IQR
+  0.7/0.6 deg — over the ENTIRE 0.003-500 s band.** The burst pipeline
+  reproduces the official Phoenix TF essentially exactly.
+- dropped (CLB neutralized below the -3 dB coupling corner): identical at
+  short periods but deviates -0.11..-0.35 decades and +33..35 deg at
+  182-505 s — exactly where the coupling tail acts.
+
+Verdict: the official processing applies the CLB table as-is — the user's
+reading (the MTU-5A CLB output already includes the deployed coupling) is
+confirmed empirically. The committed loader behavior (full table, no
+coupling neutralization) is correct and already the default; the
+`extend_below` extrapolation options remain available for tables with
+narrower measured range. The DC-coupling physics question (ACDC=0 vs the
+table's 0.005 Hz high-pass tail) is moot for parity purposes — Phoenix's
+convention governs the official product.

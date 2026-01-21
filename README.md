@@ -210,6 +210,20 @@ full architecture, contracts and verification records are in
   Verified end to end on the 1690618B corpus (all three coils + box
   matched, zero warnings).
 
+- **MTU-5A parity with the official Phoenix TF; coupling decided (DESIGN.md
+  §24.12, 2026-09-17)**: against the official MT-Editor EDI for the same
+  one-night window (`B0940330_z.edi`, self-reference, rotation 0), the
+  burst pipeline reproduces the official TF to **median Δlog₁₀ρ +0.0005/+0.0045
+  (IQR 0.015/0.027 decades), Δφ +0.2° (IQR 0.7°) over 0.003–500 s** after
+  the SI↔EDI conversion (×795.77) and the 180° sign convention. The official
+  applies the box CLB table **as-is** (including its low-frequency tail) —
+  confirmed by A/B against the alternative (coupling-neutralized) variant,
+  which deviates −0.11…−0.35 decades at 182–505 s. Full-record QC findings
+  also recorded: June 21 daytime is saturated (block tags), the MTU cancels
+  the SP offset on its slot paths but not on the continuous stream, and
+  stronger coherence sorting amplifies the long-period scatter (negative
+  result) — the trustworthy recipe is session-based.
+
 ### Current issues (known problems, from the 2026-09-11 code review)
 
 Fixed by the review batches (each with a regression test): Rotate TF
