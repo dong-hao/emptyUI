@@ -3195,3 +3195,61 @@ trailing spaces removed): `MTU-1690_CLB.asc` (box), `COIL1620/2417/
   the applied-flag semantics: RunTS.calibrate divides by all chain filters
   and flips them to applied=False, after which Compute FC divides by
   nothing.
+
+**Coupling audit (2026-09-17, user question).** The box CLB's low-frequency
+tail is a first-order high-pass, not box gain structure: single-pole fits
+give -3 dB corners of 5.02/5.04 mHz (E channels) and 4.08/4.13/4.16 mHz
+(H channels) — period ~200-245 s, tau 32-39 s — with phase residuals under
+2 deg. The official Phoenix MTU/MTU-A User Guide (phoenixgeophysics.com,
+V5 System 2000 MTU/MTU-A User Guide v1.8) documents exactly this filter:
+"Setting coupling parameters — The coupling setting governs the high pass
+filter. When the MTU is set to AC coupling, it uses a high pass filter with
+a corner frequency of 0.005 Hz that removes self-potential from the dipole"
+(MTU chapter, p. 95); the MTU-A chapter (p. 120/123) documents the same
+setting with a 2 Hz corner and states "for MT soundings, the MTU-A should
+be set to DC coupling for both E and H channels". The TBL's `ACDC` byte
+records the deployed coupling; the upstream mt_io docstring reads it as
+"DC = 0, AC = 1; MT should always be DC", and this corpus has `ACDC = 0`.
+Empirical confirmation: the electric channel carries a ~-140 mV/km
+self-potential offset (§24.11) — a static offset can only survive DC
+coupling. So the recording is DC-coupled (no high-pass in the data), while
+the CLB table was measured with the 0.005 Hz coupling high-pass in the path
+(the manual's claim that calibration files are "independent of ... the mode
+of operation (e.g., line frequency, AC/DC coupling)" refers to the
+calibration measurement procedure, not to the coupling filter being absent
+from the measured response — the fitted corner identifies it as present).
+Consequence for the §24.12 shape chain: for a DC-coupled recording the CLB
+response below its coupling corner must NOT be divided out (the deployed
+input is flat there); applying it as-is over-amplifies long periods
+(dividing by amplitude proportional to f). The coil CLC tables are unaffected
+(an induction coil is inherently AC-coupled; its proportional-to-f tail is
+physics, not a coupling setting). Open decision: coupling-aware CLB
+neutralization below the corner (estimate the corner per channel from the
+table's -3 dB crossing, or use the documented 0.005 Hz) vs. documenting the
+caveat only.
+
+**Coupling comparison (2026-09-17, user-requested A/B).** Two TF images from
+the full 3.5-day record (BuildFC window 256/factor 4/11 levels, clock zero
+epoch, per-bin coherence sort defaults, self-reference Robust estimate,
+58 merged periods): `plot_appres_phase_asis_full.png` (CLB as-is) vs
+`plot_appres_phase_dropped_full.png` (CLB neutralized below its per-channel
+-3 dB corner: amp 1, phase 0). Numeric deltas (dropped/asis):
+
+- periods <= 182 s: bit-identical (the CLB is unity there) — both windows
+  and the full record agree;
+- 230 s (right at the coupling corner): rho ratio 0.72 (xy) / 0.60 (yx),
+  phase +39/+40 deg — the noisiest, most divergent band;
+- 292-2295 s: a stable rho ratio 0.815/0.798 (-0.09 decade) with ZERO phase
+  delta — exactly the signature predicted from dividing E and H by the
+  coupling high-pass amplitudes (E's 5.02 mHz corner vs H's 4.08 mHz: the
+  phase corrections nearly cancel in E/H while the amplitudes do not);
+- 4009/6131 s: single/few-window bands, ratios scatter.
+
+The as-is variant therefore inflates long-period apparent resistivity by
+~0.09 decade relative to the dropped variant. Under the DC-coupling
+evidence (ACDC=0, the ex self-potential offset, the manual's DC = no
+high-pass), the dropped variant is the physically consistent one; the
+user's alternative reading (the MTU-5A CLB already embeds the deployed
+coupling) would require the CLB to be flat below the corner, which it is
+not. Decision pending the user's review of the images. Reproduction:
+examples/output/clb_coupling_comparison.py (--full for the 3.5-day run).

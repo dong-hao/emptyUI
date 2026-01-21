@@ -504,12 +504,10 @@ def compute_fc_levels(
         if n_usable < nperseg:
             _log.warning(
                 "Compute FC: decimation level %d has %d usable sample(s), "
-                "fewer than one window (%d) — level skipped", level,
+                "fewer than one window (%d) — level and all deeper levels "
+                "skipped (they are strictly shorter)", level,
                 n_usable, nperseg)
-            if level < num_decimations:
-                cur = _decimate_channels(norm, factor)
-                cur_rate = cur_rate / float(factor)
-            continue
+            break
         f, t, fc_vars = _stft_channels(
             series, cur_rate, num_samples_window, overlap, win,
             input_channels, output_channels,

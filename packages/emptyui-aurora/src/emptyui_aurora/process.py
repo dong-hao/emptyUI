@@ -395,10 +395,33 @@ class BuildFC(Node):
                     start = da.coords["time"].values[0]
                 data_vars[str(name)] = da
             ds = xr.Dataset(data_vars)
+            # §24.12: resolve the response-chain filter objects once from
+            # the archive so the duck payload carries the calibration the
+            # FC-level calibration divides by (to_xarray carries the refs,
+            # but the objects live in /Survey/Filters)
+            filter_names: set[str] = set()
+            for da in data_vars.values():
+                for ref in da.attrs.get("filters") or []:
+                    try:
+                        filter_names.add(ref["applied_filter"]["name"])
+                    except (TypeError, KeyError):
+                        continue
+            registry = {}
+            if filter_names:
+                fg = survey_obj.filters_group
+                for fn in sorted(filter_names):
+                    try:
+                        registry[fn] = fg.to_filter_object(fn)
+                    except Exception:  # noqa: BLE001
+                        ctx.logger.warning(
+                            "filter '%s' referenced by the archive channels "
+                            "could not be resolved — its response will not "
+                            "be removed by Compute FC", fn)
             run_ts = SimpleNamespace(
                 dataset=ds,
                 sample_rate=sample_rate,
                 start=start,
+                filters=registry,
             )
             levels = compute_fc_levels(
                 run_ts, input_channels, output_channels,

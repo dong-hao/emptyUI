@@ -537,3 +537,22 @@ def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
     assert rr["enabled_when"] == {
         "param": "estimator_engine", "values": ["Robust", "RME", "RME_RR"],
     }
+
+
+def test_compute_fc_levels_starved_cascade_stops(tmp_path):
+    """Once a decimation level has fewer samples than one window, the
+    cascade stops: deeper levels are strictly shorter, and decimating them
+    anyway crashed scipy's decimate (padlen) on the full 3.5-day record
+    (DESIGN §24.12 comparison run)."""
+    from emptyui_aurora._processing import compute_fc_levels
+
+    from _synthetic import synthetic_runts, synthetic_source
+
+    runts = synthetic_runts(synthetic_source(31, n=600))
+    levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=10,
+                               num_samples_window=256, overlap=0.5,
+                               window_type="boxcar")
+    # level 0 fits (600 samples); decimating twice leaves 37 < 256 — the
+    # cascade must stop there instead of crashing
+    assert 0 in levels
+    assert all(lv <= 2 for lv in levels)
