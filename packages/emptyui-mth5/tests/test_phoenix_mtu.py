@@ -214,6 +214,22 @@ def test_read_phoenix_mtu_archive(tmp_path):
             first_sample(2) * table.magnetic_calibration)  # CHHX = 3
         assert ex[0] == pytest.approx(
             first_sample(0) * table.ex_calibration)  # CHEX = 1
+        # tag-truth time anchors (§24.12 regression): every archived channel
+        # dataset must start at its segment's block-tag time — NOT the TBL
+        # STIM placeholder. ChannelTS anchors its time index on the channel
+        # metadata's time_period.start; the ingest used to set an
+        # undeclared 'start_time' attr (silently ignored), so every dataset
+        # was STIM-anchored, the merged FC time axes collapsed across runs,
+        # and from_channel_ts propagated the wrong period into the runs.
+        import pandas as pd
+
+        slot_run = station_obj.get_run("sr2400_0002")  # the 2nd slot (t0+10 min)
+        da = slot_run.get_channel("hx").to_xarray()
+        # archived stamps are naive (mt_timeseries convention) — compare naive
+        assert pd.Timestamp(da.coords["time"].values[0]) == \
+            pd.Timestamp("2009-12-16T08:05:00")
+        assert str(slot_run.metadata.time_period.start).startswith(
+            "2009-12-16T08:05")
 
 
 def test_read_phoenix_mtu_sample_rate_filter(tmp_path):

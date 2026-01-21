@@ -395,7 +395,13 @@ def read_phoenix_mtu(
             for comp, pos in channel_keys.items():
                 meta = getattr(table, f"{comp}_metadata")
                 meta.sample_rate = float(seg.rate)
-                meta.start_time = seg.start.isoformat()
+                # the ChannelTS time index anchors on time_period.start —
+                # setting it per segment is what gives every archived
+                # dataset its tag-truth time axis (the run metadata period
+                # alone is not enough: from_channel_ts propagates the
+                # channel's period into the run)
+                meta.time_period.start = seg.start.isoformat()
+                meta.time_period.end = seg.end.isoformat()
                 x = np.concatenate([c[pos - 1] for c in seg.chunks])
                 x, unit = _apply_tbl_calibration(comp, x, table)
                 if unit:
