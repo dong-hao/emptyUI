@@ -3322,3 +3322,50 @@ coupling neutralization) is correct and already the default; the
 narrower measured range. The DC-coupling physics question (ACDC=0 vs the
 table's 0.005 Hz high-pass tail) is moot for parity purposes — Phoenix's
 convention governs the official product.
+
+**Saturation QC — zero-weight saturated FC windows (2026-09-17).**
+
+The scatter investigation showed the remaining full-record garbage is the
+instrument's own saturation flags (tag byte 15): daytime saturation peaks
+h07-h12 UTC on June 18-21 (up to 844 blocks/h on June 21), and every
+day's daytime carries some. Stronger coherence sorting amplified the
+scatter (rejected as the lever); per-window detrending changed nothing.
+The fix is to trust the instrument: blocks flagged saturated mark every
+scan in them, so a per-sample mask can drive window-level rejection.
+
+Implementation (commit `f19e2ac`):
+- `read_phoenix_mtu` emits a per-sample "saturated" auxiliary channel
+  (0/1 float, aligned to the block-tag times) per run — written only when
+  the recording contains at least one saturated block; clean recordings
+  carry no mask channel.
+- `_decimate_channels` max-pools the binary mask through decimation
+  (edge-padded to the factor), so a flagged stretch survives to every FC
+  level.
+- `compute_fc_levels` gained `reject_saturated=True`: every FC window
+  overlapping >=1 flagged sample is NaN'd in all in/out FCs and the count
+  is recorded in attrs (`saturated_windows_rejected`); NaN FCs carry zero
+  weight through the band-free sort and the estimates unchanged. The
+  param rides ComputeFC/BuildFC (default on, off-switch for A/B) and is a
+  no-op for payloads without the mask.
+
+Verification on the real corpus (clean window, end 2026-06-21T00:00 UTC,
+decimation 10, both CLB variants re-ingested with the mask):
+- **A/B (rejection on vs off)**: medians barely move (dlog10rho -0.001
+  xy / -0.05 yx dec, dphi -0.2/-0.7 deg) but the IQRs are large
+  (-0.19..+0.00 / -0.69..+0.00 dec; -33/-55 deg) — surgical changes
+  exactly where daytime garbage dominated; night estimates untouched.
+- **Parity vs official EDI (`B0940330_z.edi`) preserved**: the 3-day
+  rejection-on chain reproduces the official one-night product to
+  dlog10rho +0.0024/+0.0023 (IQR -0.005..+0.008 / -0.011..+0.023 dec),
+  dphi +0.11/+0.08 deg (IQR 0.32/0.60) over 0.003-109 s; the committed
+  one-night chain (pre-fix control) still reproduces +0.0007/+0.0033,
+  +0.16/+0.13 deg over 0.003-417 s. Conversion restated for the record:
+  the EDI's Z is standard SEG mV/km per nT, so Z_SI = Z_EDI x
+  1e-6 x mu0/1e-9 (= /795.77), and the exp(+i omega t) convention adds a
+  180-deg flip.
+- **Result**: the clean-record TF image is now smooth 0.003-109 s
+  (previously garbage >10 s); the chain tops out at ~109 s because the
+  rejection trims the daytime windows that previously (wrongly) filled
+  the longest bands. Longer periods still need the session-based recipe
+  (per-rate night selection, deferred §24.13 candidate) to add quiet
+  stream time.

@@ -223,6 +223,14 @@ full architecture, contracts and verification records are in
   the SP offset on its slot paths but not on the continuous stream, and
   stronger coherence sorting amplifies the long-period scatter (negative
   result) — the trustworthy recipe is session-based.
+- **Saturation QC: zero-weight saturated FC windows (DESIGN.md §24.12,
+  2026-09-17)**: MTU-5A ingest now emits a per-sample `saturated`
+  auxiliary channel from the block tags; the mask max-pools through
+  decimation and Compute FC (default) NaNs every FC window overlapping a
+  flagged sample (`reject_saturated` on/off, attrs count). The clean-record
+  TF is now smooth 0.003–109 s (previously garbage >10 s) and the official-EDI
+  parity is preserved (Δlog₁₀ρ +0.002/+0.002, Δφ +0.1°) — rejection is
+  surgical: medians barely move, the daytime garbage windows vanish.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 
