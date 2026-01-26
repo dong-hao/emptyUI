@@ -79,7 +79,9 @@ def test_select_runs_drops_noisy_and_strict_noon(ctx):
 
     rows = json.loads(Path(res["table"]["path"]).read_text())
     by_id = {r["run_id"]: r for r in rows}
-    assert by_id["noisy"]["deviation"] == pytest.approx(10.0)
+    # default reference = plain median over the runs' per-bin medians:
+    # 5 clean anchors dominate -> median = 1.0 -> noisy up = 10
+    assert by_id["noisy"]["up"] == pytest.approx(10.0)
     assert by_id["mild_noon"]["threshold"] == pytest.approx(1.0)
     assert by_id["mild_midnight"]["threshold"] == pytest.approx(2.0)
 

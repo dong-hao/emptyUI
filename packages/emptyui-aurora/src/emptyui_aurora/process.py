@@ -617,7 +617,8 @@ class SelectRuns(Node):
         "Run-level QC (DESIGN §24.13, after Weckmann et al. 2005): score "
         "every run by its per-window impedance level in a reference band — "
         "the per-window |Z| from the run's own Fourier coefficients, "
-        "compared against the station-wide median. Cultural noise inflates "
+        "compared against the station-wide clean level (a percentile of the "
+        "runs' medians). Cultural noise inflates "
         "the electric channels, so a noise-dominated run deviates from the "
         "station's stable impedance level (both tails are checked: inflated "
         "and dead channels). The decision threshold carries a SOFT diurnal "
@@ -643,9 +644,23 @@ class SelectRuns(Node):
         Param("deviation_max", "number", label="Deviation max", default=2.0,
               min=1.0,
               description="A run whose median per-window impedance level in "
-                          "the band deviates from the station-wide median by "
-                          "more than this factor (either direction) is "
+                          "the band exceeds the station-wide clean level by "
+                          "more than this factor is dropped. Cultural noise "
+                          "only ever inflates the electric channels, so the "
+                          "check is one-sided."),
+        Param("dead_max", "number", label="Dead max", default=2.0, min=1.0,
+              description="Instrument-fault check, independent of the prior: "
+                          "a run whose level falls below 1/this factor of the "
+                          "clean level (dead or dropped-out channels) is "
                           "dropped."),
+        Param("reference_percentile", "number", label="Reference percentile",
+              default=50.0, min=0.0, max=100.0,
+              description="Station-wide impedance level per bin = this "
+                          "percentile over the runs' per-run medians. The "
+                          "plain median (50) empirically reproduces the "
+                          "official Phoenix TF best on the test corpus "
+                          "(§24.13 sweep); lower percentiles select the "
+                          "low-|Z| tail and bias yx up by ~+0.03 decades."),
         Param("use_prior", "boolean", label="Daytime soft prior",
               default=True,
               description="Scale the threshold by local time of day: the "
@@ -664,6 +679,7 @@ class SelectRuns(Node):
 
     def execute(self, ctx, fc, period_min: float = 1.0,
                 period_max: float = 10.0, deviation_max: float = 2.0,
+                dead_max: float = 2.0, reference_percentile: float = 50.0,
                 use_prior: bool = True, prior_max: float = 2.0,
                 local_utc_offset: float = 8.0) -> dict[str, Any]:
         import json
@@ -685,8 +701,12 @@ class SelectRuns(Node):
                 "Select Runs: fc time axis is relative (no clock zero) — "
                 "the diurnal soft prior is disabled")
 
-        # per-level per-window |Z|^2 within the band; grouped per run
-        per_run_bins: dict[str, list[np.ndarray]] = {}
+        # per-level scoring (levels have different frequency axes, so the
+        # in-band bin counts differ): per-run per-bin median -> station
+        # clean-level percentile -> per-run up/down deviations; the run's
+        # final scores are the medians over its levels
+        per_run_up: dict[str, list[float]] = {}
+        per_run_down: dict[str, list[float]] = {}
         run_start: dict[str, np.datetime64] = {}
         for ds in levels.values():
             f = np.asarray(ds["frequency"].values, dtype=float)
@@ -700,24 +720,31 @@ class SelectRuns(Node):
             zsq = np.mean(np.abs(num / denom) ** 2, axis=0)[band, :]
             runs = np.asarray(ds["run_id"].values)
             times = np.asarray(ds["time"].values)
-            for rid in np.unique(runs):
+            uniq = np.unique(runs)
+            med = np.full((uniq.size, int(band.sum())), np.nan)
+            for i, rid in enumerate(uniq):
                 m = runs == rid
-                per_run_bins.setdefault(str(rid), []).append(
-                    np.nanmedian(zsq[:, m], axis=1))
+                med[i] = np.nanmedian(zsq[:, m], axis=1)
                 if absolute_time:
                     t0 = times[m].min()
                     if str(rid) not in run_start or t0 < run_start[str(rid)]:
                         run_start[str(rid)] = t0
-        if not per_run_bins:
+            # station-wide impedance level per bin: this percentile over the
+            # runs' per-run medians — the clean level, not the median (noise
+            # inflates; storms raise every run equally and cancel)
+            ref = np.nanpercentile(med, reference_percentile, axis=0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                up = med / ref
+                down = ref / med
+            for i, rid in enumerate(uniq):
+                per_run_up.setdefault(str(rid), []).append(
+                    float(np.nanmedian(up[i][np.isfinite(up[i])])))
+                per_run_down.setdefault(str(rid), []).append(
+                    float(np.nanmedian(down[i][np.isfinite(down[i])])))
+        if not per_run_up:
             raise ValueError(
                 f"no fc frequency bins fall in the reference band "
                 f"{period_min}-{period_max} s — widen it")
-
-        # station-wide impedance level per bin: median over all runs'
-        # per-run medians (self-calibrating; storms raise every run equally
-        # and cancel, cultural noise raises single runs)
-        all_bins = np.concatenate([np.stack(v) for v in per_run_bins.values()])
-        ref = np.nanmedian(all_bins, axis=0)
 
         def prior_factor(t):
             if not use_prior or not absolute_time:
@@ -727,26 +754,32 @@ class SelectRuns(Node):
                 1.0 + np.cos(2 * np.pi * (h - 12.0) / 24.0))
 
         rows = []
-        for rid, bins in sorted(per_run_bins.items()):
-            med = np.nanmedian(np.stack(bins), axis=0)  # per-bin run level
-            with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = med / ref
-            lg = np.log2(ratio[np.isfinite(ratio) & (ratio > 0)])
-            # two-sided deviation as a FACTOR (inflated and dead channels)
-            dev = (float(2.0 ** np.median(np.abs(lg))) if lg.size
-                   else float("inf"))
+        for rid in sorted(per_run_up):
+            up_d = [x for x in per_run_up[rid] if np.isfinite(x)]
+            dn_d = [x for x in per_run_down[rid] if np.isfinite(x)]
+            up = float(np.median(up_d)) if up_d else float("inf")
+            dn = float(np.median(dn_d)) if dn_d else float("inf")
             pf = prior_factor(run_start.get(rid, 0))
             thr = deviation_max / pf
-            rows.append({"run_id": rid, "n_levels": len(bins),
-                         "deviation": dev, "prior": float(pf),
-                         "threshold": float(thr), "dropped": bool(dev > thr)})
-        kept = {r["run_id"] for r in rows if not r["dropped"]}
+            dropped = up > thr or dn > dead_max
+            rows.append({"run_id": rid, "n_levels": len(per_run_up[rid]),
+                         "deviation": max(up, dn), "up": up, "down": dn,
+                         "prior": float(pf),
+                         "threshold": float(thr), "dropped": bool(dropped)})
+        # kept = every run in the payload minus the explicitly dropped ones:
+        # runs without in-band bins (e.g. a rate family whose cascade never
+        # reaches the reference band) are not scored and must pass through
+        dropped_ids = {r["run_id"] for r in rows if r["dropped"]}
+        all_ids = set()
+        for ds in levels.values():
+            all_ids |= set(map(str, np.unique(ds["run_id"].values)))
+        kept = all_ids - dropped_ids
         for r in rows:
             if r["dropped"]:
                 ctx.logger.warning(
-                    "Select Runs: dropping %s (deviation %.2f > %.2f, "
-                    "prior %.2f)", r["run_id"], r["deviation"], r["threshold"],
-                    r["prior"])
+                    "Select Runs: dropping %s (up %.2f, down %.2f; "
+                    "threshold %.2f, prior %.2f)", r["run_id"], r["up"],
+                    r["down"], r["threshold"], r["prior"])
         out = {}
         for lv, ds in levels.items():
             mask = np.isin(np.asarray(ds["run_id"].values), list(kept))
