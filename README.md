@@ -231,6 +231,19 @@ full architecture, contracts and verification records are in
   TF is now smooth 0.003–109 s (previously garbage >10 s) and the official-EDI
   parity is preserved (Δlog₁₀ρ +0.002/+0.002, Δφ +0.1°) — rejection is
   surgical: medians barely move, the daytime garbage windows vanish.
+- **Run-level QC: Select Runs with a soft diurnal prior (DESIGN.md §24.13,
+  2026-09-17)**: the site's solar plant makes daytime noise track output, not
+  the clock — rejection is data-driven. MTU-5A ingest can split the continuous
+  stream into hourly sessions (`stream_session_hours`); Build FC stamps every
+  FC window with a `run_id` coordinate; the new Select Runs node scores each
+  run by its per-window impedance level in a 1–10 s reference band against
+  the station-wide median (self-calibrating, one-sided up-check + independent
+  dead-channel check) and drops noise-dominated runs, with a soft diurnal
+  prior (daytime runs judged up to `prior max` × stricter, night runs by the
+  full threshold). **Self-test: on the full record with no ingest window the
+  automatic chain recovers the official one-night Phoenix TF on its own**
+  (Δlog₁₀ρ +0.005/+0.005, Δφ ±0.03° over 0.003–109 s) — the selector was never
+  told about day or night.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 

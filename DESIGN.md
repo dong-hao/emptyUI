@@ -3369,3 +3369,90 @@ decimation 10, both CLB variants re-ingested with the mask):
   the longest bands. Longer periods still need the session-based recipe
   (per-rate night selection, deferred §24.13 candidate) to add quiet
   stream time.
+
+### 24.13 Run-level QC — Select Runs with a soft diurnal prior (2026-09-17)
+
+The station sits near a solar power plant: daytime noise tracks solar
+output (clouds, season), not the clock, so blind day/night removal is
+wrong — a cloudy day can be quiet, a bright evening noisy. Decisions
+(user, 2026-09-17): data-driven rejection; run-level granularity only;
+soft diurnal prior; power-density metric first (the residual-based
+two-pass selector is orthogonal — it fits the model rather than the noise
+floor — and is queued behind validation).
+
+**Literature synthesis.** Weckmann, Magunia & Ritter (2005, GJI 161:635,
+single-site frequency-domain noise selection — the canonical reference for
+exactly our situation, no uncorrelated remote available): power density
+and coherence alone are misleading (both signal and noise can be high or
+low power, and cultural noise is often correlated across E and H, which
+defeats robust processing and coherence sorting — matching our §24.12
+negative sorting result); the working discriminators are the magnetic
+polarization direction (natural H has no preferred direction; strongly
+polarized horizontal H = local noise, Szarka 1988) and the response-error
+/ cluster shape (per-window Z estimates should form a circular Argand
+cluster with the mean near its centre); BOTH tails are bad (they found
+noise intervals where E power DROPPED > 2 decades); natural signal power
+follows a smooth diurnal envelope (Szarka 1988; Garcia & Jones 2002,
+"Atmospheric sources for AMT sounding") — noise appears as deviations
+from that envelope, which is the physical basis for the soft prior (the
+clock enters as an expectation of the noise floor, not as a delete rule);
+pre-selection belongs BEFORE robust processing, and long recordings are
+needed since often only a few percent of events are clean. Recent
+taxonomy (Liu, EGU 2026 abstract EGUSPHERE-EGU26-2095) confirms the
+coherence/stability metric + hard-rejection-vs-soft-weighting framework.
+
+**Implementation** (commits `eca756f`, `a58ca13`):
+- `read_phoenix_mtu` gains `stream_session_hours` (0 = off): runs longer
+  than the target are cut into consecutive fixed-length sessions on block
+  boundaries (greedy block fill, tag-truth periods, continued per-family
+  numbering). The 84.7-h continuous stream would otherwise make run-level
+  selection all-or-nothing; hourly sessions give the stream the same
+  selection semantics as the slot families.
+- Build FC stamps every merged FC window with a per-window `run_id`
+  coordinate — the FC-database merge keeps only the first contributor's
+  attrs, so run identity must travel with the windows.
+- `Select Runs` node (between Compute FC and Coherence Sort): per-level
+  scoring (levels have different frequency axes), per-run per-bin median
+  of the per-window |Z|^2 (bivariate E/H from the run's own calibrated
+  FCs) within the reference band (default 1-10 s); station-wide clean
+  level per bin = a configurable percentile (default 50 = plain median)
+  over the runs' medians — self-calibrating: storms raise every run
+  equally and cancel; cultural noise raises single runs. One-sided up
+  check (noise only ever inflates E): drop if run/level > deviation_max
+  (default 2) scaled by the prior. Separate instrument-fault check,
+  prior-independent: drop if level/run > dead_max (default 2) — Weckmann's
+  low-power noise tail. Runs without in-band bins (a rate family whose
+  cascade never reaches the band) pass through unscored. The soft diurnal
+  prior scales the threshold: prior_factor(h_local) = 1 + (prior_max-1) *
+  0.5 * (1 + cos(2 pi (h - 12)/24)), h = (utc + offset) mod 24, offset
+  default 8 h (Tibet, §24.11) — daytime runs are judged up to prior_max
+  times stricter, night runs by the full threshold; a measured-clean day
+  still passes and a noisy night is still dropped. Per-run diagnostics
+  published as a table artifact; kept/dropped lists ride the fc attrs.
+  Relative-time payloads disable the prior with a warning.
+
+**Tuning (real corpus sweep, `select_runs_sweep.json`).** Reference
+percentile 10/25/50 x deviation_max 1.5/2/3 (prior on): pct 10/25 select
+a low-|Z| tail that biases yx up ~+0.03 decades (tight xy but biased yx);
+the plain median (pct 50, dev 2) is best overall — dlog10rho +0.004 (xy)
+/ +0.007 (yx), IQR -0.000..+0.016 / -0.014..+0.022 dec, dphi +0.04/+0.00.
+Night keeps ~1/3 of runs; deviation correlates with local time as
+expected (night median up-deviation ~2.5, noon ~14, zero noon keeps).
+
+**Self-test (the selector validates itself).** Full record (no ingest
+window), hourly stream sessions, prior on: the automatic chain —
+ingest -> Build FC -> Select Runs -> Coherence Sort -> Estimate TF
+(self-reference) — reproduces the official one-night B0940330_z.edi to
+**dlog10rho +0.0048/+0.0051 (IQR +0.0001..+0.0163 / -0.0092..+0.0181
+dec), dphi +0.03/-0.02 deg over 0.003-109 s (46 periods)**; the committed
+one-night chain (pre-fix control) still reproduces +0.0007/+0.0033,
++0.16/+0.13 deg over 0.003-417 s. The selector recovered the night
+result on its own — it was never told about day or night. The full-band
+image is smooth 0.003-109 s with error bars only at the longest periods
+(few kept stream hours).
+
+**Queued**: H-polarization-concentration feature (Weckmann/Szarka) and
+per-window Z cluster circularity as additional scores; residual-based
+two-pass selector as the orthogonal complement; the ~500 dropped runs
+represent wasted Build FC compute — a pre-BuildFC cheap scorer could
+skip them once the features are settled.
