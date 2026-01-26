@@ -472,6 +472,12 @@ class BuildFC(Node):
                             "run %s level %d has no absolute time axis — "
                             "skipping persistence", run_id, level)
                         break
+            # §24.13: per-window run identity. The merged FC database keeps
+            # only the first contributor's attrs, so Select Runs needs an
+            # explicit coordinate to group windows by run
+            for level, fc in levels.items():
+                levels[level] = fc.assign_coords(run_id=(
+                    "time", np.full(int(fc.sizes["time"]), run_id)))
             containers.append(levels)
             ctx.progress(
                 (i + 1) / len(wanted),
@@ -601,6 +607,164 @@ class CoherenceSort(Node):
         if ref_fc is not None:
             result["ref_fc"] = out_ref
         return result
+
+
+class SelectRuns(Node):
+    type = "aurora.process.select_runs"
+    title = "Select Runs"
+    tooltip = "Drop noise-dominated runs before TF estimation (run-level QC)."
+    description = (
+        "Run-level QC (DESIGN §24.13, after Weckmann et al. 2005): score "
+        "every run by its per-window impedance level in a reference band — "
+        "the per-window |Z| from the run's own Fourier coefficients, "
+        "compared against the station-wide median. Cultural noise inflates "
+        "the electric channels, so a noise-dominated run deviates from the "
+        "station's stable impedance level (both tails are checked: inflated "
+        "and dead channels). The decision threshold carries a SOFT diurnal "
+        "prior: daytime runs are held to a stricter deviation (the prior "
+        "expects a solar plant nearby), but a measured-clean day still "
+        "passes and a noisy night is still dropped — the clock shapes the "
+        "expectation, it does not delete data. Requires an fc payload built "
+        "by Build FC (per-window 'run_id' coordinate)."
+    )
+    category = "Processing"
+    inputs = (Input("fc", "fc"),)
+    outputs = (
+        Output("fc", "fc"),
+        Output("table", "table", label="run diagnostics"),
+    )
+    params = (
+        Param("period_min", "number", label="Period min (s)", default=1.0,
+              min=0.0,
+              description="Reference-band lower period bound."),
+        Param("period_max", "number", label="Period max (s)", default=10.0,
+              min=0.0,
+              description="Reference-band upper period bound."),
+        Param("deviation_max", "number", label="Deviation max", default=2.0,
+              min=1.0,
+              description="A run whose median per-window impedance level in "
+                          "the band deviates from the station-wide median by "
+                          "more than this factor (either direction) is "
+                          "dropped."),
+        Param("use_prior", "boolean", label="Daytime soft prior",
+              default=True,
+              description="Scale the threshold by local time of day: the "
+                          "diurnal natural-signal envelope (Szarka 1988; "
+                          "Garcia & Jones 2002) is the prior — daytime runs "
+                          "are judged up to 'prior max' times stricter, "
+                          "night runs by the full threshold."),
+        Param("prior_max", "number", label="Prior max", default=2.0, min=1.0,
+              description="Strictness multiplier at local noon (1 = no "
+                          "prior)."),
+        Param("local_utc_offset", "number", label="Local UTC offset (h)",
+              default=8.0, min=-12.0, max=14.0,
+              description="Site timezone offset used by the prior (Tibet "
+                          "= UTC+8, §24.11)."),
+    )
+
+    def execute(self, ctx, fc, period_min: float = 1.0,
+                period_max: float = 10.0, deviation_max: float = 2.0,
+                use_prior: bool = True, prior_max: float = 2.0,
+                local_utc_offset: float = 8.0) -> dict[str, Any]:
+        import json
+
+        import numpy as np
+        import pandas as pd
+
+        levels = fc if isinstance(fc, dict) else {0: fc}
+        sample = next(iter(levels.values()))
+        if "run_id" not in sample.coords:
+            raise ValueError(
+                "Select Runs needs an fc payload with a per-window "
+                "'run_id' coordinate — rebuild it with Build FC")
+        ins, outs, _ = _fc_io_channels(sample)
+        absolute_time = np.issubdtype(
+            np.asarray(sample["time"].values).dtype, np.datetime64)
+        if use_prior and not absolute_time:
+            ctx.logger.warning(
+                "Select Runs: fc time axis is relative (no clock zero) — "
+                "the diurnal soft prior is disabled")
+
+        # per-level per-window |Z|^2 within the band; grouped per run
+        per_run_bins: dict[str, list[np.ndarray]] = {}
+        run_start: dict[str, np.datetime64] = {}
+        for ds in levels.values():
+            f = np.asarray(ds["frequency"].values, dtype=float)
+            band = (f >= 1.0 / period_max) & (f <= 1.0 / period_min)
+            if not band.any():
+                continue
+            H = np.stack([np.asarray(ds[c].values) for c in ins])
+            E = np.stack([np.asarray(ds[c].values) for c in outs])
+            denom = np.sum(np.abs(H) ** 2, axis=0)
+            num = np.einsum("ift,jft->jft", np.conj(H), E)
+            zsq = np.mean(np.abs(num / denom) ** 2, axis=0)[band, :]
+            runs = np.asarray(ds["run_id"].values)
+            times = np.asarray(ds["time"].values)
+            for rid in np.unique(runs):
+                m = runs == rid
+                per_run_bins.setdefault(str(rid), []).append(
+                    np.nanmedian(zsq[:, m], axis=1))
+                if absolute_time:
+                    t0 = times[m].min()
+                    if str(rid) not in run_start or t0 < run_start[str(rid)]:
+                        run_start[str(rid)] = t0
+        if not per_run_bins:
+            raise ValueError(
+                f"no fc frequency bins fall in the reference band "
+                f"{period_min}-{period_max} s — widen it")
+
+        # station-wide impedance level per bin: median over all runs'
+        # per-run medians (self-calibrating; storms raise every run equally
+        # and cancel, cultural noise raises single runs)
+        all_bins = np.concatenate([np.stack(v) for v in per_run_bins.values()])
+        ref = np.nanmedian(all_bins, axis=0)
+
+        def prior_factor(t):
+            if not use_prior or not absolute_time:
+                return 1.0
+            h = (pd.Timestamp(t).value / 1e9 / 3600.0 + local_utc_offset) % 24.0
+            return 1.0 + (prior_max - 1.0) * 0.5 * (
+                1.0 + np.cos(2 * np.pi * (h - 12.0) / 24.0))
+
+        rows = []
+        for rid, bins in sorted(per_run_bins.items()):
+            med = np.nanmedian(np.stack(bins), axis=0)  # per-bin run level
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = med / ref
+            lg = np.log2(ratio[np.isfinite(ratio) & (ratio > 0)])
+            # two-sided deviation as a FACTOR (inflated and dead channels)
+            dev = (float(2.0 ** np.median(np.abs(lg))) if lg.size
+                   else float("inf"))
+            pf = prior_factor(run_start.get(rid, 0))
+            thr = deviation_max / pf
+            rows.append({"run_id": rid, "n_levels": len(bins),
+                         "deviation": dev, "prior": float(pf),
+                         "threshold": float(thr), "dropped": bool(dev > thr)})
+        kept = {r["run_id"] for r in rows if not r["dropped"]}
+        for r in rows:
+            if r["dropped"]:
+                ctx.logger.warning(
+                    "Select Runs: dropping %s (deviation %.2f > %.2f, "
+                    "prior %.2f)", r["run_id"], r["deviation"], r["threshold"],
+                    r["prior"])
+        out = {}
+        for lv, ds in levels.items():
+            mask = np.isin(np.asarray(ds["run_id"].values), list(kept))
+            out[lv] = ds.isel(time=mask)
+        for ds in out.values():
+            ds.attrs["runs_kept"] = ",".join(sorted(kept))
+            ds.attrs["runs_dropped"] = ",".join(sorted(
+                r["run_id"] for r in rows if r["dropped"]))
+            ds.attrs["select_runs_band_s"] = f"{period_min}-{period_max}"
+        path = ctx.artifact_path("select_runs", ".json")
+        path.write_text(json.dumps(rows))
+        artifact = ctx.publish_artifact(path, kind="table")
+        ctx.progress(
+            1.0,
+            f"Select Runs: kept {len(kept)}/{len(rows)} run(s) in the "
+            f"{period_min}-{period_max} s band",
+        )
+        return {"fc": out, "table": artifact}
 
 
 class EstimateTF(Node):

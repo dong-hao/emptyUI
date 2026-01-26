@@ -204,3 +204,20 @@ def test_build_fc_per_family_decimation_trim(tmp_path):
     assert (res["fc"][lvl150_full].sizes["time"]
             == single["fc"][lvl150].sizes["time"])
     archive.close_mth5()
+
+
+def test_build_fc_carries_run_id_coordinate(tmp_path):
+    """§24.13: each merged FC window knows its run — Select Runs groups by
+    the per-window 'run_id' coordinate (merge attrs alone can't)."""
+    archive = _two_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = BuildFC().execute(
+        ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=16, overlap=0.5,
+        window_type="boxcar")
+    runs = res["fc"][0]["run_id"].values
+    assert set(map(str, np.unique(runs))) == {"sr2400_0001", "sr2400_0002"}
+    # windows are time-sorted across runs: first windows belong to run 1
+    assert str(runs[0]) == "sr2400_0001"
+    assert str(runs[-1]) == "sr2400_0002"
+    archive.close_mth5()

@@ -160,6 +160,39 @@ def _file_rate(path: Path) -> int:
         return int.from_bytes(fid.read(32)[18:20], "little")
 
 
+def _split_segments(segs: list[Segment],
+                    session_seconds: float) -> list[Segment]:
+    """Cut segments longer than ``session_seconds`` into consecutive
+    fixed-length sessions on block boundaries (§24.13): the continuous
+    stream otherwise forms one giant run whose run-level QC (Select Runs)
+    could only be dropped or kept whole. Blocks are assigned greedily — a
+    block starts a new session when it would push the current session past
+    the target (non-integer block/session ratios crop the last session)."""
+    if session_seconds <= 0:
+        return segs
+    out: list[Segment] = []
+    for seg in segs:
+        if (seg.end - seg.start).total_seconds() <= session_seconds:
+            out.append(seg)
+            continue
+        chunks: list[np.ndarray] = []
+        sat: list[bool] = []
+        start = seg.start
+        t = seg.start
+        for chunk, s in zip(seg.chunks, seg.saturated):
+            dur = pd.to_timedelta(chunk.shape[1] / seg.rate, unit="s")
+            if chunks and (t + dur - start).total_seconds() > session_seconds:
+                out.append(Segment(start, t, seg.rate, len(chunks),
+                                   chunks, sat))
+                chunks, sat, start = [], [], t
+            chunks.append(chunk)
+            sat.append(s)
+            t = t + dur
+        if chunks:
+            out.append(Segment(start, t, seg.rate, len(chunks), chunks, sat))
+    return out
+
+
 def _window_bounds(start: str | float | None,
                    end: str | float | None) -> tuple[pd.Timestamp | None,
                                                      pd.Timestamp | None]:
@@ -285,6 +318,7 @@ def read_phoenix_mtu(
     start: str | float = "",
     end: str | float = "",
     calibration_folder: str | Path = "",
+    stream_session_hours: float = 0.0,
 ) -> dict[str, Any]:
     """Convert a legacy Phoenix MTU-5A recording (TBL + TSn files) into an
     mth5 archive with one run per maximal contiguous segment.
@@ -310,6 +344,14 @@ def read_phoenix_mtu(
     the Compute FC node divides the Fourier coefficients by their chained
     complex response (frequency-domain calibration); unmatched tables only
     warn.
+
+    ``stream_session_hours`` (§24.13): split runs longer than this many
+    hours into consecutive fixed-length sessions on block boundaries
+    (0 = off, default). The continuous stream otherwise forms one giant
+    run whose run-level QC (Select Runs) could only be dropped or kept
+    whole; splitting gives every hour its own run id so selection can
+    screen stream data. Slots shorter than the session pass through
+    unchanged.
 
     Returns ``{"path": archive_path, "runs": [(run_id, rate, n_samples)],
     "warnings": [str], "calibration": {comp: [filter names]}}``.
@@ -386,7 +428,8 @@ def read_phoenix_mtu(
                     warnings.append(
                         f"{path.name}: segment {seg.start} spans {got:g} s, "
                         f"TBL schedule says {expected_len:g} s ({slot_tag})")
-        for i, seg in enumerate(segs, 1):
+        for i, seg in enumerate(
+                _split_segments(segs, stream_session_hours * 3600.0), 1):
             run_id = f"sr{seg.rate}_{i:04d}"
             run_meta = table.run_metadata.copy()
             run_meta.id = run_id
@@ -563,13 +606,23 @@ class LoadPhoenixMtu(Node):
                           "HZSN) and registered as FAP shape corrections — "
                           "Compute FC removes them frequency-domain-wise "
                           "(§24.12). Unmatched tables only warn."),
+        Param("stream_session_hours", "number",
+              label="Stream session length (h)", default=0.0, min=0,
+              optional=True,
+              description="Split runs longer than this many hours into "
+                          "consecutive fixed-length sessions on block "
+                          "boundaries (0 = off). The continuous stream "
+                          "otherwise forms one giant run whose run-level "
+                          "QC (Select Runs) could only be dropped or kept "
+                          "whole (§24.13)."),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "",
                 station_id: str = "", sample_rates: str = "",
                 mth5_filename: str = "from_phoenix_mtu.mth5",
                 save_path: str = "", start: str = "",
-                end: str = "", calibration_folder: str = "") -> dict[str, Any]:
+                end: str = "", calibration_folder: str = "",
+                stream_session_hours: float = 0.0) -> dict[str, Any]:
         rates = ([int(x) for x in str(sample_rates).split(",") if x.strip()]
                  if str(sample_rates).strip() else None)
         res = read_phoenix_mtu(
@@ -582,6 +635,7 @@ class LoadPhoenixMtu(Node):
             start=start,
             end=end,
             calibration_folder=calibration_folder,
+            stream_session_hours=stream_session_hours,
         )
         for w in res["warnings"]:
             ctx.logger.warning(w)

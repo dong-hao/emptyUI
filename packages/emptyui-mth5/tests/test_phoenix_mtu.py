@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from emptyui_mth5.phoenix_mtu import (
@@ -569,3 +570,34 @@ def test_read_phoenix_mtu_clean_no_mask(tmp_path):
         station = _resolve_station(_resolve_survey(m, ""), "")
         run = station.get_run("sr15_0001")
         assert "saturated" not in run.groups_list
+
+
+def test_read_phoenix_mtu_stream_split(tmp_path):
+    """§24.13: stream_session_hours cuts a long continuous run into
+    fixed-length sessions on block boundaries, with tag-truth periods and
+    continued run numbering."""
+    from mth5.mth5 import MTH5
+
+    from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+    _write_tbl(tmp_path / "SYNTH01.TBL")
+    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t0 = pd.Timestamp("2009-12-16T07:46:52", tz="UTC")
+    # 10 one-second blocks at 15 Hz; session = 4 s -> 4+4+2 s runs
+    _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 10)], seed=11)
+    res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path,
+                           stream_session_hours=4.0 / 3600.0)
+    ids = [r[0] for r in res["runs"]]
+    ns = [r[2] for r in res["runs"]]
+    assert ids == ["sr15_0001", "sr15_0002", "sr15_0003"]
+    assert ns == [60, 60, 30]
+    with MTH5() as m:
+        m.open_mth5(res["path"], "r")
+        station = _resolve_station(_resolve_survey(m, ""), "")
+        for k, (rid, n) in enumerate(zip(ids, ns)):
+            rg = station.get_run(rid)
+            tp = rg.metadata.time_period
+            assert pd.Timestamp(tp.start.isoformat()) == \
+                t0 + pd.to_timedelta(4 * k, "s")
+            assert pd.Timestamp(tp.end.isoformat()) == t0 + pd.to_timedelta(
+                4 * k + n / 15.0 - 1 / 15.0, "s")
