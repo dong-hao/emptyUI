@@ -3457,6 +3457,46 @@ two-pass selector as the orthogonal complement; the ~500 dropped runs
 represent wasted Build FC compute — a pre-BuildFC cheap scorer could
 skip them once the features are settled.
 
+**Stage-1 separation study — the polarization lever does not exist here
+(2026-09-18).** Before building any of the queued features, the data was
+interrogated directly (`investigate_polarization.py`,
+`polarization_features.json`, `pol_rose.png`; one Build FC of the
+sessions archive, QC band 1-10 s, 1352 run-level rows, 31.2k window
+angles):
+
+- **Magnetic polarization concentration (Weckmann's strongest
+  discriminator) is LOW everywhere**: window-ensemble resultant R =
+  0.08 (sr15 night), 0.15 (sr15 day), 0.29 (sr150 night), 0.14 (sr150
+  day) — nowhere near the strongly-polarized regime (R ~ 1) of the
+  paper's Jordan/Namibia cases.
+- **The dominant major-axis angle ROTATES with time**: night ~90-120
+  deg, day ~60 deg with much broader scatter — natural source geometry
+  (the Sq current system), not a fixed local noise direction. A local
+  polarized noise source would pin one angle across all conditions.
+- Per-run concentration has no day/night discrimination either (sr150:
+  0.67 vs 0.68; sr15: night 0.38 > day 0.26 — opposite to a plant-noise
+  hypothesis), and the borderline official-night hours are
+  indistinguishable from kept hours on both pol (0.33-0.85) and spread
+  (0.27-0.59).
+- **Single-event cluster spread is weak**: sr15 day 0.60 vs night 0.54;
+  structurally unavailable for the short sr150 slots (3 windows per
+  slot, the feature needs >= 4).
+
+Interpretation: consistent with the noise physics — the solar plant
+couples galvanically/inverter-wise (lands on E, broadband, unpolarized
+in H); the magnetic contamination here is diffuse, not a polarized
+near-field source. Consequences: the polarization feature is DROPPED
+from the workflow plan (the negative result is the deliverable — a
+lever ruled out with data before it was built); the cluster spread is
+kept as a diagnostic column only. The QC effort redirects to the
+residual-based two-pass selector, which measures "does this window fit
+the model" rather than "is the floor high" — the right complement for
+diffuse noise. (Implementation notes from the study: einsum operands
+MUST share the frequency index label — "akt,blt->abt" sums k and l
+independently and silently computes the outer product of the bin sums;
+near-degenerate pooled S_hh windows (zero power, parallel h vectors)
+must be excluded via det > 1e-12 P^2 before the 2x2 solve.)
+
 **Pre-cascade hour-level QC + contiguous cascade spans (2026-09-18,
 commits `2e83279`).** Two structural additions to Build FC, driven by the
 sessions verification:
