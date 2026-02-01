@@ -3456,3 +3456,44 @@ per-window Z cluster circularity as additional scores; residual-based
 two-pass selector as the orthogonal complement; the ~500 dropped runs
 represent wasted Build FC compute — a pre-BuildFC cheap scorer could
 skip them once the features are settled.
+
+**Pre-cascade hour-level QC + contiguous cascade spans (2026-09-18,
+commits `2e83279`).** Two structural additions to Build FC, driven by the
+sessions verification:
+
+- The split ceiling: hourly sessions starve the deep decimations per
+  slice — an hour cannot form a level below ~0.23 Hz (210 decimated
+  samples vs a 256-sample window), so the merged database topped out at
+  109.2 s. Merging itself combines windows fine (L7 had 388 windows);
+  the blockage is that NO slice can form the deeper levels. `regroup_
+  contiguous` cascades maximal contiguous spans of same-rate runs as one
+  payload (adjacency within two samples, from the run_summary columns) —
+  the physically right unit for unbroken acquisitions; gapped slot runs
+  stay separate.
+- `reject_noisy_runs`: hour-level QC before any cascade — one rfft per
+  channel per run, score = MEDIAN over in-band bins (default 1-10 s) of
+  the per-bin E/H power ratio (the median of |Z(w)|^2). Two lessons from
+  the corpus: a MEAN over bins is spike-dominated (it over-rejected six
+  hours inside the official night window), and a RATIO OF CHANNEL-TOTAL
+  MEDIANS is shape-sensitive and over-rejected weak-signal night hours;
+  the median of per-bin ratios is the right statistic. The screen shares
+  Select Runs' decision rule and the soft prior helper; deviation_max
+  defaults to 3 (2 over-rejected borderline night hours the official
+  used successfully — the screen is coarse, the FC-stage sort refines).
+  Cost: doubles the data read (~+2 min on the corpus).
+
+**Full-band data-driven result.** Sessions ingest + scorer (dev 3) +
+regroup + sort + self-reference estimate: dlog10rho +0.0013/+0.0060
+(IQR -0.0079..+0.0068 / -0.0069..+0.0229 dec), dphi +0.08/+0.11 deg over
+0.003-109 s. The deep bands (143-417 s) formed at the deepest merged
+level (~19 windows) but the coherence sort's +/-16-window ensemble
+diluted them to zero — Coherence Sort's `apply_below_period` knob was
+built for exactly this ("the deep tail is healthy; weighting it only
+perturbs the estimate", §24.9): with apply_below_period=20 the deep bins
+pass unsorted and the tail extends to **416.6 s: 50 periods,
+dlog10rho +0.0005/+0.0072 (IQR -0.0095..+0.0058 / -0.0029..+0.0288),
+dphi +0.11/+0.11 deg** — the data-driven recipe now matches the official
+night-window TF over the ENTIRE band, with no clock rule anywhere. The
+committed recipe for this site: `stream_session_hours=1`,
+`reject_noisy_runs=True`, `regroup_contiguous=True`, sort with
+`apply_below_period=20`.

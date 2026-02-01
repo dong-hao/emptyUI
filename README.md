@@ -244,6 +244,16 @@ full architecture, contracts and verification records are in
   automatic chain recovers the official one-night Phoenix TF on its own**
   (Δlog₁₀ρ +0.005/+0.005, Δφ ±0.03° over 0.003–109 s) — the selector was never
   told about day or night.
+- **Full-band data-driven recipe (DESIGN.md §24.13, 2026-09-18)**: Build FC
+  gains hour-level QC before any cascade (`reject_noisy_runs`: one rfft per
+  channel, score = median over in-band bins of the per-bin E/H power ratio,
+  soft diurnal prior shared with Select Runs) and contiguous cascade spans
+  (`regroup_contiguous`: hourly slices cannot form levels below ~0.23 Hz, but
+  the kept contiguous hours cascade as one payload, restoring the long-period
+  tail). With the sort's deep bins passing unsorted (`apply_below_period=20`),
+  **the automatic recipe reaches 50 periods down to 416.6 s and matches the
+  official night-window Phoenix TF over the entire band** (Δlog₁₀ρ
+  +0.0005/+0.0072, Δφ +0.11°) — no clock rule anywhere.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 
