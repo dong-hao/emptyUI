@@ -2464,6 +2464,10 @@ def estimate_tf_levels(
             "output_channels": list(output_channels),
             "channel_nomenclature": keyword,
             "periods_per_octave": periods_per_octave,
+            # the band geometry this level's estimates were built from —
+            # Residual Sort pools the FC bins per band to predict each
+            # window's output from the band's Z (DESIGN §24.13)
+            "band_intervals": [tuple(b) for b in bands] if bands else None,
         }
         entry.update(_identity_attrs(fc))
         result[int(level)] = entry

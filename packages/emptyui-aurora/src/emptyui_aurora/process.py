@@ -1002,6 +1002,208 @@ class SelectRuns(Node):
         return {"fc": out, "table": artifact}
 
 
+class ResidualSort(Node):
+    type = "aurora.process.residual_sort"
+    title = "Residual Sort"
+    tooltip = "Drop windows/runs whose data do not fit the first-pass TF model."
+    description = (
+        "Residual-based two-pass selection (DESIGN §24.13, the orthogonal "
+        "complement of power and coherence screening): a first-pass TF "
+        "(Estimate TF's 'tf levels') predicts each FC window's outputs; "
+        "windows whose pooled unexplained-power fraction is excessive are "
+        "dropped (NaN) and the TF is re-estimated. The score is per RUN "
+        "(median over the run's windows, then median over the run's bands "
+        "after per-band normalization against the station-wide median) — "
+        "clean MT data sit near the noise floor of unexplained power; "
+        "cultural-noise windows blow it up. This measures 'does this window "
+        "fit the model' rather than 'is the floor high' — the right lever "
+        "for diffuse, unpolarized noise. Cascadeable: chain Estimate TF -> "
+        "Residual Sort -> Estimate TF, iterating if needed. Requires the fc "
+        "payload's per-window 'run_id' coordinate (Build FC) and the "
+        "'band_intervals' carried by the first pass's tf levels."
+    )
+    category = "Processing"
+    inputs = (
+        Input("fc", "fc"),
+        Input("tf_levels", "tf.level", label="tf levels (first pass)"),
+    )
+    outputs = (
+        Output("fc", "fc"),
+        Output("table", "table", label="residual diagnostics"),
+    )
+    params = (
+        Param("unexplained_max", "number", label="Unexplained max",
+              default=2.0, min=1.0,
+              description="A run whose median per-window unexplained-power "
+                          "fraction exceeds the station-wide median by more "
+                          "than this factor (in any direction — model-"
+                          "inconsistent noise inflates it, dead channels "
+                          "collapse it) is dropped."),
+        Param("period_min", "number", label="Period min (s)", default=0.0,
+              min=0.0, optional=True,
+              description="Scope the test to bands at/above this period "
+                          "(0 = all bands)."),
+        Param("period_max", "number", label="Period max (s)", default=0.0,
+              min=0.0, optional=True,
+              description="Scope the test to bands below this period "
+                          "(0 = all bands)."),
+        Param("use_prior", "boolean", label="Daytime soft prior",
+              default=True,
+              description="Scale the threshold by local time of day "
+                          "(shared with Select Runs / Build FC QC)."),
+        Param("prior_max", "number", label="Prior max", default=2.0,
+              min=1.0, optional=True),
+        Param("local_utc_offset", "number", label="Local UTC offset (h)",
+              default=8.0, min=-12.0, max=14.0, optional=True),
+    )
+
+    def execute(self, ctx, fc, tf_levels, unexplained_max: float = 2.0,
+                period_min: float = 0.0, period_max: float = 0.0,
+                use_prior: bool = True, prior_max: float = 2.0,
+                local_utc_offset: float = 8.0) -> dict[str, Any]:
+        import json
+
+        import numpy as np
+
+        levels = fc if isinstance(fc, dict) else {0: fc}
+        sample = next(iter(levels.values()))
+        if "run_id" not in sample.coords:
+            raise ValueError(
+                "Residual Sort needs an fc payload with a per-window "
+                "'run_id' coordinate — rebuild it with Build FC")
+        ins, outs, _ = _fc_io_channels(sample)
+        absolute_time = np.issubdtype(
+            np.asarray(sample["time"].values).dtype, np.datetime64)
+
+        # per (level, band): pooled per-window prediction error fraction
+        per_run_band: dict[str, dict[int, float]] = {}
+        run_start: dict[str, np.datetime64] = {}
+        n_tests = 0
+        n_intervals_seen = 0
+        for lv, ds in levels.items():
+            entry = (tf_levels or {}).get(lv)
+            if not entry or not entry.get("band_intervals"):
+                continue  # no band geometry — this level cannot be tested
+            n_intervals_seen += len(entry["band_intervals"])
+            f = np.asarray(ds["frequency"].values, dtype=float)
+            H = np.stack([np.asarray(ds[c].values) for c in ins])  # (2,nf,nt)
+            E = np.stack([np.asarray(ds[c].values) for c in outs])
+            Zs = np.asarray(entry["Z"])  # (nbands, n_out, n_in)
+            intervals = entry["band_intervals"]
+            if Zs.shape[0] != len(intervals):
+                raise ValueError(
+                    f"Residual Sort: tf levels' Z rows ({Zs.shape[0]}) do "
+                    f"not match the band intervals ({len(intervals)}) for "
+                    f"level {lv}")
+            runs = np.asarray(ds["run_id"].values)
+            times = np.asarray(ds["time"].values)
+            uniq = np.unique(runs)
+            for b, (f_hi, f_lo) in enumerate(intervals):
+                if f_hi is None or f_lo is None:
+                    continue
+                p_center = 1.0 / np.sqrt(float(f_hi) * float(f_lo))
+                if period_min and p_center < period_min:
+                    continue
+                if period_max and p_center >= period_max:
+                    continue
+                bins = (f <= float(f_hi)) & (f >= float(f_lo))
+                if not bins.any():
+                    continue
+                # pooled per-window vectors over the band's bins (saturated
+                # NaN bins poison the sums -> excluded via the finite mask)
+                hbar = np.nansum(H[:, bins, :], axis=1)  # (2, nt)
+                ebar = np.nansum(E[:, bins, :], axis=1)
+                e_pred = Zs[b] @ hbar  # (2, nt)
+                resid = np.sum(np.abs(ebar - e_pred) ** 2, axis=0)
+                power = np.sum(np.abs(ebar) ** 2, axis=0)
+                frac = np.where(power > 0, resid / np.maximum(power, 1e-300),
+                                np.nan)
+                n_tests += 1
+                for rid in uniq:
+                    m = runs == rid
+                    v = frac[m]
+                    v = v[np.isfinite(v)]
+                    if not v.size:
+                        continue
+                    per_run_band.setdefault(str(rid), {})[(lv, b)] = \
+                        float(np.median(v))
+                    if absolute_time:
+                        t0 = times[m].min()
+                        if str(rid) not in run_start or t0 < run_start[str(rid)]:
+                            run_start[str(rid)] = t0
+        if not per_run_band:
+            if n_intervals_seen:
+                ctx.logger.warning(
+                    "Residual Sort: the period scope excluded every band — "
+                    "returning the payload unfiltered")
+                out = {lv: ds.copy() for lv, ds in levels.items()}
+                for ds in out.values():
+                    ds.attrs["residual_sort_tests"] = 0
+                return {"fc": out}
+            raise ValueError(
+                "Residual Sort: no (level, band) test could be formed — "
+                "check that the first pass carried 'band_intervals' and the "
+                "period scope is not empty")
+
+        # per band: station-wide median across runs; per run: median of the
+        # normalized per-band scores over its tested bands
+        band_scores: dict[int, list[float]] = {}
+        for rid, bands in per_run_band.items():
+            for key, val in bands.items():
+                band_scores.setdefault(key, []).append(val)
+        ref = {key: float(np.median(v)) for key, v in band_scores.items()}
+
+        rows = []
+        for rid in sorted(per_run_band):
+            bands = per_run_band[rid]
+            ratios = [bands[k] / ref[k] for k in bands
+                      if ref.get(k, 0.0) > 0]
+            raw = float(np.median(list(bands.values()))) if bands else float("nan")
+            if ratios:
+                score = float(np.median(ratios))
+                dn = float(np.median([ref[k] / bands[k] for k in bands
+                                      if bands[k] > 0 and ref.get(k, 0) > 0]))
+            else:
+                score, dn = float("inf"), float("inf")
+            pf = _diurnal_prior_factor(run_start.get(rid, 0), use_prior,
+                                       prior_max, local_utc_offset,
+                                       absolute_time=absolute_time)
+            thr = unexplained_max / pf
+            rows.append({"run_id": rid, "n_tests": len(bands),
+                         "unexplained": score, "unexplained_frac": raw,
+                         "down": dn, "prior": float(pf),
+                         "threshold": float(thr), "dropped": bool(score > thr
+                                                                  or dn > thr)})
+        dropped_ids = {r["run_id"] for r in rows if r["dropped"]}
+        all_ids = set()
+        for ds in levels.values():
+            all_ids |= set(map(str, np.unique(ds["run_id"].values)))
+        kept = all_ids - dropped_ids
+        for r in rows:
+            if r["dropped"]:
+                ctx.logger.warning(
+                    "Residual Sort: dropping %s (unexplained %.2f, down %.2f; "
+                    "threshold %.2f, prior %.2f)", r["run_id"], r["unexplained"],
+                    r["down"], r["threshold"], r["prior"])
+        out = {}
+        for lv, ds in levels.items():
+            mask = np.isin(np.asarray(ds["run_id"].values), list(kept))
+            out[lv] = ds.isel(time=mask)
+        for ds in out.values():
+            ds.attrs["runs_kept"] = ",".join(sorted(kept))
+            ds.attrs["runs_dropped"] = ",".join(sorted(dropped_ids))
+            ds.attrs["residual_sort_tests"] = n_tests
+        path = ctx.artifact_path("residual_sort", ".json")
+        path.write_text(json.dumps(rows))
+        artifact = ctx.publish_artifact(path, kind="table")
+        ctx.progress(
+            1.0,
+            f"Residual Sort: kept {len(kept)}/{len(rows)} run(s) "
+            f"({n_tests} level-band tests)",
+        )
+        return {"fc": out, "table": artifact}
+
+
 class EstimateTF(Node):
     type = "aurora.process.estimate_tf"
     title = "Estimate TF"
