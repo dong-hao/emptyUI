@@ -3537,3 +3537,42 @@ night-window TF over the ENTIRE band, with no clock rule anywhere. The
 committed recipe for this site: `stream_session_hours=1`,
 `reject_noisy_runs=True`, `regroup_contiguous=True`, sort with
 `apply_below_period=20`.
+
+**Residual-based two-pass selector — delivered (2026-09-18, commits
+`85dc3b3`, `c09f923`).** The orthogonal complement of power and coherence
+screening: a first-pass TF predicts each FC window's outputs from the
+pooled magnetic vector; the per-window unexplained-power fraction is
+aggregated per run (median over windows, then median over the run's bands
+after per-band normalization against the station-wide median). Design:
+- an INDEPENDENT, cascadeable node — inputs are the fc payload and the
+  first pass's `tf levels`; the chain BuildFC -> EstimateTF -> Residual
+  Sort -> EstimateTF is a loop-free DAG, and further iterations compose
+  naturally;
+- `estimate_tf_levels` now returns each level's band geometry
+  (`band_intervals`) — the pooling key;
+- decision rule: ONE-SIDED up-check only. A LOW unexplained fraction
+  means the data fit the model WELL, not dead channels (zero-power
+  windows are excluded as NaN) — the corpus showed an inherited
+  down-check would wrongly flag 340 good-fit slots (413/682 dropped),
+  and because run-level drops remove a span's deep windows too, it cost
+  the long-period tail;
+- semantics from the tests: a tight-but-wrong run (consistent impedance
+  different from the model) DOES drop — it disagrees with the model —
+  but with a bounded, structured raw fraction (~(Z_ratio-1)^2/Z_ratio^2)
+  rather than the explosive score of incoherent noise. The residual
+  lever separates 'model-inconsistent' from 'floor-high'; scale
+  questions remain Select Runs' business;
+- an empty period scope warns and passes the payload unfiltered;
+  unscored runs pass through; the shared soft diurnal prior applies.
+
+Corpus tuning and result: unexplained_max 2 over-rejected the
+local-morning stream span whose 3 deep-level windows tip the l2u
+coarsening (19 -> 16 windows kills the 143-417 s bands — the deep tail's
+pass-1 model is itself built from ~19 windows, so testing it harshly
+against itself is circular and fragile); 3 keeps it. Final recipe:
+scorer(dev 3) + regroup + ResidualSort(unexplained_max 3) +
+CoherenceSort(apply_below_period 20) -> **50 periods down to 416.6 s,
+parity vs the official one-night EDI dlog10rho +0.0005/+0.0087 (IQR
+-0.0088..+0.0061 / -0.0028..+0.0289 dec), dphi +0.11/+0.08 deg** — the
+model-consistency refinement composes with the power screen and keeps
+the full band, with 73 genuine drops (vs 413 with the broken check).

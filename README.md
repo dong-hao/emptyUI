@@ -254,6 +254,15 @@ full architecture, contracts and verification records are in
   **the automatic recipe reaches 50 periods down to 416.6 s and matches the
   official night-window Phoenix TF over the entire band** (Δlog₁₀ρ
   +0.0005/+0.0072, Δφ +0.11°) — no clock rule anywhere.
+- **Residual Sort: model-consistency QC (DESIGN.md §24.13, 2026-09-18)**: an
+  independent, cascadeable node (Build FC → Estimate TF → Residual Sort →
+  Estimate TF) — the first-pass TF predicts each FC window's outputs; runs
+  whose pooled unexplained-power fraction blows up are dropped. One-sided by
+  design (low unexplained = good fit, not dead channels — the corpus showed
+  an inherited down-check would wrongly flag 340 good-fit slots). Final
+  recipe with the refinement: **50 periods to 416.6 s, Δlog₁₀ρ
+  +0.0005/+0.0087, Δφ +0.11°** — 73 genuine drops vs 413 with the broken
+  check.
 
 ### Current issues (known problems, from the 2026-09-11 code review)
 
