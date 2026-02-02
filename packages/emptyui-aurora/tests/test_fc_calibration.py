@@ -221,12 +221,14 @@ def test_compute_fc_rejects_saturated_windows():
     )
 
     sr, nperseg, overlap = 8.0, 256, 0.5
-    flagged = slice(1000, 1008)  # 8 flagged samples -> 1 s at 8 Hz
+    flagged = slice(1000, 1100)  # 100 flagged samples -> 12.5 s at 8 Hz
     runts = _runts_with_mask(flagged_slice=flagged)
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=1,
                                factor=4, num_samples_window=nperseg,
                                overlap=overlap, window_type="boxcar")
-    # level 0: exactly the windows overlapping the flagged samples are NaN
+    # level 0: exactly the windows whose flagged fraction exceeds the
+    # threshold are NaN (fraction-based §24.12: a few clipped samples out
+    # of a long window are tolerated, not deleted)
     step = int(nperseg * (1 - overlap))
     n_win = levels[0]["hx"].values.shape[1]
     expect = _saturated_window_mask(
@@ -238,6 +240,15 @@ def test_compute_fc_rejects_saturated_windows():
         assert np.all(np.isnan(zi[:, expect]))
         assert np.all(np.isfinite(zi[:, ~expect]))
     assert levels[0].attrs["saturated_windows_rejected"] == int(expect.sum())
+    # every kept window's flagged share is below the threshold and every
+    # rejected one's above — the ratio, not the overlap, decides
+    cc = np.concatenate(
+        [[0.0], np.cumsum(np.asarray(runts.dataset["saturated"].values) > 0)])
+    starts = np.arange(n_win) * step
+    ends = np.minimum(starts + nperseg, cc.size - 1)
+    shares = (cc[ends] - cc[starts]) / np.maximum(ends - starts, 1)
+    assert np.all(shares[~expect] <= 0.01)
+    assert np.all(shares[expect] > 0.01)
     # level 1 (max-pooled mask): the flagged region survives decimation
     assert levels[1].attrs["saturated_windows_rejected"] > 0
     # the rejected window times fall inside the flagged interval

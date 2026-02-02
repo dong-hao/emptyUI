@@ -178,10 +178,20 @@ class ComputeFC(Node):
                           "off (default) = global Detrend node only."),
         Param("reject_saturated", "boolean", label="Reject saturated windows",
               default=True,
-              description="Zero-weight (NaN) every FC window overlapping a "
-                          "sample flagged saturated by the instrument (MTU-5A "
+              description="Zero-weight (NaN) every FC window whose flagged "
+                          "sample fraction exceeds 'saturated max' (MTU-5A "
                           "block tags byte 15, §24.12 QC). No effect on "
                           "payloads without a 'saturated' mask."),
+        Param("saturated_max", "number", label="Saturated max",
+              default=0.01, min=0.0, max=1.0,
+              enabled_when=("reject_saturated", (True,)),
+              description="Flagged-fraction threshold: a window is "
+                          "zero-weighted when more than this share of its "
+                          "samples is flagged saturated. The original "
+                          "any-overlap rule deleted the long-period tail "
+                          "whenever saturation is frequent (a 73-minute "
+                          "window almost always overlaps one clipped "
+                          "sample out of 65536)."),
         Param("persist", "boolean", label="Persist to workspace", default=True,
               description="Write each level's FC into the workspace MTH5 FC layer"),
         Param("survey", "string", label="Survey id", default="", optional=True),
@@ -204,6 +214,7 @@ class ComputeFC(Node):
                 clock_zero: str = "",
                 prewhitening: str = "", per_window_detrend: str = "",
                 reject_saturated: bool = True,
+                saturated_max: float = 0.01,
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
         # Channel names resolve inside compute_fc_levels (empty fields = auto
@@ -341,10 +352,20 @@ class BuildFC(Node):
               default="", options=("", "linear")),
         Param("reject_saturated", "boolean", label="Reject saturated windows",
               default=True,
-              description="Zero-weight (NaN) every FC window overlapping a "
-                          "sample flagged saturated by the instrument (MTU-5A "
+              description="Zero-weight (NaN) every FC window whose flagged "
+                          "sample fraction exceeds 'saturated max' (MTU-5A "
                           "block tags byte 15, §24.12 QC). No effect on "
                           "payloads without a 'saturated' mask."),
+        Param("saturated_max", "number", label="Saturated max",
+              default=0.01, min=0.0, max=1.0,
+              enabled_when=("reject_saturated", (True,)),
+              description="Flagged-fraction threshold: a window is "
+                          "zero-weighted when more than this share of its "
+                          "samples is flagged saturated. The original "
+                          "any-overlap rule deleted the long-period tail "
+                          "whenever saturation is frequent (a 73-minute "
+                          "window almost always overlaps one clipped "
+                          "sample out of 65536)."),
         Param("persist", "boolean", label="Persist per-run FCs", default=False,
               description="Write each run's FC levels into the workspace "
                           "MTH5 keyed by run (aurora's FC-layer pattern) — "
@@ -373,6 +394,7 @@ class BuildFC(Node):
                 deep_from_level=None, clock_zero: str = "epoch",
                 prewhitening: str = "", per_window_detrend: str = "",
                 reject_saturated: bool = True,
+                saturated_max: float = 0.01,
                 persist: bool = False,
                 regroup_contiguous: bool = False) -> dict[str, Any]:
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
@@ -567,6 +589,7 @@ class BuildFC(Node):
                 deep_from_level=deep_from_level,
                 clock_zero=clock_zero,
                 reject_saturated=reject_saturated,
+                saturated_max=saturated_max,
             )
             # the station identity travels in the attrs (DESIGN.md §15);
             # run_id is per-span, the rest comes from the hoisted station md

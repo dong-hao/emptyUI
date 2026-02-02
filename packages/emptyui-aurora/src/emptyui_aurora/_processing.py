@@ -412,9 +412,14 @@ def compute_fc_levels(
     deep_from_level=None,
     clock_zero="",
     reject_saturated=True,
+    saturated_max: float = 0.01,
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
+    ``saturated_max`` (§24.12 QC): an FC window is zero-weighted when the
+    flagged fraction of its sample span exceeds this threshold (the original
+    any-overlap rule deleted the long-period tail whenever saturation is
+    frequent — see :func:`_saturated_window_mask`).
     ``num_decimations`` is the number of cascading decimations performed, so it
     also equals the deepest decimation level: 0 = no decimation (just level 0 at
     the native sample rate); 1 = decimate once (levels 0 and 1); N = levels 0..N.
@@ -520,7 +525,8 @@ def compute_fc_levels(
             flags = _saturated_window_mask(
                 series["saturated"], max(8, int(num_samples_window)),
                 int(max(8, int(num_samples_window)) * overlap),
-                next(iter(fc_vars.values()))[1].shape[1])
+                next(iter(fc_vars.values()))[1].shape[1],
+                saturated_max=saturated_max)
             n_sat_rejected = int(flags.sum())
             if n_sat_rejected:
                 for comp, (dims, zi) in fc_vars.items():
@@ -558,6 +564,7 @@ def compute_fc_levels(
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
                 "calibration_applied": cal_note,
                 "saturated_windows_rejected": n_sat_rejected,
+                "saturated_max": float(saturated_max),
                 "start_datetime": start_iso,
             },
         )
@@ -859,21 +866,28 @@ def _window(name: str) -> str:
     return {"hanning": "hann"}.get(name, name)
 
 
-def _saturated_window_mask(sat, nperseg, noverlap, n_win) -> np.ndarray:
+def _saturated_window_mask(sat, nperseg, noverlap, n_win,
+                           saturated_max: float = 0.01) -> np.ndarray:
     """Per-FC-window saturation flags (§24.12 QC).
 
     ``sat`` is the binary per-sample mask at the CURRENT level's rate; an FC
-    window is flagged iff it overlaps at least one flagged sample (a clipped
-    scan distorts the whole window's spectrum, so the conservative call is to
-    reject the window entirely). Returns a boolean array of length
-    ``n_win`` (the STFT's window count) aligned to the FC time axis.
+    window is flagged iff the flagged FRACTION of its sample span exceeds
+    ``saturated_max``. The original rule zero-weighted on ANY overlap, which
+    is right for a clean recording but orders-of-magnitude over-conservative
+    when saturation is frequent: a 73-minute deep window almost always
+    overlaps one clipped sample out of 65536, and rejecting it deletes the
+    entire long-period tail (the union fix in Build FC exposed this —
+    grouped spans had silently dropped the mask channel before). Returns a
+    boolean array of length ``n_win`` (the STFT's window count) aligned to
+    the FC time axis.
     """
     sat = np.asarray(sat, dtype=float)
     c = np.concatenate([[0.0], np.cumsum(sat > 0)])
     step = max(1, nperseg - noverlap)
     starts = np.arange(n_win) * step
     ends = np.minimum(starts + nperseg, c.size - 1)
-    return (c[ends] - c[starts]) > 0
+    n = np.maximum(ends - starts, 1)
+    return (c[ends] - c[starts]) / n > saturated_max
 
 
 def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
