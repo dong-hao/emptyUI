@@ -1036,9 +1036,11 @@ class ResidualSort(Node):
               default=2.0, min=1.0,
               description="A run whose median per-window unexplained-power "
                           "fraction exceeds the station-wide median by more "
-                          "than this factor (in any direction — model-"
-                          "inconsistent noise inflates it, dead channels "
-                          "collapse it) is dropped."),
+                          "than this factor is dropped. One-sided by design: "
+                          "a LOW fraction means the data fit the model well "
+                          "(not dead channels — zero-power windows are "
+                          "excluded as NaN), so there is no down check here; "
+                          "'down' is published as a diagnostic only."),
         Param("period_min", "number", label="Period min (s)", default=0.0,
               min=0.0, optional=True,
               description="Scope the test to bands at/above this period "
@@ -1169,11 +1171,13 @@ class ResidualSort(Node):
                                        prior_max, local_utc_offset,
                                        absolute_time=absolute_time)
             thr = unexplained_max / pf
+            # ONE-SIDED: low unexplained = good fit, never a drop reason
+            # (the corpus showed 340 good-fit runs would be wrongly flagged
+            # by an inherited down check)
             rows.append({"run_id": rid, "n_tests": len(bands),
                          "unexplained": score, "unexplained_frac": raw,
                          "down": dn, "prior": float(pf),
-                         "threshold": float(thr), "dropped": bool(score > thr
-                                                                  or dn > thr)})
+                         "threshold": float(thr), "dropped": bool(score > thr)})
         dropped_ids = {r["run_id"] for r in rows if r["dropped"]}
         all_ids = set()
         for ds in levels.values():
