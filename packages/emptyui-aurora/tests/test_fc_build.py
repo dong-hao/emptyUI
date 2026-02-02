@@ -273,7 +273,8 @@ def _multi_run_archive(tmp_path: Path, n: int = 4, contiguous: bool = True,
 
 
 def test_build_fc_regroups_contiguous_runs(tmp_path):
-    """Two back-to-back runs cascade as ONE span with regroup_contiguous;
+    """Two back-to-back runs cascade as ONE span with regroup_contiguous,
+    but each window keeps its own session's id (Select Runs groups by it);
     gapped runs stay separate."""
     archive = _multi_run_archive(tmp_path, n=2, contiguous=True)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
@@ -282,7 +283,9 @@ def test_build_fc_regroups_contiguous_runs(tmp_path):
         decimation_levels=0, window_samples=16, overlap=0.5,
         window_type="boxcar", regroup_contiguous=True)
     runs = set(map(str, np.unique(res["fc"][0]["run_id"].values)))
-    assert runs == {"sr1_span0001"}
+    assert runs == {"sr2400_0001", "sr2400_0002"}
+    # the cascade identity stays per-span in the attrs
+    assert res["fc"][0].attrs["run_id"] == "sr1_span0001"
     archive.close_mth5()
 
 
@@ -298,31 +301,48 @@ def test_build_fc_regroup_keeps_gaps_separate(tmp_path):
     archive.close_mth5()
 
 
-def test_build_fc_rejects_noisy_run(tmp_path):
-    """The pre-cascade scorer skips the run with a large in-band sine on
-    the electric channels; clean runs pass and keep their ids."""
-    archive = _multi_run_archive(tmp_path, n=6, contiguous=False,
-                                 noisy_idx=2)
+def test_build_fc_select_runs_drops_noisy_session(tmp_path):
+    """Hour-level QC now lives in Select Runs (§24.13): the inflated run is
+    dropped from the merged span while clean runs keep their ids — no
+    pre-cascade read of the time series anywhere."""
+    from emptyui_aurora.process import SelectRuns
+
+    archive = _multi_run_archive(tmp_path, n=6, contiguous=True, noisy_idx=2)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = BuildFC().execute(
+    fc = BuildFC().execute(
         ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
         decimation_levels=0, window_samples=16, overlap=0.5,
-        window_type="boxcar", reject_noisy_runs=True, use_prior=False)
+        window_type="boxcar", regroup_contiguous=True)["fc"]
+    res = SelectRuns().execute(ctx, fc, deviation_max=2.0,
+                               dead_max=1e9, use_prior=False)
     runs = set(map(str, np.unique(res["fc"][0]["run_id"].values)))
     assert "sr2400_0003" not in runs
     assert runs == {f"sr2400_{i + 1:04d}" for i in range(6)} - {"sr2400_0003"}
     archive.close_mth5()
 
 
-def test_build_fc_reject_and_regroup(tmp_path):
-    """Kept contiguous runs merge into a span around the rejected one."""
+def test_build_fc_select_runs_drops_overlap_neighbors(tmp_path):
+    """Windows of the PREVIOUS session that overlap a rejected one picked up
+    its samples through the cascade — the conservative guard drops them too
+    (start-time attribution already handles right straddlers)."""
+    from emptyui_aurora.process import SelectRuns
+
     archive = _multi_run_archive(tmp_path, n=6, contiguous=True, noisy_idx=2)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = BuildFC().execute(
+    fc = BuildFC().execute(
         ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
         decimation_levels=0, window_samples=16, overlap=0.5,
-        window_type="boxcar", reject_noisy_runs=True, use_prior=False,
-        regroup_contiguous=True)
-    runs = set(map(str, np.unique(res["fc"][0]["run_id"].values)))
-    assert runs == {"sr1_span0001", "sr1_span0002"}
+        window_type="boxcar", regroup_contiguous=True)["fc"]
+    res = SelectRuns().execute(ctx, fc, deviation_max=2.0,
+                               dead_max=1e9, use_prior=False)
+    out = res["fc"][0]
+    runs = np.asarray(out["run_id"].values)
+    times = np.asarray(out["time"].values).astype("datetime64[ns]")
+    # run 0003 starts at t=64 s; its windows start >= 64. Run 0002 spans
+    # [32, 64): windows start at 32/40/48/56 — the one at 56 overlaps 0003
+    t0 = np.datetime64("2024-01-01T00:00:00", "ns")
+    rel = (times - t0) / np.timedelta64(1, "s")
+    m2 = runs == "sr2400_0002"
+    assert rel[m2].max() <= 48.0
+    assert m2.sum() == 3  # 32/40/48 survive; 56 dropped
     archive.close_mth5()

@@ -350,55 +350,17 @@ class BuildFC(Node):
                           "MTH5 keyed by run (aurora's FC-layer pattern) — "
                           "off by default; turn on once the procedure is "
                           "settled (DESIGN §24.8 decision (b))."),
-        Param("reject_noisy_runs", "boolean", label="Reject noisy runs",
-              default=False,
-              description="Hour-level QC BEFORE the cascades (§24.13): score "
-                          "every run by its E/H band-power ratio in the QC "
-                          "band (time domain, one rfft per channel) and skip "
-                          "runs failing the Select Runs rule (station-wide "
-                          "median, one-sided up-check + dead-channel check, "
-                          "soft diurnal prior). Doubles the data read; pair "
-                          "with 'Regroup contiguous' so the kept hours "
-                          "cascade deeply."),
-        Param("qc_period_min", "number", label="QC period min (s)",
-              default=1.0, min=0.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
-        Param("qc_period_max", "number", label="QC period max (s)",
-              default=10.0, min=0.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
-        Param("deviation_max", "number", label="Deviation max", default=3.0,
-              min=1.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,)),
-              description="A run whose median per-bin E/H power ratio in "
-                          "the QC band exceeds the station-wide median by "
-                          "more than this factor is skipped. The pre-cascade "
-                          "screen is coarse — the FC-stage coherence sort "
-                          "still refines; 3 kept the official night window "
-                          "intact on the test corpus (2 over-rejected six "
-                          "night hours)."),
-        Param("dead_max", "number", label="Dead max", default=2.0,
-              min=1.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
         Param("regroup_contiguous", "boolean", label="Regroup contiguous runs",
               default=False,
               description="Cascade maximal contiguous spans of same-rate "
                           "runs as ONE payload (§24.13): hourly sessions "
-                          "starve the deep decimations per slice (an hour "
-                          "cannot form a level below ~0.23 Hz), but the "
-                          "underlying stream is unbroken — cascading the "
+                          "cannot form a level below ~0.23 Hz per slice, but "
+                          "the underlying stream is unbroken — cascading the "
                           "kept contiguous span restores the long-period "
-                          "tail. Pair with 'Reject noisy runs' (a span "
-                          "mixing bad hours is scored as one coarse unit "
-                          "downstream)."),
-        Param("use_prior", "boolean", label="Daytime soft prior",
-              default=True, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
-        Param("prior_max", "number", label="Prior max", default=2.0,
-              min=1.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
-        Param("local_utc_offset", "number", label="Local UTC offset (h)",
-              default=8.0, min=-12.0, max=14.0, optional=True,
-              enabled_when=("reject_noisy_runs", (True,))),
+                          "tail. Built from ALL sessions: hour-level QC "
+                          "lives in Select Runs, so spans never depend on "
+                          "QC outcomes and each window is stamped with the "
+                          "session it came from."),
     )
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
@@ -412,12 +374,7 @@ class BuildFC(Node):
                 prewhitening: str = "", per_window_detrend: str = "",
                 reject_saturated: bool = True,
                 persist: bool = False,
-                reject_noisy_runs: bool = False,
-                qc_period_min: float = 1.0, qc_period_max: float = 10.0,
-                deviation_max: float = 3.0, dead_max: float = 2.0,
-                regroup_contiguous: bool = False,
-                use_prior: bool = True, prior_max: float = 2.0,
-                local_utc_offset: float = 8.0) -> dict[str, Any]:
+                regroup_contiguous: bool = False) -> dict[str, Any]:
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
 
         survey_obj = _resolve_survey(mth5, survey)
@@ -513,84 +470,20 @@ class BuildFC(Node):
                             "be removed by Compute FC", fn)
             return registry
 
-        kept = list(wanted)
-        if reject_noisy_runs:
-            # §24.13 hour-level QC: one rfft per channel per run — the
-            # E/H band-power ratio is the time-domain equivalent of the
-            # FC-stage per-window |Z|^2 score (Parseval), cheap enough to
-            # run before any cascade. Same decision rule as Select Runs.
-            import json
-
-            rows = []
-            ratios = {}
-            starts = {}
-            for rid in wanted:
-                run_obj = _resolve_run(station_obj, rid)
-                data_vars, sample_rate, start = _read_channels(run_obj)
-                ds = xr.Dataset(data_vars)
-                ins, outs, _ = classify_channels(
-                    [str(c) for c in ds.data_vars], channel_nomenclature)
-                if not ins or not outs:
-                    continue
-                specs = {}
-                band = None
-                for comp in ins + outs:
-                    x = np.nan_to_num(
-                        np.asarray(ds[comp].values, dtype=float))
-                    spec = np.abs(np.fft.rfft(x)) ** 2
-                    fr = np.fft.rfftfreq(x.size, d=1.0 / sample_rate)
-                    band = ((fr >= 1.0 / qc_period_max)
-                            & (fr <= 1.0 / qc_period_min))
-                    specs[comp] = spec[band]
-                if band is None or not band.any():
-                    continue
-                # median over in-band bins of the PER-BIN E/H power ratio —
-                # the median of |Z(w)|^2, insensitive to signal strength
-                # (a ratio of channel-total medians is shape-sensitive and
-                # over-rejected weak-signal night hours on the test corpus)
-                e_spec = np.mean([specs[c] for c in outs], axis=0)
-                h_spec = np.mean([specs[c] for c in ins], axis=0)
-                ok = h_spec > 0
-                ratios[rid] = (float(np.median(e_spec[ok] / h_spec[ok]))
-                               if ok.any() else 0.0)
-                starts[rid] = start
-            ref = (float(np.median(list(ratios.values())))
-                   if ratios else float("nan"))
-            for rid, r in ratios.items():
-                pf = _diurnal_prior_factor(starts[rid], use_prior, prior_max,
-                                           local_utc_offset, absolute_time=True)
-                up, dn = r / ref, ref / r
-                thr = deviation_max / pf
-                dropped = bool(up > thr or dn > dead_max)
-                rows.append({"run_id": rid, "up": float(up), "down": float(dn),
-                             "prior": float(pf), "threshold": float(thr),
-                             "dropped": dropped})
-                if dropped:
-                    ctx.logger.warning(
-                        "Build FC QC: skipping noisy run %s (up %.2f, "
-                        "down %.2f; threshold %.2f, prior %.2f)",
-                        rid, up, dn, thr, pf)
-            path = ctx.artifact_path("select_runs_pre", ".json")
-            path.write_text(json.dumps(rows))
-            ctx.publish_artifact(path, kind="table")
-            kept = [r["run_id"] for r in rows if not r["dropped"]]
-            if not kept:
-                raise ValueError(
-                    "Build FC QC rejected every run — check the QC band "
-                    f"({qc_period_min}-{qc_period_max} s) and thresholds")
-
         # cascade spans: singletons by default; with regroup_contiguous,
         # maximal contiguous spans of same-rate runs (adjacency within two
         # samples) — the physically right processing unit for unbroken
-        # acquisitions
+        # acquisitions. Built from ALL sessions: hour-level QC lives in
+        # Select Runs (§24.13), so spans never depend on QC outcomes and
+        # the time series is read exactly once.
         import pandas as pd
 
         spans: list[list[str]] = []
         if not regroup_contiguous:
-            spans = [[rid] for rid in kept]
+            spans = [[rid] for rid in wanted]
         else:
             per_rate: dict[float, list[str]] = {}
-            for rid in kept:
+            for rid in wanted:
                 per_rate.setdefault(rate_of[rid], []).append(rid)
             starts = dict(zip(summary["id"].astype(str),
                               pd.to_datetime(summary["start"])))
@@ -616,20 +509,34 @@ class BuildFC(Node):
             for rid in span:
                 run_obj = _resolve_run(station_obj, rid)
                 data_vars, sample_rate, start = _read_channels(run_obj)
-                members.append((data_vars, sample_rate, start))
-            sample_rate = members[0][1]
+                members.append((rid, data_vars, sample_rate, start))
+            sample_rate = members[0][2]
             span_id = (span[0] if len(span) == 1
                        else f"sr{sample_rate:g}_span{i:04d}")
             if len(span) == 1:
-                data_vars = members[0][0]
-                start = members[0][2]
+                data_vars = members[0][1]
+                start = members[0][3]
             else:
-                data_vars = {
-                    name: xr.concat([mv[0][name] for mv in members],
-                                    dim="time")
-                    for name in members[0][0]
-                }
-                start = members[0][2]
+                # union of channels across members: the 'saturated' aux
+                # mask exists only on runs with flagged samples — pad the
+                # others with zeros (no saturation there) instead of
+                # silently dropping the mask or crashing on concat
+                keys = list(members[0][1])
+                for mv in members[1:]:
+                    for name in mv[1]:
+                        if name not in keys:
+                            keys.append(name)
+                data_vars = {}
+                for name in keys:
+                    parts = []
+                    for mv in members:
+                        if name in mv[1]:
+                            parts.append(mv[1][name])
+                        else:
+                            parts.append(
+                                xr.zeros_like(next(iter(mv[1].values()))))
+                    data_vars[name] = xr.concat(parts, dim="time")
+                start = members[0][3]
             registry = _resolve_registry(data_vars)
             ds = xr.Dataset(data_vars)
             run_ts = SimpleNamespace(
@@ -680,12 +587,34 @@ class BuildFC(Node):
                             "run %s level %d has no absolute time axis — "
                             "skipping persistence", span_id, level)
                         break
-            # §24.13: per-window run identity. The merged FC database keeps
-            # only the first contributor's attrs, so Select Runs needs an
-            # explicit coordinate to group windows by run
-            for level, fc in levels.items():
-                levels[level] = fc.assign_coords(run_id=(
-                    "time", np.full(int(fc.sizes["time"]), span_id)))
+            # §24.13: per-window run identity at SESSION granularity — the
+            # merged FC database keeps only the first contributor's attrs,
+            # so the QC nodes need an explicit coordinate to group windows
+            # by run. Windows straddling an internal boundary follow the
+            # session their start falls in; Select Runs drops rejected
+            # sessions downstream, conservatively including the overlap
+            # neighbors that picked up their samples through the cascade.
+            if len(span) == 1:
+                for level, fc in levels.items():
+                    levels[level] = fc.assign_coords(run_id=(
+                        "time", np.full(int(fc.sizes["time"]), span[0])))
+            else:
+                lens = [len(next(iter(mv[1].values()))) for mv in members]
+                bnds = np.concatenate(
+                    ([0.0], np.cumsum(lens)[:-1])) / sample_rate
+                for level, fc in levels.items():
+                    t = np.asarray(fc["time"].values)
+                    if np.issubdtype(t.dtype, np.datetime64):
+                        t0 = np.asarray(members[0][3],
+                                        dtype="datetime64[ns]")
+                        off = ((t - t0) / np.timedelta64(1, "s")).astype(float)
+                    else:
+                        off = t.astype(float)
+                    k = np.minimum(
+                        np.searchsorted(bnds[1:], off, side="right"),
+                        len(span) - 1)
+                    levels[level] = fc.assign_coords(run_id=(
+                        "time", np.asarray(span)[k]))
             containers.append(levels)
             ctx.progress(
                 (i) / len(spans),
@@ -696,7 +625,7 @@ class BuildFC(Node):
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(
             1.0,
-            f"FC database: {len(kept)} run(s) in {len(spans)} span(s) -> "
+            f"FC database: {len(wanted)} run(s) in {len(spans)} span(s) -> "
             f"{len(merged)} level(s), {n_win} window(s)",
         )
         return {"fc": merged}
@@ -982,10 +911,43 @@ class SelectRuns(Node):
                     "Select Runs: dropping %s (up %.2f, down %.2f; "
                     "threshold %.2f, prior %.2f)", r["run_id"], r["up"],
                     r["down"], r["threshold"], r["prior"])
+        # conservative guard: a window from a NEIGHBOR session that overlaps
+        # a rejected one picked up its samples through the decimation
+        # cascade — drop it too. Start-time attribution already puts right
+        # straddlers in the rejected session; only left neighbors need the
+        # extra cut (one window duration wide).
+        dur = None
+        try:
+            dur = (float(sample.attrs["num_samples_window"])
+                   / float(sample.attrs["sample_rate"]))
+        except (KeyError, TypeError, ZeroDivisionError):
+            dur = None
+        n_extra = 0
         out = {}
         for lv, ds in levels.items():
-            mask = np.isin(np.asarray(ds["run_id"].values), list(kept))
+            runs_arr = np.asarray(ds["run_id"].values)
+            mask = np.isin(runs_arr, list(kept))
+            if dropped_ids and dur:
+                times = np.asarray(ds["time"].values)
+                dt = np.issubdtype(times.dtype, np.datetime64)
+                for rid in dropped_ids:
+                    sel = runs_arr == rid
+                    if not sel.any():
+                        continue
+                    t_lo = times[sel].min()
+                    if dt:
+                        delta = ((times - t_lo)
+                                 / np.timedelta64(1, "s")).astype(float)
+                    else:
+                        delta = times.astype(float) - float(t_lo)
+                    extra = (delta < 0) & (delta > -dur)
+                    n_extra += int(extra.sum())
+                    mask &= ~extra
             out[lv] = ds.isel(time=mask)
+        if n_extra:
+            ctx.logger.warning(
+                "Select Runs: dropping %d overlap neighbor window(s) "
+                "adjacent to rejected runs", n_extra)
         for ds in out.values():
             ds.attrs["runs_kept"] = ",".join(sorted(kept))
             ds.attrs["runs_dropped"] = ",".join(sorted(
