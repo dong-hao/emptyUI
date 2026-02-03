@@ -233,6 +233,7 @@ class ComputeFC(Node):
             deep_from_level=deep_from_level,
             clock_zero=clock_zero,
             reject_saturated=reject_saturated,
+            saturated_max=saturated_max,
         )
         from emptyui_mth5.persist import persist_fc_level, runts_context
 

@@ -91,7 +91,7 @@ test("Estimate TF's remote reference is enabled only for the robust estimator", 
   await expect(remote).toBeEnabled();
 });
 
-test("Estimate TF inherits the banding params from an upstream Coherence Sort", async ({
+test("Coherence Sort is band-free and Estimate TF keeps its own banding (§24.9)", async ({
   page,
 }) => {
   await page.goto("/");
@@ -119,11 +119,14 @@ test("Estimate TF inherits the banding params from an upstream Coherence Sort", 
   await page.mouse.move(th.x + th.width / 2, th.y + th.height / 2, { steps: 8 });
   await page.mouse.up();
 
-  // the sort's band style flows into the estimator's unset banding params
-  // (chain-walking inherit, DESIGN.md §4/§18.2)
-  const sortStyle = param(sort, "Band style").locator("select");
-  await sortStyle.selectOption("uniform");
-  await expect(param(estimate, "Band style").locator("input")).toHaveValue(
-    "uniform",
+  // §24.9: the sort is band-free — no banding widget on its surface; the
+  // estimator owns banding and keeps its own defaults (the old sort→TF
+  // banding inherit was deliberately removed and must stay removed)
+  for (const label of ["Band style", "Periods per octave", "Min bins per band"]) {
+    await expect(param(sort, label)).toHaveCount(0);
+  }
+  await expect(param(sort, "Apply below period")).toHaveCount(1);
+  await expect(param(estimate, "Band style").locator("select")).toHaveValue(
+    "l2u",
   );
 });

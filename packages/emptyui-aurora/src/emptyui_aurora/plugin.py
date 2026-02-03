@@ -9,14 +9,25 @@ RME_RR) are all aurora-backed.
 from __future__ import annotations
 
 from .plots import PlotCoherency, PlotSpectrogramFC
-from .process import BuildFC, CoherenceSort, ComputeFC, EstimateTF, MergeFC, MergeTFLevels
+from .process import (
+    BuildFC,
+    CoherenceSort,
+    ComputeFC,
+    EstimateTF,
+    MergeFC,
+    MergeTFLevels,
+    ResidualSort,
+    SelectRuns,
+)
 
 
 def register(registry) -> None:
     registry.add(ComputeFC)
     registry.add(BuildFC)
     registry.add(CoherenceSort)
+    registry.add(SelectRuns)
     registry.add(EstimateTF)
+    registry.add(ResidualSort)
     registry.add(MergeFC)
     registry.add(MergeTFLevels)
     registry.add(PlotCoherency)

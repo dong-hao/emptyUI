@@ -17,6 +17,9 @@ import pytest
 
 from test_magnetic_units import _field, _runts
 
+from emptyui.context import RunContext
+from emptyui.store import DataStore
+
 
 def _fap(name="t_fap", amp=2.0, phase_deg=90.0):
     """A deterministic FAP filter: response = amp * exp(i*phase) everywhere
@@ -280,3 +283,30 @@ def test_payload_without_mask_unaffected():
                                window_type="boxcar")
     assert not np.any(np.isnan(levels[0]["hx"].values))
     assert levels[0].attrs["saturated_windows_rejected"] == 0
+
+
+def test_compute_fc_node_forwards_saturated_max(tmp_path):
+    """Regression: the ComputeFC node declared ``saturated_max`` (its only
+    UI surface for the fraction threshold) but dropped it when calling
+    ``compute_fc_levels`` — the helper default always applied, silently
+    (BuildFC forwarded it; the two nodes disagreed). The param must reach
+    the fc attrs."""
+    from emptyui_aurora.process import ComputeFC
+
+    runts = _runts_with_mask(flagged_slice=slice(1000, 1100))
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ComputeFC().execute(
+        ctx, runts, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=256, overlap=0.5,
+        window_type="boxcar", saturated_max=0.5)
+    assert res["fc"][0].attrs["saturated_max"] == 0.5
+    # at the loose threshold the 100/256 ≈ 0.39 flagged share passes, so
+    # nothing is rejected — a different outcome than the 0.01 default
+    assert res["fc"][0].attrs["saturated_windows_rejected"] == 0
+
+    res_default = ComputeFC().execute(
+        ctx, runts, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=256, overlap=0.5,
+        window_type="boxcar")
+    assert res_default["fc"][0].attrs["saturated_max"] == 0.01
+    assert res_default["fc"][0].attrs["saturated_windows_rejected"] > 0
