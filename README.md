@@ -345,6 +345,10 @@ radio/datalist DOM id collisions, unvalidated workflow load (format/version
 18. **MMT (multi-station MT) estimator** — low-medium gain, medium-high effort,
     **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR
     using multiple sites; aurora 0.6.2 has only single-remote estimators.
+19. **Universal saturation/QC mask channel convention** — low-medium gain, low
+    effort (§24.12 follow-up): generalize the MTU-5A `saturated`
+    auxiliary-channel convention so any loader can emit a per-sample quality
+    mask; Compute FC / Build FC already consume it generically.
 
 ### UI conventions (stable)
 
