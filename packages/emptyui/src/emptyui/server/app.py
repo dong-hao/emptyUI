@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 import emptyui
 from emptyui.cache import NodeCache
@@ -404,6 +405,13 @@ def create_app(
             validate_workflow(workflow, registry)
         except ValidationError_ as exc:
             raise HTTPException(status_code=422, detail=exc.errors) from exc
+        except PydanticValidationError as exc:
+            # malformed document (§6 envelope: missing/wrong-typed fields) —
+            # surface pydantic's field errors as 422, not an unhandled 500
+            raise HTTPException(
+                status_code=422,
+                detail=[str(e) for e in exc.errors()],
+            ) from exc
 
         if req.targets:
             node_ids = {n["id"] if isinstance(n, dict) else n.id

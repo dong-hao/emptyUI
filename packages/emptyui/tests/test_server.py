@@ -260,6 +260,29 @@ def test_merge_summary_terminal_status_is_monotonic():
     )
 
 
+def test_stale_params_accepted_with_warning(client):
+    """§24.9 policy end-to-end: a saved workflow carrying params a node no
+    longer declares must run (schema does not hard-reject) and surface a
+    node-level progress note naming the stale params — not a silent
+    no-op, not a 422."""
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.util.echo",
+                   "params": {"label": "hi", "band_style": "l2u",
+                              "coherence_trim": True}}],
+        "edges": [],
+    }
+    resp = client.post("/api/runs", json={"workflow": workflow})
+    assert resp.status_code == 200
+    detail = _wait_status(client, resp.json()["run_id"])
+    assert detail["status"] == "completed"
+    notes = [e for e in detail["events"]
+             if e["event"] == "node_progress"
+             and "not declared" in str(e.get("msg", ""))]
+    assert len(notes) == 1
+    assert "band_style" in notes[0]["msg"]
+    assert "coherence_trim" in notes[0]["msg"]
+
+
 def test_cancel_after_completion_keeps_completed(client):
     workflow = {
         "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],

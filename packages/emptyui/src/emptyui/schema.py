@@ -84,12 +84,11 @@ def validate_workflow(workflow: Workflow, registry) -> None:
                 )
             continue
 
-        known_params = {p.name for p in manifest.params}
-        for name in wnode.params:
-            if name not in known_params:
-                errors.append(
-                    f"node '{wnode.id}' ({wnode.type}): unknown param '{name}'"
-                )
+        # Stale params (§24.9) are deliberately tolerated here: a saved
+        # workflow may carry params a node no longer declares. The executor
+        # resolves only manifest params and emits a node-level progress
+        # note naming them — validation must not hard-reject what the
+        # documented policy is to warn about.
 
         required_inputs = {i.name for i in manifest.inputs if i.required}
         for name in required_inputs:

@@ -245,12 +245,14 @@ full architecture, contracts and verification records are in
   (Δlog₁₀ρ +0.005/+0.005, Δφ ±0.03° over 0.003–109 s) — the selector was never
   told about day or night.
 - **Full-band data-driven recipe (DESIGN.md §24.13, 2026-09-18)**: Build FC
-  gains hour-level QC before any cascade (`reject_noisy_runs`: one rfft per
-  channel, score = median over in-band bins of the per-bin E/H power ratio,
-  soft diurnal prior shared with Select Runs) and contiguous cascade spans
-  (`regroup_contiguous`: hourly slices cannot form levels below ~0.23 Hz, but
-  the kept contiguous hours cascade as one payload, restoring the long-period
-  tail). With the sort's deep bins passing unsorted (`apply_below_period=20`),
+  gains contiguous cascade spans (`regroup_contiguous`: hourly slices cannot
+  form levels below ~0.23 Hz, but the underlying stream is unbroken —
+  cascading the kept contiguous span as one payload restores the long-period
+  tail), and the run/session-level QC lives in **Select Runs** (per-window
+  |Z| level from the FC payload vs the station-wide clean level, soft diurnal
+  prior, conservative overlap guard — the earlier pre-cascade rfft scorer was
+  folded into the FC stage; Build FC reads each span exactly once). With the
+  sort's deep bins passing unsorted (`apply_below_period=20`),
   **the automatic recipe reaches 50 periods down to 416.6 s and matches the
   official night-window Phoenix TF over the entire band** (Δlog₁₀ρ
   +0.0005/+0.0072, Δφ +0.11°) — no clock rule anywhere.

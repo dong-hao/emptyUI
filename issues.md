@@ -7,13 +7,19 @@ status at the time of review:
 - Browser e2e (`npx playwright test`): **17 passed, 1 failed** — the failure is
   the stale banding-inherit test (H4 below), empirically reproduced.
 
-**Fix round (same day):** H1, H2, H4 and H3 are resolved — `SelectRuns` /
-`ResidualSort` registered (`plugin.py`) with a new wiring guard
+**Fix rounds:** H1–H4 are resolved — `SelectRuns` / `ResidualSort`
+registered (`plugin.py`) with a new wiring guard
 (`tests/test_plugin_registration.py`), `ComputeFC` forwards `saturated_max`
 with a node-level regression test (`test_fc_calibration.py`), the stale
 e2e test was replaced by a §24.9 negative-regression test, and the HEAD
-commit message was amended to describe its actual diff. Suite after the
-fixes: **Python 448 passed / e2e 18 passed**. The universal saturation-mask
+commit message was amended to describe its actual diff. M1–M4 are resolved
+as well — DESIGN §24.13 / README recipe text refreshed (hour-level QC lives
+in Select Runs since `623e541`), the `BuildFC.decimation_levels` and
+`MergeFC` manifest descriptions corrected, the schema's unknown-param
+hard-reject removed in favor of the documented §24.9 tolerate+warn policy
+(end-to-end test added), and malformed workflow JSON now returns 422 with
+pydantic's field errors instead of a 500. Suite after the fixes:
+**Python 453 passed / e2e 18 passed**. The universal saturation-mask
 follow-up is recorded as M4 #19 in DESIGN.md §11 and the README.
 
 Everything else in the documented contract (API routes, caching/partial
@@ -145,25 +151,24 @@ specified. The findings below are the exceptions.
 
 ## Medium severity
 
-- **M1** Stale §24.13/README docs: commit `623e541` removed
-  `reject_noisy_runs` (+ QC band/threshold knobs) from Build FC — hour-level
-  QC folded into Select Runs — but DESIGN.md §24.13 (lines ~3513/3538) and
-  README ("Build FC gains hour-level QC before any cascade (`reject_noisy_runs`)")
-  still document the removed param as "the committed recipe".
-- **M2** Stale manifest descriptions: `BuildFC.decimation_levels` claims
-  "0 = auto (decimate until fewer samples than one window remain)"
-  (`process.py:326-329`) — code computes `min(decimation_levels, d_max)`, so
-  0 = no decimation, same as ComputeFC. `MergeFC` still advertises "sample
-  rates must agree (error)" (`process.py:1382-1385`) although §24.8 made
-  mixed rates the feature (`_processing.py:1874-1883`).
-- **M3** Stale-param semantics broken by schema: `schema.py:87-92` hard-422s
-  unknown params before a run, so the executor's stale-param warning
-  (`executor.py:502-513`, §24.9: saved workflows "processed unchanged" with
-  a warning) is unreachable via `POST /api/runs`. Pick one policy.
-- **M4** Malformed workflow JSON → HTTP 500 instead of 422:
-  `server/app.py:402-406` catches only the internal `ValidationError_`;
-  pydantic's `ValidationError` from `Workflow.model_validate` escapes as 500
-  (verified: missing `type`, non-list `edges`, non-list `nodes`).
+- **M1** ~~Stale §24.13/README docs~~ — **FIXED**: DESIGN §24.13 and README
+  now record that hour-level QC folded into Select Runs (commit `623e541`);
+  the historical scorer text is retained as the superseded record and the
+  committed recipe updated (`stream_session_hours=1`, `regroup_contiguous=True`,
+  Select Runs defaults, sort `apply_below_period=20`).
+- **M2** ~~Stale manifest descriptions~~ — **FIXED**: `BuildFC.decimation_levels`
+  now reads "Deepest decimation level: 0 = native rate only" (+ the §24.8
+  per-family trim note) and `MergeFC` documents the rate-keyed mixed-rate
+  merge instead of the retired rate-mismatch error; the dead `dec_of_run`
+  block it stemmed from is removed.
+- **M3** ~~Stale-param semantics broken by schema~~ — **FIXED** (policy =
+  the documented §24.9 tolerate+warn): `schema.py` no longer hard-rejects
+  unknown params; the executor's stale-param note is now reachable through
+  `POST /api/runs`, pinned end-to-end by `test_stale_params_accepted_with_warning`.
+- **M4** ~~Malformed workflow JSON → HTTP 500~~ — **FIXED**: `app.py` also
+  catches pydantic's `ValidationError` and returns 422 with the field
+  errors; `test_malformed_workflow_returns_422_not_500` covers the
+  malformed-envelope cases.
 - **M5** `RotateTF` hard-requires a tipper (`emptyui_mth5/tf.py:248-251`)
   although `_rotate_arrays` handles `hz is None` — tipper-less EDIs (very
   common) fail with a misleading "ex/ey/hz required" error; a conditional
@@ -259,6 +264,7 @@ specified. The findings below are the exceptions.
 
 1. ~~**H1 + H2 + H3 + H4**~~ — **done** (registration + guard, param
    forwarding, message amend, e2e replacement).
-2. **M1–M4** — doc/manifest refresh + the two API-consistency fixes.
+2. ~~**M1–M4**~~ — **done** (doc refresh, manifest descriptions,
+   tolerate+warn policy, 422-on-malformed).
 3. M5–M14 and the low list as capacity allows; the physics items (M5–M8)
    matter most for correctness-sensitive users.

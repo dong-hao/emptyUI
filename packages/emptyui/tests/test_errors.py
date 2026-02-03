@@ -266,6 +266,25 @@ def test_invalid_workflow_returns_422(client):
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        {"nodes": [{"id": "n1"}], "edges": []},           # missing type
+        {"nodes": "notalist", "edges": []},                # wrong nodes type
+        {"nodes": [], "edges": "oops"},                    # wrong edges type
+        {"nodes": [{"id": "n1", "type": "core.util.echo",
+                    "position": "bad"}], "edges": []},     # wrong position type
+    ],
+)
+def test_malformed_workflow_returns_422_not_500(client, workflow):
+    """§6/§8: a structurally malformed document (pydantic envelope failure,
+    not a semantic catalog mismatch) must surface as 422 with the field
+    errors, not escape as an unhandled 500."""
+    resp = client.post("/api/runs", json={"workflow": workflow})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]
+
+
 def test_cancel_unknown_run_404(client):
     assert client.post("/api/runs/nope/cancel").status_code == 404
 

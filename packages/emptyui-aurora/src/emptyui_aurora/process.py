@@ -326,8 +326,10 @@ class BuildFC(Node):
               description="0 = take from the run metadata when present"),
         Param("decimation_levels", "integer", label="Decimation levels",
               default=0, min=0,
-              description="0 = auto (decimate until fewer samples than one "
-                          "window remain)"),
+              description="Deepest decimation level: 0 = native rate only; "
+                          "on a mixed-rate burst archive each family's "
+                          "cascade is trimmed to stop at the next family's "
+                          "native rate (§24.8)."),
         Param("factor", "integer", label="Decimation factor", default=4, min=2),
         Param("window_samples", "integer", label="Window (samples)",
               default=256, min=8),
@@ -427,17 +429,6 @@ class BuildFC(Node):
         rate_of = dict(zip(summary["id"].astype(str),
                            summary["sample_rate"].astype(float)))
         family_rates = sorted({rate_of[r] for r in wanted})
-        dec_of_run: dict[str, int] = {}
-        for rid in wanted:
-            r = rate_of[rid]
-            lower = [x for x in family_rates if x < r * (1 - 1e-9)]
-            if not lower:
-                dec_of_run[rid] = decimation_levels
-                continue
-            d_max = max(0, int(np.ceil(np.log2(r / max(lower))
-                                       / np.log2(factor))) - 1)
-            dec_of_run[rid] = min(decimation_levels, d_max)
-
         dipole = e_dipole_length_m or None
         containers = []
         # fast per-run data path: reading channels via to_xarray and
@@ -1381,12 +1372,14 @@ class MergeFC(Node):
         "non-adjacent runs (gaps) or burst-mode acquisition (a merged time-"
         "series cascade cannot decimate across slot boundaries; per-run "
         "cascades are fine and starved deep levels are skipped). Inputs are "
-        "matched per level: sample rates must agree (error), window "
-        "settings should agree (warning), frequency grids are intersected "
-        "and channels missing in some input are dropped (warnings). The "
-        "FCs must share one absolute window grid for remote-reference "
-        "pairing — compute with Compute FC's 'clock zero' anchor when the "
-        "runs were computed separately."
+        "matched per level keyed by their ACTUAL sample rate — mixing rate "
+        "families is the point (§24.8: levels are re-keyed to consecutive "
+        "ints in descending rate order); window settings should agree "
+        "(warning), frequency grids are intersected and channels missing "
+        "in some input are dropped (warnings). The FCs must share one "
+        "absolute window grid for remote-reference pairing — compute with "
+        "Compute FC's 'clock zero' anchor when the runs were computed "
+        "separately."
     )
     category = "Processing"
     inputs = (

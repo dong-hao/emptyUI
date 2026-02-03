@@ -3511,20 +3511,30 @@ sessions verification:
   payload (adjacency within two samples, from the run_summary columns) —
   the physically right unit for unbroken acquisitions; gapped slot runs
   stay separate.
-- `reject_noisy_runs`: hour-level QC before any cascade — one rfft per
-  channel per run, score = MEDIAN over in-band bins (default 1-10 s) of
-  the per-bin E/H power ratio (the median of |Z(w)|^2). Two lessons from
-  the corpus: a MEAN over bins is spike-dominated (it over-rejected six
-  hours inside the official night window), and a RATIO OF CHANNEL-TOTAL
-  MEDIANS is shape-sensitive and over-rejected weak-signal night hours;
-  the median of per-bin ratios is the right statistic. The screen shares
-  Select Runs' decision rule and the soft prior helper; deviation_max
-  defaults to 3 (2 over-rejected borderline night hours the official
-  used successfully — the screen is coarse, the FC-stage sort refines).
-  Cost: doubles the data read (~+2 min on the corpus).
+- `reject_noisy_runs` — **superseded by commit `623e541` (same day)**:
+  hour-level QC was first built before any cascade (one rfft per channel
+  per run, score = MEDIAN over in-band bins (default 1-10 s) of the
+  per-bin E/H power ratio; a MEAN over bins proved spike-dominated and a
+  RATIO OF CHANNEL-TOTAL MEDIANS shape-sensitive — the median of per-bin
+  ratios was the right statistic). It then folded into **Select Runs**:
+  the FC payload already carries those spectra (the rfft was only ever a
+  Parseval stand-in for what the FC stage sees), and regrouping had
+  stamped `run_id` per-span, destroying hour granularity at the FC stage.
+  Build FC now builds cascade spans from ALL sessions (regroup before any
+  QC — spans never depend on QC outcomes), reads each span exactly once,
+  and stamps per-window `run_id` at SESSION granularity (windows
+  straddling an internal boundary follow the session their start falls
+  in); Select Runs scores sessions by per-window |Z| straight from the
+  FCs and gained the conservative overlap guard — windows of NEIGHBOR
+  sessions that overlap a rejected one picked up its samples through the
+  decimation cascade and are dropped too (one window duration wide;
+  start-time attribution already puts right straddlers in the rejected
+  session). The grouped-span channel concat unions channels across
+  members and pads a missing `saturated` mask with zeros.
 
-**Full-band data-driven result.** Sessions ingest + scorer (dev 3) +
-regroup + sort + self-reference estimate: dlog10rho +0.0013/+0.0060
+**Full-band data-driven result.** Sessions ingest + FC-stage session QC
+(Select Runs, deviation_max 3 at the time) + regroup + sort +
+self-reference estimate: dlog10rho +0.0013/+0.0060
 (IQR -0.0079..+0.0068 / -0.0069..+0.0229 dec), dphi +0.08/+0.11 deg over
 0.003-109 s. The deep bands (143-417 s) formed at the deepest merged
 level (~19 windows) but the coherence sort's +/-16-window ensemble
@@ -3536,7 +3546,7 @@ dlog10rho +0.0005/+0.0072 (IQR -0.0095..+0.0058 / -0.0029..+0.0288),
 dphi +0.11/+0.11 deg** — the data-driven recipe now matches the official
 night-window TF over the ENTIRE band, with no clock rule anywhere. The
 committed recipe for this site: `stream_session_hours=1`,
-`reject_noisy_runs=True`, `regroup_contiguous=True`, sort with
+`regroup_contiguous=True`, Select Runs (defaults), sort with
 `apply_below_period=20`.
 
 **Residual-based two-pass selector — delivered (2026-09-18, commits
@@ -3571,7 +3581,7 @@ local-morning stream span whose 3 deep-level windows tip the l2u
 coarsening (19 -> 16 windows kills the 143-417 s bands — the deep tail's
 pass-1 model is itself built from ~19 windows, so testing it harshly
 against itself is circular and fragile); 3 keeps it. Final recipe:
-scorer(dev 3) + regroup + ResidualSort(unexplained_max 3) +
+Select Runs (dev 3) + regroup + ResidualSort(unexplained_max 3) +
 CoherenceSort(apply_below_period 20) -> **50 periods down to 416.6 s,
 parity vs the official one-night EDI dlog10rho +0.0005/+0.0087 (IQR
 -0.0088..+0.0061 / -0.0028..+0.0289 dec), dphi +0.11/+0.08 deg** — the
