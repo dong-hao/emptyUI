@@ -109,7 +109,18 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
             min={param.min}
             max={param.max}
             step={param.step}
-            onChange={(e) => set(e.target.value === "" ? null : Number(e.target.value))}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                set(null);
+                return;
+              }
+              // intermediate typing states ("e", "-", "1e") parse to NaN —
+              // keep the raw text in the box instead of storing NaN (which
+              // JSON-serializes to null and defeats the inherit unset check)
+              const n = Number(raw);
+              set(Number.isFinite(n) ? n : raw);
+            }}
           />
         );
         break;

@@ -457,6 +457,12 @@ class BuildFC(Node):
                 if start is None and "time" in da.coords:
                     start = da.coords["time"].values[0]
                 data_vars[str(name)] = da
+            if not sample_rate:
+                # defensive: a division by zero deep in the STFT is worse
+                # than a loud error naming the run
+                raise ValueError(
+                    f"run '{run_obj.metadata.id}' carries no sample_rate in "
+                    "its channel metadata — cannot build FCs")
             return data_vars, sample_rate, start
 
         def _resolve_registry(data_vars):

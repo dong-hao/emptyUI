@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -10,6 +11,8 @@ from typing import Any
 from emptyui.api import Node
 
 ENTRY_POINT_GROUP = "emptyui.nodes"
+
+logger = logging.getLogger("emptyui")
 
 
 @dataclass
@@ -25,6 +28,9 @@ class PluginInfo:
     bundled: bool
     node_types: list[str] = field(default_factory=list)
     enabled: bool = True
+    #: when discovery or registration failed, the reason (the plugin is
+    #: skipped — recorded instead of crashing discovery/startup)
+    error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +39,7 @@ class PluginInfo:
             "node_count": len(self.node_types),
             "bundled": self.bundled,
             "enabled": self.enabled,
+            "error": self.error,
         }
 
 
@@ -171,12 +178,40 @@ def discover_plugins(
     registry._plugin_of = {}
     infos: list[PluginInfo] = []
     for ep in sorted(entry_points(group=ENTRY_POINT_GROUP), key=lambda e: e.name):
-        register = ep.load()
+        # a broken third-party plugin (missing heavy dep, raising register)
+        # must not take down the whole instance — skip it and record the
+        # error; the plugin shows up disabled with a note in /api/plugins
+        try:
+            register = ep.load()
+        except Exception as exc:  # noqa: BLE001 — any import failure degrades
+            logger.warning(
+                "plugin '%s' failed to import and was skipped: %s: %s",
+                ep.name, type(exc).__name__, exc)
+            infos.append(PluginInfo(
+                name=ep.name, version=_plugin_version(ep), bundled=False,
+                node_types=[], enabled=False,
+                error=f"{type(exc).__name__}: {exc}"))
+            continue
         bundled = bool(getattr(register, "bundled", False))
         enabled = bundled or (disabled is None or ep.name not in disabled)
         if enabled:
             before = set(registry._nodes)
-            register(registry)
+            try:
+                register(registry)
+            except ValueError:
+                # a packaging CONTRACT violation (duplicate node type, §3
+                # namespacing) stays loud — re-enabling must surface the
+                # conflict, not silently drop the plugin
+                raise
+            except Exception as exc:  # noqa: BLE001 — degrade, never crash startup
+                logger.warning(
+                    "plugin '%s' registration failed and was skipped: %s: %s",
+                    ep.name, type(exc).__name__, exc)
+                infos.append(PluginInfo(
+                    name=ep.name, version=_plugin_version(ep), bundled=bundled,
+                    node_types=[], enabled=False,
+                    error=f"{type(exc).__name__}: {exc}"))
+                continue
             node_types = sorted(set(registry._nodes) - before)
         else:
             # learn the disabled plugin's node types in a scratch registry:

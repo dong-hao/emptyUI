@@ -54,13 +54,18 @@ class LoadCsv(Node):
             if not matches:
                 raise ValueError(f"time column '{time_column}' not in {header}")
             t_idx = matches[0]
-        elif any("time" in h.lower() or h.lower() == "t" for h in header):
-            t_idx = next(i for i, h in enumerate(header)
-                         if "time" in h.lower() or h.lower() == "t")
+        else:
+            # auto-detect: EXACT conventional names only — a substring match
+            # would hijack a data channel named e.g. 'Ex_time' as the axis
+            _TIME_NAMES = {"time", "t", "timestamp", "datetime", "date_time",
+                           "time_s", "time (s)"}
+            t_idx = next((i for i, h in enumerate(header)
+                          if h.lower().strip() in _TIME_NAMES), None)
 
         # datetime-ish time column (e.g. ISO strings): genfromtxt would turn
         # these into NaN — convert to epoch seconds via pandas instead, and
-        # record the absolute start for downstream FC persistence.
+        # record the absolute start for downstream FC persistence. pandas is
+        # an OPTIONAL core-nodes dependency — fail with an actionable message
         t_is_datetime = False
         if t_idx is not None and first_row is not None and t_idx < len(first_row):
             try:
@@ -68,7 +73,13 @@ class LoadCsv(Node):
             except ValueError:
                 t_is_datetime = True
         if t_idx is not None and t_is_datetime:
-            import pandas as pd
+            try:
+                import pandas as pd
+            except ImportError as exc:  # pragma: no cover - env-dependent
+                raise ImportError(
+                    "the CSV's time column is ISO-datetime text; converting "
+                    "it needs pandas — install it (pip install pandas) or "
+                    "provide an epoch-seconds time column") from exc
 
             def _epoch(s) -> float:
                 if isinstance(s, bytes):
@@ -98,7 +109,13 @@ class LoadCsv(Node):
                 )
             sample_rate = float(1.0 / med)
             if t_is_datetime:
-                import pandas as pd
+                try:
+                    import pandas as pd
+                except ImportError as exc:  # pragma: no cover - env-dependent
+                    raise ImportError(
+                        "the CSV's time column is ISO-datetime text; converting "
+                        "it needs pandas — install it (pip install pandas) or "
+                        "provide an epoch-seconds time column") from exc
 
                 start_datetime = pd.Timestamp(float(t[0]), unit="s").isoformat()
             else:
@@ -115,6 +132,16 @@ class LoadCsv(Node):
                 f"no channel columns found in {p.name} (only a time column?)"
             )
 
+        # duplicate headers silently collided in the channels dict (last
+        # column won, the first was lost) — a loud error instead
+        seen_names: dict[str, int] = {}
+        for i in channel_cols:
+            name = header[i]
+            if name in seen_names:
+                raise ValueError(
+                    f"duplicate column name '{name}' (columns "
+                    f"{seen_names[name]} and {i}) — rename one of them")
+            seen_names[name] = i
         channels = {
             header[i]: np.ascontiguousarray(data[:, i], dtype=np.float64)
             for i in channel_cols

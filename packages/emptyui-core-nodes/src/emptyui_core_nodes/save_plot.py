@@ -47,6 +47,14 @@ class SavePlotNode(Node):
         out_dir = Path(output_dir).expanduser()
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # the prefix feeds a glob scan and a filename — glob metacharacters
+        # break the auto-increment scan and path separators would write
+        # outside out_dir
+        if re.search(r"[\[\]*?/\\]", name_prefix):
+            raise ValueError(
+                f"name prefix {name_prefix!r} contains glob metacharacters "
+                "or path separators ([ ] * ? / \\) — use a plain name")
+
         # auto-increment: prefix_001.ext, prefix_002.ext, ...
         pattern = re.compile(rf"^{re.escape(name_prefix)}_(\d+)\.{file_format}$")
         next_idx = 1

@@ -346,3 +346,37 @@ def test_build_fc_select_runs_drops_overlap_neighbors(tmp_path):
     assert rel[m2].max() <= 48.0
     assert m2.sum() == 3  # 32/40/48 survive; 56 dropped
     archive.close_mth5()
+
+
+# --- low-list: clock_zero validation (typos fail loudly; future anchors warn) ---
+
+def test_clock_zero_typo_raises_clean_error(tmp_path):
+    from emptyui_aurora._processing import compute_fc_levels
+    from test_magnetic_units import _field, _runts
+
+    r = _runts(*_field(np.random.default_rng(3), n=512, sr=8.0))
+    for bad in ("epch", "2026-13-40"):
+        with pytest.raises(ValueError, match="not a valid anchor"):
+            compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
+                              num_decimations=0, num_samples_window=64,
+                              overlap=0.5, window_type="boxcar",
+                              clock_zero=bad)
+
+
+def test_clock_zero_in_the_future_warns(caplog):
+    """An anchor LATER than the data silently degraded to run-start
+    anchoring (k0 <= 0) — exactly the misalignment the feature prevents;
+    it must warn."""
+    from emptyui_aurora._processing import compute_fc_levels
+    from test_magnetic_units import _field, _runts
+
+    r = _runts(*_field(np.random.default_rng(3), n=512, sr=8.0))
+    with caplog.at_level("WARNING", logger="emptyui"):
+        levels = compute_fc_levels(
+            r, ["hx", "hy"], ["ex", "ey"],
+            num_decimations=0, num_samples_window=64,
+            overlap=0.5, window_type="boxcar",
+            clock_zero="2099-01-01T00:00:00",
+            start_datetime="2024-01-01T00:00:00")
+    assert any("AFTER the record start" in rec.message for rec in caplog.records)
+    assert 0 in levels

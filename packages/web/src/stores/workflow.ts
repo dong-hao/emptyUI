@@ -13,6 +13,36 @@ import {
 import { useCatalog, portColor } from "./catalog";
 import type { NodeManifest } from "../api/client";
 
+/** Collision-safe node id: full UUID space, not a 6-hex slice (16.7M —
+ *  long sessions with many pastes could collide, surfacing only as a
+ *  server-side 422 at run time). The `n` prefix keeps CSS selectors sane. */
+export function uniqueNodeId(): string {
+  return `n${crypto.randomUUID()}`;
+}
+
+/** Stale edges: endpoint node missing, or a port the manifest doesn't
+ *  declare (renamed/removed in a newer plugin version). With an EMPTY
+ *  catalog every manifest check passes vacuously — callers re-run this
+ *  through revalidateEdges() when the catalog arrives. */
+function pruneStaleEdges<E extends { id: string; source: string; source_port: string; target: string; target_port: string }>(
+  candidates: E[],
+  nodes: Node<MTNodeData>[],
+  manifestOfType: (type: string) => NodeManifest | undefined,
+): E[] {
+  return candidates.filter((e) => {
+    const src = nodes.find((n) => n.id === e.source);
+    const tgt = nodes.find((n) => n.id === e.target);
+    if (!src || !tgt) return false;
+    const srcManifest = manifestOfType(src.data.nodeType);
+    const tgtManifest = manifestOfType(tgt.data.nodeType);
+    if (srcManifest && !srcManifest.outputs.some((o) => o.name === e.source_port))
+      return false;
+    if (tgtManifest && !tgtManifest.inputs.some((i) => i.name === e.target_port))
+      return false;
+    return true;
+  });
+}
+
 export interface MTNodeData extends Record<string, unknown> {
   label: string;
   nodeType: string;
@@ -121,6 +151,10 @@ interface WorkflowState {
     patch: Partial<MTNodeData> | ((d: MTNodeData) => Partial<MTNodeData>),
   ) => void;
   deleteSelected: () => void;
+  /** Re-run stale-edge pruning when the catalog arrives after a load
+   *  (with an empty catalog every manifest check passes vacuously —
+   *  edges referencing renamed/removed ports would survive). */
+  revalidateEdges: () => void;
   /** Copy/paste of the selected subgraph (Ctrl+C/Ctrl+V/Ctrl+D, DESIGN §9). */
   copySelection: () => void;
   pasteSelection: () => void;
@@ -235,6 +269,27 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
         selectedNodeId: null,
       };
     }),
+  revalidateEdges: () => {
+    const { nodes, edges } = get();
+    const { catalog } = useCatalog.getState();
+    if (!catalog?.nodes?.length) return;
+    const manifestOfType = (type: string) =>
+      catalog.nodes.find((m) => m.type === type);
+    const surviving = new Set(
+      pruneStaleEdges(
+        edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          source_port: e.sourceHandle ?? "",
+          target: e.target,
+          target_port: e.targetHandle ?? "",
+        })),
+        nodes,
+        manifestOfType,
+      ).map((e) => e.id),
+    );
+    set({ edges: edges.filter((e) => surviving.has(e.id)) });
+  },
   copySelection: () => {
     const selected = get().nodes.filter((n) => n.selected);
     if (!selected.length) return;
@@ -262,7 +317,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     const dy = PASTE_STEP * pasteCount;
     const idMap = new Map<string, string>();
     const newNodes = clip.nodes.map((n) => {
-      const id = `n${crypto.randomUUID().slice(0, 6)}`;
+      const id = uniqueNodeId();
       idMap.set(n.id, id);
       return {
         ...n,
@@ -374,21 +429,7 @@ export function deserializeWorkflow(
   const nodeIds = new Set(nodes.map((n) => n.id));
   const manifestOfType = (type: string) =>
     catalog?.nodes.find((m) => m.type === type);
-  const edges: Edge[] = doc.edges
-    .filter((e) => {
-      // stale edge: endpoint node missing, or a port the manifest doesn't
-      // declare (renamed/removed in a newer plugin version)
-      const src = nodes.find((n) => n.id === e.source);
-      const tgt = nodes.find((n) => n.id === e.target);
-      if (!src || !tgt) return false;
-      const srcManifest = manifestOfType(src.data.nodeType);
-      const tgtManifest = manifestOfType(tgt.data.nodeType);
-      if (srcManifest && !srcManifest.outputs.some((o) => o.name === e.source_port))
-        return false;
-      if (tgtManifest && !tgtManifest.inputs.some((i) => i.name === e.target_port))
-        return false;
-      return true;
-    })
+  const edges: Edge[] = pruneStaleEdges(doc.edges, nodes, manifestOfType)
     .map((e) => {
       // re-derive edge color from the source port type
       const src = nodes.find((n) => n.id === e.source)!;

@@ -97,7 +97,7 @@ class Detrend(Node):
         out = {}
         for k, v in data.channels.items():
             if method == "none":
-                out[k] = v
+                out[k] = v.copy()  # functional contract: never share arrays
             elif method == "mean":
                 out[k] = v - v.mean()
             else:  # linear

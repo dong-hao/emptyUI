@@ -481,6 +481,22 @@ def compute_fc_levels(
                  and str(deep_from_level) != "" else None)
     win_deep = window_type_deep or window_type
     cz = str(clock_zero or "").strip()
+    if cz and cz.lower() != "epoch":
+        # validate an explicit anchor format UP FRONT: a typo must not be
+        # swallowed by the no-absolute-start skip below (the skip is a data
+        # condition, the anchor format is a param error)
+        try:
+            probe = pd.Timestamp(cz)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"clock_zero {clock_zero!r} is not a valid anchor — use "
+                "'epoch', an ISO datetime, or empty for run-start anchoring"
+            ) from exc
+        if pd.isna(probe):
+            raise ValueError(
+                f"clock_zero {clock_zero!r} did not parse to a datetime — "
+                "use 'epoch', an ISO datetime, or empty for run-start "
+                "anchoring")
     if cz and start_datetime is None:
         _log.warning(
             "clock_zero=%r requires an absolute start time — the payload "
@@ -796,7 +812,16 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
     if clock_zero in ("", None):
         return 0, 0.0
     cz = str(clock_zero).strip()
-    t0 = pd.Timestamp(CLOCK_ZERO_EPOCH if cz.lower() == "epoch" else cz)
+    try:
+        t0 = pd.Timestamp(CLOCK_ZERO_EPOCH if cz.lower() == "epoch" else cz)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"clock_zero {clock_zero!r} is not a valid anchor — use 'epoch', "
+            "an ISO datetime, or empty for run-start anchoring") from exc
+    if pd.isna(t0):
+        raise ValueError(
+            f"clock_zero {clock_zero!r} did not parse to a datetime — use "
+            "'epoch', an ISO datetime, or empty for run-start anchoring")
     if data_start_abs is None:
         _log.warning(
             "clock_zero=%r requires an absolute start time — the payload "
@@ -810,6 +835,15 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
     elif data_start_abs.tzinfo is None and t0.tzinfo is not None:
         t0 = t0.tz_localize(None)
     dt = (data_start_abs - t0).total_seconds()
+    if dt < 0:
+        # an anchor LATER than the data would silently degrade to run-start
+        # anchoring (k0 <= 0) — exactly the misalignment the feature exists
+        # to prevent; warn so the typo'd/overshot anchor is visible
+        _log.warning(
+            "clock_zero=%r lies AFTER the record start (%.3f s) — the "
+            "record has no sample at the anchor; windows anchor at the run "
+            "start (head skip disabled)", clock_zero, dt)
+        return 0, 0.0
     step_s = (nperseg - noverlap) / float(sample_rate)
     k0 = int(np.ceil(dt / step_s))
     n_skip = max(0, round((k0 * step_s - dt) * sample_rate))
@@ -1688,9 +1722,8 @@ def _l2u_band_table(levels, min_bins_per_band=40.0, t_short=None):
         k_lo_min = cur[-1][0]  # template span: k descends (short → long)
         k_hi_max = cur[0][1]
         w = int(np.floor(min_bins_per_band / n_windows)) + 1
-        if n_windows * w <= min_bins_per_band:
-            out[lv] = _l2u_intervals(lv, template, geom)  # cannot satisfy
-            continue
+        # w = floor(m/n)+1 => n*w > m always, so the "cannot satisfy" branch
+        # below is unreachable by construction (kept out — dead code)
         n_target = max(2, len(cur) - len(cur) // 3)
         chosen = None
         while n_target >= 2:
@@ -2563,8 +2596,9 @@ def merge_tf_levels(per_level):
         if degenerate.size:
             _log.warning(
                 "Merge TF levels: level %d contributed no estimate at %d "
-                "band(s) (all-zero/degenerate — often coherence sort removed "
-                "every window there): %s",
+                "band(s) (all-zero/degenerate — usually the coherence sort "
+                "removed every window, sometimes a band interval fell "
+                "outside this level's frequency grid): %s",
                 lv, degenerate.size,
                 "; ".join(f"T={p:.4g}s" for p in degenerate[:8]),
             )

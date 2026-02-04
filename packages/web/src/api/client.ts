@@ -93,6 +93,14 @@ export interface NodeManifest {
   deps: string[];
   /** input port -> {targetParam, upstreamParam} for chain-walking auto-fill */
   inherit?: InheritMap;
+  /** declared model weights (§8 plugin guide: declare, don't bundle) */
+  models?: {
+    id: string;
+    filename: string;
+    sha256: string;
+    url?: string;
+    license?: string;
+  }[];
 }
 
 export interface Catalog {

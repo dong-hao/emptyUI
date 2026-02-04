@@ -111,12 +111,18 @@ class LoadLemi(Node):
                     cal_path.name, sorted(cal_filters))
 
         runs = client.get_run_dict()
+        if not runs:
+            raise ValueError(
+                f"no LEMI runs found in the data directory — no readable "
+                f"time-series files (looked for the instrument's .TXT "
+                f"files under {data_path})")
 
         with MTH5(**client.h5_kwargs) as m:
             m.open_mth5(str(target), client.mth5_file_mode)
             survey_group = m.add_survey(client.collection.survey_id)
             for st_id, runs_by_id in runs.items():
                 station_group = survey_group.stations_group.add_station(st_id)
+                station_runts = None
                 for run_id, run_df in runs_by_id.items():
                     run_group = station_group.add_run(run_id)
                     run_ts = read_file(
@@ -128,7 +134,11 @@ class LoadLemi(Node):
                         attach_filters(run_ts, cal_filters)
                     run_ts.run_metadata.id = run_id
                     run_group.from_runts(run_ts)
-                station_group.metadata.update(run_ts.station_metadata)
+                    station_runts = run_ts
+                # the LAST run's station metadata (a loop-variable leak when
+                # runs_by_id is empty raised NameError before)
+                if station_runts is not None:
+                    station_group.metadata.update(station_runts.station_metadata)
                 station_group.write_metadata()
             survey_group.update_metadata()
 

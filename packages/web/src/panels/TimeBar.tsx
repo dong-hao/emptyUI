@@ -51,7 +51,11 @@ function parseBound(
     if (t !== null) return t;
   }
   const rel = Number(text);
-  return Number.isFinite(rel) ? rel : null;
+  // bare numbers are RELATIVE SECONDS on both sides (the server's
+  // parse_bound semantics) — in an absolute extent they measure from the
+  // record start; the old fallback treated them as epoch seconds, drawing
+  // the handle at the track edge and disagreeing with the server clamp
+  return Number.isFinite(rel) ? extent.startSec + rel : null;
 }
 
 function fmtBound(sec: number, extent: TimeExtent): string {
@@ -84,10 +88,16 @@ export function TimeBar({ extent, startValue, endValue, onChange }: TimeBarProps
     const move = (ev: PointerEvent) => {
       const rect = track.getBoundingClientRect();
       const f = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-      let t = extent.startSec + f * span;
       const other = which === "start" ? end : start;
-      if (which === "start") t = Math.min(t, other - MIN_GAP_S);
-      else t = Math.max(t, other + MIN_GAP_S);
+      let t = extent.startSec + f * span;
+      // no-cross clamp only when the extent can actually provide the slot —
+      // in extents shorter than MIN_GAP_S it would push the handle outside
+      // the record (the extent clamp below then wins and the slot shrinks
+      // below the server's minimum anyway)
+      if (span > MIN_GAP_S) {
+        if (which === "start") t = Math.min(t, other - MIN_GAP_S);
+        else t = Math.max(t, other + MIN_GAP_S);
+      }
       t = Math.min(extent.endSec, Math.max(extent.startSec, t));
       onChange(which, fmtBound(t, extent));
     };

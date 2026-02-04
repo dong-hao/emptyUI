@@ -132,8 +132,23 @@ class ExtractRun(Node):
                 ctx.logger.warning(
                     "run extent unknown (no time metadata) — start/end "
                     "passed through unclamped")
-                start_dt = pd.to_datetime(start) if str(start).strip() else None
-                end_dt = pd.to_datetime(end) if str(end).strip() else None
+                # bare numbers are RELATIVE SECONDS per the node contract —
+                # pd.to_datetime("600") would mis-parse them as epoch
+                # nanoseconds; parse ISO only, error on anything else
+                def _iso_or_none(text):
+                    text = str(text).strip()
+                    if not text:
+                        return None
+                    try:
+                        return pd.Timestamp(text)
+                    except (ValueError, TypeError) as exc:
+                        raise ValueError(
+                            f"time slot {text!r} is not an ISO datetime — "
+                            "with no run extent, only ISO bounds (or empty) "
+                            "are accepted (relative seconds need a known "
+                            "record start)") from exc
+                start_dt = _iso_or_none(start)
+                end_dt = _iso_or_none(end)
             else:
                 rec_len = (ext1 - ext0).total_seconds()
                 s0, s1 = resolve_window_s(
@@ -475,6 +490,17 @@ class AlignRuns(Node):
         n2 = max((len(v) for v in ch2.values()), default=0)
         if n1 < 1 or n2 < 1:
             raise ValueError("runs have no samples")
+        # mixed channel lengths (the LEMI row-indexing pathology this module
+        # documents): the crop slices each channel independently, so a short
+        # channel silently yields a ragged RunTS — warn loudly
+        for tag, ch in (("input 1", ch1), ("input 2", ch2)):
+            lens = {len(v) for v in ch.values()}
+            if len(lens) > 1:
+                ctx.logger.warning(
+                    "%s carries channels of unequal length (%s) — the "
+                    "aligned RunTS will be ragged (upstream defect, likely "
+                    "row-indexed LEMI data)", tag,
+                    sorted(lens))
 
         if a1 is not None and a2 is not None:
             t0 = max(a1, a2)

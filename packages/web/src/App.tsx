@@ -20,6 +20,7 @@ import { SettingsDialog } from "./panels/SettingsDialog";
 import {
   deserializeWorkflow,
   serializeWorkflow,
+  uniqueNodeId,
   useWorkflow,
   validateConnection,
   type MTNodeData,
@@ -81,6 +82,16 @@ export default function App() {
   useEffect(() => {
     ensureSocket();
   }, []);
+
+  // A document loaded before the catalog arrived skips stale-edge pruning
+  // vacuously — re-run it once the catalog is available.
+  const loadedBeforeCatalog = useRef(false);
+  useEffect(() => {
+    if (catalog && loadedBeforeCatalog.current) {
+      loadedBeforeCatalog.current = false;
+      useWorkflow.getState().revalidateEdges();
+    }
+  }, [catalog]);
 
   // Copy/paste of the selected subgraph (DESIGN.md §9, ComfyUI parity):
   // Ctrl/Cmd+C copies the selected nodes + their internal edges, Ctrl/Cmd+V
@@ -193,7 +204,7 @@ export default function App() {
 
   const handleAdd = (manifest: NodeManifest) => {
     addNode({
-      id: `n${crypto.randomUUID().slice(0, 6)}`,
+      id: uniqueNodeId(),
       type: "mt",
       position: { x: 80 + Math.random() * 200, y: 80 + Math.random() * 160 },
       data: {
@@ -318,6 +329,7 @@ export default function App() {
       const doc = JSON.parse(await file.text());
       const { nodes: loaded, edges: loadedEdges, name } = deserializeWorkflow(doc);
       useWorkflow.getState().loadDocument(loaded, loadedEdges, name);
+      if (!catalog?.nodes?.length) loadedBeforeCatalog.current = true;
       setMessage(null);
     } catch (e) {
       setMessage(`Load failed: ${e instanceof Error ? e.message : String(e)}`);

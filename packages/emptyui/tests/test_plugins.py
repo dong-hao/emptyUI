@@ -321,3 +321,47 @@ def test_rebuild_swaps_node_table_atomically(monkeypatch):
     registry.rebuild(set())
     assert registry.get("fake.core") is not None
     assert registry.get("fake.slow") is not None
+
+
+# --- low-list: a broken third-party plugin must not crash discovery -------
+
+def test_broken_plugin_degrades_gracefully():
+    """A plugin whose import or register() raises must be skipped with a
+    recorded error, not take down discovery/startup (§5.1 robustness)."""
+    from types import SimpleNamespace
+
+    import emptyui.registry as R
+
+    def good_register(r):
+        r.add(_BrokenOk)
+
+    class _BrokenOk(Node):
+        type = "test.broken_ok"
+
+    class BoomEntryPoint:
+        name = "broken_plugin"
+
+        def load(self):
+            raise ImportError("missing heavy dep")
+
+    ok_ep = SimpleNamespace(name="ok_plugin", group="emptyui.nodes",
+                            value="mod:register", load=lambda: good_register)
+    real = R.entry_points
+
+    class _FakeSource:
+        def __call__(self, group=None):
+            return [ok_ep, BoomEntryPoint()]
+
+    R.entry_points = _FakeSource()
+    try:
+        reg = Registry()
+        infos = R.discover_plugins(reg, set())
+    finally:
+        R.entry_points = real
+    by_name = {i.name: i for i in infos}
+    assert by_name["ok_plugin"].enabled
+    assert "test.broken_ok" in reg.types()
+    assert not by_name["broken_plugin"].enabled
+    assert "ImportError" in by_name["broken_plugin"].error
+    assert by_name["broken_plugin"].to_dict()["error"]
+    assert by_name["broken_plugin"].to_dict()["node_count"] == 0

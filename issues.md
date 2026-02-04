@@ -283,49 +283,76 @@ specified. The findings below are the exceptions.
   workflows in the repo root) and a root-level `test-results/` entry
   added.
 
-**Remaining behavior items (low):**
+**Remaining behavior items (low) — RESOLVED (behavior round), with two
+documented exceptions:**
 
-- Adjusted-R² formula change — optional follow-up to the L5 doc fix above;
-  requires re-running the §24.6 ablation thresholds first.
-- Clock-zero: no input validation (raw pandas `ValueError` on typos) and a
-  future clock zero silently anchors at run start (`_processing.py:792`,
-  `:805-810`).
-- Cache keys hash pre-coercion params (`executor.py:219-227`) — avoidable
-  misses; file-param mtime invalidation silently misses for relative paths
-  in remote mode (`executor.py:197-203`).
-- `Registry.rebuild` three-assignment swap + unlocked `/api/nodes` read —
-  minor race, message overclaim (`registry.py:135`, `app.py:272`).
-- Broken third-party plugin crashes discovery/startup (`registry.py:170-175`)
-  — no graceful degradation.
-- `/api/health` implemented but undocumented (§8); `EMPTYUI_CORS_ORIGINS` /
-  `EMPTYUI_SETTINGS_PATH` implemented but missing from §17.4's list.
-- Headless cache restore writes artifacts to CWD when workspace is None
-  (`executor.py:274`, `context.py:39`).
-- Align Runs bare-number fallback mis-parses seconds as epoch nanoseconds
-  (`emptyui_mth5/runs.py:135-136`); mixed channel lengths produce ragged
-  RunTS silently (`runs.py:474-475`).
-- `lemi.py:118-131` loop-variable leak (NameError on empty runs list);
-  silently empty archive for a directory with no `.TXT` files.
-- `phoenix_mtu.py`: nonexistent calibration folder → raw `FileNotFoundError`;
-  schedule cross-check false positives at window edges; run vs channel
-  metadata end-time off-by-one-sample; empty-serial warning wording.
-- Dead code: `dec_of_run` (`process.py:429-438`), duplicate `_select_channels`
-  (`emptyui_core_nodes/plots.py:29-40`), unreachable starvation branch
-  (`_processing.py:1683-1685`), `DEFAULT_KEYWORD` export unused, garbled
-  docstring (`_processing.py:1090-1092`), single-level `compute_fc` drifting
-  from `compute_fc_levels` (tests-only).
-- Core-nodes: `LoadCsv` imports pandas unguarded (optional dep); duplicate
-  headers silently collide; auto time-column detection matches any header
-  containing "time"; `SavePlot` name_prefix glob/`/` hazards; Detrend
-  "none" shares channel arrays (no copy).
-- Frontend: `TimeBar` clamp-order edge cases and bare-number semantics
-  mismatch server-side; `ParamField` can emit transient NaN; 6-hex node ids
-  without collision check; stale-edge pruning skipped when catalog hasn't
-  loaded; Settings dirty check can't clear a 0-valued knob; properties panel
-  omits manifest `models`.
-- Repo hygiene: untracked user workflows in the repo root
-  (`mtu5test.emptyui.json`, `nims-rr.emptyui.json`) — gitignore or move to
-  `examples/`.
+- ~~Clock-zero validation~~ — **FIXED**: an explicit anchor is validated
+  UP FRONT in `compute_fc_levels` (a typo is a param error, not swallowed
+  by the no-absolute-start skip; `_clock_zero_head_skip` also validates for
+  direct callers), and an anchor AFTER the record start warns instead of
+  silently degrading to run-start anchoring (k0 ≤ 0 — exactly the
+  misalignment the feature prevents).
+- ~~Cache keys hash pre-coercion params~~ — **FIXED**: keys coerce params
+  to the manifest type and canonicalize numerics (int 4 vs "4" share one
+  entry; a coercion failure surfaces as the same `ExecutionError` the
+  execution phase produces); `path_kind="in"` params resolve under the
+  data root before statting (remote-mode relative paths now invalidate on
+  external modification).
+- `Registry.rebuild` swap race — **documented** (docstring scoped to the
+  `_nodes` swap; a full lock of `/api/nodes` is a larger change for a
+  harmless manifestation — `manifests()` only reads `_nodes`).
+- ~~Broken third-party plugin crashes discovery~~ — **FIXED**: import or
+  `register()` failures are skipped with a recorded error (`PluginInfo.error`,
+  surfaced in `/api/plugins`); packaging CONTRACT violations (duplicate
+  node type) deliberately stay loud — re-enabling surfaces the conflict.
+- ~~Headless cache restore writes to CWD~~ — **FIXED**: without a workspace
+  the file copy is skipped and the artifact event resolves to the cache
+  entry's own file.
+- ~~Align Runs bare-number mis-parse~~ — **FIXED**: with an unknown run
+  extent, bounds are ISO-or-error (relative seconds need a known record
+  start — `pd.to_datetime("600")` would mis-parse as epoch nanoseconds).
+  Mixed channel lengths warn loudly (ragged RunTS, the documented LEMI
+  pathology).
+- ~~`lemi.py` loop leak / silently empty archive~~ — **FIXED**: the
+  station-metadata update uses a hoisted variable (no NameError) and an
+  empty run dict is an actionable error.
+- ~~`phoenix_mtu.py` rough edges~~ — **FIXED**: nonexistent calibration
+  folder → actionable `FileNotFoundError`; window-crop segments detected by
+  containment (not exact equality — cropped blocks made edge checks false-
+  alarm); the empty-serial warning names the missing tag; the run-vs-channel
+  end-time difference is documented as deliberate (channel periods feed
+  `from_channel_ts` — changing them perturbs the §24.12-verified ingest).
+- ~~Dead code~~ — duplicate `_select_channels` and the unreachable l2u
+  starvation branch removed (`dec_of_run` went with M2; the garbled
+  docstring with the docs round). `DEFAULT_KEYWORD` kept: it is used
+  within nomenclature and is the public API surface for plugin-tier
+  callers. The tests-only single-level `compute_fc` keeps its documented
+  drift note.
+- ~~Core-nodes~~ — **FIXED**: `LoadCsv` guards the optional pandas import
+  with an actionable message, detects time columns by EXACT conventional
+  names only (a channel named `Ex_time` was hijacked as the axis), and
+  errors on duplicate headers (last-column-wins silently lost data);
+  `SavePlot` rejects glob metacharacters/path separators in the prefix;
+  Detrend "none" copies arrays (functional contract).
+- ~~Frontend~~ — **FIXED**: `TimeBar` treats bare numbers as relative
+  seconds on both sides (server semantics — the old fallback read them as
+  epoch seconds) and skips the no-cross clamp in sub-slot extents;
+  `ParamField` keeps raw text for intermediate NaN states instead of
+  storing NaN; node ids use full UUIDs (collision-safe); stale-edge
+  pruning re-runs once the catalog arrives after a load; the properties
+  panel lists manifest `models`.
+- ~~Settings dirty check can't clear a 0-valued knob~~ — **NOT
+  REPRODUCIBLE**: the code already special-cases the empty draft
+  (`raw === "" → null`) before the numeric compare, so an emptied draft on
+  a 0-valued knob IS dirty; record corrected.
+- ~~Repo hygiene~~ — **DONE** (previous round: `*.emptyui.json` +
+  root-level `test-results/` gitignored).
+
+**Deferred by design (low, recorded):** the Adjusted-R² formula change
+(above); the `/api/nodes` unlocked read (docstring-scoped); the
+`smooth_bins` circular pooling and the OLS-vs-node warning-channel nits
+(both touch sort statistics vs the recorded §24.6 ablations — changing
+them requires a re-ablation first).
 
 ---
 
@@ -337,7 +364,8 @@ specified. The findings below are the exceptions.
    tolerate+warn policy, 422-on-malformed).
 3. ~~**M5–M8**~~ — **done** (physics batch, with corrected records).
 4. ~~**M9–M14**~~ — **done** (frontend/config batch, empirically verified).
-5. Low list: the documentation-inconsistency subset is **done**; the
-   remaining behavior items (clock-zero validation, cache-key coercion,
-   plugin-crash degradation, LoadCsv/SavePlot/TimeBar polish, …) as
-   capacity allows.
+5. ~~Low list: the documentation-inconsistency subset~~ — **done**; the
+   remaining behavior items are also **done** (two documented exceptions:
+   the Adjusted-R² formula change and the `/api/nodes` read lock — both
+   recorded with rationale). The review backlog in this file is closed;
+   DESIGN.md/README §11 M4 remains the forward-looking backlog.

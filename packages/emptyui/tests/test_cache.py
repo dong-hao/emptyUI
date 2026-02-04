@@ -310,3 +310,51 @@ def test_cache_lru_eviction_and_clear():
 
     assert cache.clear() == 2
     assert len(cache) == 0
+
+
+def test_string_and_number_params_share_cache_entry():
+    """§7 hashes the EFFECTIVE params — the combobox string "4" and the
+    number 4 on a number param produce one cache entry (coercion happens
+    at key time, matching execution)."""
+    from emptyui import Input, Node, Output, Param
+    from emptyui.schema import Edge, Workflow, WorkflowNode
+
+    calls = {"n": 0}
+
+    class Src(Node):
+        type = "test.sig_src"
+        outputs = (Output("data", "any"),)
+
+        def execute(self, ctx):
+            return {"data": 1}
+
+    class Scale(Node):
+        type = "test.sig_scale"
+        inputs = (Input("data", "any"),)
+        outputs = (Output("out", "any"),)
+        params = (Param("factor", "number", default=2.0),)
+
+        def execute(self, ctx, data, factor=2.0):
+            calls["n"] += 1
+            return {"out": data * factor}
+
+    reg = Registry()
+    reg.add(Src)
+    reg.add(Scale)
+    cache = NodeCache()
+    ex = Executor(reg)
+
+    def wf(factor):
+        return Workflow(
+            nodes=[
+                WorkflowNode(id="n1", type="test.sig_src"),
+                WorkflowNode(id="n2", type="test.sig_scale",
+                             params={"factor": factor}),
+            ],
+            edges=[Edge(id="e1", source="n1", source_port="data",
+                        target="n2", target_port="data")],
+        )
+
+    ex.run(wf(4), emit=lambda e: None, cache=cache)
+    ex.run(wf("4"), emit=lambda e: None, cache=cache)
+    assert calls["n"] == 1  # second run hit the cache

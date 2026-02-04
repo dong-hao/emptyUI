@@ -62,6 +62,19 @@ export function PropertiesPanel({
       {manifest.deps.length > 0 && (
         <p className="muted">deps: {manifest.deps.join(", ")}</p>
       )}
+      {(manifest.models?.length ?? 0) > 0 && (
+        <div className="muted">
+          <h3>Models</h3>
+          <ul>
+            {manifest.models!.map((m) => (
+              <li key={m.id}>
+                <code>{m.filename}</code> ({m.license}) — sha256{" "}
+                {m.sha256.slice(0, 12)}…
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <h3>Ports</h3>
       <ul className="ports">

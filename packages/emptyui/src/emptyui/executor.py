@@ -185,7 +185,7 @@ class Executor:
         return seen
 
     @staticmethod
-    def _value_signature(value: Any) -> Any:
+    def _value_signature(value: Any, data_root=None, path_kind: str = "") -> Any:
         """Cache-signature form of one effective param value.
 
         String values that point at existing files contribute their stat
@@ -193,13 +193,22 @@ class Executor:
         (Nextflow-style: cheap, detects externally modified inputs; content
         hashing is deliberately avoided — too expensive for data files).
         Everything else is used as-is (workflow params are JSON-borne).
+
+        ``data_root`` + ``path_kind="in"``: a RELATIVE input path is
+        resolved under the data root before statting (execution resolves
+        the same way, §17.2) — without this the stat silently missed for
+        remote-mode workflows and external modifications never
+        invalidated the cache.
         """
         if isinstance(value, str):
+            p = Path(value).expanduser()
+            if path_kind == "in" and data_root is not None and not p.is_absolute():
+                p = Path(data_root) / p
             try:
-                st = Path(value).stat()
+                st = p.stat()
             except (OSError, ValueError):
                 return value
-            return [value, st.st_size, st.st_mtime_ns]
+            return [str(p), st.st_size, st.st_mtime_ns]
         return value
 
     def _node_key(
@@ -207,6 +216,7 @@ class Executor:
         wnode: WorkflowNode,
         manifest,
         incoming: list[dict[str, str]],
+        data_root=None,
     ) -> str:
         """Structural cache signature for one node (DESIGN.md §7).
 
@@ -219,12 +229,25 @@ class Executor:
         params: dict[str, Any] = {}
         for param in manifest.params:
             if param.name in wnode.params:
-                value: Any = wnode.params[param.name]
+                raw: Any = wnode.params[param.name]
             elif param.default is not None:
-                value = param.default
+                raw = param.default
             else:
                 continue
-            params[param.name] = self._value_signature(value)
+            # §7 hashes the EFFECTIVE params — coerce first, so the string
+            # combobox value "4" and the number 4 share one cache entry
+            # (execution coerces identically, §18 review fix). The numeric
+            # canonicalization here normalizes the KEY form only (int 4 vs
+            # float 4.0); execution keeps its own semantics.
+            value = self._coerce_param(param, raw)
+            widget = getattr(param, "widget", "")
+            if widget in ("number", "integer") and isinstance(
+                    value, (int, float)) and not isinstance(value, bool):
+                value = (float(value) if widget == "number"
+                         else round(float(value)))
+            params[param.name] = self._value_signature(
+                value, data_root=data_root,
+                path_kind=getattr(param, "path_kind", ""))
         payload = {
             "type": wnode.type,
             "version": manifest.version,
@@ -266,12 +289,18 @@ class Executor:
         return recorded
 
     @staticmethod
-    def _artifact_dest(rec: dict[str, Any], node_id: str, workspace) -> Path:
+    def _artifact_dest(rec: dict[str, Any], node_id: str, workspace) -> Path | None:
         """Workspace path for a restored artifact, renamed for this run's
         node instance (mirrors ``RunContext.artifact_path`` so same-type
-        instances still cannot overwrite each other's files)."""
+        instances still cannot overwrite each other's files).
+
+        None without a workspace (headless/CLI embedding): restoring into
+        the process CWD was a side effect outside the workspace model —
+        the restore skips file copying instead (the cache entry still
+        re-registers the output payloads).
+        """
         name = f"{rec['stem']}_{node_id}{rec['suffix']}"
-        return workspace / name if workspace is not None else Path(name)
+        return workspace / name if workspace is not None else None
 
     @staticmethod
     def _coerce_param(param, value: Any) -> Any:
@@ -400,7 +429,15 @@ class Executor:
                 for e in workflow.edges
                 if e.target == node_id
             ]
-            keys[node_id] = self._node_key(wnode, manifest, incoming)
+            try:
+                keys[node_id] = self._node_key(wnode, manifest, incoming,
+                                               data_root=data_root)
+            except ValueError as exc:
+                # param coercion now happens at key time (§7 hashes the
+                # EFFECTIVE params) — surface the failure as the same
+                # ExecutionError the execution phase would produce
+                emit({"event": "run_finished", "status": "failed"})
+                raise ExecutionError(node_id, exc) from exc
 
         execute = (
             self._ancestor_closure(workflow, targets)
@@ -443,10 +480,18 @@ class Executor:
                 outputs_by_node[node_id] = handles
                 for rec in entry.artifacts:
                     dest = self._artifact_dest(rec, node_id, workspace)
-                    # a run can restore into the original run's workspace
-                    # (same-workspace partial re-runs) — skip then
-                    if not (dest.exists() and os.path.samefile(rec["src"], dest)):
-                        shutil.copyfile(rec["src"], dest)
+                    if dest is not None:
+                        # a run can restore into the original run's workspace
+                        # (same-workspace partial re-runs) — skip then
+                        if not (dest.exists()
+                                and os.path.samefile(rec["src"], dest)):
+                            shutil.copyfile(rec["src"], dest)
+                        event_path = str(dest)
+                    else:
+                        # headless/CLI run without a workspace: skip the
+                        # file copy (no CWD side effect) — the artifact
+                        # event resolves to the cache entry's own file
+                        event_path = rec["src"]
                     artifact_id = f"a{uuid4().hex[:8]}"
                     emit(
                         {
@@ -454,7 +499,7 @@ class Executor:
                             "node": node_id,
                             "id": artifact_id,
                             "kind": rec["kind"],
-                            "path": str(dest),
+                            "path": event_path,
                             "handle": handles.get(rec["port"], ""),
                             "url": f"/api/artifacts/{artifact_id}/preview",
                         }

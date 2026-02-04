@@ -33,12 +33,6 @@ def _select_channels(data: TimeSeries, spec: str) -> list[str]:
     return resolve_channels(list(data.channels), spec)
 
 
-def _select_channels(data: TimeSeries, spec: str) -> list[str]:
-    """Resolve a channel spec against the data (empty = all). Standard
-    component names (ex/ey/hx/hy/hz) are mapped through the inferred
-    nomenclature; matching is case-insensitive."""
-    return resolve_channels(list(data.channels), spec)
-
 
 def _time_axis(data: TimeSeries, n0: int, n1: int):
     """Return (x, label) for samples [n0, n1) — datetime axis when an

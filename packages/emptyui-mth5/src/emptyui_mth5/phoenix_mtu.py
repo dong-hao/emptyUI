@@ -273,6 +273,11 @@ def _prepare_asc_calibration(
 
     folder = (Path(str(calibration_folder)).expanduser()
               if str(calibration_folder).strip() else data_path)
+    if not folder.exists():
+        raise FileNotFoundError(
+            f"calibration folder not found: {folder} — set the calibration "
+            "parameter to the folder holding the *_CLB.asc / *_CLC.asc "
+            "files, or clear it to look next to the recording")
     if not any(p.suffix.lower() == ".asc" for p in folder.iterdir()
                if p.is_file()):
         return {}  # no ASC tables provided at all — stay silent
@@ -289,10 +294,12 @@ def _prepare_asc_calibration(
         for comp, fap in build_phoenix_filters(box, comp_map=comp_map).items():
             chains.setdefault(comp, []).append(fap)
     else:
+        serial_note = (f"matching serial {box_serial!r}" if box_serial
+                       else "no 'SNUM' tag in the TBL to match against")
         warnings.append(
-            f"no box calibration (*_CLB.asc matching serial {box_serial!r}) "
-            f"in {folder} — the frequency-dependent shape correction is "
-            "missing (the TBL scalar calibration still applies)")
+            f"no box calibration (*_CLB.asc, {serial_note}) in {folder} — "
+            "the frequency-dependent shape correction is missing (the TBL "
+            "scalar calibration still applies)")
     for comp, serial in coil_serials.items():
         path = found.get(comp)
         if path is None:
@@ -419,12 +426,15 @@ def read_phoenix_mtu(
             for seg in segs:
                 got = (seg.end - seg.start).total_seconds()
                 if expected_len and abs(got - expected_len) > 1e-6:
-                    at_edge = (
-                        (win_start is not None and seg.start == win_start)
-                        or (win_end is not None and seg.end == win_end))
-                    if win_start is not None or win_end is not None:
-                        if at_edge:
-                            continue  # window crop, not a schedule anomaly
+                    # a window-cropped segment LIES INSIDE the window (the
+                    # block filter drops whole blocks, so the first retained
+                    # block's tag is >= but not necessarily == the bound) —
+                    # exact-equality checks false-alarmed on those
+                    inside_window = (
+                        (win_start is None or seg.start >= win_start)
+                        and (win_end is None or seg.end <= win_end))
+                    if (win_start is not None or win_end is not None) and inside_window:
+                        continue  # window crop, not a schedule anomaly
                     warnings.append(
                         f"{path.name}: segment {seg.start} spans {got:g} s, "
                         f"TBL schedule says {expected_len:g} s ({slot_tag})")
@@ -435,7 +445,12 @@ def read_phoenix_mtu(
             run_meta.id = run_id
             run_meta.sample_rate = float(seg.rate)
             # actual block-tag time period — never the TBL placeholders
-            # (STIM/ETIM); end = last sample (mt_timeseries convention)
+            # (STIM/ETIM). Run end is the last SAMPLE (mt_timeseries
+            # inclusive convention); the CHANNEL metadata below uses the
+            # exclusive segment end (deliberate: ChannelTS anchors its time
+            # index on time_period.start, and from_channel_ts propagates
+            # channel periods — changing the channel end would perturb the
+            # §24.12-verified ingest behavior).
             run_meta.time_period.start = seg.start.isoformat()
             run_meta.time_period.end = (seg.end - pd.to_timedelta(
                 1.0 / seg.rate, unit="s")).isoformat()
