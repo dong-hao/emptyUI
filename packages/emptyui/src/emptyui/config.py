@@ -78,11 +78,12 @@ class Settings:
         )
         raw_settings = os.environ.get("EMPTYUI_SETTINGS_PATH", "").strip()
         settings_path = Path(raw_settings).expanduser() if raw_settings else None
+        raw_base = os.environ.get("EMPTYUI_BASE_PATH", "").strip()
         return cls(
             data_root=Path(data_root).expanduser() if data_root else None,
             serve_dist=serve_dist or None,
             cors_origins=cors_origins,
-            root_path=None,
+            root_path=raw_base or None,
             workspace_ttl_seconds=workspace_ttl_seconds,
             max_concurrent_runs=max_concurrent_runs,
             disabled_plugins=disabled_plugins,

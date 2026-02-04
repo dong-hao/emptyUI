@@ -172,8 +172,15 @@ class SettingsStore:
             if spec is None:
                 raise ValueError(
                     f"unknown or not live-editable setting: '{key}'")
-            vtype, _default, _desc = spec
+            vtype, default, _desc = spec
             if value is None:
+                # §22: null = "off" only for knobs whose default is None
+                # (off by design); a knob with a non-null default (e.g.
+                # cache_max_entries = 256) does not accept null
+                if default is not None:
+                    raise ValueError(
+                        f"setting '{key}' does not accept null "
+                        f"(default {default!r}; 0 or a number to bound it)")
                 out[key] = None
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):

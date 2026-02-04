@@ -26,14 +26,23 @@ from .runs import _resolve_run, _resolve_station, _resolve_survey
 
 
 def merge_runts(run_ts_list, gap_method: str = "slinear",
-                new_run_id: str = "merged"):
+                new_run_id: str = "merged", logger=None):
     """Physically concatenate mth5 RunTS objects (in order) into one series.
 
     Runs must share the sample rate; inter-run gaps are bridged with
     ``gap_method`` interpolation (mt_timeseries ``RunTS.merge``). The merged
     run's id is set to ``new_run_id`` (station/survey metadata come from the
     first run). Returns the merged RunTS.
+
+    §3 constraints made loud: runs sharing channel components is required
+    (RunTS.merge cannot combine unequal sets) and OVERLAPPING acquisitions
+    are rejected (the merge cannot combine non-monotonic time indexes, and
+    the overlap would be interpolated over — fabricated samples). The
+    FC-level alternative (Merge FC) concatenates without fabrication.
     """
+    import logging
+
+    _log = logger or logging.getLogger("emptyui")
     if not run_ts_list:
         raise ValueError("no runs to merge")
     rates = {float(rt.sample_rate) for rt in run_ts_list}
@@ -41,6 +50,41 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
         raise ValueError(
             f"cannot merge runs of mixed sample rates: {sorted(rates)} — "
             "all runs of one station must share the sampling")
+    # §3: channel components must be consistent — RunTS.merge cannot
+    # combine runs with unequal channel sets (xarray MergeError), so this
+    # is a hard error with an actionable message, not a warning
+    comp_sets = [set(map(str, rt.channels)) for rt in run_ts_list]
+    union = set.union(*comp_sets)
+    for rt, comps in zip(run_ts_list, comp_sets):
+        missing = sorted(union - comps)
+        if missing:
+            raise ValueError(
+                f"cannot merge run '{_rt_id(rt)}': it lacks channel(s) "
+                f"{missing} that the other runs carry — all runs of one "
+                "station must share the channel components (§3)")
+    # §3: OVERLAPPING acquisitions cannot be combined — RunTS.merge's
+    # index combination fails on non-monotonic global time indexes (the
+    # overlap would also be interpolated over, fabricating samples).
+    # Reject with an actionable message instead of the raw xarray error.
+    prev_end = None
+    for rt in run_ts_list:
+        try:
+            span = _rt_span(rt)
+        except Exception:  # noqa: BLE001 — spans unavailable on some payloads
+            prev_end = None
+            continue
+        if span is None:
+            prev_end = None
+            continue
+        start, end = span
+        if prev_end is not None and start < prev_end:
+            raise ValueError(
+                f"cannot merge: run '{_rt_id(rt)}' starting {start} overlaps "
+                f"the previous run's end {prev_end} — overlapping "
+                "acquisitions cannot be concatenated (check the run "
+                "selection; Merge FC concatenates Fourier coefficients "
+                "without fabricating samples)")
+        prev_end = end
     merged = run_ts_list[0]
     for rt in run_ts_list[1:]:
         merged = merged.merge(rt, gap_method=gap_method)
@@ -49,6 +93,26 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     except Exception:  # noqa: BLE001, S110 — duck-typed payloads without run metadata
         pass
     return merged
+
+
+def _rt_id(rt):
+    try:
+        return str(rt.run_metadata.id)
+    except Exception:  # noqa: BLE001 — duck-typed payloads
+        return "<unnamed>"
+
+
+def _rt_span(rt):
+    """(start, end) datetimes of a RunTS payload; None without an absolute
+    time axis (overlap checks need absolute time)."""
+    import numpy as np
+    import pandas as pd
+
+    ts = rt.dataset["time"].values
+    if not np.issubdtype(ts.dtype, np.datetime64):
+        return None
+    idx = pd.DatetimeIndex(ts)
+    return idx[0], idx[-1]
 
 
 class MergeRuns(Node):
@@ -96,12 +160,24 @@ class MergeRuns(Node):
         if missing:
             raise ValueError(
                 f"run(s) {missing} not in station archive {available}")
+        # duplicates merge silently-wrong (the same run twice inflates its
+        # weight) — dedup preserving order, with a warning
+        seen: set[str] = set()
+        deduped = []
+        for r in wanted:
+            if r in seen:
+                ctx.logger.warning(
+                    "run '%s' listed more than once — merging it once", r)
+                continue
+            seen.add(r)
+            deduped.append(r)
+        wanted = deduped
         run_ts_list = []
         for run_id in wanted:
             run_obj = _resolve_run(station_obj, run_id)
             run_ts_list.append(run_obj.to_runts())
         merged = merge_runts(run_ts_list, gap_method=gap_method,
-                             new_run_id=new_run_id)
+                             new_run_id=new_run_id, logger=ctx.logger)
         ctx.progress(
             1.0,
             f"merged {len(wanted)} run(s) ({', '.join(wanted)}): "

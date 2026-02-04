@@ -196,8 +196,12 @@ def create_app(
                   if settings.max_concurrent_runs is not None
                   else file_live.get("max_concurrent_runs"))
         ),
-        cache_max_entries=int(
-            file_live.get("cache_max_entries") or 256),
+        # 0 is a valid bound (the cache clamps to 1 entry live) — do not
+        # conflate it with unset via a falsy `or` (M14: a restart-time 0
+        # silently became the 256 default)
+        cache_max_entries=(
+            256 if file_live.get("cache_max_entries") is None
+            else max(1, int(file_live["cache_max_entries"]))),
         env_baselined=frozenset(
             k for k, v in (("workspace_ttl_seconds", _ttl_kwarg),
                            ("max_concurrent_runs", _runs_kwarg))
@@ -388,7 +392,11 @@ def create_app(
                 )
             plugin_store.set_settings(coerced)
             if coerced.get("cache_max_entries") is not None:
-                runtime.cache_max_entries = round(coerced["cache_max_entries"])
+                # 0 means "cache off" in the UI; the cache itself clamps to
+                # 1 entry — clamp the reported knob identically so a
+                # restart restores the same bound (M14)
+                runtime.cache_max_entries = max(
+                    1, round(coerced["cache_max_entries"]))
                 node_cache.resize(runtime.cache_max_entries)
             if "workspace_ttl_seconds" in coerced:
                 runtime.workspace_ttl_seconds = coerced["workspace_ttl_seconds"]

@@ -268,3 +268,23 @@ def test_merge_tf_levels_without_z_err_merges_as_zeros():
     per[0]["Z_err"] = 0.5
     _, _, Z_err = merge_tf_levels(per)
     assert np.all(Z_err == 0.5)
+
+
+# --- review item B13 / M11: overlap bounds are validated up front ---------
+
+def test_compute_fc_overlap_out_of_bounds_rejected():
+    import numpy as np
+    from emptyui_aurora._processing import compute_fc_levels
+    from test_magnetic_units import _field, _runts
+
+    r = _runts(*_field(np.random.default_rng(3), n=512, sr=8.0))
+    for bad in (1.0, 1.5, -0.1):
+        with pytest.raises(ValueError, match="overlap must be in"):
+            compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
+                              num_decimations=0, num_samples_window=64,
+                              overlap=bad, window_type="hamming")
+    # the manifest bound (0.99) still passes
+    levels = compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
+                               num_decimations=0, num_samples_window=64,
+                               overlap=0.99, window_type="hamming")
+    assert 0 in levels

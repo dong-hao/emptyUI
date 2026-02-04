@@ -107,7 +107,9 @@ app = create_app(data_root="/srv/emptyui/data", serve_dist="/opt/emptyui/web/dis
 - **Long runs**: keep proxy read/idle timeouts generous; the UI survives
   disconnects (run status is re-fetched).
 - **Plugin availability**: the platform controls it via
-  `EMPTYUI_DISABLED_PLUGINS`; runtime toggling (§5.1) is planned.
+  `EMPTYUI_DISABLED_PLUGINS`; runtime toggling (§5.1) is available in the
+  web UI's Settings dialog (in-memory by default; optional JSON persistence
+  via `EMPTYUI_SETTINGS_PATH`).
 - **Retention & limits**: set `EMPTYUI_WORKSPACE_TTL` to garbage-collect
   terminal run records, artifact indexes, and per-run workspaces; active runs
   are never removed. Set `EMPTYUI_MAX_CONCURRENT_RUNS` to apply admission

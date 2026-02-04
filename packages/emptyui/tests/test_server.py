@@ -411,3 +411,35 @@ def test_settings_live_ttl_effect(tmp_path):
         _time.sleep(0.02)
     cleaned = client.app.state.cleanup_expired_runs(now=_time.time() + 11)
     assert cleaned == 1
+
+
+# --- M14: settings null/0 policy (§22) ------------------------------------
+
+def test_settings_null_rejected_for_non_null_default(client):
+    """§22: 'null not allowed for knobs with a non-null default' —
+    cache_max_entries (default 256) must reject null with 422."""
+    resp = client.put("/api/settings", json={"values": {"cache_max_entries": None}})
+    assert resp.status_code == 422
+    assert "does not accept null" in str(resp.json()["detail"])
+    # null stays valid for the None-default knobs (off-by-design)
+    ok = client.put("/api/settings", json={"values": {"workspace_ttl_seconds": None}})
+    assert ok.status_code == 200
+
+
+def test_settings_cache_zero_survives_restart_consistently(tmp_path):
+    """A 0-valued cache_max_entries must not conflate with unset: live PUT
+    clamps to 1 (the cache never runs zero) and a restart from the file
+    must restore the same bound — not silently 256."""
+    reg = Registry()
+    client2 = TestClient(create_app(
+        reg, settings_path=tmp_path / "settings.json"))
+    resp = client2.put("/api/settings", json={"values": {"cache_max_entries": 0}})
+    assert resp.status_code == 200
+    view = resp.json()
+    assert view["live"]["cache_max_entries"]["value"] == 1
+    # restart: a fresh app reading the same file sees the same value
+    client3 = TestClient(create_app(
+        Registry(), settings_path=tmp_path / "settings.json"))
+    view3 = client3.get("/api/settings").json()
+    assert view3["live"]["cache_max_entries"]["value"] == 1
+    assert view3["live"]["cache_max_entries"]["source"] == "ui"

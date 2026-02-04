@@ -110,3 +110,50 @@ def test_merge_runs_node_single_run_passthrough(tmp_path: Path):
     assert res["merged_run"].run_metadata.id == "only"
     assert res["merged_run"].dataset.sizes["time"] == 32
     archive.close_mth5()
+
+
+# --- M12: §3 constraints made loud (overlap, channel consistency, dup ids) -
+
+def test_merge_runts_rejects_overlapping_runs():
+    """Two runs with an OVERLAP: RunTS.merge fails on non-monotonic indexes
+    (and would interpolate over real acquired data) — the §3 constraint is
+    a hard error with an actionable message, not a silent fabrication."""
+    r1 = _synthetic_runts(start="2024-01-01T00:00:00", n=64)
+    r2 = _synthetic_runts(start="2024-01-01T00:00:32", n=64)  # 32 s overlap
+    with pytest.raises(ValueError, match="overlaps"):
+        merge_runts([r1, r2])
+
+
+def test_merge_runts_errors_on_missing_channels():
+    """Runs with unequal channel sets cannot be combined by RunTS.merge
+    (raw xarray MergeError) — the §3 consistency constraint is a hard
+    error with an actionable message."""
+    r1 = _synthetic_runts(comps=("bx", "by", "e1", "e2"))
+    r2 = _synthetic_runts(start="2024-01-01T00:01:04", comps=("bx", "by", "e1"))
+    with pytest.raises(ValueError, match="lacks channel"):
+        merge_runts([r1, r2])
+
+
+def test_merge_node_dedups_duplicate_run_ids(test12rr_path, tmp_path, caplog):
+    """The params run list silently merging the same run twice inflated its
+    weight — duplicates are deduped with a warning."""
+    import warnings
+
+    from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
+
+    warnings.filterwarnings("ignore")
+    from mth5.mth5 import MTH5
+
+    m = MTH5()
+    m.open_mth5(str(test12rr_path), "r+")
+    try:
+        survey_obj = _resolve_survey(m, "")
+        station_obj = _resolve_station(survey_obj, "")
+        run_id = _resolve_run(station_obj, "").metadata.id
+        ctx = RunContext(workspace=tmp_path, store=DataStore())
+        with caplog.at_level("WARNING", logger="emptyui"):
+            res = MergeRuns().execute(ctx, m, runs=f"{run_id},{run_id}")
+        assert res["merged_run"] is not None
+        assert any("more than once" in r.message for r in caplog.records)
+    finally:
+        m.close_mth5()

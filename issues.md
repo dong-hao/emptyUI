@@ -21,9 +21,12 @@ hard-reject removed in favor of the documented §24.9 tolerate+warn policy
 pydantic's field errors instead of a 500. M5–M8 (the physics batch) are
 resolved with corrected records — see their entries below (M5's trigger
 was overstated and re-verified; M6/M7/M8 shipped with empirical
-convention/declination/geometry fixes). Suite after the fixes:
-**Python 464 passed / e2e 18 passed**. The universal saturation-mask
-follow-up is recorded as M4 #19 in DESIGN.md §11 and the README.
+convention/declination/geometry fixes). M9–M14 are resolved too — see the
+entries below (M12's guards were empirically upgraded from warnings to
+hard errors; the reconnect-occupancy fix exposed reconnectEdge's
+error-007 contract). Suite after the fixes: **Python 473 passed / e2e 18
+passed**. The universal saturation-mask follow-up is recorded as M4 #19 in
+DESIGN.md §11 and the README.
 
 Everything else in the documented contract (API routes, caching/partial
 runs/cancellation, plugin toggles, remote-mode knobs, settings, unit physics,
@@ -204,31 +207,47 @@ specified. The findings below are the exceptions.
   provenance (the FC model cannot express them; FC amplitudes are already
   calibrated). Bonus fix: Read FC with an empty run id now falls back to the
   first run (pre-existing gap, same contract as the write node).
-- **M9** Frontend: `fitView` is consumed on the empty initial node set (no-op)
-  and `padding: 40` is a *fraction* in React Flow v12, not px
-  (`packages/web/src/App.tsx:360-364`); polling-fallback dedupe omits `port`
-  from the `payload` event key (`App.tsx:218-233`) — multi-output nodes lose
-  all but one extent summary in the polling path; edge **reconnect** does
-  not enforce one-edge-per-input (`src/stores/workflow.ts:181-187`);
-  `EMPTYUI_BASE_PATH` documented in DESIGN §17.4 but not implemented in
-  `config.py`; `docs/deployment.md:110` still says plugin toggling "is
-  planned" (delivered §5.1); palette-added nodes are 250 px vs loaded 280 px
-  (§23.4).
-- **M10** `band_intervals` only populated for the l2u primary path
-  (`emptyui_aurora/_processing.py:2484`) — Residual Sort silently skips
-  `uniform`/metadata-less-fallback levels (`process.py:1070-1073`).
-- **M11** `overlap ≥ 1` remains server-reachable: manifest `max=0.99` is
-  frontend-only (`process.py:134`, `:333`); neither `compute_fc_levels` nor
-  the executor validates `Param.min/max` — review item B13 half-open.
-- **M12** Merge Runs lacks §3's documented guards: no overlap warning, no
-  channel-consistency check, duplicate run ids accepted silently
-  (`emptyui_mth5/merge.py:39-98`).
-- **M13** View Selection is registered but dead: no bundled node produces a
-  `selection` payload (producer M4-deferred; `tables.py:26-46`). Hide or
-  remove; its dict fallback path would also crash (`_as_dataframe`).
-- **M14** Settings edge cases: `cache_max_entries` accepts `null` (violating
-  §22's "null not allowed for non-null defaults") and `0` conflates with
-  unset across restart (`settings.py:176-178`, `app.py:198-199`).
+- **M9** Frontend: (a) ~~`fitView` no-op + `padding: 40` fraction semantics~~ —
+  **FIXED**: the declarative `fitView` prop (consumed on the empty initial
+  node set in React Flow v12) was replaced by an explicit fit when the graph
+  first becomes non-empty, with `padding: 0.1` under v12's fraction
+  semantics (the inverted comment removed); (b) ~~polling dedupe drops
+  multi-port `payload` events~~ — **FIXED**: the dedupe key now includes
+  `port` + summary; (c) ~~edge reconnect violates one-edge-per-input~~ —
+  **FIXED**: the reconnect path now drops edges occupying the new target
+  input (same rule as onConnect); the dragged edge must survive the filter
+  (reconnectEdge looks it up by id — missing → error 007 → the edge is
+  lost); (d) ~~`EMPTYUI_BASE_PATH` unimplemented~~ — **FIXED**: read in
+  `Settings.from_env` → `root_path`; (e) ~~deployment.md "toggling is
+  planned"~~ — **FIXED** (wording updated); (f) ~~palette nodes 250 px~~ —
+  **FIXED** (280 px everywhere).
+- **M10** ~~`band_intervals` only populated for the l2u primary path~~ —
+  **FIXED**: the non-l2u branch resolves the same table `estimate_tf` uses
+  (`_resolve_period_bands` on the normalized, DC-filtered fc) and passes it
+  as `bands_override` — guaranteed 1:1 alignment with the Z rows. Pairs are
+  widened by one ULP so single-bin bands survive the
+  `_bands_from_freq_pairs` mapping (searchsorted excludes edge-exact
+  bins). Residual Sort no longer silently skips uniform/fallback levels
+  (regression test runs the whole chain).
+- **M11** ~~`overlap ≥ 1` user-reachable crash~~ — **FIXED**:
+  `compute_fc_levels` rejects `overlap` outside [0, 1) with an actionable
+  message before any scipy call (verified crash: `noverlap must be less
+  than nperseg`); the manifest bound (0.99) still passes.
+- **M12** ~~Merge Runs lacks §3 guards~~ — **FIXED (empirically
+  upgraded)**: verification showed `RunTS.merge` cannot combine UNEQUAL
+  channel sets (raw xarray `MergeError`) nor OVERLAPPING acquisitions
+  (non-monotonic index error) — both are now hard errors with actionable
+  messages naming the offending run; duplicate run ids in the params list
+  are deduped with a warning (previously silently double-weighted).
+- **M13** ~~View Selection dead + broken fallback~~ — **FIXED**: the node is
+  `hidden = True` (palette-hidden, still executable for plugin-produced
+  selection payloads) and `_as_dataframe` now accepts a real pandas
+  DataFrame or a payload with `.df`; the dict fallback (crash-on-use) is a
+  loud `TypeError`.
+- **M14** ~~Settings null/0 conflation~~ — **FIXED**: null is rejected with
+  422 for knobs with a non-null default (`cache_max_entries`), still valid
+  for the None-default "off" knobs; `0` clamps to 1 identically on live PUT
+  and restart-from-file (the falsy `or 256` conflation removed).
 
 ---
 
@@ -285,4 +304,5 @@ specified. The findings below are the exceptions.
 2. ~~**M1–M4**~~ — **done** (doc refresh, manifest descriptions,
    tolerate+warn policy, 422-on-malformed).
 3. ~~**M5–M8**~~ — **done** (physics batch, with corrected records).
-4. M9–M14 and the low list as capacity allows.
+4. ~~**M9–M14**~~ — **done** (frontend/config batch, empirically verified).
+5. The low-severity list as capacity allows.

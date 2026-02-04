@@ -452,6 +452,13 @@ def compute_fc_levels(
     """
     import xarray as xr
 
+    # review item B13: overlap >= 1 reaches scipy.signal.stft as
+    # noverlap >= nperseg and crashes mid-node — reject with an actionable
+    # message up front (the manifest max is frontend-only)
+    if not (0.0 <= float(overlap) < 1.0):
+        raise ValueError(
+            f"overlap must be in [0, 1) — got {overlap!r} "
+            "(0 = adjacent windows, 0.99 = near-total overlap)")
     channels, sample_rate, start_s, start_dt = to_channels(value, check_finite=False)
     if start_datetime is None:
         start_datetime = start_dt
@@ -2456,7 +2463,26 @@ def estimate_tf_levels(
             if not bands:
                 continue  # head clip / coarsening left this level no bands
         else:
-            bands = None
+            # No container-level table (uniform style, or the l2u fallback
+            # for metadata-less fcs): resolve the SAME table estimate_tf
+            # will use internally (§23.5 choke point) and pass it
+            # explicitly, so the recorded band_intervals align 1:1 with
+            # the Z rows — Residual Sort's pooling key (DESIGN §24.13).
+            fc_n = _normalize_fc_layout(fc)
+            fc_n = fc_n.isel(frequency=fc_n["frequency"].values > 0)
+            f_n = np.asarray(fc_n["frequency"].values, dtype=float)
+            _, bins_r = _resolve_period_bands(
+                fc_n, periods_per_octave, band_style, t_short=t_short)
+            # Pairs from the bins' actual extent, widened by one ULP on
+            # both ends: _bands_from_freq_pairs maps intervals with
+            # searchsorted(side="right"), which would EXCLUDE a bin lying
+            # exactly on the interval edge — a single-bin band (common at
+            # the uniform partition's long-period end) would come back
+            # empty (NaN period).
+            bands = [
+                (float(np.nextafter(f_n[b].max(), np.inf)),
+                 float(np.nextafter(f_n[b].min(), -np.inf)))
+                for b in bins_r if b.size]
         ref_fc = _level_ref(ref_levels, level)
         periods, Z, Z_err = estimate_tf(
             fc, input_channels, output_channels,

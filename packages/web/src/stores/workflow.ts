@@ -183,7 +183,25 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     const { nodes, edges } = get();
     const { catalog } = useCatalog.getState();
     if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [])) return;
-    set((s) => ({ edges: reconnectEdge(oldEdge, connection, s.edges) }));
+    set((s) => ({
+      // one-to-one inputs: rerouting onto an occupied input replaces the
+      // old edge (the same rule onConnect enforces — reconnectEdge only
+      // rewrites the dragged edge and knows nothing about occupancy). The
+      // dragged edge itself must SURVIVE the filter: reconnectEdge looks
+      // it up by id (missing -> error 007 -> the edge is lost).
+      edges: reconnectEdge(
+        oldEdge,
+        connection,
+        s.edges.filter(
+          (e) =>
+            e.id === oldEdge.id ||
+            !(
+              e.target === connection.target &&
+              e.targetHandle === connection.targetHandle
+            ),
+        ),
+      ),
+    }));
   },
   addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
   selectNode: (id) =>

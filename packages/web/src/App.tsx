@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
+import {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  type Node,
+  type ReactFlowInstance,
+} from "@xyflow/react";
 import type { Connection, Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
@@ -33,6 +40,24 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
   const pollGenerationRef = useRef(0);
+  const rfInstance = useRef<
+    ReactFlowInstance<Node<MTNodeData>, Edge> | null
+  >(null);
+
+  // §9 initial view: fit the graph once it first becomes non-empty (the
+  // declarative `fitView` prop is consumed on the empty initial node set in
+  // React Flow v12 — an explicit call after the first node arrives covers
+  // both palette-add and document load). React Flow v12 padding is a
+  // FRACTION of the viewport (0.1 = 10%), not px.
+  const hadNodes = useRef(false);
+  useEffect(() => {
+    if (nodes.length > 0 && !hadNodes.current) {
+      hadNodes.current = true;
+      rfInstance.current?.fitView({ maxZoom: 1, padding: 0.1 });
+    } else if (nodes.length === 0) {
+      hadNodes.current = false;
+    }
+  }, [nodes.length]);
 
   const stopPolling = useCallback(() => {
     pollGenerationRef.current += 1;
@@ -184,7 +209,7 @@ export default function App() {
         manifest.type === "core.display.preview_plot" ||
         manifest.type === "core.display.view_table"
           ? { width: 340, height: 260 }
-          : { width: 250, height: "auto" },
+          : { width: 280, height: "auto" },
     });
   };
 
@@ -217,6 +242,12 @@ export default function App() {
       const generation = pollGenerationRef.current;
       const eventKey = (event: Record<string, unknown>, index: number) => {
         if (event.event === "artifact") return `artifact:${event.id ?? index}`;
+        if (event.event === "payload") {
+          // port + summary identify the event (§23.4): multi-output nodes
+          // (e.g. Align Runs data1/data2) each carry their own extent
+          return `payload:${event.node ?? ""}:${event.port ?? ""}:${
+            JSON.stringify(event.summary ?? "")}`;
+        }
         if (event.event === "run_started" || event.event === "run_finished") {
           return `${event.event}:${event.status ?? ""}`;
         }
@@ -357,11 +388,9 @@ export default function App() {
             onNodeClick={(_, node) => useWorkflow.getState().selectNode(node.id)}
             onPaneClick={() => useWorkflow.getState().selectNode(null)}
             deleteKeyCode={["Backspace", "Delete"]}
-            fitView
-            // cap the initial zoom: fitting 1-2 nodes must not zoom to 200%
-            // (fitView's default maxZoom); padding is in px (a fraction like
-            // 0.15 is interpreted as ~0 px), ComfyUI keeps overview at 100%
-            fitViewOptions={{ maxZoom: 1, padding: 40 }}
+            onInit={(instance) => {
+              rfInstance.current = instance;
+            }}
           >
             <Background />
             <Controls />

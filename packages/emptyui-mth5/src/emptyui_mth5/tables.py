@@ -6,30 +6,45 @@ import json
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from emptyui import Input, Node, Output
 
 from .plotting import MU0
 
 
 def _as_dataframe(value):
-    """Return a pandas DataFrame from a selection payload."""
+    """Return a DataFrame-like object from a selection payload.
+
+    Supported: an actual pandas DataFrame (test/plugin convenience) and
+    payloads with a real ``.df`` (mth5 KernelDataset). A plain dict's
+    ``to_dict`` takes no ``orient`` argument, so the old duck-typed
+    fallback crashed on use — anything else is a loud error. (No bundled
+    node produces ``selection`` payloads — the producer is M4-deferred,
+    §3; plugin producers duck-type ``.df``.)
+    """
+    if isinstance(value, pd.DataFrame):
+        return value
     df = getattr(value, "df", None)  # mth5 KernelDataset -> .df
     if df is not None and hasattr(df, "to_dict"):
         return df
-    if hasattr(value, "to_dict"):
-        return value
     raise TypeError(
-        f"cannot interpret selection payload of type {type(value).__name__} as a table"
-    )
+        f"cannot interpret selection payload of type {type(value).__name__} "
+        "as a table (expected a pandas DataFrame or a payload with a "
+        "pandas '.df', e.g. an mth5 KernelDataset)")
 
 
 class ViewSelection(Node):
     type = "mth5.table.selection"
     title = "View Selection"
     tooltip = "Render the run selection (mth5 KernelDataset) as a table."
+    hidden = True  # no bundled producer of `selection` payloads (§3, M4-deferred)
     description = (
         "Render the run selection (mth5 KernelDataset) as a table inside a "
-        "View Table node."
+        "View Table node. Utility node: hidden from the palette because no "
+        "bundled node currently produces a 'selection' payload (the "
+        "producer is M4-deferred, DESIGN §3); it stays registered so "
+        "plugin-produced selection payloads (duck-typed '.df') can be "
+        "viewed by saved workflows."
     )
     category = "Display"
     inputs = (Input("selection", "selection"),)

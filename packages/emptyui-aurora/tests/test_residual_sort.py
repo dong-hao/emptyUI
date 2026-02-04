@@ -149,3 +149,38 @@ def test_residual_sort_empty_scope_warns_and_passes(ctx):
     assert res["fc"][0].attrs["residual_sort_tests"] == 0
     kept = set(map(str, np.unique(res["fc"][0]["run_id"].values)))
     assert "noisy" in kept  # nothing was filtered
+
+
+def test_band_intervals_populated_for_uniform_style(ctx):
+    """M10: band_intervals were only populated on the l2u primary path —
+    for band_style='uniform' (and the l2u metadata-less fallback) the
+    entry carried None and Residual Sort silently skipped the level.
+    estimate_tf_levels now resolves the same table estimate_tf uses and
+    records it, so the pooling key always exists."""
+    from emptyui_aurora._processing import compute_fc_levels, estimate_tf_levels
+    from test_magnetic_units import _field, _runts
+
+    rng = np.random.default_rng(11)
+    hx, hy, ex, ey = _field(rng, n=16384, sr=8.0)
+    runts = _runts(hx, hy, ex, ey)
+    levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=2,
+                               factor=4, num_samples_window=256,
+                               overlap=0.5, window_type="hamming")
+    # Residual Sort's contract: per-window run_id (Build FC stamps it)
+    for lv in levels:
+        levels[lv] = levels[lv].assign_coords(
+            run_id=("time", np.full(int(levels[lv].sizes["time"]), "r1")))
+    result = estimate_tf_levels(
+        levels, ["hx", "hy"], ["ex", "ey"], estimator_engine="OLS",
+        periods_per_octave=3, band_style="uniform")
+    tested = 0
+    for lv, entry in result.items():
+        assert entry["band_intervals"], f"level {lv} lost its band geometry"
+        assert len(entry["band_intervals"]) == entry["Z"].shape[0], (
+            "intervals must align 1:1 with the Z rows")
+        # and Residual Sort actually tests the level now
+        res = ResidualSort().execute(
+            ctx, {lv: levels[lv]}, {lv: entry}, period_min=0, period_max=0)
+        assert "fc" in res
+        tested += 1
+    assert tested == len(result)
