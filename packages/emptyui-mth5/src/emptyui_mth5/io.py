@@ -38,7 +38,11 @@ class SaveMth5(Node):
     type = "mth5.io.save"
     title = "Save MTH5"
     tooltip = "Close (flush) the open MTH5 archive to disk."
-    description = "Persist the archive (close/flush) and record its path."
+    description = (
+        "Persist the archive (close/flush) so any mth5 script can read it "
+        "back. The path parameter does not move the archive — it guards "
+        "against a mismatch with the path the archive was opened from."
+    )
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
     outputs = ()

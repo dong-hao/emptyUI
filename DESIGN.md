@@ -352,7 +352,8 @@ single-line text input.
 #### Tooltip / description / palette protocol
 
 - **`tooltip`** — the hover tip; exactly **one sentence** saying what the node
-  *does* (imperative, ≤ ~100 chars, no parameter lists).
+  *does* (imperative, ≤ ~100 chars, no parameter lists; the
+  first-sentence fallback truncates at 140 chars).
 - **`description`** — full details shown in the properties panel on click.
 - **Fallback**: empty `tooltip` resolves to the first sentence of `description`
   (`emptyui.api.first_sentence`) — write every description so its first sentence
@@ -620,6 +621,9 @@ several figures.
 | POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
 | DELETE | `/api/cache` | Drop all cached node results |
 | GET/POST | `/api/plugins[/{name}/enable|disable]` | Plugin listing + enable/disable hot reload (§5.1) |
+| GET/PUT | `/api/settings` | Runtime settings view + live-knob edits (§22) |
+| GET | `/api/files` | Server-side file picker (data-root clamped, §17.2) |
+| GET | `/api/health` | Liveness probe (`{"status": "ok"}`) for platform gateways |
 | WS   | `/api/ws` | Run events stream |
 
 A run-level artifact gallery is not implemented — viewers on nodes are the
@@ -1104,7 +1108,10 @@ the Estimate TF node default.** Two parts:
    scale by the cascade factor per level, exactly the official grid's structure.
    Window-rich levels (0–3) keep the full 6-band template untouched.
 2. **Log-uniform window-starvation coarsening.** Per level, if any band's total
-   samples (n_windows × band width) fall below `min_bins_per_band` (default 40),
+   samples (n_windows × band width) fall below `min_bins_per_band`
+   (default 40 in the internal helper; the Estimate TF node exposes **20**
+   since the §24.6 default flip — every call site passes its value
+   explicitly, `test_defaults.py` pins the split),
    the level's grid is REBUILT as a coarser uniform table: `n − ⌊n/3⌋` bands,
    each widened to the minimal width whose total samples exceed the threshold,
    re-spaced uniformly in log period across the template's span (endpoints
@@ -1519,7 +1526,9 @@ root and forces outputs into the workspace.
 - **Max concurrent runs** per instance (queued or HTTP 429), bounding memory/CPU
   in a shared platform; default unlimited for local dev.
 - **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`, `EMPTYUI_SERVE_DIST`,
-  `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`)
+  `EMPTYUI_CORS_ORIGINS`, `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`,
+  `EMPTYUI_MAX_CONCURRENT_RUNS`, `EMPTYUI_DISABLED_PLUGINS`,
+  `EMPTYUI_SETTINGS_PATH`)
   mirrored as `create_app(...)` keyword arguments for module embedding without
   env coupling.
 
@@ -2432,8 +2441,12 @@ penalize isolated clean windows) with optional pooling over
 ±`smooth_bins` adjacent bins (a FIXED smoothing scale — deliberately not
 the estimate's band table; restores dof at deep levels with few windows).
 Adjusted-R² correction removes the p/(W−1) high bias of sample coherence
-(the §16.2 C2 bias, corrected exactly for this statistic since the
-ensemble count is known). Weights are per (bin, window) — finer than the
+(the §16.2 C2 bias — the ensemble count is known, so the correction is
+applicable here; note the implemented form leaves a small residual under
+the null (~1/(W−p), ≈0.03 at the default ensemble) versus the textbook
+null-zeroing adjusted-R² — empirically immaterial for the ens=16
+thresholds, and the ablation record (§24.6 tables) was measured with the
+implemented form). Weights are per (bin, window) — finer than the
 per-window scalars, frequency-dependent like EMTF's, and independent of
 the band-average method (the band table survives only as the diagnostics
 table's aggregation view). Failure mode trade-off: isolated clean windows

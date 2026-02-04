@@ -26,7 +26,11 @@ entries below (M12's guards were empirically upgraded from warnings to
 hard errors; the reconnect-occupancy fix exposed reconnectEdge's
 error-007 contract). Suite after the fixes: **Python 473 passed / e2e 18
 passed**. The universal saturation-mask follow-up is recorded as M4 #19 in
-DESIGN.md §11 and the README.
+DESIGN.md §11 and the README. A documentation-inconsistency sweep of the
+low list is also resolved — see the "Documentation-inconsistency subset —
+FIXED" block in the low section (§8/§17.4/§14.9/§24.6/§4 completion and
+corrections, deployment.md env table, README commit-convention guard,
+garbled/misleading docstrings, gitignore hygiene).
 
 Everything else in the documented contract (API routes, caching/partial
 runs/cancellation, plugin toggles, remote-mode knobs, settings, unit physics,
@@ -253,8 +257,36 @@ specified. The findings below are the exceptions.
 
 ## Low severity (abridged; full detail available on request)
 
-- Adjusted-R² debias off-by-one vs the null-zeroing textbook form
-  (`_processing.py:1192-1193`) — "exact" claim in §24.6 slightly overstated.
+**Documentation-inconsistency subset — FIXED (docs round):**
+- §24.6's "corrected exactly" adjusted-R² claim reworded: the implemented
+  form leaves a ~1/(W−p) residual under the null vs the textbook
+  null-zeroing form (L5) — empirically immaterial at ens=16; the ablation
+  record was measured with the implemented form (formula change deferred:
+  it would shift sort-threshold semantics vs the recorded ablations).
+- §14.9's `min_bins_per_band` "default 40" clarified: 40 is the internal
+  helper default; the Estimate TF node exposes 20 since §24.6
+  (`test_defaults.py` pins the split).
+- §8 API table completed: `GET/PUT /api/settings` (§22), `GET /api/files`
+  (§17.2) and `GET /api/health` were implemented but undocumented.
+- §17.4's env-knob list completed (adds `EMPTYUI_CORS_ORIGINS`,
+  `EMPTYUI_DISABLED_PLUGINS`, `EMPTYUI_SETTINGS_PATH`; `EMPTYUI_BASE_PATH`
+  is now implemented AND documented, plus a deployment.md table row).
+- §4 tooltip guidance notes the 140-char fallback truncation (vs the
+  ~100-char author guidance).
+- Garbled `_resolve_band_style` docstring (L9) rewritten; `SaveMth5`'s
+  "record its path" description corrected (the param is a mismatch guard,
+  not a move); `Registry.rebuild`'s "never partial" docstring claim scoped
+  to the `_nodes` swap (the plugin tables update in separate assignments).
+- README commit-log convention gains the H3 lesson: the message must
+  describe the diff it accompanies.
+- Repo hygiene: `*.emptyui.json` gitignored (the two untracked user
+  workflows in the repo root) and a root-level `test-results/` entry
+  added.
+
+**Remaining behavior items (low):**
+
+- Adjusted-R² formula change — optional follow-up to the L5 doc fix above;
+  requires re-running the §24.6 ablation thresholds first.
 - Clock-zero: no input validation (raw pandas `ValueError` on typos) and a
   future clock zero silently anchors at run start (`_processing.py:792`,
   `:805-810`).
@@ -305,4 +337,7 @@ specified. The findings below are the exceptions.
    tolerate+warn policy, 422-on-malformed).
 3. ~~**M5–M8**~~ — **done** (physics batch, with corrected records).
 4. ~~**M9–M14**~~ — **done** (frontend/config batch, empirically verified).
-5. The low-severity list as capacity allows.
+5. Low list: the documentation-inconsistency subset is **done**; the
+   remaining behavior items (clock-zero validation, cache-key coercion,
+   plugin-crash degradation, LoadCsv/SavePlot/TimeBar polish, …) as
+   capacity allows.

@@ -63,7 +63,9 @@ message-only/docs chores + why).
 
 `Type` is one of `Feat:`, `Fix:`, `Perf:`, `Chore:`, `Docs:`. Keep the
 subject under ~72 characters where possible; the DESIGN.md section
-reference anchors the change to the design record.
+reference anchors the change to the design record. The message must
+describe the diff it accompanies — a message narrating changes that are
+not in the commit falsifies the decision record.
 
 ## Browser end-to-end tests (Playwright)
 

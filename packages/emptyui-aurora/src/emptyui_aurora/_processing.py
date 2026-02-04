@@ -1094,9 +1094,10 @@ def _resolve_band_style(band_style):
     ``"uniform"`` — the uniform log2-grid partition with merge-based level
     combination (formerly named ``"log"``, legacy alias accepted). The
     retired ``"emtf"`` value is accepted as a legacy alias of ``"l2u"``
-    (identical scheme was not — the auto-derived disjoint EMTF-style table
-    was replaced 2026-09-11 by the l2u scheme); the retired ``"index"``
-    mode raises a clear error.
+    — not because the schemes are identical (the auto-derived disjoint
+    EMTF-style table was replaced by the l2u scheme on 2026-09-11), but
+    so saved workflows keep running; the retired ``"index"`` mode raises
+    a clear error.
     """
     style = str(band_style or "l2u").strip().lower()
     if style == "log":  # legacy alias, identical behavior

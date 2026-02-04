@@ -24,6 +24,7 @@ read it first; this guide is the operational counterpart.
 | `EMPTYUI_DATA_ROOT` | Read-only root for platform-provisioned data. Input path params (CSV/MTH5/calibration/LEMI data) resolve only inside it; `/api/files` is clamped to it; output params resolve into the per-run workspace (absolute output paths are rejected in remote mode). **Unset = unrestricted (local dev).** | unset |
 | `EMPTYUI_SERVE_DIST` | Directory of the built frontend (e.g. `/opt/emptyui/web/dist`). When set, FastAPI serves it at `/` (single origin). | unset (Vite dev serves itself) |
 | `EMPTYUI_CORS_ORIGINS` | Comma-separated allowed origins. Empty value **disables** the CORS middleware (same-origin serving needs none). | `*` |
+| `EMPTYUI_BASE_PATH` | ASGI sub-path for module embedding (e.g. `/tools/emptyui`) — sets FastAPI `root_path`. Usually provided by the proxy/uvicorn `--root-path` instead. | unset |
 | `EMPTYUI_WORKSPACE_TTL` | Retain completed run workspaces and artifacts for this many seconds before cleanup. `0` or unset disables cleanup. | disabled |
 | `EMPTYUI_MAX_CONCURRENT_RUNS` | Maximum queued/running runs per backend process. `0` or unset is unlimited. Excess submissions receive HTTP 429. | unlimited |
 | `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime settings (plugin enable/disable §5.1 + live knobs §22: retention TTL, run limit, cache size). **Unset = in-memory only** — no settings file is created. | unset (memory-only) |

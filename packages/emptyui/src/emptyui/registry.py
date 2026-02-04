@@ -119,9 +119,13 @@ class Registry:
 
         Module imports are cached by Python, so re-running discovery is
         cheap; the node table is rebuilt into a scratch registry and
-        swapped in atomically, so readers (e.g. a run starting while a
-        toggle happens) see either the old or the new table — never an
-        empty or partial one. Nodes added directly via :meth:`add`
+        swapped in atomically, so readers see either the old or the new
+        ``_nodes`` table — never an empty or partial one. The plugin
+        tables are updated in three separate assignments immediately
+        after, so a concurrent ``/api/nodes`` read can briefly pair the
+        new node table with the old plugin tables (harmless: manifests()
+        only touches ``_nodes``; status_of during a race may misattribute
+        a just-disabled type). Nodes added directly via :meth:`add`
         survive a rebuild (they are re-registered unless a plugin claims
         the same type — plugin nodes win on conflict).
         """
