@@ -18,8 +18,11 @@ in Select Runs since `623e541`), the `BuildFC.decimation_levels` and
 `MergeFC` manifest descriptions corrected, the schema's unknown-param
 hard-reject removed in favor of the documented §24.9 tolerate+warn policy
 (end-to-end test added), and malformed workflow JSON now returns 422 with
-pydantic's field errors instead of a 500. Suite after the fixes:
-**Python 453 passed / e2e 18 passed**. The universal saturation-mask
+pydantic's field errors instead of a 500. M5–M8 (the physics batch) are
+resolved with corrected records — see their entries below (M5's trigger
+was overstated and re-verified; M6/M7/M8 shipped with empirical
+convention/declination/geometry fixes). Suite after the fixes:
+**Python 464 passed / e2e 18 passed**. The universal saturation-mask
 follow-up is recorded as M4 #19 in DESIGN.md §11 and the README.
 
 Everything else in the documented contract (API routes, caching/partial
@@ -169,23 +172,38 @@ specified. The findings below are the exceptions.
   catches pydantic's `ValidationError` and returns 422 with the field
   errors; `test_malformed_workflow_returns_422_not_500` covers the
   malformed-envelope cases.
-- **M5** `RotateTF` hard-requires a tipper (`emptyui_mth5/tf.py:248-251`)
-  although `_rotate_arrays` handles `hz is None` — tipper-less EDIs (very
-  common) fail with a misleading "ex/ey/hz required" error; a conditional
-  2×2 block fixes it.
-- **M6** EDI import ignores `SIGNCONVENTION` (`tf.py:133-149`): an
-  `exp(+iωt)` product (e.g. the Phoenix `B0940330_z.edi` whose 180° flip the
-  §24.12 record corrected by hand) imports with mirrored phases and no
-  warning; also interacts with the 0–90° phase fold (−45° → clipped).
-- **M7** §24.2 declination fix is partial (`tf.py:145-147`): `if not d.value:`
-  cannot distinguish "field absent" from "explicit 0.0" (mt_metadata
-  defaults the header declination to 0.0); an explicit zero in an unparsed
-  format can be silently overwritten by the Hx-AZM fallback.
-- **M8** FC provenance round-trip loses attrs (`emptyui_mth5/fc.py`): only
-  `units` survives write→read; `magnetic_unit`, `electric_scaling`,
-  `calibration_applied`, window geometry, station identity all drop —
-  breaking merge warnings and the §23.3 provenance line for read-back FCs
-  (§3's "enriched by `mth5.fc.read`" only partially holds).
+- **M5** ~~`RotateTF` hard-requires a tipper~~ — **FIXED (record corrected)**:
+  verification showed the claimed trigger (EDI imports) is factually wrong —
+  EDI/XML readers store 5×5/3×2 with a zero hz row, so tipper-less EDIs
+  (verified on the real USArray SDG31 EDI) and tipper-less `build_tf` TFs both
+  rotate fine. The `hz_i is None` path is defensively unreachable in the
+  bundled stack; hardened anyway (conditional zero-filled hz row, consistent
+  with `_rotate_arrays`' tolerance) and regression-tested.
+- **M6** ~~EDI import ignores `SIGNCONVENTION`~~ — **FIXED**: Import TF gains a
+  `sign_convention` param (`as-is` default / `negate (180 deg)` /
+  `conjugate`). Empirics (stored §24.12 parity data): the Phoenix MT-Editor
+  EDI needs **negation** (Δφ +0.24°), not conjugation (−67°); the USArray
+  EMTF EDI declares exp(+iωt) yet its data already matches emptyUI as-is —
+  so headers cannot be auto-trusted; `as-is` warns when the field declares
+  the + family, conversions append a processing note.
+- **M7** ~~declination explicit-0.0 vs absent~~ — **FIXED**: layered logic —
+  strict-matched Decl field is authoritative (explicit 0.0 survives, model
+  not clobbered); a declination KEY line the strict regex cannot parse
+  defers to mt_metadata's parser (no Hx override); the Hx AZM fallback fires
+  only when no declination field exists anywhere.
+- **M8** ~~FC provenance round-trip loses attrs~~ — **FIXED (scoped)**: a
+  JSON-attr shortcut was implemented and **rejected after verification** —
+  mt_metadata's `read_metadata` parses every group attribute and unknown
+  keys crash ANY foreign consumer of the archive. Delivered instead: the
+  window/decimation geometry rides mth5's own FC metadata model
+  (`time_series_decimation` + `short_time_fourier_transform`, written by
+  Write FC and `persist_fc_level`, restored by Read FC/`load_fc_level` with
+  enum-value normalization), station identity resolves from the archive
+  hierarchy, and `magnetic_unit`/nomenclature re-derive from channel names.
+  `electric_scaling`/`calibration_applied` deliberately stay in-memory
+  provenance (the FC model cannot express them; FC amplitudes are already
+  calibrated). Bonus fix: Read FC with an empty run id now falls back to the
+  first run (pre-existing gap, same contract as the write node).
 - **M9** Frontend: `fitView` is consumed on the empty initial node set (no-op)
   and `padding: 40` is a *fraction* in React Flow v12, not px
   (`packages/web/src/App.tsx:360-364`); polling-fallback dedupe omits `port`
@@ -266,5 +284,5 @@ specified. The findings below are the exceptions.
    forwarding, message amend, e2e replacement).
 2. ~~**M1–M4**~~ — **done** (doc refresh, manifest descriptions,
    tolerate+warn policy, 422-on-malformed).
-3. M5–M14 and the low list as capacity allows; the physics items (M5–M8)
-   matter most for correctness-sensitive users.
+3. ~~**M5–M8**~~ — **done** (physics batch, with corrected records).
+4. M9–M14 and the low list as capacity allows.

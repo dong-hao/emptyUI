@@ -1,4 +1,5 @@
-"""Rotate TF node: frame rotation math, node behaviour, EDI declination parsing."""
+"""Rotate TF node: frame rotation math, node behaviour, EDI declination
+parsing and sign-convention handling."""
 
 from __future__ import annotations
 
@@ -370,3 +371,132 @@ def test_import_edi_no_declination(tmp_path: Path):
     tf = ImportTF().execute(ctx, str(p))["tf"]
     d = tf.station_metadata.location.declination
     assert float(d.value) == 0.0
+
+
+# --- M5: tipper-less TF rotation -----------------------------------------
+
+def test_rotate_tipperless_tf():
+    """A tipper-less TF (zero hz row, the canonical storage for absent
+    tipper) rotates: the impedance block rotates, the hz row stays zero."""
+    tf = _lemi_tf(with_tipper=False)
+    out = rotate_transfer_function(tf, 45.0)
+    R = _rot_matrix(45.0)
+    expect = np.einsum("ij,njk,lk->nil", R, _z2(tf), R)
+    assert np.allclose(_z2(out), expect)
+    assert np.allclose(_tipper(out), 0.0)
+    assert np.allclose(_tipper(tf), 0.0)
+
+
+def test_rotate_hz_less_storage_zero_fills_tipper_row():
+    """A dataset genuinely lacking the hz coordinate (out-of-contract
+    storage, reachable only by bypassing the TF setter) still rotates —
+    mt_metadata's canonical 3x2 setter forces a zero-filled hz row."""
+    from types import SimpleNamespace
+
+    from emptyui_mth5.tf import _standard_indices
+
+    tf = _lemi_tf(with_tipper=False)
+    arr = tf.dataset["transfer_function"]
+    (ex_i, ey_i, hz_i), (hx_i, hy_i) = _standard_indices(
+        tf, ("ex", "ey", "hz"), ("hx", "hy"))
+    assert hz_i is not None  # canonical storage always carries the hz row
+    z2 = arr.isel(output=[ex_i, ey_i], input=[hx_i, hy_i]).copy()
+    stub = SimpleNamespace(
+        dataset={"transfer_function": z2},
+        inverse_channel_nomenclature=dict(tf.inverse_channel_nomenclature),
+        ex=tf.ex, ey=tf.ey, hz=tf.hz, hx=tf.hx, hy=tf.hy,
+        run_metadata=SimpleNamespace(comments=SimpleNamespace(value="")),
+    )
+    out = rotate_transfer_function(stub, 45.0)
+    blk = out.transfer_function
+    assert blk.shape[1:] == (3, 2)
+    assert np.allclose(blk.values[:, 2, :], 0.0)
+    R = _rot_matrix(45.0)
+    expect = np.einsum("ij,njk,lk->nil", R, z2.values, R)
+    assert np.allclose(blk.values[:, :2, :], expect)
+
+
+# --- M6: EDI sign convention (not reliably self-describing) ---------------
+
+def _sign_edi(with_field: bool = True) -> str:
+    text = MINI_EDI.replace(
+        ">ZXYI //2\n0.000000E+00 0.000000E+00",
+        ">ZXYI //2\n5.000000E-01 5.000000E-01")
+    if with_field:
+        text = text.replace(
+            "REFTYPE=CART",
+            "REFTYPE=CART\nSIGNCONVENTION=exp(+ i\\omega t)")
+    return text
+
+
+def _import(tmp_path, text, **kwargs):
+    p = tmp_path / "site.edi"
+    p.write_text(text)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    return ImportTF().execute(ctx, str(p), **kwargs)["tf"]
+
+
+def test_import_negate_convention(tmp_path: Path):
+    base = _import(tmp_path, _sign_edi())
+    neg = _import(tmp_path, _sign_edi(), sign_convention="negate (180 deg)")
+    a = base.dataset["transfer_function"].values
+    b = neg.dataset["transfer_function"].values
+    assert np.allclose(b, -a)
+    assert "negated" in neg.run_metadata.comments.value
+    assert "negated" not in (base.run_metadata.comments.value or "")
+
+
+def test_import_conjugate_convention(tmp_path: Path):
+    base = _import(tmp_path, _sign_edi())
+    con = _import(tmp_path, _sign_edi(),
+                  sign_convention="conjugate (exp(+i omega t))")
+    a = base.dataset["transfer_function"].values
+    b = con.dataset["transfer_function"].values
+    assert np.allclose(b, np.conj(a))
+    assert "conjugated" in con.run_metadata.comments.value
+
+
+def test_import_as_is_warns_on_declared_plus_convention(tmp_path, caplog):
+    with caplog.at_level("WARNING", logger="emptyui"):
+        _import(tmp_path, _sign_edi())
+    assert any("SIGNCONVENTION" in r.message for r in caplog.records)
+
+
+def test_import_no_sign_field_no_warning(tmp_path, caplog):
+    with caplog.at_level("WARNING", logger="emptyui"):
+        _import(tmp_path, _sign_edi(with_field=False))
+    assert not any("SIGNCONVENTION" in r.message for r in caplog.records)
+
+
+# --- M7: explicit-zero declination vs absent (the 'not d.value' gap) ------
+
+def test_import_explicit_zero_declination_not_overridden(tmp_path: Path):
+    """An explicit DECLINATION=0.0 must survive: the strict-match branch
+    used to treat the falsy 0.0 as 'unset' and re-set it (clobbering the
+    model); the Hx AZM fallback must not fire over an explicit field."""
+    text = MINI_EDI.replace("DECL=5.7", "DECL=0.0")
+    text = text.replace("DECLINATION=5.7 degree", "DECLINATION=0.0 degree")
+    tf = _import(tmp_path, text)
+    d = tf.station_metadata.location.declination
+    assert float(d.value) == 0.0
+    assert d.model != "unknown"
+
+
+def test_import_exotic_decl_line_no_hx_override(tmp_path: Path):
+    """A declination KEY line the strict regex cannot parse: mt_metadata's
+    parser owns it — the Hx AZM fallback must not silently override."""
+    text = MINI_EDI.replace("DECL=5.7\n", "")
+    text = text.replace(
+        "DECLINATION=5.7 degree\n", "DECLINATION.WMM=0.0\n")
+    tf = _import(tmp_path, text)
+    d = tf.station_metadata.location.declination
+    assert float(d.value) == 0.0
+
+
+def test_import_hx_fallback_still_fires(tmp_path: Path):
+    """No declination field at all + Hx AZM=5.7 -> the USArray-style
+    fallback still supplies the declination (existing behaviour)."""
+    text = MINI_EDI.replace("DECL=5.7\n", "")
+    text = text.replace("DECLINATION=5.7 degree\n", "")
+    tf = _import(tmp_path, text)
+    assert float(tf.station_metadata.location.declination.value) == 5.7

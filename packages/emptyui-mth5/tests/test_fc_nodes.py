@@ -101,3 +101,69 @@ def test_spectra_to_fc_group_metadata(writable_archive, tmp_path, caplog):
     with caplog.at_level(_logging.WARNING, logger="emptyui"):
         SpectraToFCGroup().execute(ctx, fc2, mth5=writable_archive)
     assert any("no sample_rate metadata" in r.message for r in caplog.records)
+
+
+# --- M8: fc geometry/identity survive the archive round trip --------------
+
+_GEOMETRY = {
+    "sample_rate": 2.0, "decimation_level": 0, "factor": 4,
+    "num_samples_window": 256, "overlap": 0.5, "window_type": "hamming",
+    "prewhitening": "first difference", "per_window_detrend": "linear",
+}
+
+
+def test_fc_provenance_round_trip(writable_archive, tmp_path):
+    """Write FC -> Read FC restores the window/decimation geometry (mth5's
+    native FC metadata model), the station identity (archive hierarchy) and
+    the nomenclature/magnetic-unit derivations — so the merge_fc window
+    warnings and the §23.3 provenance line work for read-back FCs.
+
+    Note: attrs the FC metadata model cannot express (electric_scaling,
+    calibration_applied) deliberately stay in-memory provenance — unknown
+    HDF5 attributes would break mt_metadata's read_metadata for any
+    foreign consumer of the archive.
+    """
+    from emptyui_mth5.fc import FCGroupToSpectra
+
+    fc = _fc_dataset()
+    fc.attrs.update(_GEOMETRY)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    SpectraToFCGroup().execute(ctx, fc, mth5=writable_archive)
+    out = FCGroupToSpectra().execute(ctx, writable_archive)["fc"]
+    # geometry from mth5's native FC metadata
+    assert out.attrs["sample_rate"] == 2.0
+    assert out.attrs["num_samples_window"] == 256
+    assert out.attrs["window_type"] == "hamming"
+    assert abs(out.attrs["overlap"] - 0.5) < 1e-9
+    assert out.attrs["prewhitening"] == "first difference"
+    assert out.attrs["per_window_detrend"] == "linear"
+    assert out.attrs["factor"] == 4
+    # identity resolved from the archive hierarchy
+    assert out.attrs.get("station_id")
+    assert out.attrs.get("run_id")
+    # derivations from the channel names
+    assert out.attrs["channel_nomenclature"] == "default"
+    # magnetic unit is re-derived from the channel names (the recorded 'b'
+    # vs 'h' choice is in-memory provenance; standard hx/hy derive to 'h')
+    assert out.attrs["magnetic_unit"] in ("b", "h")
+    assert out.attrs["input_channels"] == "hx,hy"
+    assert out.attrs["output_channels"] == "ex,ey"
+
+
+def test_persist_fc_level_round_trips_geometry(tmp_path):
+    """The workspace persistence path (Compute FC auto-persist, Build FC
+    persist) records and restores the same geometry/identity."""
+    from emptyui_mth5.persist import load_fc_level, persist_fc_level
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = _fc_dataset()
+    fc.attrs.update(_GEOMETRY)
+    persist_fc_level(ctx, fc, 0, 2.0, survey="ws", station="st", run="r1")
+    out = load_fc_level(ctx, 0, survey="ws", station="st", run="r1")
+    assert out.attrs["sample_rate"] == 2.0
+    assert out.attrs["num_samples_window"] == 256
+    assert out.attrs["window_type"] == "hamming"
+    assert abs(out.attrs["overlap"] - 0.5) < 1e-9
+    assert out.attrs["station_id"] == "st"
+    assert out.attrs["run_id"] == "r1"
+    assert out.attrs["survey_id"] == "ws"

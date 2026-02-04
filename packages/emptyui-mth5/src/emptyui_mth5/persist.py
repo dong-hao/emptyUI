@@ -79,6 +79,12 @@ def persist_fc_level(
         dec_level.from_xarray(fc, sample_rate_decimation_level=float(sample_rate))
         dec_level.update_metadata()
         fc_group.update_metadata()
+        # window/decimation geometry rides mth5's own FC metadata model
+        # (unknown HDF5 attrs would break mt_metadata's read_metadata for
+        # any foreign consumer — see write_fc_geometry)
+        from .fc import write_fc_geometry
+
+        write_fc_geometry(dec_level, dict(fc.attrs))
     finally:
         m.close_mth5()
     return path
@@ -107,7 +113,13 @@ def load_fc_level(
             .fourier_coefficients_group.get_fc_group(run)
             .get_decimation_level(str(decimation_level))
         )
-        return dec.to_xarray(channels=channels)
+        spectra = dec.to_xarray(channels=channels)
+        from .fc import _enrich_fc_attrs
+
+        _enrich_fc_attrs(
+            spectra, dec, decimation_level,
+            m.get_survey(survey).stations_group.get_station(station))
+        return spectra
     finally:
         m.close_mth5()
 

@@ -98,6 +98,36 @@ _EDI_HX_AZM_RE = re.compile(
     r"(?im)^\s*>?\s*hmeas\b[^\n]*\b(?:azm|azim(?:uth)?)\s*=\s*([-+]?\d+(?:\.\d+)?)"
 )
 
+#: A declination KEY line in any format variant (HEAD or INFO): the line
+#: merely has to START with a decl key — values may be multi-field, quoted,
+#: or commented, which the strict value regex cannot parse. Presence of such
+#: a line means mt_metadata's own parser already handled the field.
+_EDI_DECL_KEY_RE = re.compile(r"(?im)^\s*>?\s*decl(?:ination)?\b")
+
+#: EDI SIGNCONVENTION field (HEAD): e.g. ``SIGNCONVENTION=exp(+ i\omega t)``.
+_EDI_SIGNCONVENTION_RE = re.compile(
+    r"(?im)^\s*signconvention\s*=\s*(.+?)\s*$"
+)
+
+
+def _edi_decl_plus_family(value: str) -> bool:
+    """Classify a SIGNCONVENTION value into the exp(+iωt) family ('+' or
+    'exp(+ i omega t)' spellings); anything else ('-', 'exp(-iwt)', …) is
+    the exp(−iωt) family."""
+    return "+" in value
+
+
+def _hx_azimuth(text: str) -> float | None:
+    """The Hx measurement azimuth (deg) from DEFINEMEAS, or None."""
+    for line in text.splitlines():
+        if re.match(r"(?i)^\s*>?\s*hmeas\b", line) and re.search(
+            r"(?i)\bchtype\s*=\s*hx\b", line
+        ):
+            m = _EDI_HX_AZM_RE.search(line)
+            if m:
+                return float(m.group(1))
+    return None
+
 
 def _edi_declination(text: str) -> float | None:
     """Best-effort station declination (deg) from an EDI file.
@@ -110,27 +140,50 @@ def _edi_declination(text: str) -> float | None:
     m = _EDI_DECL_RE.search(text)
     if m:
         return float(m.group(1))
-    for line in text.splitlines():
-        if re.match(r"(?i)^\s*>?\s*hmeas\b", line) and re.search(
-            r"(?i)\bchtype\s*=\s*hx\b", line
-        ):
-            m = _EDI_HX_AZM_RE.search(line)
-            if m:
-                return float(m.group(1))
-    return None
+    return _hx_azimuth(text)
 
 
 class ImportTF(Node):
     type = "mth5.tf.import"
     title = "Import TF"
     tooltip = "Read a transfer function from file (edi/xml/zmm/avg/j)."
-    description = "Read a transfer function from file (edi/xml/zmm/avg/j)."
+    description = (
+        "Read a transfer function from file (edi/xml/zmm/avg/j). For EDI, "
+        "the station declination is parsed (explicit Declination/Decl field, "
+        "else the Hx measurement azimuth; when neither is present the "
+        "'Angle' parameter of Rotate TF applies). Sign conventions in the "
+        "EDI world are NOT reliably self-describing: the official USArray "
+        "EMTF EDI declares exp(+i omega t) but its data already matches "
+        "emptyUI's exp(-i omega t) convention as-is (DESIGN §16.3), while "
+        "Phoenix MT-Editor EDIs declare nothing and need the 180-deg "
+        "negation (DESIGN §24.12). 'Sign convention' = as-is imports the "
+        "file untouched (default); the negation/conjugation options convert "
+        "the data (a processing note records the conversion); the "
+        "SIGNCONVENTION header field, when present, is checked with a "
+        "warning since it may not match the data."
+    )
     category = "Data I/O"
     inputs = ()
     outputs = (Output("tf", "tf"),)
-    params = (Param("path", "file", label="TF file path", path_kind="in"),)
+    params = (
+        Param("path", "file", label="TF file path", path_kind="in"),
+        Param("sign_convention", "select", label="Sign convention",
+              default="as-is",
+              options=("as-is", "negate (180 deg)",
+                       "conjugate (exp(+i omega t))"),
+              description="Convert the imported TF to emptyUI's exp(-i "
+                          "omega t) convention. 'negate' multiplies Z and "
+                          "the tipper by -1 (the empirically verified "
+                          "conversion for Phoenix MT-Editor EDIs, §24.12); "
+                          "'conjugate' flips the sign of the imaginary "
+                          "parts (the literal exp(+i omega t) -> exp(-i "
+                          "omega t) mapping). EDI headers cannot be "
+                          "trusted to distinguish the cases — see the "
+                          "USArray counter-example."),
+    )
 
-    def execute(self, ctx, path: str) -> dict[str, Any]:
+    def execute(self, ctx, path: str,
+                sign_convention: str = "as-is") -> dict[str, Any]:
         from mt_metadata.transfer_functions.core import TF
 
         p = Path(path)
@@ -138,13 +191,55 @@ class ImportTF(Node):
             raise FileNotFoundError(f"TF file not found: {p}")
         tf = TF()
         tf.read(fn=str(p))
+        notes = []
         if p.suffix.lower() == ".edi":
-            decl = _edi_declination(p.read_text(errors="replace"))
-            if decl is not None:
-                d = tf.station_metadata.location.declination
-                if not d.value:  # never override a value mt_metadata parsed
-                    d.value = float(decl)
+            text = p.read_text(errors="replace")
+            m = _EDI_SIGNCONVENTION_RE.search(text)
+            if m and _edi_decl_plus_family(m.group(1)) and (
+                    sign_convention == "as-is"):
+                ctx.logger.warning(
+                    "the EDI declares SIGNCONVENTION '%s' (exp(+i omega t) "
+                    "family) but EDI headers are not reliably "
+                    "self-describing: the official USArray EMTF EDI declares "
+                    "it while its data already matches the exp(-i omega t) "
+                    "convention as-is. If phases appear mirrored, set the "
+                    "'Sign convention' param explicitly.", m.group(1))
+            if sign_convention.startswith("negate"):
+                tf.dataset["transfer_function"].values *= -1.0
+                notes.append("sign convention: negated (180 deg) on import")
+            elif sign_convention.startswith("conjugate"):
+                tf.dataset["transfer_function"].values = np.conj(
+                    tf.dataset["transfer_function"].values)
+                notes.append(
+                    "sign convention: conjugated (exp(+i omega t) -> "
+                    "exp(-i omega t)) on import")
+            m = _EDI_DECL_RE.search(text)
+            d = tf.station_metadata.location.declination
+            if m:
+                # an explicit Decl field (strictly parsed) is authoritative —
+                # including an explicit 0.0 (M7: 'not d.value' cannot
+                # distinguish absent from explicit zero)
+                decl = float(m.group(1))
+                if decl != d.value:
+                    d.value = decl
                     d.model = "unknown"
+            elif _EDI_DECL_KEY_RE.search(text):
+                # a declination KEY line exists in a format the strict
+                # regex cannot parse — mt_metadata's own parser already
+                # handled it; never override, never fall back to Hx
+                pass
+            elif not d.value:
+                # no declination field anywhere: fall back to the Hx
+                # measurement azimuth (USArray EMTF convention)
+                hx = _hx_azimuth(text)
+                if hx is not None:
+                    d.value = float(hx)
+                    d.model = "unknown"
+        if notes:
+            existing = tf.run_metadata.comments.value
+            add = "\n".join(notes)
+            tf.run_metadata.comments.value = (
+                f"{existing}\n{add}" if existing else add)
         ctx.progress(1.0, f"imported TF from {p.name}")
         return {"tf": tf}
 
@@ -231,9 +326,11 @@ def rotate_transfer_function(tf, angle_deg: float):
 
     Standard MT convention (DESIGN.md §16.3): ``Z' = R(angle) Z R(angle)ᵀ``,
     the tipper rotates as a vector, and per-element error stds rotate with
-    ``|R|`` (conservative bound — no covariance is stored). Station/survey
-    metadata is carried over unchanged; a one-line processing note is
-    appended to the run comments.
+    ``|R|`` (conservative bound — no covariance is stored). A tipper-less
+    TF rotates fine (only the impedance block is rotated; mt_metadata's
+    canonical storage zero-fills the hz row). Station/survey metadata is
+    carried over unchanged; a one-line processing note is appended to the
+    run comments.
     """
     import copy
 
@@ -245,23 +342,36 @@ def rotate_transfer_function(tf, angle_deg: float):
     (ex_i, ey_i, hz_i), (hx_i, hy_i) = _standard_indices(
         out, ("ex", "ey", "hz"), ("hx", "hy")
     )
-    if None in (ex_i, ey_i, hz_i, hx_i, hy_i):
+    if None in (ex_i, ey_i, hx_i, hy_i):
         raise ValueError(
-            "a TF with ex/ey/hz outputs and hx/hy inputs is required to rotate"
+            "a TF with ex/ey outputs and hx/hy inputs is required to rotate"
         )
     # mt_metadata's TF setter accepts only the 3x2 impedance(+tipper) block in
     # the nomenclature-mapped channel names (the canonical storage is 5x5).
+    # A tipper-less TF (e.g. impedance-only formats) is stored with a
+    # zero-filled hz row — mt_metadata's own representation of an absent
+    # tipper; the rotation leaves it zero (nothing to rotate).
     coords = {
         "period": arr.coords["period"].values,
         "output": [out.ex, out.ey, out.hz],
         "input": [out.hx, out.hy],
     }
-    blk = data[:, [ex_i, ey_i, hz_i], :][:, :, [hx_i, hy_i]]
+    if hz_i is None:
+        z2 = data[:, [ex_i, ey_i], :][:, :, [hx_i, hy_i]]
+        blk = np.concatenate(
+            [z2, np.zeros_like(z2[:, :1, :])], axis=1)
+    else:
+        blk = data[:, [ex_i, ey_i, hz_i], :][:, :, [hx_i, hy_i]]
     out.transfer_function = xr.DataArray(
         blk, dims=("period", "output", "input"), coords=coords
     )
     if err is not None:
-        eblk = err[:, [ex_i, ey_i, hz_i], :][:, :, [hx_i, hy_i]]
+        if hz_i is None:
+            e2 = err[:, [ex_i, ey_i], :][:, :, [hx_i, hy_i]]
+            eblk = np.concatenate(
+                [e2, np.zeros_like(e2[:, :1, :])], axis=1)
+        else:
+            eblk = err[:, [ex_i, ey_i, hz_i], :][:, :, [hx_i, hy_i]]
         out.transfer_function_error = xr.DataArray(
             eblk, dims=("period", "output", "input"), coords=coords
         )
