@@ -50,7 +50,7 @@ function LiveKnobRow({
  *
  * Sections: Plugins (§5.1 enable/disable, bundled read-only), Server &
  * retention (live-editable knobs, explicit Save), Deployment (read-only
- * env/restart-level rows), Planned (reserved §21 cache knobs, inert).
+ * env/restart-level rows), Planned (reserved §12.3 cache knobs, inert).
  */
 export function SettingsDialog({ onClose }: Props) {
   const { plugins, loading, error, load, toggle } = usePlugins();
@@ -155,7 +155,7 @@ export function SettingsDialog({ onClose }: Props) {
             </table>
           )}
 
-          <h3 className="settings-section">Planned — disk cache (§21)</h3>
+          <h3 className="settings-section">Planned — disk cache (§12.3)</h3>
           {view && (
             <table className="plugin-table">
               <tbody>

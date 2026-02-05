@@ -45,7 +45,7 @@ export default function App() {
     ReactFlowInstance<Node<MTNodeData>, Edge> | null
   >(null);
 
-  // §9 initial view: fit the graph once it first becomes non-empty (the
+  // §8 initial view: fit the graph once it first becomes non-empty (the
   // declarative `fitView` prop is consumed on the empty initial node set in
   // React Flow v12 — an explicit call after the first node arrives covers
   // both palette-add and document load). React Flow v12 padding is a
@@ -93,7 +93,7 @@ export default function App() {
     }
   }, [catalog]);
 
-  // Copy/paste of the selected subgraph (DESIGN.md §9, ComfyUI parity):
+  // Copy/paste of the selected subgraph (DESIGN.md §8, ComfyUI parity):
   // Ctrl/Cmd+C copies the selected nodes + their internal edges, Ctrl/Cmd+V
   // pastes with fresh ids and a fan-out offset, Ctrl/Cmd+D duplicates in
   // place. Keystrokes originating in form controls (param editing!) are
@@ -128,7 +128,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Live connection rule (DESIGN.md §3 + §9): self-loops, type mismatches
+  // Live connection rule (DESIGN.md §3 + §8): self-loops, type mismatches
   // and cycles are rejected during the drag — React Flow greys out invalid
   // drop targets. The same rule re-validates in onConnect and server-side.
   const isValidConnection = useCallback(
@@ -144,7 +144,7 @@ export default function App() {
     [catalog],
   );
 
-  // --- Disconnect gestures (DESIGN.md §9, ComfyUI parity) -----------------
+  // --- Disconnect gestures (DESIGN.md §8, ComfyUI parity) -----------------
   // 1. Drag a connected handle to the empty pane -> unlink. onConnectStart
   //    records the edge(s) on the starting handle; onConnectEnd detaches
   //    them when no valid new connection was made. Input handles hold one

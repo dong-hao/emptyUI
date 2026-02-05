@@ -72,7 +72,7 @@ export interface SettingsView {
   live: Record<string, LiveSetting>;
   /** deployment-level rows — display only (env/restart) */
   deployment: Record<string, unknown>;
-  /** reserved for the postponed §21 disk cache */
+  /** reserved for the postponed §12.3 disk cache */
   planned: Record<string, unknown>;
 }
 
@@ -151,7 +151,7 @@ export const api = {
   files: (path = "") =>
     getJson<FileListing>(`/files?path=${encodeURIComponent(path)}`),
   // runtime settings (DESIGN.md §22): live knobs editable, deployment rows
-  // read-only, planned (§21 cache) knobs reserved
+  // read-only, planned (§12.3 cache) knobs reserved
   settings: () => getJson<SettingsView>("/settings"),
   putSettings: async (values: Record<string, number | null>): Promise<SettingsView> => {
     const res = await fetch(`${BASE}/settings`, {

@@ -1,4 +1,4 @@
-"""FastAPI application (DESIGN.md §8).
+"""FastAPI application (DESIGN.md §7.3).
 
 M1: runs execute on a worker thread; events stream to WebSocket clients.
 """
@@ -123,7 +123,7 @@ def create_app(
     disabled_plugins: tuple[str, ...] | None = None,
     settings_path: Path | str | None = None,
 ) -> FastAPI:
-    """Build the application (DESIGN.md §8, remote-mode knobs §17/§17.2).
+    """Build the application (DESIGN.md §7.3, remote-mode knobs §17/§17.2).
 
     Explicit keyword arguments win over ``settings``/env: embedding platforms
     pass what they need without env coupling. ``data_root`` confines input
@@ -365,7 +365,7 @@ def create_app(
     @app.get("/api/settings")
     def get_settings() -> dict:
         """Effective runtime settings (§22): live-editable knobs, read-only
-        deployment rows and the reserved (planned) §21 cache knobs."""
+        deployment rows and the reserved (planned) §12.3 cache knobs."""
         return _settings_view()
 
     @app.put("/api/settings")

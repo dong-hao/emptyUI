@@ -36,7 +36,7 @@ interface RunState {
   reset: () => void;
 }
 
-/** Ephemeral run state streamed over WebSocket (DESIGN.md §9). */
+/** Ephemeral run state streamed over WebSocket (DESIGN.md §8). */
 export const useRun = create<RunState>((set) => ({
   runId: null,
   runStatus: "idle",

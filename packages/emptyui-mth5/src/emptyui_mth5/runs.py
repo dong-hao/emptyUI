@@ -368,7 +368,7 @@ def _channel_units_from(source):
     mth5 RunTS archives carry units in the dataset variable attrs
     (``nanoTesla`` / ``milliVolt per kilometer``); core/synthetic payloads
     usually carry none. Align Runs must preserve them: Compute FC reads the
-    units to decide the nT→A/m conversion (DESIGN §16.4) — dropping them
+    units to decide the nT→A/m conversion (DESIGN §16.3) — dropping them
     silently returns the impedance to wrong units.
     """
     units: dict[str, str] = {}

@@ -53,7 +53,7 @@ def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
     Note the mode only drives the nT->A/m conversion via
     :func:`_magnetic_to_h`: 'b' always converts (fluxgate B is nT), while
     'h' converts unless the payload units already say A/m (coil archives are
-    nT too — see DESIGN §16.4 USArray verification).
+    nT too — see DESIGN §16.3 USArray verification).
     """
     mu = str(magnetic_unit or "auto").strip().lower()
     if mu in ("h", "b"):
@@ -628,7 +628,7 @@ def _channel_units(value):
 #: the instrument response), so any FC/TF built from them is garbage with a
 #: plausible-looking shape. mth5 archives built from FDSN store raw counts
 #: with the response attached — a Calibrate step is mandatory before
-#: Compute FC (DESIGN §16.4).
+#: Compute FC (DESIGN §16.3).
 _COUNT_UNITS = ("digital counts", "count", "counts")
 
 

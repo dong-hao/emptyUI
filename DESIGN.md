@@ -3,27 +3,17 @@
 A node-based, ComfyUI-inspired visual workflow interface for magnetotelluric (MT)
 data processing and visualization.
 
-Status: v0.2 — design frozen for M0/M1 (2026-08-25).
-Implementation status: **M0–M3 complete (2026-09-09)**; post-M3 deliveries:
-automatic l2u frequency grid (2026-09-11, §14.9) and the TF rotation node
-(2026-09-11, §11/§16.3). Every remaining item is M4 and ranked by gain/effort in
-§11. Sections §1–§12 are the current contract; §13–§17 are condensed records of
-delivered plans (kept for the decisions they encode, not as work logs).
+Status: **M0–M3 complete (2026-09-09)**; M4 (community & advanced backlog) in
+progress — ranked by gain/effort in §12.
 
-Processing-correctness milestones (all verified):
-- **Unit normalization**: magnetic channels converted nT→A/m (B→H; both fluxgate
-  and coil archives are nT — verified against the USArray EDI, §16.3) and
-  electric mV/km→V/m; the missing nT→T factor was the root cause of
-  non-physical apparent resistivity (now ~10–10³ Ω·m).
-- **Impedance phase convention**: verified against aurora on the official
-  synthetic halfspace (`test12rr`); all three estimators (OLS/RME/RME_RR) are
-  aurora-backed and share aurora's convention (Zxy≈+45°, Zyx≈−135°).
-- Detrending is the dedicated `core.filter.detrend` node (mean/linear/none);
-  `e_dipole_length_m` optional (off by default — LEMI output is mV/km).
-- **Channel nomenclature** (2026-09-05): instrument naming handled through
-  mt_metadata's canonical `CHANNEL_MAPS` (§3) instead of hardcoded tables; the
-  magnetic B/H mode is derived automatically and TFs are built aurora-style
-  (actual channel names + nomenclature map).
+**How to read this document.** Sections §1–§12 are the **living contract** —
+the current architecture and behavior, organized by subsystem (framework, backend,
+frontend, data support, processing). Delivered design decisions are recorded in
+`docs/history/` (`m2-delivery.md`, `m3-delivery.md`, `m4-delivery.md`), which
+preserve the **original §13–§24 numbering verbatim** — historical section
+references in code docstrings and commit messages resolve there. Where this
+document consolidates a former dated section, the consolidation note points at
+the history file.
 
 ---
 
@@ -47,7 +37,7 @@ Processing-correctness milestones (all verified):
 
 ---
 
-## 2. Architecture Overview
+## 2. Architecture Overview & Repository Layout
 
 ```
 ┌───────────────────────────── Browser ─────────────────────────────┐
@@ -80,6 +70,55 @@ Processing-correctness milestones (all verified):
 Key principle: **the frontend never hardcodes node behavior**. The backend is
 the single source of truth for what nodes exist and what parameters they take;
 the frontend renders everything from that metadata.
+
+Repository layout (monorepo):
+
+```
+emptyui/
+├── README.md
+├── DESIGN.md                        # the living contract (this document)
+├── docs/
+│   ├── deployment.md                # remote/embedded deployment guide
+│   ├── plugin-guide.md              # plugin authoring contract
+│   └── history/                     # verbatim delivery records (M2/M3/M4);
+│                                    #   preserve original §13–§24 numbering
+├── packages/
+│   ├── emptyui/                 # Python core (framework only)
+│   │   ├── src/emptyui/
+│   │   │   ├── api.py           # Node/Input/Output/Param declarations
+│   │   │   ├── registry.py      # entry-point discovery + manifest export
+│   │   │   ├── executor.py      # DAG scheduler, caching, cancellation
+│   │   │   ├── context.py       # ctx: workspace, logging, progress, artifacts
+│   │   │   ├── store.py         # handle-based data store
+│   │   │   ├── schema.py        # workflow JSON validation (pydantic)
+│   │   │   └── server/          # FastAPI app, routes, WS hub
+│   │   └── tests/
+│   ├── emptyui-core-nodes/      # bundled minimal plugin (numpy/matplotlib)
+│   │   └── src/emptyui_core_nodes/
+│   └── web/                     # React frontend
+│       └── src/
+│           ├── graph/           # canvas, node rendering, edges
+│           ├── panels/          # palette, properties, results
+│           ├── api/             # REST/WS clients, generated types
+│           └── stores/
+├── examples/                    # sample workflows + tiny sample datasets
+│   ├── workflow/                # ready-to-load workflow documents, kept in sync
+│   │                            #   with the current node manifests (regenerate by
+│   │                            #   loading and re-saving when surfaces change)
+│   ├── data/                    # sample datasets; raw instrument corpora are
+│   │                            #   gitignored (regenerable, see each subdir)
+│   └── plugin-template/         # working plugin template
+├── test/verification/           # recorded parity/metrics JSONs + the verification
+│                                #   scripts that reproduce them (history records)
+└── scripts/                     # dev up/down, codegen
+```
+
+Dependency policy:
+- `emptyui` core deps: `fastapi`, `uvicorn`, `pydantic`, `numpy` only.
+- `emptyui-core-nodes`: adds `matplotlib` (+ optional `pandas`, `scipy`).
+- Everything else (mth5, aurora, mt_metadata, …): plugin extras.
+- Frontend pinned via lockfile; API types generated from OpenAPI spec
+  (`scripts/codegen`).
 
 ---
 
@@ -212,7 +251,7 @@ The aurora processing run is split at the Fourier-coefficient boundary:
   the electric pair and/or a vertical magnetic channel (e.g. `e1,e2,bz`) to also
   produce the tipper. The magnetic B/H mode is **derived automatically** from
   the nomenclature/channel names (bx/by → fluxgate B→H; hx/hy → coil H, archived
-  in nT like fluxgate B, so also converted to A/m; §16.3) — the `magnetic_unit`
+  in nT like fluxgate B, so also converted to A/m; §10.5) — the `magnetic_unit`
   select defaults to `auto` and exists only for legacy saved workflows.
   **Channel auto-configuration**: empty input/output channel fields resolve
   from the data and its nomenclature — inputs = horizontal magnetic pair,
@@ -224,14 +263,15 @@ The aurora processing run is split at the Fourier-coefficient boundary:
   (explicit user choices never overridden).
 - **`EstimateTF` node (FC → TF)** — inputs `fc` + optional `ref_fc` (remote
   reference); params: estimator (`Robust`/`Least Squares`), remote-reference
-  on/off, band style (`l2u` default / `uniform`, §14.9), `min_bins_per_band`,
-  `t_short`, periods-per-octave. Band edges are derived internally. Output `tf`
-  + per-level `tf.level`. The TF is built aurora-style: rows/cols carry the
-  **actual** channel names and the `channel_nomenclature` map is attached — a
-  2×2 impedance, or a 3×2 impedance + tipper. The remote reference (**RME_RR**,
-  aurora-backed) pairs local/remote FC samples by row, so the ref fc must share
-  the local fc's **frequency AND time grids** (both validated with clear errors);
-  the runs must be aligned first (see `Align Runs`).
+  on/off, band style (`l2u` default / `uniform` / `manual`, §10.2),
+  `min_bins_per_band`, `t_short`, periods-per-octave. Band edges are derived
+  internally. Output `tf` + per-level `tf.level`. The TF is built aurora-style:
+  rows/cols carry the **actual** channel names and the `channel_nomenclature`
+  map is attached — a 2×2 impedance, or a 3×2 impedance + tipper. The remote
+  reference (**RME_RR**, aurora-backed) pairs local/remote FC samples by row, so
+  the ref fc must share the local fc's **frequency AND time grids** (both
+  validated with clear errors); the runs must be aligned first (see
+  `Align Runs`).
 - **`Align Runs` node (`mth5.runs.align`)** — two `ts.run` inputs → two `ts.run`
   outputs, both normalized to an mth5 `RunTS` cropped to their **common
   acquisition overlap**. Required for remote reference: same sample rate
@@ -258,7 +298,7 @@ the nomenclature keyword is carried as metadata (fc attrs, TF map) and used only
 to interpret names:
 
 - **Unit normalization** (B vs H) is derived from the names, not a manual switch
-  (§16.3: coil archives are nT too, so hx/hy → A/m as well).
+  (coil archives are nT too, so hx/hy → A/m as well; §10.5).
 - **Load LEMI-424** exposes a `channel_nomenclature` select (lemi12/lemi34):
   LEMI instruments can carry four E channels; the keyword selects the electric
   pair read into the MTH5.
@@ -384,9 +424,8 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
   ```
   The magnetic B/H mode is **not** a manual choice (derived from nomenclature;
   §3).
-- **`enabled_when`** (per param, added 2026-09-12): conditional-UX rule — the
-  widget is editable only when the named sibling param currently holds one of
-  the listed values:
+- **`enabled_when`** (per param): conditional-UX rule — the widget is editable
+  only when the named sibling param currently holds one of the listed values:
   ```python
   Param("remote_reference", "boolean", default=False,
         enabled_when=("estimator_engine", ("Robust", "RME", "RME_RR")),
@@ -394,8 +433,7 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
   ```
   Complements `cascade` (which *sets* values; `enabled_when` *gates* editing).
   Rendering-only — the executor never enforces it (nodes validate their own
-  params). Replaced the frontend's string-sniffing of `estimator_engine`
-  (review §18.3), which was node-specific logic in generic code.
+  params).
 - **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
   an upstream node is connected, those params render as dropdowns populated from
   the upstream node's params and auto-fill if empty. Same-name inheritance is an
@@ -467,14 +505,14 @@ Rules that keep the ecosystem healthy:
 - Each plugin declares its heavy deps as pip extras.
 - Node types are namespaced by convention: `core.<domain>.<name>` for the
   bundled plugin, `<org>.<domain>.<name>` for external plugins.
-- **Open, namespaced port types** (2026-09-08): plugins may introduce new types
-  but must namespace them and declare UI metadata via the node's `port_types`
-  ClassVar; reusing core tags is strongly preferred, and consumers duck-type
-  documented payload attributes instead of importing plugin containers.
+- **Open, namespaced port types**: plugins may introduce new types but must
+  namespace them and declare UI metadata via the node's `port_types` ClassVar;
+  reusing core tags is strongly preferred, and consumers duck-type documented
+  payload attributes instead of importing plugin containers.
 - **Self-tests required**: every plugin ships a pytest suite (see template).
 - **Models declared, not bundled**: `models` in the manifest
   (id/filename/sha256/url/license); binaries live in a configured model
-  directory (platform-provisioned in remote mode, §17) — never inside the wheel.
+  directory (platform-provisioned in remote mode, §11) — never inside the wheel.
 - Manifests include `version`; workflows record plugin versions for
   reproducibility. The full authoring contract (immutable-input execute
   contract, packaging layout, publishing checklist) is **`docs/plugin-guide.md`**
@@ -482,7 +520,7 @@ Rules that keep the ecosystem healthy:
 - A future `emptyui plugin publish/index` flow can distribute community plugins
   as ordinary PyPI packages.
 
-### 5.1 Plugin enable/disable — implemented (2026-09-09)
+### 5.1 Plugin enable/disable
 
 Users switch third-party plugins on/off from the web UI; bundled plugins
 (`core`, `mth5`, `aurora` — marked via `register.bundled = True`) are always on
@@ -499,20 +537,15 @@ and shown read-only.
    read-only rows; config entries naming unknown plugins are ignored without
    warning (config files travel between machines).
 
-**Backend API**
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET    | `/api/plugins` | installed plugins: `[{name, version, node_count, bundled, enabled}]` |
-| POST   | `/api/plugins/{name}/enable` | hot-reload the registry with the plugin active |
-| POST   | `/api/plugins/{name}/disable` | hot-reload without it; clear the cross-run cache |
+**Backend API** (see §7.3): `GET /api/plugins`,
+`POST /api/plugins/{name}/enable|disable`.
 
 **Config & persistence**
-- `EMPTYUI_DISABLED_PLUGINS` sets the baseline at startup (the §17 platform knob).
-- Runtime toggles are **in-memory only** (2026-09-09); optional JSON-file
-  persistence activates only when `EMPTYUI_SETTINGS_PATH` (or
-  `create_app(settings_path=...)`) is configured; the default user-config-dir
-  settings file is deferred. Unknown names are silently ignored.
+- `EMPTYUI_DISABLED_PLUGINS` sets the baseline at startup (the §11 platform knob).
+- Runtime toggles are **in-memory only**; optional JSON-file persistence
+  activates only when `EMPTYUI_SETTINGS_PATH` (or `create_app(settings_path=...)`)
+  is configured; the default user-config-dir settings file is deferred. Unknown
+  names are silently ignored.
 - `create_app(disabled_plugins=[...])` mirrors the env for module embedding.
 
 **Robustness**
@@ -555,43 +588,57 @@ One file = one reproducible pipeline.
 - Edges reference ports by name → resilient to port reordering.
 - `position` is UI-only → headless/batch execution ignores it cleanly.
 - Executor validates against current manifests at load time with actionable
-  messages.
+  messages. Saved workflows carrying params a node no longer declares are
+  processed unchanged (only manifest params are resolved), but each stale param
+  emits a node-level progress note — stale surfaces degrade loudly, never
+  silently.
 
 ---
 
-## 7. Execution Model
+## 7. Backend — Execution, API & Runtime Settings
 
-- **Scheduler**: Kahn topological sort; branches run **sequentially** (M0).
+### 7.1 Execution model
+
+- **Scheduler**: Kahn topological sort; branches run **sequentially**.
   Concurrent thread-pool execution is M4 #12 (`cpu_bound` hints).
-- **Caching** (M3, 2026-09-08): server-lifetime in-memory LRU (`NodeCache`,
-  256 entries). Cache key = **structural signature** computed in topological
-  order: `sha256(type, manifest version, effective params, per-input upstream
+- **Caching**: server-lifetime in-memory LRU (`NodeCache`, 256 entries). Cache
+  key = **structural signature** computed in topological order:
+  `sha256(type, manifest version, effective params, per-input upstream
   signatures)` — node ids excluded (copy/paste duplicates share entries);
   signatures recurse through the DAG so invalidation propagates. Data payloads
   are **never hashed** (xarray/RunTS impractical to digest); string params
-  pointing at existing files hash `(path, size, mtime_ns)` (Nextflow-style), so
-  externally modified input files invalidate. On a cache hit the executor
-  re-registers outputs and **copies artifact files into the new run's
-  workspace** (renamed for the restoring node); vanished artifact files
-  re-execute the node. Cached nodes emit `node_status` with `"cached": true`.
-  **Immutability contract** (ComfyUI model): nodes must be functional — never
-  mutate inputs or previously returned outputs. Disk persistence across
-  restarts is M4 #5. `DELETE /api/cache` drops all entries.
-- **Partial runs** (M3, 2026-09-08): `POST /api/runs` accepts
-  `targets: [node_id, …]` — "execute to here" runs the targets plus their
-  ancestral closure; other nodes emit no events. Unknown targets rejected with
-  422. The web UI exposes "Run to here" in the properties panel.
+  pointing at existing files hash `(path, size, mtime_ns)` (Nextflow-style; path
+  is taken **data-root-relative** when the file lives under the data root or
+  project dir, so cache keys survive relocation), so externally modified input
+  files invalidate. On a cache hit the executor re-registers outputs and
+  **copies artifact files into the new run's workspace** (renamed for the
+  restoring node); vanished artifact files re-execute the node. Cached nodes
+  emit `node_status` with `"cached": true`. **Immutability contract**
+  (ComfyUI model): nodes must be functional — never mutate inputs or previously
+  returned outputs. `DELETE /api/cache` drops all entries.
+- **Partial runs**: `POST /api/runs` accepts `targets: [node_id, …]` —
+  "execute to here" runs the targets plus their ancestral closure; other nodes
+  emit no events. Unknown targets rejected with 422. The web UI exposes
+  "Run to here" in the properties panel.
 - **Progress**: nodes call `ctx.progress(frac, message)`; forwarded to all
   connected WebSocket clients.
-- **Failure**: *current executor* aborts the whole run (error event +
+- **Failure**: the executor aborts the whole run (error event +
   `run_finished: failed`); per-branch continuation is future work.
-- **Cancellation**: implemented — `POST /api/runs/{id}/cancel` sets a per-run
+- **Cancellation**: `POST /api/runs/{id}/cancel` sets a per-run
   `threading.Event` polled between nodes (including after the final node, so
   cancelling during the last node reports `cancelled`); toolbar **✕ Cancel**
   enabled while queued/running. A node cannot be interrupted mid-execution —
   cancellation takes effect at the next node boundary.
+- **Payload summaries**: when the executor materializes a `ts.run`/`ts.channel`
+  output handle (fresh or restored from cache) it emits
+  `{"event": "payload", node, port, type, summary}` with a duck-typed extent
+  summary — absolute ISO bounds (UTC) when the record carries a real start,
+  relative seconds otherwise; placeholder epochs (1980/1970) degrade to
+  relative. An open MTH5 archive summarizes as `kind: "mth5"` with per-run
+  extents. These drive the frontend time selector (§8.3). Poll/WS replay
+  carries them like artifact events.
 
-### Run lifecycle events (WebSocket)
+### 7.2 Run lifecycle events (WebSocket)
 
 ```
 { "event": "run_started",   "run_id": "r1" }
@@ -599,6 +646,8 @@ One file = one reproducible pipeline.
 { "event": "node_progress", "node": "n2", "frac": 0.42, "msg": "filtering…" }
 { "event": "artifact",      "node": "n3", "id": "a7", "kind": "image",
   "handle": "h12", "url": "/api/artifacts/a7/preview" }
+{ "event": "payload",       "node": "n2", "port": "out", "type": "ts.run",
+  "summary": { … extent … } }
 { "event": "node_status",   "node": "n3", "status": "done" }
 { "event": "run_finished",  "run_id": "r1", "status": "completed" }
 ```
@@ -607,9 +656,7 @@ The `artifact` event carries the output `handle` id so viewer nodes resolve
 exactly which figure arrives on which input edge, even when one node publishes
 several figures.
 
----
-
-## 8. Backend API (REST)
+### 7.3 REST API
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -621,8 +668,8 @@ several figures.
 | POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
 | DELETE | `/api/cache` | Drop all cached node results |
 | GET/POST | `/api/plugins[/{name}/enable|disable]` | Plugin listing + enable/disable hot reload (§5.1) |
-| GET/PUT | `/api/settings` | Runtime settings view + live-knob edits (§22) |
-| GET | `/api/files` | Server-side file picker (data-root clamped, §17.2) |
+| GET/PUT | `/api/settings` | Runtime settings view + live-knob edits (§7.4) |
+| GET | `/api/files` | Server-side file picker (data-root clamped, §11.2) |
 | GET | `/api/health` | Liveness probe (`{"status": "ok"}`) for platform gateways |
 | WS   | `/api/ws` | Run events stream |
 
@@ -630,13 +677,46 @@ A run-level artifact gallery is not implemented — viewers on nodes are the
 per-figure/table display, each with its own download link. MVP keeps state on
 the file-based workspace (§3); a DB is added only if run history demands it.
 
+### 7.4 Runtime settings
+
+The ⚙ Settings dialog is the single settings surface; the backend is the
+source of truth (`GET/PUT /api/settings`).
+
+- **Precedence**: env/platform baseline wins → UI edits recorded on top →
+  defaults. Knobs whose start value arrived from env/kwarg are
+  **platform-baselined and not UI-editable** (PUT → 409 naming the knob) —
+  confinement/serving semantics stay restart-level decisions.
+- **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
+  `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
+  (null/0 = unlimited), `cache_max_entries` (default 256). Applied
+  immediately (TTL loop re-reads per pass, admission check reads the live
+  holder, `NodeCache.resize()` trims). `RuntimeSettings` is the mutable holder
+  the app closures read.
+- **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
+  `cors_origins`, `root_path` — changing confinement/serving mid-flight is an
+  architecture change; env + restart only.
+- **Planned (reserved, inert)**: `project_dir`, `cache_max_gb`,
+  `cache_ttl_days` — the §12.3 disk cache lands into this scaffolding.
+- **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
+  (`disabled_plugins` + `settings` sections; atomic write; unknown keys
+  ignored on load — files may travel). Opt-in: unset = memory-only, no file
+  is created. Settings PUT validates against the whitelist (numbers ≥ 0 or
+  null-for-off; null not allowed for knobs with a non-null default).
+- **Frontend**: Settings dialog sections — Server & retention (live numbers,
+  empty = off, explicit Save), Deployment (read-only code values), Planned
+  (disabled rows, "planned" tag), Plugins (§5.1).
+- **Policy (user decision)**: null/0 = off/unlimited; values ≥ 1 are real
+  limits. Unbounded local mode is deliberate; the TTL knob is the only
+  retention mechanism until the §12.3 disk cache lands.
+
 ---
 
-## 9. Frontend Design
+## 8. Frontend
 
 Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Query**
 
-Components:
+### 8.1 Components & state
+
 - **GraphCanvas** — React Flow; maps workflow JSON ⇄ RF nodes/edges bidirectionally.
 - **NodePalette** — grouped by `category`, populated from `GET /api/nodes`.
 - **Inline node params (default, ComfyUI paradigm)** — parameters render as
@@ -660,11 +740,13 @@ Connection rules (port types, one edge per input port, no self-loops, no
 cycles) are enforced client-side during drag (`isValidConnection`) and
 re-checked in `onConnect`, then re-validated server-side before every run.
 
-### Canvas interaction protocol (ComfyUI parity)
+### 8.2 Canvas interaction protocol (ComfyUI parity)
 
 - **Disconnect gestures**: drag a connected handle to the empty pane → unlink;
   drag either endpoint anchor of an edge → drop on a compatible handle re-routes,
-  drop on the pane deletes; click an edge + `Delete`/`Backspace`.
+  drop on the pane deletes; click an edge + `Delete`/`Backspace`. Reconnecting
+  an input enforces one-edge-per-input: the old edge must survive the filter, so
+  dropping the *only* edge is a delete, never a silent re-route.
 - **Copy/paste**: `Ctrl/Cmd+C` snapshots the selected subgraph (nodes + internal
   edges); `Ctrl/Cmd+V` pastes with fresh ids, deep-copied params, remapped
   internal edges and a 24 px fan-out offset — external edges are *not* rewired.
@@ -672,808 +754,442 @@ re-checked in `onConnect`, then re-validated server-side before every run.
 - **Selection**: click = exclusive, `Ctrl/Cmd+click` = additive, `Shift+drag` =
   box selection (`selectionMode: Full`); `Delete`/`Backspace` deletes the full
   selection.
-- **Initial view**: `fitView` capped at `maxZoom: 1` with 40 px padding.
+- **Initial view**: `fitView` capped at `maxZoom: 1` with generous padding
+  (fraction-based, v12-compatible).
+- **Node sizing**: standard node width 280 px (widened for the time bar; §8.3).
+
+### 8.3 Time selector (time bar)
+
+Selecting a time slot (e.g. to avoid noisy intervals) in records spanning hours
+to days:
+
+- **Extent source**: the backend payload summaries (§7.1) provide each
+  connected `ts.run`/`mth5` port's extent; the frontend *intersects* the
+  extents of the ports a param's `time_bar` binding lists (comma-separated;
+  e.g. Align Runs shows the overlap of both inputs). Honest constraint: the
+  extent is known only after the upstream node has run once.
+- **`Param.time_bar`** (rendering-only): the input port name(s) whose summary
+  drives the frontend time bar for this param pair.
+- **`TimeBar` widget** (custom, zero deps): horizontal acquisition bar with two
+  pointer-driven handles sandwiching the slot, shaded selection, extent tick
+  labels, synced bidirectionally with the paired Start/End edit boxes (which
+  remain the node's own string params — the bar only writes through their
+  onChange). Guards: handles stay in the record, cannot cross, slot kept
+  > 1 s (server rejects ≤ 1 s; widget clamps ≥ 2 s at second resolution);
+  out-of-extent box values draw at the track edge (server clamps with a
+  warning — degrade, never reject).
+- **Hosts**: Plot Time Series (start/end of the streamed record), Extract Run
+  (bar bound to the matched `mth5` run extent, absolute GMT), Align Runs (one
+  pair over the aligned overlap — identical-interval outputs), Merge Channels
+  (crop of the merged run). Extract Run / Align Runs bounds clamp into the run
+  extent; extent-unknown → passthrough with warning. Merge Runs is
+  deliberately skipped: its per-run windows live in the selection table rows,
+  not in a node-param pair.
 
 ---
 
-## 10. Repository Layout (monorepo)
+## 9. Data & Instrument Ingestion
 
-```
-emptyui/
-├── README.md
-├── DESIGN.md
-├── packages/
-│   ├── emptyui/                 # Python core (framework only)
-│   │   ├── src/emptyui/
-│   │   │   ├── api.py           # Node/Input/Output/Param declarations
-│   │   │   ├── registry.py      # entry-point discovery + manifest export
-│   │   │   ├── executor.py      # DAG scheduler, caching, cancellation
-│   │   │   ├── context.py       # ctx: workspace, logging, progress, artifacts
-│   │   │   ├── store.py         # handle-based data store
-│   │   │   ├── schema.py        # workflow JSON validation (pydantic)
-│   │   │   └── server/          # FastAPI app, routes, WS hub
-│   │   └── tests/
-│   ├── emptyui-core-nodes/      # bundled minimal plugin (numpy/matplotlib)
-│   │   └── src/emptyui_core_nodes/
-│   └── web/                     # React frontend
-│       └── src/
-│           ├── graph/           # canvas, node rendering, edges
-│           ├── panels/          # palette, properties, results
-│           ├── api/             # REST/WS clients, generated types
-│           └── stores/
-├── examples/                    # sample workflows + tiny sample datasets
-│   ├── workflow/                # ready-to-load workflow documents, kept in sync
-│   │                            #   with the current node manifests (regenerate by
-│   │                            #   loading and re-saving when surfaces change)
-│   ├── data/                    # sample datasets; raw instrument corpora are
-│   │                            #   gitignored (regenerable, see each subdir)
-│   └── (test/verification/)     # recorded parity/metrics JSONs + the verification
-│                                #   scripts that reproduce them (§24 records)
-├── docs/
-└── scripts/                     # dev up/down, codegen
-```
+This section covers getting field data into the graph: channel nomenclature
+(§3), the calibration framework, and the per-instrument loaders. Format-level
+byte records and the ingestion research history are preserved in
+`docs/history/` (§24.7/§24.8, §24.10–§24.12).
 
-Dependency policy:
-- `emptyui` core deps: `fastapi`, `uvicorn`, `pydantic`, `numpy` only.
-- `emptyui-core-nodes`: adds `matplotlib` (+ optional `pandas`, `scipy`).
-- Everything else (mth5, aurora, mt_metadata, …): plugin extras.
-- Frontend pinned via lockfile; API types generated from OpenAPI spec
-  (`scripts/codegen`).
+### 9.1 Calibration framework
 
----
+`emptyui-mth5/calibration.py`:
+- `parse_fap` (LEMI `.chn`/`.def`), `parse_json_calibration` (mt_io format),
+  `build_fap_filters` (per-channel `FrequencyResponseTableFilter`, units
+  nanoTesla / mV·km by channel prefix), `attach_filters` (mt_timeseries style —
+  `run.filters` + per-channel `attrs["filters"]` in the AppliedFilter format
+  that survives an MTH5 round trip; channels without a filter get a unity
+  coefficient filter so `RunTS.calibrate()` passes temperature channels
+  warning-free), `find_calibration_file` (auto-pickup, station-pair files
+  preferred), `load_calibration` (dispatch by extension).
+- **Below-table policy**: flat clamp (first-row modulus, zero phase, extended
+  to 0.001·f_min) — log-extrapolation was worse.
+- `Load LEMI-424`: `calibration_path` param + `extend_flat`; filters attached
+  **before** `from_runts`, so the calibration is archived with the run. The
+  `mth5.calibration.load` node feeds the explicit path of `mth5.calibrate`.
 
-## 11. MVP Roadmap
+### 9.2 Calibration placement — frequency-domain, inside Compute FC
 
-**M0 — Skeleton** ✅: monorepo scaffold, CI, core Node API + registry + schema
-validation + echo node, web shell with palette from `/api/nodes`.
+**Decision: calibrate in the frequency domain, inside Compute FC** — not a
+separate downstream node, not the time-domain route. Rationale: the conventional
+MT approach calibrates in the frequency domain (matching aurora's
+`calibrate_stft_obj`); the MTU-5A makes the time-domain route impractical — the
+induction-coil response falls off steeply at long periods, the burst archive has
+~1000 short slots (per-slot FFT/iFFT round trips are wasteful), and per-frequency
+division is trivial at every decimation level. STFT, prewhitening/recolor, and
+response division are all linear frequency-domain operations — they commute.
 
-**M1 — First real pipeline** ✅: `load_csv → bandpass → timeseries/spectrogram`
-nodes, topo executor with WS progress/artifacts/errors, manifest-driven
-properties panel, workflow save/load.
+**Mechanism.** Compute FC applies the response right after the STFT, before
+returning/persisting the FCs — mirroring aurora exactly. No new port: the mth5
+convention puts the response on the channel metadata
+(`AppliedFilter(name, applied, stage)` → `/Survey/Filters`, typed filter
+objects: ZPK / FAP / coefficient / time delay / FIR, evaluated as
+`complex_response(f)`), which the ts.run payloads already carry. Applied-flag
+semantics prevent double-calibration: only filters with `applied=False` are
+removed; a prior time-domain `Calibrate` flips the flags, so both routes coexist
+(the time-domain Calibrate node remains for the classical route and explicit
+control). The FC records the applied calibration in its attrs
+(`calibration_applied`, e.g. `"hx=box+coil; ex=box"`).
 
-**M2 — MT ecosystem integration** ✅ (2026-09-05/06):
-`emptyui-mth5` plugin (mth5 0.6.8: Load/SaveMTH5, ExtractRun/SplitChannels/
-MergeChannels, TF I/O, Merge Runs, FC read/write), `emptyui-aurora` plugin
-(aurora 0.6.2: ComputeFC/EstimateTF/MergeTFLevels; OLS/RME/RME_RR), table
-viewer, export coercion nodes, and publication-quality plot standardization
-(§15).
+The calibration chains ride the payload through the graph: core `TimeSeries`
+carries `calibration` (`{channel: [(filter, applied), …]}`) coerced from RunTS
+dataset attrs, preserved by `TimeSeries.copy`, the core Detrend/Bandpass nodes,
+and rebuilt on Align Runs / Split → Merge Channels outputs.
 
-**M3 — Power features** ✅ (2026-09-09). Delivered: nomenclature-aware automatic
-channel configuration; remote reference end-to-end (Align Runs); run
-cancellation + artifact download; headless Playwright regression suite;
-robustness batches A & B (fan-in duplicate rejection, legacy mth5 API
-resolvers, NaN/Inf guards, tipper ylim auto-expand, remote-reference
-partial-ref-container error, calibration unmatched-channel warnings,
-node-instance-unique artifact filenames, `Calibrate` explicit-filter
-delegation); content-addressed caching + partial execution (§7); instrument
-calibration framework + LEMI support (§16.1); EMTF-style coherence sorting
-(§16.2); plugin packaging guide + template; plugin enable/disable (§5.1);
-remote-server contract (§17.6 items 1–6). Sub-workflows deferred to M4 (§12).
+### 9.3 Instrument loaders
 
-**Post-M3 deliveries:**
-- **Improved auto frequency grid** — **delivered 2026-09-11** (M4 #17): the
-  `Estimate TF` node default is the `l2u` scheme (fixed reference template +
-  log-uniform window-starvation coarsening + optional `t_short` head clip),
-  reproducing the official hand-crafted USArray grid strategy for any window
-  (§14.9).
-- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-11**: rotate a
-  TF to true north before comparison/inversion. Standard convention
-  `Z' = R(angle) Z R(angle)ᵀ`, `R(angle) = [[cos α, sin α], [−sin α, cos α]]`,
-  positive = clockwise from true north; magnetic→true north ⇒
-  `angle = −declination` (tipper rotates as a vector; per-element error stds
-  rotate with |R| — the §16.3-validated conservative bound, no covariance is
-  stored). `Import TF` parses the EDI declination (explicit
-  Declination/Decl field, else the Hx measurement azimuth; EDI formats are
-  diverse — when neither is present the node falls back to the `angle`
-  parameter with a warning). Station metadata is carried over unchanged; a
-  one-line "rotated X deg" processing note is appended.
+| Loader | Notes |
+|---|---|
+| Load MTH5 | Native archives; runs/FCs/TFs |
+| Load CSV / Load NIMS | Generic series; NIMS via the mth5 USArray tooling |
+| Load LEMI-424 | `channel_nomenclature` select (lemi12/lemi34), FAP `.chn`/`.def` calibration auto-pickup |
+| Extract / Split / Merge Channels, Align Runs, Merge Runs | Archive/series manipulation (§3) |
+| **Load Phoenix MTU-5A** | Burst-mode ingestion — see below |
+| TF Import/Export | EDI/XML/ZMM/AVG/J |
 
-**M4 — Community & advanced backlog (2026-09-09, ranked by gain/effort)**
+#### Phoenix MTU-5A burst ingestion
 
-All remaining tasks (M3 leftovers, M4 items, documented open questions) are
-consolidated here, ranked by expected **gain per unit effort** (descending).
+Burst-mode recorders interleave **scheduled high-rate slots** with **continuous
+low-rate streams** (MTU-5A families: 2400/150/15 Hz; MTU-5C: 24 kHz/150 Hz).
+Upstream has no working MTU-5A burst→MTH5 path (the stock reader densely
+concatenates blocks and stamps a compressed implicit clock — each 32-byte block
+header carries the true UTC timestamp/rate/clock status/saturation flags).
 
-| # | Task | Gain | Effort | Ratio | Notes |
-|---|------|------|--------|-------|-------|
-| 1 | **Plot Coherency + Plot Phase Tensor nodes** | High | Low | ★★★★★ | Standard MT QC/interpretation products; data already flows through `fc`/coherence diagnostics/`tf` — plot code patterns exist (mth5/plotting.py). **Delivered 2026-09-12** (§20): `aurora.plot.coherency` (fc-direct, shared statistic with Coherence Sort) and `mth5.plot.phase_tensor` (Caldwell ellipses, skew-colored). |
-| 2 | **Merge Runs: remote multi-row warning** | Medium | Trivial | ★★★★★ | §3 open item (aurora TODO): warn when a local run spans multiple remote runs instead of silently mis-pairing; one `ctx.warn`/log guard + test. |
-| 3 | **Batch/queue runner** | High | Medium | ★★★★ | Multi-station processing is the real repetition pattern; headless `POST /api/runs` + a small queue UI/CLI reuses the executor as-is. |
-| 4 | **In-band smoothing taper (Parzen/Hann)** | Medium | Low | ★★★★ | §14.8/M4: `√weight` FC rows by band-center proximity before regression — the `_coherence_weight` mechanism already exists; composes with OLS/RME/RME_RR. Genuine enhancement (neither EMTF nor aurora does this). |
-| 5 | **Disk-persisted result cache** | Medium | Medium | ★★★ | Cache keys/restore logic already exist (§7); FC/STFT recomputation across restarts is the expensive part. Needs a payload serialization strategy for xarray/RunTS. |
-| 6 | **Calibration absolute-gain verification** | Medium | Low | ★★★ | §16.1 open item: process one site independently (mtpy/other) and compare ρ/phase — validation, not a feature. |
-| 7 | **True EMTF per-frequency coherence sort** | Medium | Medium | ★★★ | §16.2: window-ensemble per-frequency variant (current sort is a broadband heuristic); parity with EMTF conventions. |
-| 8 | **mtpy golden-image plot comparison** | Low-Med | Low | ★★ | §15 open item: test-only dev extra; guards plot regressions against future style changes. |
-| 9 | **Hand-authored band-config files** | Low-Med | Medium | ★★ | §11/M4: load exact EMTF band-setup files (exact-table node option — the `bands_override` of §16.3). The l2u scheme (§14.9) already reproduces the official grid strategy, so this is an optional preset layer. |
-| 10 | **Paradigm B: cross-decimation FC pooling** | High | High | ★★ | §14.5 novel extension: pool raw FCs across levels per band for statistically stronger long-period estimates; research-y, unproven, but the highest scientific upside. |
-| 11 | **FC→TS inverse node** | Low | Low-Med | ★★ | §12 open question: inverse STFT/overlap-add for frequency-domain denoising demos; plugin-tier coercion node. |
-| 12 | **Executor thread-pool concurrency** | Low | Medium | ★★ | §7 future work: `cpu_bound` hints + branch parallelism; MT pipelines are 5–10 mostly-linear nodes, so the practical gain is small. |
-| 13 | **Sub-workflows (nested DAGs)** | Medium | High | ★ | §12: defer unless workflows outgrow copy/paste + templates + the batch runner (>20-node workflows or un-maintainable repeated blocks). |
-| 14 | **Docs site** | Low-Med | Medium-High | ★ | Plugin guide + deployment guide exist; a hosted site is marketing/onboarding, not functionality. |
-| 15 | **Plugin index/publish flow** | Low | High | ★ | PyPI + the §11 checklist already cover distribution; a marketplace adds discovery, not capability. |
-| 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | ★ | §12 open question; only matters once ML noise-suppression plugins exist. |
-| 17 | **Improved auto frequency grid (window-count adaptive)** | High | Medium | ★★★★ | §14.9: **delivered 2026-09-11** — `Estimate TF` node default is the `l2u` scheme, reproducing the official grid strategy for any window. |
-| 18 | **MMT (multi-station MT) estimator** | Low-Med | Medium-High | ★★ | **Long-term nice-to-have** (2026-09-10, Kelbert et al. 2026, Rev. Geophys. 10.1029/2024RG000850): Egbert (1997) / Smirnov & Egbert (2012) extension of RR using **multiple sites** to define reference fields; the official short-period products were made this way. aurora 0.6.2 has only OLS/RME/RME_RR (**single** remote) — needs a new emptyUI solver (K reference stations → 2K reference channels, robust multivariate regression). Expected benefit: the <15 s end, where a single 1 Hz NIMS remote (SDH28) is itself noise-limited (§16.3). Do **after** the basic processing chain + frequency grid are pinned. |
-| 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | ★★★ | §24.12 follow-up: generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically (max-pool through decimation, fraction-threshold `saturated_max` window rejection, no-op without the channel). Candidate emitters: NIMS/USArray status channels, LEMI, CSV loaders; define the channel name + semantics once so instruments share the QC path. |
+`read_phoenix_mtu(data_path, …)` (core) + `Load Phoenix MTU-5A` node
+(`mth5.io.phoenix_mtu`, LoadLemi contract):
+- Parse the TBL once (schedule, survey/station/run metadata, scalar
+  calibrations — always applied at ingest; `STIM`/`ETIM` are placeholders,
+  never the data extent — actual block timestamps are the truth).
+- Stream each TS file block-by-block reading the per-block tags: true UTC
+  time, rate, `n_scan`/`n_ch`, clock status / clock error, saturation flags.
+- Group contiguous blocks (`t[k+1] == t[k] + n_scan/rate`) into segments;
+  **one mth5 run per maximal segment**, id `sr{rate}_{NNNN:04d}`; continuous
+  rates collapse naturally.
+- Params: `survey_id`/`station_id` (defaults from TBL), `sample_rates`
+  (comma list; empty = every TS file), `calibration_folder` (§9.2 ASC
+  matching), `start`/`end` (UTC ISO or epoch; empty = full recording —
+  filtered at ingest, per-second granularity, partial slots become short
+  runs), `stream_session_hours` (0 = off; runs longer than the target are cut
+  into consecutive fixed-length sessions on block boundaries so the
+  continuous stream gets run-level QC granularity, §10.4).
+- Quality aggregation: per-block clock/saturation anomalies and truncated
+  tails become warnings; the TBL slot schedule is cross-checked loosely
+  (report, never reject). Runs with any saturated block carry a per-sample
+  `saturated` auxiliary channel (§10.1).
 
-**Priority note (2026-09-11):** TF rotation is **delivered**; next in line is
-the exact-table node option (M4 #9 — still needed for apples-to-apples
-comparisons with the official product). MMT (#18) stays a long-term target;
-basic processing is pinned first.
+#### Build FC Database (`aurora.fc.build`)
 
-Deferred-by-design items with rationale: sub-workflows (§12), disk-persisted
-cache (restart survival only), band-config presets (the l2u scheme reproduces
-the official grid strategy automatically, so hand-authored files are optional),
-and the in-band smoothing taper (a genuine enhancement neither classic EMTF nor
-current aurora implement).
+Input `mth5` (+ the ComputeFC STFT parameter set + `survey`/`station`/`runs`);
+iterates the listed runs, `compute_fc_levels` per run (epoch-anchored
+`clock_zero` default **"epoch"** — staggered slot schedules make run-start
+anchoring useless), `merge_fc_containers` per station → output `fc` container.
+Optional `persist` writes each run's FC levels into the archive's FC layer
+keyed by run (off by default).
+
+- **Cascade spans (`regroup_contiguous`)**: maximal contiguous spans of
+  same-rate runs are cascaded as ONE payload (adjacency within two samples,
+  from the run summary columns) — the physically right unit for unbroken
+  acquisitions; gapped slot runs stay separate. Hourly sessions alone cannot
+  form deep decimation levels (an hour caps at ~0.23 Hz with window 256);
+  cascading the kept contiguous span restores the long-period tail. Build FC
+  builds spans from ALL sessions (before any QC — spans never depend on QC
+  outcomes), reads each span exactly once, and stamps per-window `run_id` at
+  session granularity.
+- **Per-family decimation trim**: the continuous (lowest-rate) family carries
+  the full `decimation_levels` cascade; higher-rate families decimate only
+  until their rate would reach the next family's native rate — prevents
+  same-rate levels from different families double-covering identical windows.
+- **Performance hardening** (mth5/mt_metadata pathologies): `pyproj.CRS`
+  LRU cache (`_compat.apply_crs_cache`), `ChannelDataset.to_xarray` channel
+  reads (~40× faster than `RunGroup.to_runts`), station metadata hoisted out
+  of the run loop, `add_run`+`from_channel_ts` archive writes.
 
 ---
 
-## 12. Open Questions
+## 10. Processing Semantics
 
-All open questions are M4 backlog items, ranked in §11:
+The physics contract of the TS → FC → TF chain. Ablation histories and
+verification records live in `docs/history/` (§14, §16, §24).
 
-- **FC→TS inverse node** (M4 #11): inverse STFT/overlap-add for frequency-domain
-  denoising demos; plugin-tier coercion node when needed.
-- **ML plugin GPU availability** (M4 #16): `ctx.resources.gpu_count`?
-- **Sub-workflows / nested DAGs** (M4 #13) — **deferred** (2026-09-08): after
-  delivering caching + partial execution (§7), completing M3, and a survey of
-  comparable systems (ComfyUI subgraphs, n8n, Node-RED, KNIME), sub-workflows
-  were judged not worth the complexity: typical MT pipelines are 5–10
-  mostly-linear nodes, the one genuine repetition pattern (multi-station
-  blocks) is covered by copy/paste (§9) and, more directly, an M4 batch runner
-  (#3). Lighter alternatives — example-workflow templates and visual grouping —
-  are preferred. Revisit only if real usage produces >20-node workflows or an
-  un-maintainable repeated block.
-- **Authentication model** — resolved by design (not implementation): emptyUI
-  stays identity-blind behind the platform gateway; see §17.
+### 10.1 Compute FC — the STFT chain
 
----
+emptyUI implements **taper → FFT only** (Hamming default, 50% overlap,
+`boundary=None`); the remaining aurora steps are deliberately absent:
 
-## 13. Remaining M2 — delivered (historical plan record, 2026-08-29)
-
-Status: **M2 delivered (2026-09-05)**; every item below is done. Key delivered
-decisions (kept for their content, not the plan):
-
-- **Robust RME/RME_RR estimator** (2026-08-29): wraps aurora estimators (`OLS`
-  via `estimate_ols`; `RME`/`RME_RR` via their aurora classes — the regression
-  module does not re-export at package level, import submodules directly).
-  `remote_reference` supported via the `ref_fc` input; when unconnected, local
-  channels are reused as a self-reference. All three verified to match aurora's
-  phase convention on `test12rr` (Zxy≈+45°, Zyx≈−135°).
-- **Estimator UI**: `EstimateTF` exposes **two** estimator options —
-  **`Least Squares`** and **`Robust`** — plus a separate `Remote Reference`
-  checkbox that only applies to `Robust` (Robust+off → `RME`; Robust+on →
-  `RME_RR`; disabled in the UI for LSQ). Legacy saved-workflow values
-  (`OLS`/`RME`/`RME_RR`) still load. **No LS+RR by design**: aurora offers
-  remote reference only through robust `RME_RR` (remote reference exists to
-  suppress incoherent noise, where robust weighting matters); requesting LSQ
-  with Remote Reference raises a clear error.
-- **Multi-level decimation + FC persistence + MergeTFLevels** (2026-08-29):
-  cascading decimation (`compute_fc_levels`), per-level FC persisted to the
-  workspace MTH5 (`persist.py`), per-level TF estimation + deepest-wins merge.
-- **Table viewer, Calibrate node** — delivered (see §16.1 for calibration).
-- **Cross-cutting enabler**: MT integration tests run in CI by *generating* the
-  synthetic `test12rr` fixture (as `test_phase_convention.py` scripts) instead
-  of relying on gitignored raw LEMI/BGS data.
-
----
-
-## 14. Current Plan — M2: Multi-level Decimation + FC Persistence (delivered 2026-08-29)
-
-Status: **delivered**. This section is the historical plan for broadband MT;
-§14.6–14.9 are the band-construction history and the current delivered default.
-
-### 14.1 What aurora actually does (grounding)
-
-- **Cascading decimation** (`prototype_decimate`): level *i* decimates level
-  *i−1* by that level's integer `factor` (`scipy.signal.decimate`); level *i*'s
-  rate = native / ∏(factors 1..i).
-- **Per-level STFT**: prewhiten → truncate to clock-zero → sliding window →
-  linear detrend → taper → FFT → recolor. Window `num_samples` is kept
-  **constant across levels** (window duration grows at deeper levels → better
-  long-period resolution).
-- **FC generation vs use**: aurora either *loads* a persisted FC from mth5 or
-  *computes* it, then optionally persists (`save_fourier_coefficients`).
-- **Merging runs at the FC level** (`merge_stfts`): `xr.concat(stfts, "time")` —
-  the across-runs merge, not the across-levels one.
-- **Per-level TF + level merge** (`process_mth5.py`): each level estimated
-  independently to a per-level `TTFZ`; a `TransferFunctionCollection` merges
-  them, resolving duplicate periods (emptyUI's `MergeTFLevels`).
-- **FC persistence format**: `from_xarray` requires a **`datetime64` time
-  coordinate** (float seconds fails) — persisted FCs must carry the run's
-  absolute start time.
-
-**emptyUI deviations from the aurora STFT chain (documented 2026-09-13).**
-`ComputeFC` implements **taper → FFT only** (Hamming, 50% overlap,
-`boundary=None`, `detrend=False`); the remaining aurora steps are
-deliberately absent:
-
-- **No prewhitening / recoloring** — aurora 0.6.2 defaults to
-  `stft.prewhitening_type: "first difference"` (a time-domain first
-  difference, inverted in the frequency domain by `÷ j2πf`;
-  `mth5.processing.spectre.prewhitening`). Its EMTF-style ARMA
-  prewhitening (`pwset.cfg`, aurora Issue #60) is only a placeholder
-  upstream — nothing beyond the first difference exists in the pinned
-  aurora either. emptyUI relies on the Hamming taper's sidelobe
-  suppression instead; leakage from strongly colored (≈1/f) natural fields
-  is therefore higher than aurora's at short windows. Ratio-based TF
-  products target the same estimator, but persisted FC amplitudes are not
-  directly comparable to aurora-persisted FCs.
-- **No per-window detrend** — aurora applies
-  `scipy.signal.detrend("linear")` per window, keeping window-level trends
-  out of the low-frequency bins. emptyUI detrends globally via the
-  upstream `Detrend` node only; windowed trends leak into low-frequency
-  bins via window sidelobes.
-- **No clock-zero truncation** — emptyUI decimates the (aligned) runs
-  directly; aurora truncates to a run-config clock zero first.
-- **FC normalization** — scipy 'spectrum' scaling (÷ win.sum()); aurora
+- **Prewhitening (opt-in)**: `prewhitening="first difference"` applies the
+  time-domain first difference and the exact `÷ j2πf` inverse recoloring
+  (clean-signal FCs preserved to ~1e-4 relative). Ablation verdict (SDG31 vs
+  the official EMTF product): the controlling factor at short periods is
+  **DC/edge leakage suppression** — the current default's entire deficit is
+  concentrated at 7.3–15.1 s; a zero-endpoint taper (hann) or prewhitening
+  closes it; boxcar without prewhitening is catastrophic (~1 decade, all
+  periods). Defaults stay hamming/no-PW pending the persisted-FC convention;
+  the recipe for noise-floor-dominated stations is boxcar + PW at
+  short-period levels (history §24.3 E1).
+- **Per-level taper schedule**: `window_type` (base) + `window_type_deep` +
+  `deep_from_level`. Physically motivated, not tuned: white-ish fluxgate
+  noise dominates level 0 (boxcar maximizes dof), the diurnal Sq line lies
+  inside day-scale windows (hann suppresses its sidelobe leakage). Per-level
+  window recorded in the fc attrs.
+- **No per-window detrend (by design)** — emptyUI detrends globally via the
+  upstream `Detrend` node; ablated as NOT a lever for the long-period tail
+  (history §24.3 E2).
+- **No clock-zero truncation by default**: `clock_zero` ("" = run-start
+  anchoring, "epoch" = Unix epoch, or explicit ISO) anchors window starts to
+  `t0 + k·step` per level and drops the head partial window, so per-run FCs
+  of different runs/stations share one window grid — the prerequisite for
+  remote-reference pairing across separately-computed runs (burst slots).
+  Levels with fewer samples than one window are skipped with a warning.
+- **FC normalization**: scipy 'spectrum' scaling (÷ win.sum()); aurora
   additionally applies a linear spectral-density calibration factor. All
   ratio-based products (Z, tipper, coherence, OLS σ) are scale-equivariant
   and unaffected; persisted FC amplitudes and spectrogram dB are in
-  emptyUI's own convention.
-- **Window family** — Hamming with 50% overlap vs aurora's default boxcar
-  with 25% overlap (128/32).
+  emptyUI's own convention (history §14.1, item A5).
+- **Saturation rejection (`reject_saturated`, default on)**: every FC window
+  overlapping ≥1 flagged sample of a per-sample `saturated` auxiliary mask
+  channel is NaN'd in all in/out FCs; the mask max-pools through decimation;
+  the count is recorded in attrs. A no-op for payloads without the mask.
+  Verified: surgical — medians barely move, daytime garbage windows vanish;
+  official-EDI parity preserved (history §24.12).
+- **Calibration application**: §9.2 (frequency-domain, applied-flag-aware,
+  DC column NaN when the response vanishes there).
 
-### 14.2 Design decisions (all delivered)
-- **D1** — fc `time` must be `datetime64`; `ts.run` carries an absolute
-  `start_datetime` (normalized end-to-end so persistence round-trips).
-- **D2** — window expressed as **`num_samples` constant across levels**
-  (aurora-style), not seconds.
-- **D3** — multi-level FC container `{level: xr.Dataset}` on one `fc` handle.
-- **D4** — ComputeFC auto-persists each level to the workspace mth5 and returns
-  the in-memory multi-level `fc` regardless; `mth5.fc.write` remains for
-  explicit single-level control.
-- **D5** — EstimateTF estimates each level and returns a **single merged `tf`**,
-  with `merge_tf_levels()` shared by the `MergeTFLevels` node for advanced use.
+### 10.2 Frequency grid (band styles)
 
-### 14.3 Phased implementation (delivered 2026-08-29)
-- **Phase 1** — FC persistence groundwork: absolute `start_datetime` through
-  `ts.run`/fc, `workspace.mth5` with `persist_fc_level`/`load_fc_level`,
-  ComputeFC auto-persists every level when an absolute start is available
-  (warning otherwise). Round-trip fc→mth5→fc verified. (2026-09-05: the mth5
-  read-back path is complete — `mth5.fc.read` enriches read-back fc metadata
-  and `estimate_tf` normalizes mth5's `(time, frequency)` layout.)
-- **Phase 2** — multi-level FC generation (`compute_fc_levels`): N cascading
-  levels, constant `num_samples_window`; window param renamed to
-  `window_samples`.
-- **Phase 3** — per-level TF + merge (`estimate_tf_levels`, `merge_tf_levels`):
-  deepest-wins duplicate resolution; EstimateTF returns merged `tf` + `tf_levels`.
-- **Phase 4** — integration: end-to-end on LEMI (4 levels → 64 periods → EDI);
-  fixture generated in CI.
+`Estimate TF` banding parameter set: `band_style` (`l2u` default /
+`uniform` / `manual`), `periods_per_octave` (3), `min_bins_per_band` (20),
+`t_short` (0 = template head).
 
-### 14.4 Sequencing / banding spec (final, still current)
+- **`l2u` (default)** — fixed reference template + log-uniform
+  window-starvation coarsening + optional head clip, reproducing the official
+  hand-crafted USArray grid strategy (SDG31, ppo≈3) for any (window, factor):
+  the SAME decoded template is applied to EVERY decimation level (periods
+  scale by the cascade factor); a level whose band sample counts fall below
+  `min_bins_per_band` is rebuilt as a coarser uniform table (endpoints
+  included, overlaps dropped until disjoint or ≤2 bands). `t_short` drops
+  bands shorter than the given period (applied at a single choke point —
+  `_resolve_period_bands` — for BOTH schemes and the metadata-less fallback,
+  so it is honored everywhere the param is advertised). The l2u grid is
+  **window-invariant** (the template scales ×window/128 — the window only
+  changes FC bin resolution). Verified: SDG31 rotated metrics 0.020 median /
+  0.071 p90 / 93% pass vs the exact official table's 0.019/0.045/98%
+  (history §14.9 for the full experiment record).
+- **`uniform`** — the uniform log2-grid partition: shortest period Fs/4 per
+  level, longest window/4, band centers on a global log2 grid anchored at
+  4/Fs so consecutive levels land on the same absolute periods; levels
+  overlap and the merge keeps the deepest level covering each period
+  (more cycles = better long-period resolution). Legacy alias `"log"`.
+- **`manual`** — explicit band table: comma-separated band-center frequencies
+  + per-level counts → per-level `(f_hi, f_lo)` edges at geometric midpoints
+  (the harness-proven reconstruction of the official grid, for
+  apples-to-apples comparisons). `enabled_when`-gated params.
+- Legacy `"emtf"` is an alias of `"l2u"`; the retired `"index"` mode raises a
+  clear error.
+- **Cross-level tiling**: deepest-rate-first period tiling
+  (`_resolve_cross_level_claims`) — a period is estimated by the deepest level
+  that covers it; shallower bands are clipped to the unclaimed remainder.
+  `merge_tf_levels` dedups tolerance-based within half the level's center
+  spacing (aligned cascades still collide exactly; burst mixed-rate families
+  dedup near-duplicates).
 
-- **Periods per octave** (`periods_per_octave`, default 4) replaces
-  periods-per-decade; bands sit on a log2 grid matching FFT/decimation windows.
-- **Final banding spec** (2026-08-29): shortest period = **Fs/4** per level;
-  longest period = **window_length/4** (N/(4·Fs)); band centers on a global log2
-  grid anchored at 4/Fs, so consecutive levels land on the **same absolute
-  periods** wherever they overlap. Levels therefore **overlap** (Fs/4 →
-  window/4); the merge keeps the **deepest** level covering each period
-  (deeper level = longer window = more cycles = better long-period resolution),
-  dropping degenerate bands. This achieved aurora's "consistent frequency
-  points between levels" without external band files. Implementation note
-  (2026-09-13): the `uniform` scheme's midpoint-edge membership extends the
-  first/last band half a bandwidth past these anchors — bins up to
-  ≈2^(1/ppo)·Fs/4 enter the shortest band (the `l2u` template table is scaled
-  from the same anchors).
-- **TF table node** (`mth5.table.tf` "View TF") renders a TF as a table
-  (period, rho_xy/yx, phase_xy/yx).
-- **Decimation convention**: level *i* = decimated *i* times; `decimation_levels`
-  default 0 = native rate only.
-- **Deferred → M4 #9**: load an aurora-style band config file (exact center
-  frequencies + bandwidths) rather than always deriving the table — superseded
-  in practice by the l2u scheme (§14.9).
+### 10.3 Coherence Sort (per-bin statistic)
 
-### 14.5 Worth exploring — Paradigm B (cross-decimation-level FC pooling) — M4 #10
+The node (`aurora.process.coherence_sort`, between Compute FC and Estimate TF)
+scores FC windows with the **EMTF-style per-frequency window-ensemble
+multiple coherence** — the band-free sort:
 
-At long periods the deepest decimation levels have few STFT windows, so per-level
-TF estimates are statistically weak. Deeper levels also have **finer raw
-frequency resolution** (more harmonics per Hz). Pooling all levels' FCs that
-fall in a band into **one** robust regression recovers more samples precisely
-where they are scarce. Existing codes (EMTF, BIRRP, aurora) define bands this
-way but process each level's bands *separately* (Paradigm A); their band tables
-are non-overlapping across levels. **No existing open-source code pools FCs
-across decimation levels into one band** — Paradigm B is a novel extension
-enabled by emptyUI's raw FC layer. Implementation sketch (if pursued): a global
-band table (reuse the log-octave grid); per band, gather FC samples from *every*
-level whose raw bins fall inside (weighted by level sample count); run the
-existing aurora-backed `_solve_band` once per band. Value is highest at long
-periods. References: Egbert (1997, EMTF); Chave & Thomson (2004, BIRRP); aurora
-`Band` metadata + EMTF band setup files; mth5 FC layer.
+- **Statistic**: per (frequency bin, window), the multiple coherence² of each
+  output on the magnetic inputs estimated over a sliding window ensemble
+  (±`ensemble_windows` windows, default 16, center included) with optional
+  pooling over ±`smooth_bins` adjacent bins (a fixed smoothing scale,
+  deliberately not the estimate's band table). Adjusted-R² debias removes the
+  sample-coherence high bias (a small residual under the null remains,
+  ~1/(W−p), empirically immaterial at ens=16). Weights are per (bin, window) —
+  finer than per-window scalars and independent of any band table.
+- **Params** (the whole surface): `coherence_min` (0.25), `coherence_max`
+  (0.98 — perfect coherence can be a noise signature: few DOF or coherent
+  noise), `mode` (`weight` default / `drop` / `off`), `apply_below_period`
+  (empty = all levels; band-center periods at/above the threshold pass
+  unsorted — scope the remedy to the noise-floor head without perturbing the
+  healthy deep tail), `ensemble_windows` (16), `smooth_bins`.
+- **Two-FC design**: accepts `fc` + `ref_fc` and outputs both (mirroring
+  Estimate TF) because remote reference *replaces* the local magnetic
+  channels: single-FC mode uses local outputs' multiple coherence on the
+  local magnetic inputs; two-FC mode uses the local outputs' coherence on the
+  remote magnetic inputs combined (minimum) with the local↔remote magnetic
+  transfer coherence. Both criteria are reported in the diagnostics table.
+  The two FCs must share identical time/frequency grids (validated, same
+  errors as Estimate TF). The shared per-row weight is baked as √w into both
+  output FCs (weighted-LS semantics: one weight per observation row).
+- **Loud failure semantics**: a band whose every sample was fully
+  down-weighted leaves the band regression with no usable rows — `estimate_tf`
+  warns naming the skipped band periods and retained-row counts;
+  `merge_tf_levels` warns naming dropped degenerate bands; the Estimate TF
+  progress line reports merged/offered band-periods and the processing notes
+  record both counts. Kill + warn (a "can't estimate → pass through"
+  alternative was rejected: it would re-admit un-QC'd data).
+- **Known caveat (uncorrected)**: overlapping windows and shared noise
+  realizations mean the effective DOF is smaller than the nominal row count;
+  no Egbert-style DOF correction is applied to the estimate's σ² (M4 #7
+  statistics work). The per-bin debias handles the statistic itself.
+- `Estimate TF` skips non-finite FC rows when gathering band rows (required
+  by `drop` mode, and gives correct RR semantics: a row is used only if both
+  local and remote FCs are finite).
 
-### 14.6 Discrete, EMTF-style band construction (`band_style` switch — history; `"index"` retired 2026-09-09)
+### 10.4 Run-level QC (Select Runs, Residual Sort)
 
-> **Superseded (2026-09-09, §14.8; further superseded 2026-09-11, §14.9):** the
-> `band_style="index"` mode was retired after the comparative assessment (its
-> per-level fallback role lives on inside the `"l2u"` scheme); `"log"` was
-> renamed `"uniform"` (legacy value still accepted as an alias). Retained as
-> history; reproducible from commit e2046df/bd75d14.
+Noise rejection at **run/session granularity**, before estimation. Motivation
+(Weckmann et al. 2005; Szarka 1988): power and coherence alone are misleading —
+cultural noise is often correlated across E and H, defeating robust processing
+and coherence sorting (measured: stronger sorting *amplified* this site's
+scatter — negative result, history §24.13). The site's solar plant makes
+daytime noise track output, not the clock, so blind day/night removal is
+wrong — rejection is **data-driven with a soft diurnal prior**.
 
-Key findings from the research (2026-09-08/09): aurora's default production band
-table (`bs_256_26.cfg`) is a hand-authored, non-overlapping, gapless integer-bin
-partition tuned for one (window, factor) configuration — no band-averaging taper
-is applied by either classic EMTF or current aurora (aurora's own source carries
-an unresolved TODO for it). emptyUI's `_period_bands()` instead partitions a
-continuous log2 grid and afterwards tests which raw bins fall in each band —
-near the long-period end several nominal bands can silently collect **zero** raw
-bins in a way that depends on floating-point boundary coincidences.
+- **Select Runs** (between Compute FC and Coherence Sort): per-level scoring;
+  per-run per-bin median of the per-window |Z|² (bivariate E/H from the run's
+  own calibrated FCs) within the reference band (default 1–10 s); station-wide
+  clean level per bin = a configurable percentile (default 50) over the runs'
+  medians — self-calibrating (storms raise every run equally and cancel;
+  cultural noise raises single runs). **One-sided up check** (noise only ever
+  inflates E): drop if run/level > `deviation_max` (default 2) scaled by the
+  soft diurnal prior (`prior_factor(h) = 1 + (prior_max−1)·0.5·(1 + cos(2π(h−12)/24))`,
+  UTC offset default 8 h) — daytime runs are judged up to `prior_max`×
+  stricter, night runs by the full threshold; a measured-clean day still
+  passes, a noisy night is still dropped. Separate **instrument-fault check**,
+  prior-independent: drop if level/run > `dead_max` (default 2). Runs without
+  in-band bins pass through unscored. Per-run diagnostics published as a table
+  artifact; kept/dropped lists ride the fc attrs; relative-time payloads
+  disable the prior with a warning. **Overlap guard**: windows of neighbor
+  sessions that overlap a rejected one picked up its samples through the
+  decimation cascade and are dropped too (one window duration wide).
+- **Residual Sort** (`aurora.sort.residual`, the orthogonal complement): a
+  first-pass TF predicts each FC window's outputs from the pooled magnetic
+  vector; the per-window unexplained-power fraction is aggregated per run
+  (median over windows, then median over the run's bands after per-band
+  normalization against the station-wide median). **Independent, cascadeable
+  node** — inputs are the fc payload and the first pass's `tf levels`; the
+  chain BuildFC → EstimateTF → Residual Sort → EstimateTF is a loop-free DAG.
+  `estimate_tf_levels` returns each level's `band_intervals` (the pooling
+  key). **One-sided up-check only** (a LOW unexplained fraction means the
+  data fit the model WELL, not dead channels — the inherited down-check
+  wrongly flagged 340 good-fit slots and cost the long-period tail).
+  Semantics: a tight-but-wrong run DOES drop (it disagrees with the model,
+  with a bounded structured fraction rather than the explosive score of
+  incoherent noise); empty period scope warns and passes through; unscored
+  runs pass through; the shared soft diurnal prior applies.
+- **Stage-1 separation study (negative result, kept as the record)**:
+  magnetic polarization concentration (Weckmann's strongest discriminator)
+  is LOW everywhere on the validation corpus and the major-axis angle rotates
+  with time (natural source geometry) — the polarization feature is dropped
+  from the workflow plan; the cluster-spread feature is a diagnostic column
+  only. The QC effort belongs to the residual lever (history §24.13).
 
-The `_period_bands_indexed()` function auto-derived the EMTF-equivalent table
-for any configuration by walking the integer FFT-bin index grid directly —
-guaranteeing every raw bin in a level's reliable range is assigned to exactly one
-band. A **zigzag defect** was found and fixed (2026-09-09): walking the bin-index
-grid yields the same index sequence at every level, but identical indices sit at
-frequencies differing by `factor**level`, so overlapping bands got different
-period labels per level and the merge dedup never fired (interleaved
-near-duplicates). **Fix: one GLOBAL boundary grid for the whole container**
-(`_container_band_edges` → `_index_band_edges`), shared by all levels — band
-labels identical across levels, so the exact merge dedup fires again and the
-deepest level wins each overlap. The per-level walk survives only for standalone
-single-level calls. Verified on BGS NO46+NX37 (window 256): merged curve smooth
-again (50 interleaved points → 36 = one per global band).
+### 10.5 Units & scaling
 
-### 14.7 Disjoint EMTF/aurora-style band table (`band_style="emtf"` — history)
+- **Magnetic**: B/H mode derived from nomenclature/channel names (bx/by →
+  fluxgate B→H; hx/hy → coil H, archived in nT like fluxgate B). nT→A/m
+  conversion is units-aware: nT units → convert; explicit A/m (or unknown,
+  legacy synthetic) → leave. Regression: `test_magnetic_units.py`.
+- **Electric (`Compute FC`, attr-aware)**:
 
-> **Superseded (2026-09-11, §14.9):** replaced by the l2u scheme as the default
-> frequency-grid method; `"emtf"` is still accepted as a legacy alias of
-> `"l2u"`. Retained as history; reproducible from pre-2026-09-11 commits.
+  | condition | action |
+  |---|---|
+  | `e_dipole_length_m` set | raw-potential path: `x · 1e-3 / dipole` (warning if attrs canonicalize to mV/km — contradiction) |
+  | attrs = milliVolt per kilometer | ×1e-6 (LEMI archives; legacy path) |
+  | attrs = Volt per meter | passthrough (already physical) |
+  | attrs = milliVolt per meter | ×1e-3 |
+  | attrs = milliVolt (raw potential) | **hard error**: set `e_dipole_length_m` |
+  | unrecognized | warning + passthrough (never silently scale what cannot be interpreted) |
+  | no attrs (unitless) | ×1e-6 — legacy behavior (synthetic fixtures, core payloads) |
 
-The merge-based modes deliberately let levels overlap and resolve post-hoc
-(deepest wins) — smooth boundaries at the cost of redundant robust regressions.
-Classic EMTF instead assigns every band to **exactly one** level — no overlap,
-each frequency evaluated once — at the cost of small handover discontinuities.
-Decoding the classic table (`bs_256_26.cfg`, N=256 → 128 bins/level, factor 4):
-per-level usable bins ≈ 5..55; level 1 dense (~3.2 bands/octave); levels 2–3
-repeat an **identical 6-band bin template** with frequencies ÷4 per level;
-bands shrink to a **single bin** at each level's bottom; nearly disjoint across
-levels (one small real overlap even in the hand-tuned file). The single rule
-"walk centers down a ~3/octave geometric ladder snapped to whole bins; hand over
-to the next level when the width would drop below ~1 bin" reproduces the entire
-shape automatically for any (window, factor, ppo).
+  The fc records `electric_scaling` in attrs. Unitless payloads behave exactly
+  as the legacy path (all synthetic fixtures and the USArray verification
+  unaffected; regression `test_electric_units.py`).
+- **Counts rejection**: FDSN-built mth5 archives store raw counts with the
+  response attached (Calibrate mandatory); Compute FC **hard-errors** on
+  count-family units ("digital counts"/"count"/"counts") with an actionable
+  message instead of a silent passthrough (the unitless path is unchanged —
+  LEMI workflows are unaffected).
+- **Core-node boundary**: `coerce_run` preserves the per-channel `units` dict
+  through the core Detrend/Bandpass nodes; Align re-stamps it on its RunTS
+  outputs (a dropped-units regression once produced 10⁻⁶–10⁸ Ω·m output).
+- **Calibration relabeling**: `RunTS.calibrate` rewrites each channel's units
+  attr to `channel_response.units_in`; gain-correction FAPs (units_in ==
+  units_out) keep the archival label, and declared unit transformations are
+  honored by the attr-aware path.
 
-**Comparative assessment (2026-09-09, BGS NO46+NX37, window 256/512):** all four
-configurations recover the same physical structure. Key findings: (a)
-long-period tail smoothness is **dominated by ladder PHASE, not the band
-method** (shifting a discrete ladder by half a band onto `log`'s phase made the
-tail ~2.7× smoother; at window 512 the ranking reshuffled) — do not rank band
-methods by tail smoothness; (b) the genuine replicable effect is **ownership
-policy** (emtf-shallowest wins the window-poor tail clearly); (c) boundary nit:
-the grids bottom exactly at the window/4 cutoff and the `(lo, hi]` convention
-leaves the exact cutoff bin unassigned; (d) open question: isolated narrowband
-dips (~4700/4100/3100/16384 s at window 256) — cultural noise vs sampling
-artifact, needs a longer record. Provisional verdict superseded 2026-09-11:
-neither scheme reproduces the official USArray grid, and the l2u scheme
-(§14.9) was delivered as the single automatic method.
+### 10.6 Display & plot conventions
 
-### 14.8 Consolidation: two band schemes (`"uniform"` + `"l2u"`, 2026-09-11)
+Publication-quality standard (USArray convention; reference figure
+`SDG31b_H28coh.png`). `Plot AppRes & Phase` and `Plot Tipper` stay separate
+nodes — no combined plot.
 
-Following the assessments above, the band-configuration surface was consolidated
-to the two schemes that matter:
-
-- **`band_style="l2u"`** — the **default** (§14.9): fixed reference template +
-  log-uniform window-starvation coarsening + optional head clip. Replaced the
-  auto-derived EMTF-style table on 2026-09-11 after the USArray verification
-  (§16.3) showed it does NOT reproduce the official grid (42 vs 30 periods, no
-  tail coarsening) while l2u reproduces the official strategy (counts
-  6/6/6/6/4/2 at window 256, metrics matching the exact-table reference).
-- **`band_style="uniform"`** — the uniform log2-grid partition (formerly
-  `"log"`): merge-based across overlapping levels, deepest wins.
-- Legacy values `"log"` (alias of `"uniform"`) and `"emtf"` (alias of `"l2u"`)
-  are accepted so saved workflows keep running; the retired `"index"` mode
-  raises a clear error.
-- Removed: the `index` mode, the deepest-owner variant, `band_owner`, and the
-  emtf table machinery (the per-level bin walk `_period_bands_indexed` survives
-  as the `"l2u"` fallback for metadata-less fcs).
-
-### 14.9 Frequency grid determination — the delivered default method (`band_style="l2u"`, 2026-09-11)
-
-**Motivation.** §16.3's SDG31 verification exposed that the then-default
-`band_style="emtf"` table does **not** reproduce the official USArray grid: 42
-vs 30 periods (window 256, ppo 3 — 12/6/6/6/6/6 vs 6/6/6/6/4/2 per level),
-uniform 1/3-octave widths everywhere (no tail coarsening), and a long-period
-tail running to the reliability floor (52.4 ks) where the official stops at
-18.7 ks. The coarsening prototype (merge-by-closest-center) was also worse than
-the exact table (pass_rho 76% vs 83%) — it changed the ladder phase. Goal: an
-**automatic** algorithm that mimics the official hand-crafted band list's
-*strategy* for any (window, factor), so no hand-authored config is needed.
-Setting the grid **exactly** as the official EDI stays an option
-(`bands_override` / M4 #9) but is not flexible to different window lengths.
-
-**Reference grid decoded (official `USArray.SDG31.2017.edi`, ppo ≈ 3).**
-
-| level | fs (Hz) | bands | period range (s) | mean spacing (oct/band) | ≈ bands/octave |
-|-------|---------|-------|------------------|--------------------------|----------------|
-| 0 | 1 | 6 | 7.31 – 25.6 | 0.36 | 2.8 |
-| 1 | 0.25 | 6 | 33.0 – 102.4 | 0.33 | 3.1 |
-| 2 | 0.0625 | 6 | 132.1 – 409.6 | 0.33 | 3.1 |
-| 3 | 0.015625 | 6 | 528.5 – 1638.4 | 0.33 | 3.1 |
-| 4 | 3.9e-3 | 4 | 2259.9 – 7281.8 | 0.56 | 1.8 |
-| 5 | 9.8e-4 | 2 | 11915.6 – 18724.6 | 0.65 | 1.5 |
-
-Decoded findings (the "hand-crafted" structure the method mimics):
-- **Head (L0–L3) = ~3 bands/octave** (ppo 3); **tail (L4–L5) ≈ half as dense —
-  bandwidth doubled** (0.56–0.65 oct/band ≈ 2/ppo). The doubling starts where
-  levels become window-starved, not at a fixed period.
-- **The L1–L3 template repeats VERBATIM at every level** (window-128 native bins
-  `[15-16],[12],[9-10],[7-8],[6],[5]`; at window-256 k = 31/24/19/15/12/10 —
-  exactly 2× the classic `bs_256_26` level-2/3 template) — the official grid is
-  NOT a per-level walk, it is a FIXED template applied to all levels. The single
-  most important decoded insight.
-- **Head clip at 7.31 s** (not Fs/4 = 4 s): data-driven (Kelbert et al. 2026:
-  NIMS magnetic noise exceeds signal below 10–20 s; RR reliable only to ~7 s).
-- **Tail clip at 18.7 ks** (not the ~65 ks L5 floor): window-starvation-driven —
-  window counts (10-day, 1 Hz, window 256): 6673/1667/416/103/25/**5** → the
-  official tail coarsening keeps ≥ ~2.5–6 windows/band.
-
-**The delivered method — `_l2u_band_table` (`emptyui-aurora/_processing.py`),
-the Estimate TF node default.** Two parts:
-
-1. **Fixed reference template.** `_L2_TEMPLATE_128` = the official L1–L3
-   template family, scaled to the container's window (×window/128, overlaps
-   merged). The SAME template is applied to EVERY decimation level — periods
-   scale by the cascade factor per level, exactly the official grid's structure.
-   Window-rich levels (0–3) keep the full 6-band template untouched.
-2. **Log-uniform window-starvation coarsening.** Per level, if any band's total
-   samples (n_windows × band width) fall below `min_bins_per_band`
-   (default 40 in the internal helper; the Estimate TF node exposes **20**
-   since the §24.6 default flip — every call site passes its value
-   explicitly, `test_defaults.py` pins the split),
-   the level's grid is REBUILT as a coarser uniform table: `n − ⌊n/3⌋` bands,
-   each widened to the minimal width whose total samples exceed the threshold,
-   re-spaced uniformly in log period across the template's span (endpoints
-   included), overlapping bands dropped until no overlap or ≤2 bands remain
-   (extreme starvation: width shrunk to tile the span — bands stay disjoint).
-   This reproduces the official tail's strategy while keeping the grid uniform
-   and log-even.
-
-`t_short` (default 0 = template head) drops bands shorter than the given period;
-the official ~7.3 s clip is data-driven, so it stays a parameter.
-`min_bins_per_band=0` disables coarsening. Levels without window metadata are
-left unchanged; a container with insufficient metadata falls back to the
-per-level bin walk (`_period_bands_indexed`).
-
-**Why this over the alternatives (experiment history, condensed).** Reproducible
-via `verify_sdg31.py`; rotation-corrected −5.7° metrics, T ≥ 15 s, 27 matched
-periods:
-
-| grid | rotated med/p90/pass | outcome |
-|------|----------------------|---------|
-| exact official table | 0.019 / 0.045 / 98% | reference (best possible) |
-| **l2u, window 256 (delivered default)** | **0.020 / 0.071 / 93%** | best automatic; official counts 6/6/6/6/4/2 exactly; window-invariant grid (see note) |
-| l2u, window 128 | 0.019 / 0.089 / 93% | same scheme, coarser bins |
-| fixed template + MIN=3 coarsening (`l2`) | 0.022 / 0.070 / 94% | best non-uniform scheme; residual from hand-crafted L0/L4/L5 |
-| emtf auto table (legacy) | 0.051 / 0.153 / 76% | superseded — did not reproduce the official grid |
-| l2u bin-uniform placement | 0.024 / 0.131 / 85% | log placement wins |
-| l2u ppo=2 / ppo=4 (128 w) | 0.031/0.095/91% · 0.024/0.092/93% | official density is ~3/octave; both sparser and denser lose |
-| close-gap (L4→L5 handover) | degrades all ppo variants | the official's own L4→L5 handover is 1.64 — the coarsened 1.65/1.78 matches it; closing to the template's 1.29 hurts |
-
-Key conclusions: (a) the window length matching the official's own (256/512)
-matters more than the coarsening details — at window 256 the template bins ARE
-the official's positions; (b) the L4→L5 "gap" is NOT a defect (the official has
-the same sparse tail); (c) the official grid is **not a single uniform
-template** — its L0 and L4/L5 ladders are hand-crafted variants, which l2u
-reproduces by construction (fixed template head + window-starvation coarsened
-tail). Note: the l2u grid is **window-invariant** (the template scales
-×window/128, so windows 128 and 256 evaluate the SAME periods — the window only
-changes FC bin resolution; the window-256 metric advantage comes from the finer
-bins, not the grid). The earlier 0.018/0.058 window-256 result was produced by
-the verify-script prototype accepting OVERLAPPING L5 bands at the 2-band floor;
-the package fixes that (bands must stay disjoint), hence 0.020/0.071.
-
-**Validation protocol status.** Unit tests (synthetic containers): template
-scaling (window 128/256/512/64 — disjoint, non-degenerate); window-rich levels
-keep the template; starved levels rebuilt uniformly; extreme starvation shrinks
-to a tile; metadata-less levels untouched; `t_short` clips the head; node params
-reach the grid (`test_band_style.py`). Robustness across window 128/256/512,
-ppo 3/4 and short records is covered by the same mechanics.
-
-**Non-goals.** Replacing `bands_override` (M4 #9); Paradigm B cross-level
-pooling (M4 #10); auto-deriving the head clip from data (follow-up).
-
-**Effort.** Medium — `_l2u_band_table`/`_l2u_template`/`_clip_head_bands` +
-`estimate_tf_levels` pass-through + node params + tests; no estimator changes.
-
----
-
-## 15. Publication-quality plot standardization (delivered 2026-09-06)
-
-**Motivation.** The Display nodes were proof-of-concept level: no error bars
-(TF errors never stored), no MT display conventions (raw phase, no y-limits
-policy), components distinguished by color only, no site/processing metadata in
-titles, low DPI (110), inconsistent style.
-
-**Status: delivered** (P1–P4). Conventions implemented as decided below.
-Reference figure: `SDG31b_H28coh.png` (USArray convention — primary style
-reference; repo root). We do **not** build a combined plot — `Plot AppRes &
-Phase` and
-`Plot Tipper` stay separate nodes.
-
-### Conventions implemented (the spec)
-- **TF error propagation (enabler)**: `_solve_band`/`build_tf` propagate
-  `transfer_function_error` + `tipper_error` (std of each complex element — what
-  mt_metadata's EDI writer squares into `.VAR`). RME/RME_RR populate
-  `cov_ss_inv`/`cov_nn` (default `return_covariance=True`); OLS uses the
-  classical `(XᴴX)⁻¹·σ²` covariance from residuals.
+- **TF error propagation**: `_solve_band`/`build_tf` propagate
+  `transfer_function_error` + `tipper_error` (std of each complex element —
+  what mt_metadata's EDI writer squares into `.VAR`). RME/RME_RR populate
+  `cov_ss_inv`/`cov_nn`; OLS uses the classical `(XᴴX)⁻¹·σ²` covariance.
 - **Error-bar math** (aurora/mtpy formulas): `σ_|Z| = σ_Z/√2`;
   `σ_ρ/ρ = 2·σ_|Z|/|Z|`; `σ_φ(rad) = σ_|Z|/|Z|`; tipper per Re/Im panel:
-  `σ_component = σ_T/√2` (component std under the isotropic complex-error
-  assumption — the same √2 convention as `σ_|Z|`; doc corrected 2026-09-13
-  to match the delivered code, which divides by √2).
-- **Phase display**: off-diagonal components (Zxy, Zyx) folded into (0°, 90°) by
-  ±180° (aurora `RhoPlot`/USArray convention), ylim 0–90°, ticks every 15°;
-  **diagonal components (Zxx, Zyy) keep signed phase in [-180°, 180°]**.
-- **Style** (shared module `emptyui-mth5/plotting.py`; mirrored minimal
-  `emptyui-core-nodes/_plotstyle.py` — core stays mth5-free): font sizes ~9–10
-  pt, dpi ≥ 150, `bbox_inches="tight"`, PNG + optional PDF, boxed legend
-  (marker+label, never color-only).
-- **Axes (USArray convention)**: x = Period (secs) log10 (decade ticks, shared
-  across panels); ρ_a = log10 (Ω·m); φ = linear (Degrees); tipper = Re/Im,
-  ylim [-1, 1]; **equal per-decade scale** (one decade of period = same physical
-  length as one decade of ρ_a — MT convention).
-- **Markers & colors**: **XY = ○ (blue), YX = ✕ (red)** + distinct linestyles
-  (colorblind-safe); XX = square, YY = diamond (proposal). Tipper: Re = ○ /
-  Im = ✕ per component panel.
-- **TF station metadata (prerequisite)**: ComputeFC attaches
-  survey/station/run + lat/lon/elev to fc attrs; EstimateTF/MergeTFLevels pass
-  them to `build_tf`, which sets `tf.survey_metadata`/`tf.station_metadata`/
-  `tf.run_metadata` — the **single point of truth** for plot titles AND
-  EDI/XML/ZMM export headers (verified: EDI carries `DATAID`/`LAT`/`LON`/
-  `SURVEY` + `*.VAR` lines). `AlignRuns._crop_to_runts` carries the same
-  metadata onto aligned runs.
-- **Title & metadata**: EMTF/USArray-style `<station id><run id> [
-  LON = …; LAT = … ]` plus a processing-provenance subtitle (estimator, remote
-  reference, decimation levels, periods per octave, nomenclature); figure
-  metadata via `fig.savefig(metadata=…)`.
+  `σ_component = σ_T/√2`.
+- **Phase display**: off-diagonal components folded into (0°, 90°) by ±180°,
+  ylim 0–90°, ticks every 15°; **diagonal components keep signed phase in
+  [-180°, 180°]**.
+- **Axes**: x = Period (secs) log10 (decade ticks, shared across panels);
+  ρ_a = log10 (Ω·m); φ = linear (Degrees); tipper = Re/Im, ylim [-1, 1];
+  **equal per-decade scale** (one decade of period = one decade of ρ_a — MT
+  convention).
+- **Markers & colors**: XY = ○ open circle (blue), YX = ✕ (red) + distinct
+  linestyles (colorblind-safe); XX = square, YY = diamond. Tipper: Re = ○ /
+  Im = ✕ per component panel (panels = Re/Im, series = components — the exact
+  mirror of AppRes & Phase). Symbols only, shared log-period x-limits,
+  boxed legend.
+- **Style** (shared module `emptyui-mth5/plotting.py`; minimal mirrored
+  `emptyui-core-nodes/_plotstyle.py` — core stays mth5-free): font sizes
+  ~9–10 pt, dpi ≥ 150, `bbox_inches="tight"`, PNG + optional PDF.
+- **TF station metadata**: ComputeFC attaches survey/station/run + lat/lon/elev
+  to fc attrs; EstimateTF/MergeTFLevels pass them to `build_tf`, which sets
+  `tf.survey_metadata`/`station_metadata`/`run_metadata` — the single point of
+  truth for plot titles AND EDI/XML/ZMM export headers.
+- **Title & provenance**: EMTF/USArray-style
+  `<station id><run id> [ LON = …; LAT = … ]` plus a processing-provenance
+  subtitle; `print_params` boolean (default on) toggles the provenance line,
+  which is anchored to the measured x-label bottom and word-wrapped to the
+  axes width.
 - **Core plots** (`PlotTimeSeries`, `PlotSpectrogram`): datetime x-axis
   (ConciseDateFormatter; relative-seconds fallback), channel unit hints
   (mV/km electric, nT magnetic), station/run in title, unit-aware colorbar.
-
-### Verification & references
-Tests assert the conventions (off-diagonal ylim (0, 90), diagonal [-180, 180],
-tipper [-1, 1], errorbar containers, ○/✕ markers, equal per-decade scale < 5%
-tolerance, station in title, dpi ≥ 150); visual review against the USArray
-reference. References: aurora 0.6.2 `TTFZ` (error-bar math + phase-fold
-reference); mtpy `PlotMTResponse` (tipper layout; **not a dependency** — optional
-dev extra for golden-image comparison, M4 #8); mt_metadata 1.0.10
-`TF.impedance_error`/`TF.tipper_error`/`TF.transfer_function_error`.
-
-### Decisions (2026-09-06)
-- x-axis: **Period (secs), log10** — decided.
-- Tipper: **Re/Im panels, ylim [-1, 1]** — decided; replaces |T|/phase panels.
-- Diagonal phase: **signed, [-180°, 180°]** — decided.
-- Markers/colors: **USArray convention** (○ XY, ✕ YX, blue/red); XX = square /
-  YY = diamond (proposal).
-- Open: add `mtpy` as a test-only dev extra for golden-image comparison (M4 #8).
+- **Plot Coherency** (`aurora.plot.coherency`): renders the **per-bin
+  statistic** the sort applies (per (bin, window) window-ensemble coherence,
+  median across windows, one series per decimation level, guidance band at
+  the sort bounds); fc-direct — works without a sort node in the graph.
+- **Plot Phase Tensor** (`mth5.plot.phase_tensor`): Caldwell-style PT
+  ellipses vs period colored by skew (Φ = X⁻¹·Y from Z = X + iY; ellipses
+  constructed in display space and mapped back — data-space ellipses are
+  log-warped). No PT error bars (MVP; noted in the plot label).
+- **Plot Spectrogram (fc)** (`aurora.plot.spectrogram`): input `fc` — power
+  = 10·log10|FC|², coefficients reused, no second FFT; `channel` param with
+  inherited-comma-split candidates; `decimation_level` (−1 = deepest); the
+  legacy ts-based node is hidden but still executable.
+- **Plot Tipper**: `tipper_ylim` param ("auto" | "min,max"), mirroring
+  `rho_ylim`.
 
 ---
 
-## 16. M3 tasks — instrument calibration & coherence sorting (delivered 2026-09-07)
-
-Two independent follow-ups identified while investigating the BGS NO46/NX37
-short-period results. §16.3 is the subsequent USArray ground-truth verification
-(2026-09-10).
-
-### 16.1 General calibration framework + LEMI-417/424 calibration support
-
-**Grounding (2026-09-07).** The LEMI logger outputs physical units (nT, µV/m)
-assuming unity gain and zero phase; the deviation grows near Nyquist. The
-manufacturer's `.chn` (LEMI-417-era) and `.def` (KMS-200 wrapper) files are FAP
-files: header `'#FP' <NTF> <NCH>`, rows = 12 frequencies × 5 channels, complex
-response as modulus + argument (degrees), first column = frequency (Hz). **No
-public parser exists** for either format; mt_io/mth5 accept only per-channel
-JSON, and `LEMICollection.get_calibrations` globs only `*.json` — manufacturer
-files were silently ignored. Empirical check on the BGS pair: the short-period
-ρ_a collapse is primarily the **instrument noise floor** (LEMI-424 is a
-long-period system, designed T=20–100,000 s); applying the `.chn` file (flat
-clamp below 0.25 Hz) scales ρ by ~×6.25 and shifts phase ~±30° — a real but
-modest correction that cannot recover sub-noise-floor periods.
-
-**Implemented (2026-09-07).** `emptyui-mth5/calibration.py`:
-`parse_fap` (`.chn`/`.def`), `parse_json_calibration` (mt_io format),
-`build_fap_filters` (per-channel `FrequencyResponseTableFilter`, units
-nanoTesla / mV·km by channel prefix), `attach_filters` (mt_timeseries style —
-`run.filters` + per-channel `attrs["filters"]` in the AppliedFilter format that
-survives an MTH5 round trip; channels without a filter get a unity coefficient
-filter so `RunTS.calibrate()` passes temperature channels warning-free),
-`find_calibration_file` (auto-pickup, station-pair files preferred),
-`load_calibration` (dispatch by extension). `Load LEMI-424`: `calibration_path`
-param + `extend_flat`; filters attached **before** `from_runts`, so the
-calibration is archived with the run. New `mth5.calibration.load` node feeds the
-explicit path of `mth5.calibrate`. Below-table policy: **flat clamp** (first-row
-modulus, zero phase, extended to 0.001·f_min) — log-extrapolation was worse.
-Verified on BGS NO46 LEMI-417: ρ_a ≈ ×6.25, phase ≈ 5–15° — consistent with the
-empirical check. Open: absolute-gain verification (M4 #6); `.def` parsing is
-heuristic (no sample in repo — clear error if the FAP block is not found).
-
-### 16.2 EMTF-style coherence sorting (filter low-coherence FCs)
-
-**Grounding (2026-09-07).** aurora 0.6.2 has **no sample-level coherence
-sorting**: the robust M-estimator computes squared coherence but only **logs**
-it; its coherence helpers are band-widening only. Measured on the BGS pair:
-E–B coh² ≈ 0.01–0.1 at T=4–16 s (signal below the noise floor — no recovery),
-0.03–0.3 at T=11–30 s (transition zone — sorting can help), 0.6–0.9 at T>30 s.
-Grounding for the method: Egbert (1997, EMTF) and Chave & Thomson (2004, BIRRP)
-use coherence-based identification/downweighting of contaminated samples; not
-implemented in the pinned aurora, so added in emptyUI (pre-regression, external
-to aurora's residual-based M-estimator).
-
-**Design (2026-09-07, as delivered).** A dedicated node
-**`aurora.process.coherence_sort`** ("Coherence Sort"), placed between
-`Compute FC` and `Estimate TF`, in `emptyui-aurora` (reuses the same band
-geometry as `Estimate TF`; `periods_per_octave` exposed, default 4).
-
-- **Two-FC design (user decision)**: accepts **both** `fc` + `ref_fc` inputs and
-  outputs (mirroring `Estimate TF`) because remote reference *replaces* the local
-  magnetic channels: single-FC mode uses local outputs' multiple coherence on
-  the **local** magnetic inputs; two-FC mode uses the local outputs' coherence
-  on the **remote** magnetic inputs **combined** (minimum, fixed — no
-  `coherence_source` param) with the local↔remote magnetic transfer coherence,
-  since the reference can only clean the local H to the extent the two magnetic
-  fields are coherent. Both criteria are reported in the diagnostic table.
-  The two FCs must share identical time/frequency grids (validated, same errors
-  as `Estimate TF`). The shared per-row weight is baked as √w into **both**
-  output FCs (weighted-LS semantics — one weight per observation row), making
-  remote-reference row weighting exactly correct.
-- **Params**: `coherence_min` (0.25), `coherence_max` (0.98 — perfect multiple
-  coherence can be a noise signature: few DOF/overfit or coherent noise, so
-  coh ≈ 1 must not automatically mean "good data"), `mode` (`weight` default /
-  `drop` / `off`), `coherence_trim` (False — band-edge trimming: set bins whose
-  band median coherence is below `coherence_min` to NaN with a warning;
-  trimming applies only in `weight`/`drop` modes — `mode=off` means no
-  coherence-based modification at all, warning added 2026-09-13),
-  `periods_per_octave` (4).
-- **Statistic**: per-window **multiple coherence** over the frequency-bin
-  ensemble inside one STFT window, per level; sparse bands fall back to the
-  minimum pairwise coherence; degenerate windows score 0 (conservative); per
-  output channel the minimum across outputs is used.   statistic falls back to the minimum pairwise coherence there — which is
-  **not** trivially 1, so the lower bound still applies (conservative);
-  only the upper rule is capped (`coh ≤ coherence_max − ε`,
-  implemented 2026-09-07; rationale corrected 2026-09-13 — the original
-  "fits exactly, so coherence is trivially 1.0" wording described the
-  regression, not the computed statistic).
-- **Semantics note (Batch B)**: this is a per-window broadband (bin-ensemble)
-  QC heuristic — **not** EMTF/BIRRP's window-ensemble coherence per frequency.
-  The two agree qualitatively but not numerically; a true EMTF-style
-  per-frequency variant is M4 #7. The node description states this.
-- **Known statistical bias (documented 2026-09-13, uncorrected)**: the sample
-  multiple coherence treats the band's n_bins × n_windows rows as independent,
-  but windows overlap 50% and bins within a window share that window's noise
-  realization, so the effective DOF is far smaller and the sample coherence is
-  biased high by ≈ n_in/(N_eff − 1) (~5% at the default `min_bins_per_band=40`;
-  no Egbert-style DOF correction is applied). Consequences: long-period bands
-  pass `coherence_min` more easily than the nominal threshold implies, the
-  "coh ≈ 1 is suspicious" rule fires inconsistently, and OLS σ² (dof =
-  n_obs − n_in, §15) is underestimated by the same DOF inflation. Correcting
-  or replacing the statistic is part of M4 #7.
-- **`Estimate TF` change (small, generic)**: skip non-finite FC samples when
-  gathering band rows — required by `drop`/`coherence_trim`, and gives correct
-  RR semantics for free (a row is used only if both local and remote FCs are
-  finite; row pairing stays aligned because the time grid is never dropped).
-- **Diagnostics**: `table` output with per-period median coherence for each
-  criterion (E–H and, two-FC, the magnetic transfer coherence, plus their
-  min), retained/total window counts, and a `trimmed` flag (the
-  "applied weight range" wording from the original spec was never
-  delivered — weight range is not in the rows). A
-  coherence-vs-period plot is a later add-on (M4 #1).
-- **Implementation**: `_simple_coherence`, `_multiple_coherence`,
-  `_coherence_weight`, `coherence_sort_fc(s)` in `emptyui-aurora/_processing.py`;
-  `CoherenceSort` node + `_fc_io_channels` in `process.py`.
-- **Verification**: synthetic FCs with injected low-coherence windows (weights
-  exclude/down-weight and recover the true impedance; weight vs drop compared;
-  upper bound tested with overfit bands); two-FC mode synthetic stations (a
-  noisy local H with high E–H_remote coherence must be **retained** for RR; low
-  E–H_remote or low H_local–H_remote must be dropped); real BGS RR workflow
-  (T=11–30 s improves, long periods unchanged; `coherence_trim` removes
-  noise-floor bands with a warning). Defaults are loose — BGS long-period
-  results must remain stable.
-
-**Addendum (2026-09-11, review §18.2):** `min_bins_per_band` and `t_short` are
-now exposed on the node (previously the sort hard-coded 40 / had no head clip),
-so its banding can match a customized Estimate TF exactly — a test asserts
-set-identical band centers under matching params. The statistic itself remains
-the per-window broadband heuristic (M4 #7); Estimate TF should inherit the
-banding parameters from an upstream Coherence Sort when one is connected
-(§18.2 design note).
-
-### 16.3 USArray verification: SDG31 vs the official EMTF (SPUD) TF (2026-09-10)
-
-**Goal.** Pin the emptyUI MT processing chain (TS → FC → TF) against a
-ground-truth transfer function before relying on it: process USArray station
-**4P.SDG31** (Stratford Slough, SD) with emptyUI and compare with the official
-EMTF result for the same site, using **4P.SDH28** as the remote reference (the
-official processing used `REMOTESITE=SDH28`). Reproducible via
-`examples/data/lims-usarray-test/verify_sdg31.py`.
-
-**Data** (aurora operate-aurora recipe, `build_mth5.py`): 1 Hz channels
-LQE/LQN (100 m dipoles) + LFE/LFN/LFZ (NIMS), 2017-10-16→10-26 (SDG31) and
-2017-10-12→10-31 (SDH28); stored as standard-named ex/ey/hx/hy/hz in raw
-counts; archived responses turn them into mV/km and nT via `Calibrate`.
-Processing inferred from the official EDI grid: **factor 4, 6 decimation levels,
-~3 bands/octave head, coarser tail**; band centers are exact dyadic FFT-bin
-values and the L1–L3 template is exactly **2× the classic `bs_256_26`
-level-2/3 index template**. Window 256 is **wrong** for this site (dilutes the
-intermittent short-period signal); window 128 with 2-bin bands reproduces the
-official centers to ≤0.05%, which is why the exact-grid comparison works. For
-apples-to-apples the band table is reconstructed **exactly** from the official
-band-center frequencies (`exact_official_bands`; 6,6,6,6,4,2 per level); the
-§14.9 default `l2u` scheme reproduces the official strategy automatically.
-
-**Result (verified 2026-09-10).** For the reliable band **T ≥ 15 s** (27 matched
-periods; exact official grid, robust RR):
-- Un-rotated (geomagnetic frame): median |Δlog₁₀ρ| = 0.06 (ρ within 15%),
-  p90 = 0.11, 83% within the 26% gate; median |Δφ| = 1.6°, p90 = 3.6°, 98%
-  within 10°; coherence sorting (drop, trim) improves pass_rho to 91%.
-- **Coordinate-frame rotation (the xy-down / yx-up offset)**: MT acquisition is
-  in the **geomagnetic frame**; TFs must be **rotated to true north before
-  inversion**. The USArray data are geomagnetic; the official EMTF product was
-  **rotated −5.7° to true north** (EarthScope EMTF page: "Declination: 5.7
-  degree", "Angle To GG North: 0.00"). The IGRF model value (4.26°, in the mth5
-  archive) is **not** the relevant declination here — both the EDI and the
-  product page record 5.7°. Comparing un-rotated results shows exactly the
-  expected signature (ρ_xy ~10–20% low, ρ_yx ~5–15% high from ~100 s on) with a
-  consistent best-fit frame rotation of **−5.85°** (median; std 1.7°; opposite
-  sign 1.9× worse; 90° swap 100× worse; diagonal ratios ≈ 1 → no gain error) —
-  matching the documented −5.7° (residual 0.15° is banding noise).
-- **Rotated by −5.7°** with the standard convention
-  (`Z' = R(angle)·Z·R(angle)ᵀ`, `R(angle) = [[cos α, sin α], [−sin α, cos α]]`,
-  positive = clockwise from true north; magnetic→true north ⇒
-  `angle = −declination`): median |Δlog₁₀ρ| = **0.019** (ρ within ~4.5%),
-  p90 = 0.045, 98% within gate; median |Δφ| = 0.69°, p90 = 2.95°, 100% within
-  10°. (2026-09-10 correction: a script bug had mislabeled a later variant as
-  this "rotation-corrected" comparison; the numbers above are the genuine
-  exact-grid results.)
-- **TF rotation node** (`mth5.tf.rotate`) — **delivered 2026-09-11** (see §11):
-  rotates a TF by an arbitrary angle or to true north via the station
-  declination; `Import TF` parses the EDI declination (explicit field, else Hx
-  azimuth) with a fallback to the `angle` parameter; the verify script's
-  `render_appres_figure` now uses the package rotation.
-- **T < 15 s is noise-limited in the 1 Hz archive**: E/H multiple coherence²
-  drops to 0.001–0.05 (telluric signal at 7–12 s is intermittent — only ~2% of
-  windows coherent) and ρ collapses (median |Δlog₁₀ρ| ≈ 1.5 with the 128 s
-  window). A **64-sample window + coherence sorting recovers 9–15 s to within
-  ~40%** (median |Δlog₁₀ρ| = 0.15); 7.3 s stays degenerate. The official's own
-  variance is 40× larger there, and the short-period (40 Hz) data are not in
-  the EarthScope FDSN archive — the 1 Hz E noise floor is the physical limit.
-  Verdict: pin the 15 s–18.7 ks band (or the 64 s-window short-period recovery).
-  **Paper confirmation (Kelbert et al. 2026, Rev. Geophys.,
-  10.1029/2024RG000850)**: the SS low-amplitude bias below 10–20 s is documented,
-  matching our finding that RR is unbiased where SS is biased low. Their
-  short-period products additionally used **MMT (multi-station MT)** — which
-  explains why the official grid is clean at 7–15 s while our **single** remote
-  (SDH28, itself a 1 Hz NIMS site) cannot be; MMT is a **long-term M4
-  nice-to-have** (§11 #18). Pin the basic processing chain first.
-
-**Bugs found & fixed by this verification.**
-1. **Magnetic nT→A/m conversion was skipped for coil channels**
-   (`magnetic_unit='h'`): mth5 coil archives are in nT (like fluxgate B), but
-   only the fluxgate path (`'b'`) divided by μ0 — Z off by μ0·1e9 ≈ 1.26e3, ρ
-   off by ~1.6e6. Fixed via units-aware conversion (`_magnetic_to_h`): nT units
-   → convert; explicit A/m (or unknown, legacy synthetic) → leave. Regression
-   tests in `test_magnetic_units.py`.
-2. **`Align Runs` dropped channel units**: the aligned RunTS rebuilt ChannelTS
-   pieces without units metadata, so downstream Compute FC skipped the
-   conversion (same 1.6e6 error, now silently through the RR path). Fixed:
-   `_crop_to_runts` preserves per-channel units; the inter-station coherence
-   guard now checks the horizontal magnetic channels (the vertical field is
-   naturally incoherent between stations — the old check false-alarmed on `hz`).
-
-**Follow-up (M4).** Expose the exact band table as a node-level option
-(§11 #9) instead of the script-level `bands_override`; short-period verification
-needs the 40 Hz data (outside EarthScope FDSN); MMT multi-station estimator
-(§11 #18).
-
----
-
-## 17. Remote deployment — embedded mode (designed 2026-09-08; contract items 1–6 delivered 2026-09-08)
+## 11. Deployment
 
 emptyUI is **not** a standalone multi-user app. The target remote scenario is
-emptyUI's FastAPI backend (+ built web frontend) embedded **as a module** into a
-platform that already provides authentication — one backend instance **per user
-or team**, mounted under a sub-path of the platform's URL space. The design goal
-is a small **compatibility contract**, not an auth subsystem.
+emptyUI's FastAPI backend (+ built web frontend) embedded **as a module** into
+a platform that already provides authentication — one backend instance **per
+user or team**, mounted under a sub-path of the platform's URL space. The
+design goal is a small **compatibility contract**, not an auth subsystem. The
+operational guide is **`docs/deployment.md`**.
 
-### 17.1 Trust model & division of responsibility
+### 11.1 Trust model
 
 | Concern | Owner |
 |---|---|
@@ -1484,2126 +1200,182 @@ is a small **compatibility contract**, not an auth subsystem.
 | Identity-blind execution, confined file access, proxy-compatible API/WS, retention & limits | emptyUI |
 
 **Identity-blindness contract** — emptyUI contains no auth code and never
-enforces identity. The gateway authenticates every request (including WebSocket
-upgrades — browsers cannot set `Authorization` headers on WS, so gateway-side
-cookie/cert auth is the natural fit; same-origin serving makes this seamless).
-Identity headers (`X-Forwarded-User`) may be logged but are not interpreted.
-Per-user isolation is achieved by construction (one process per user/team);
-process-global state — runs, artifacts, the cross-run cache — is therefore
-per-user without any ownership metadata.
+enforces identity. The gateway authenticates every request (including
+WebSocket upgrades — browsers cannot set `Authorization` headers on WS, so
+gateway-side cookie/cert auth is the natural fit). Per-user isolation is
+achieved by construction (one process per user/team).
 
-### 17.2 Storage realms (read-only inputs vs writable outputs)
+### 11.2 Storage realms
 
-- **Data root (read-only)**: the platform provisions original data (CSVs, MTH5
-  archives, calibration FAP files) into a configured directory. Input path
-  params and the `/api/files` picker resolve **only inside** the data root;
-  nodes never write here.
-- **Output workspace (writable)**: per-run workspaces hold artifacts, plots and
-  TF/export files — served through the artifact endpoints; nothing outside the
-  output workspace is writable.
-- **Project directory (stable, designed §21)**: a user-designated writable
-  directory holding long-lived, relocatable state — the `.emptyui-cache/`
-  disk cache. Unlike the ephemeral per-run workspaces it survives restarts
-  and travels with the data folder; `EMPTYUI_PROJECT_DIR` designates it
-  (unset → disk cache disabled, in-memory tier unaffected).
+- **Data root (read-only)**: the platform provisions original data into a
+  configured directory. Input path params and the `/api/files` picker resolve
+  **only inside** the data root; nodes never write here.
+- **Output workspace (writable)**: per-run workspaces hold artifacts, plots
+  and TF/export files — served through the artifact endpoints; nothing outside
+  the output workspace is writable.
+- **Project directory (stable, planned §12.3)**: a user-designated writable
+  directory holding long-lived, relocatable state — the `.emptyui-cache/` disk
+  cache. `EMPTYUI_PROJECT_DIR` designates it (unset → disk cache disabled).
 
-Local development keeps today's behavior (data root defaults to
-unrestricted/cwd); confinement activates only in remote mode. Manifests mark
-path-kind params as `in`/`out` so a single resolver confines inputs to the data
-root and forces outputs into the workspace.
+Local development keeps unrestricted behavior (data root defaults to
+cwd); confinement activates only in remote mode. Manifests mark path-kind
+params as `in`/`out` so a single resolver confines inputs to the data root and
+forces outputs into the workspace (outputs normalize + validate identically —
+`../` escapes are rejected).
 
-### 17.3 Serving, mounting, proxies
+### 11.3 Serving, mounting, proxies
 
 - **Single origin**: `create_app` optionally serves the built `dist/` bundle —
-  no CORS in remote mode (the dev `*` middleware is replaced by a locked-down /
-  disabled configuration); session cookies flow naturally to REST and WS.
-- **Sub-path mount**: the app must be mountable under e.g. `/tools/emptyui/` —
-  FastAPI `root_path` plus a configurable frontend API base; the WS URL derives
-  from that base.
+  no CORS in remote mode; session cookies flow naturally to REST and WS.
+- **Sub-path mount**: mountable under e.g. `/tools/emptyui/` — FastAPI
+  `root_path` plus a runtime-derived frontend API base (works at `/`, under a
+  sub-path and in dev with no rebuild); the WS URL derives from that base.
 - **Proxy compatibility**: standard `X-Forwarded-*` handling; WS upgrade
-  proxying with generous idle timeouts (runs are long-lived); the existing
-  polling fallback is a deliberate asset — the UI keeps working when WS
-  connections are dropped by intermediate proxies.
+  proxying with generous idle timeouts; the polling fallback is a deliberate
+  asset — the UI keeps working when proxies drop WS connections.
 
-### 17.4 Operational policy (config knobs)
+### 11.4 Operational policy (config knobs)
 
-- **Workspace retention**: optional TTL + periodic cleanup coupled with artifact
-  GC; expired workspaces invalidate their artifact entries; cleanup only removes
-  worker-complete terminal runs. Disabled TTL preserves local-dev behavior.
-- **Max concurrent runs** per instance (queued or HTTP 429), bounding memory/CPU
-  in a shared platform; default unlimited for local dev.
-- **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`, `EMPTYUI_SERVE_DIST`,
-  `EMPTYUI_CORS_ORIGINS`, `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`,
-  `EMPTYUI_MAX_CONCURRENT_RUNS`, `EMPTYUI_DISABLED_PLUGINS`,
-  `EMPTYUI_SETTINGS_PATH`)
-  mirrored as `create_app(...)` keyword arguments for module embedding without
-  env coupling.
+- **Workspace retention**: optional TTL + periodic cleanup coupled with
+  artifact GC; expired workspaces invalidate their artifact entries; cleanup
+  only removes worker-complete terminal runs. Disabled TTL preserves
+  local-dev behavior.
+- **Max concurrent runs** per instance (queued or HTTP 429), bounding
+  memory/CPU in a shared platform; default unlimited for local dev.
+- **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`,
+  `EMPTYUI_SERVE_DIST`, `EMPTYUI_CORS_ORIGINS`, `EMPTYUI_BASE_PATH`,
+  `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`,
+  `EMPTYUI_DISABLED_PLUGINS`, `EMPTYUI_SETTINGS_PATH`) mirrored as
+  `create_app(...)` keyword arguments for module embedding (kwargs win).
 
-### 17.5 Explicit non-goals
+### 11.5 Explicit non-goals
 - Authentication/user management inside emptyUI (the gateway's job).
-- Multi-user shared process / horizontal scaling — scale out is "more
-  instances", not "a bigger instance".
-- File-upload API — data is provisioned by the platform; uploads are a possible
-  follow-up.
-- Database persistence for runs/artifacts — the file-based workspace (§3) stands
-  until run history demands more.
-
-### 17.6 Compatibility checklist (2026-09-08 — items 1–6 delivered)
-
-1. ✅ Data-root confinement: `EMPTYUI_DATA_ROOT` + `create_app(data_root=…)`;
-   `/api/files` clamped to the root; `path_kind: "in"` params validated inside
-   the root; `path_kind: "out"` params resolve into the per-run workspace.
-   Confinement activates only when a data root is configured.
-2. ✅ Same-origin serving + CORS: `EMPTYUI_SERVE_DIST` / `create_app(serve_dist=…)`;
-   `EMPTYUI_CORS_ORIGINS` / `create_app(cors_origins=…)` replaces the dev `*`
-   default (empty tuple disables the middleware).
-3. ✅ Sub-path support: the frontend derives its API base at runtime from the
-   document location (one segment below the app root) — works at `/`, under a
-   sub-path mount and in dev with no rebuild; `root_path` plumbing for module
-   embedding.
-4. ✅ Workspace TTL cleanup + artifact GC — `EMPTYUI_WORKSPACE_TTL` /
-   `create_app(workspace_ttl_seconds=...)`; disabled when unset or ≤ 0.
-5. ✅ Max-concurrent-runs guard — `EMPTYUI_MAX_CONCURRENT_RUNS` /
-   `create_app(max_concurrent_runs=...)`; unlimited when unset or ≤ 0; excess
-   submissions receive HTTP 429.
-6. ✅ Config plumbing + deployment guide: `emptyui/config.py` (env-first, kwargs
-   win) + `docs/deployment.md` (gateway contract, nginx sub-path/WS example,
-   data provisioning, module embedding).
+- Multi-user shared process — scale out is "more instances", not "a bigger
+  instance".
+- File-upload API — data is provisioned by the platform; uploads are a
+  possible follow-up.
+- Database persistence for runs/artifacts — the file-based workspace (§3)
+  stands until run history demands more.
 
 ---
 
-## 18. Code review record (2026-09-11) — findings, fixes, and follow-ups
+## 12. Roadmap, Open Questions & Planned Designs
 
-A full codebase review (framework, MT plugins, frontend) verified the
-delivered milestones and surfaced a set of defects, all fixed with
-regression tests the same day unless noted. Status of record:
+### 12.1 Status
 
-### 18.1 Delivered fixes (batches 1–4)
-
-1. **Rotate TF registration** — `mth5.tf.rotate` was implemented and tested
-   but never registered in `emptyui-mth5/plugin.py` (unreachable from the
-   UI); the "delivered 2026-09-11" claims were premature by one wiring line.
-   Registered + registration test; the dead duplicate `register` in `tf.py`
-   removed.
-2. **Output-path confinement escape** — `PathPolicy._resolve_output` joined
-   relative `path_kind="out"` values without an under-workspace check, so
-   `../…` escaped the run workspace (§17.2). Inputs were already correct;
-   outputs now normalize + validate identically.
-3. **Registry robustness** — `rebuild()` swaps the node table atomically
-   (scratch registry → swap), so a run starting during a plugin toggle sees
-   the old or new table, never a partial one (the "serialized by the app
-   lock" docstring claim was wrong); disabled plugins register into a
-   scratch registry during discovery, so a node-type collision with an
-   enabled plugin no longer crashes order-dependently (re-enabling still
-   surfaces the conflict loudly); unknown node types fail the run with a
-   clean `ExecutionError` instead of a bare `AttributeError`.
-4. **Run lifecycle** — terminal run status is monotonic (`_merge_summary`):
-   a cancel racing a fast-completing run can no longer flap
-   cancelled→completed; WS clients disconnect in a `finally` on any exit
-   path.
-5. **Processing guards** — `merge_tf_levels` tolerates level payloads
-   without `Z_err` (zeros) and broadcasts scalar `Z_err`; the ComputeFC NaN
-   guard is scoped to the actually-used in/out channels (a NaN in an unused
-   auxiliary channel — e.g. LEMI temperature — no longer hard-fails the
-   node; NaN in a used channel still errors).
-6. **Align Runs coherence guard** — the long-period (64–1024 s) diagnostic
-   resolved magnetic channels by literal `hx/hy` names and therefore never
-   fired on LEMI data (`bx/by`) — exactly the data it was built for. It now
-   resolves both stations' channels through the nomenclature (per-station
-   keyword inference), including mixed standard/LEMI pairs.
-7. **Coherence Sort banding consistency** — the sort hard-coded
-   `min_bins_per_band=40` and had no `t_short`, so it could band
-   differently from a customized Estimate TF (see §16.2/§18.2). Both
-   params are now exposed on the node with the estimator's defaults, and a
-   test asserts set-identical band centers between the sort's diagnostics
-   and `estimate_tf_levels` under matching params.
-8. **Absolute-ohm anchor test** — the prior known-Z regressions used
-   abs=0.5 tolerances (a tens-of-percent global FC-normalization error
-   would pass). New analytic test: with E = Z·H per sample, every STFT bin
-   satisfies the relation individually and common-mode window scaling
-   cancels in Z, so recovery is exact up to noise (~1e-4 relative measured);
-   the test asserts ~1% — any FC-normalization regression now fails loudly.
-9. **Frontend** — radio/datalist DOM ids scoped per node instance; workflow
-   load validates the §6 envelope (format/version) and prunes stale edges
-   (missing nodes/ports); `meta.name` round-trips (no more permanent
-   `untitled.emptyui.json`); events arriving in the reset→setRunId window
-   are buffered and flushed instead of dropped (poll dedupe key includes
-   `cached`); the inherit auto-fill is idempotent (an inherited value equal
-   to the manifest default no longer re-triggers the effect — the update
-   loop is guarded by an actual-change filter); "Run to here" disabled
-   while a run is active.
-10. **Post-review browser-testing fixes (2026-09-12)** — (a) **string
-   number params**: inheritable number params render as free-text
-   comboboxes whose raw string entries ('10') reached node code as str
-   and broke arithmetic (`'10' <= 0` TypeError on `t_short`); the
-   executor now coerces number/integer (+ numeric select) params to the
-   manifest's declared type (empty string → None, clean error naming the
-   param) — healing old saved documents — and the combobox coerces
-   client-side too; (b) **phase-tensor ellipses rendered flattened**:
-   data-space ellipses on the log-period axis are log-warped and their
-   rotation mixes the huge data-space half-width into the y-extent;
-   ellipses are now constructed in *display* space and mapped back
-   (`_ellipse_outline`), preserving aspect/orientation exactly.
-
-### 18.2 Coherence Sort vs. EMTF — two distinct inconsistencies
-
-The review separated two issues that the "not EMTF" note (§16.2) conflated:
-
-- **Banding mismatch (fixed, item 7 above)** — a parameter-plumbing bug,
-  not a statistics question.
-- **Statistic mismatch (open, M4 #7)** — emptyUI scores a *per-window*
-  multiple coherence over the band's frequency-bin ensemble; EMTF/BIRRP
-  compute coherence *per frequency* over the window ensemble. The two
-  statistics are transposed axes of the same bins×windows cube: they agree
-  qualitatively (BGS verification: T=11–30 s improves, long periods
-  stable) but cannot be reconciled by parameter tuning — a per-frequency
-  variant needs a different algorithm shape (per-frequency masks instead
-  of per-window √w weights) and a decision on how per-frequency masks
-  interact with aurora's RME_RR row pairing. aurora 0.6.2 itself has no
-  sample-level coherence sorting at all (it only logs coherence), so the
-  node is additive, not a deviation.
-
-**Design note (follow-up):** Estimate TF should **inherit its banding
-parameters from an upstream Coherence Sort when one is connected**
-(`band_style`, `periods_per_octave`, `min_bins_per_band`, `t_short`) via
-the §4 chain-walking `inherit` mechanism (downstream auto-fill from the
-connected sort node; explicit user choices on Estimate TF are never
-overridden). — **Delivered 2026-09-12**: `EstimateTF.inherit` declares the
-mapping on the `fc` input; e2e-verified (sort's band style flows into the
-estimator's unset params). The statistic itself remains the per-window
-broadband heuristic (M4 #7); do the inherit-aware parameter surface for
-the per-frequency variant together with M4 #7.
-
-### 18.3 Open items (deferred — need a design decision)
-
-- Default retention policy (TTL / cache size bounds) — currently unbounded
-  in local mode by design (user decision 2026-09-12: TTL only for now; a
-  portable local disk cache is a later design).
-- ~~Electric-unit scaling~~ — **decided & delivered 2026-09-12, see §19**
-  (attr-aware electric path, modelled on the magnetic path).
-- Plugin-embedded node viewers — **decided 2026-09-12 (user)**: keep the
-  ComfyUI paradigm literal. Producing Display nodes stay compact (port
-  rows) and emit a `plot` port; previewing is a user choice via the
-  `Preview Plot`/`Save Plot`/`View Table` utility nodes, whose viewer
-  bodies remain deliberately special-cased (frontend literals accepted by
-  design — the two utility nodes are the framework's own viewer widgets).
-  Generalizing viewers (by output port type or shipped components) is
-  parked until table/viewer workflows mature and the inline-settings
-  interaction (axis ranges, time windows on plot nodes) is thought
-  through.
-- ~~`remote_reference` string-sniffing~~ — **delivered 2026-09-12**: the
-  manifest-declared `enabled_when` rule (§4) replaced it.
-- ~~RunTS start == 1980-01-01 epoch sentinel ambiguity;
-  `SpectraToFCGroup` writes decimation level "0" with sample-rate default
-  1.0~~ — **delivered 2026-09-12 (metadata-hygiene bundle)**: a shared
-  placeholder-epoch helper (`UNKNOWN_EPOCH_STARTS` = 1980 mt_timeseries
-  default + 1970 Unix default, common in digitized paper records) is used
-  by `runs._run_time_info` AND aurora's `_start_datetime` (previously
-  inconsistent — fc time axes could carry fake 1980 stamps). **Old records
-  are never rejected**: a placeholder-epoch start is warned about and
-  degraded (no absolute-time alignment/persistence), and genuinely old
-  stamps (1950s digitized data) are preserved as-is. `Write FC` gains a
-  `decimation_level` param and derives the level's sample rate from the
-  fc's metadata, falling back to 1.0 with a warning — never silently
-  mislabeled.
-
----
-
-## 19. Unit-aware electric scaling (decided 2026-09-12, delivered)
-
-The review (§18.3) found the electric path scaled **unconditionally**
-×1e-6 (mV/km assumed) while the magnetic path checks the payload's unit
-attrs — payloads already in V/m were silently mis-scaled by 10⁶, and
-`e_dipole_length_m` on mV/km data double-scaled by dipole/1000. The
-Calibrate chain made this a live hazard: `RunTS.calibrate` rewrites each
-channel's units attr to `channel_response.units_in`
-(`get_calibrated_units`), so a calibration declaring a real unit
-transformation (e.g. counts → V/m) delivers V/m data that Compute FC then
-mis-scaled. Decision (user, 2026-09-12): **check attrs like the magnetic
-path**; unitless payloads keep the legacy behavior.
-
-Policy — `Compute FC` (`_electric_to_vm`, applied in `compute_fc` and
-`_normalize_channels`):
-
-- **`e_dipole_length_m` set** — the explicit raw-potential path (user
-  choice wins): `x · 1e-3 / dipole`, with a **warning** when the channel's
-  attrs canonicalize to mV/km (contradiction: the dipole scaling assumes a
-  raw mV potential — clear the param for field data).
-- **No dipole — scale by the channel's canonical unit attrs** (canonicalized
-  via mt_metadata's unit registry, `_canonical_unit`: `'mV/km'` →
-  "milliVolt per kilometer", `'V/m'` → "Volt per meter"):
-
-  | canonical attrs | action |
-  |---|---|
-  | milliVolt per kilometer | ×1e-6 (LEMI archives; legacy path) |
-  | Volt per meter | passthrough (already physical) |
-  | milliVolt per meter | ×1e-3 |
-  | milliVolt (raw potential) | **hard error**: set `e_dipole_length_m` (was a silent wrong ×1e-6) |
-  | unrecognized | warning + passthrough (never silently scale what cannot be interpreted) |
-  | no attrs (unitless) | ×1e-6 — legacy behavior (synthetic fixtures, core payloads; emptyui's LEMI reader writes mV/km attrs) |
-
-- The fc records `electric_scaling` in attrs ("mV/km -> V/m", "passthrough
-  (V/m)", "mV potential -> V/m (dipole)", "legacy (unitless, mV/km
-  assumed)", ...; deeper decimation levels: "level 0 (passed down)").
-
-Calibrate side: **no change needed** — `attach_filters` fills missing
-units with the archival default, so gain-correction FAPs (LEMI,
-`units_in == units_out`) keep the mV/km label after calibration (verified
-numerically by the SDG31 chain), and declared unit transformations are
-relabelled by `RunTS.calibrate` to `units_in`, which the attr-aware path
-honors. Backward compatibility: unitless payloads behave exactly as
-before — all fixtures and the USArray verification are unaffected
-(regression tests in `test_electric_units.py`).
-
----
-
-## 20. Plot Coherency + Plot Phase Tensor nodes (designed 2026-09-12, M4 #1)
-
-Standard MT QC/interpretation products; both render to the `plot` port (§3
-grammar — producers stay compact, preview is a user choice). **No new
-runtime dependencies**: numpy + matplotlib only (both already pinned);
-mtpy is not needed for computation (its PhaseTensor math is elementary);
-it would only enter as a test-only golden-image reference (M4 #8).
-
-### 20.1 Plot Coherency (`aurora.plot.coherency`, emptyui-aurora, Display)
-
-- **Inputs**: `fc` + optional `ref_fc` (Coherence Sort's grammar); output
-  `plot`.
-- **Source decision (user, 2026-09-12): fc-direct** — computes per-band
-  multiple coherence from the fc itself, not the sort's diagnostics
-  table. The per-band coherence loop is refactored out of
-  `coherence_sort_fc` into a shared `_band_coherence(local, ref, ins,
-  outs, band_bins)` helper, so the plot uses **numerically the same
-  per-criterion statistics** as Coherence Sort (honest about the
-  broadband-heuristic caveat, §18.2) and works when no sort node is in
-  the graph. One nuance (noted 2026-09-13): the sort's criterion is the
-  **minimum** of the two curves in two-FC mode, while the plot renders
-  the criteria separately without taking the min.
-- **Curves**: median coh² vs period per criterion — E–H signal coherence
-  (remote H when a `ref_fc` is connected) and, two-FC, the local↔remote
-  magnetic transfer coherence; shaded guidance band at
-  [`coherence_min`, `coherence_max`] (defaults 0.25/0.98 = the sort's
-  defaults) — a one-glance QC view of "what will the sort do".
-- **Params**: the banding set (`band_style`, `periods_per_octave`,
-  `min_bins_per_band`, `t_short`) with the **same inherit-from-sort
-  declaration as Estimate TF** (§18.2), plus `coherence_min`/
-  `coherence_max` references. §15 conventions (log period axis, dpi 150,
-  station title, framed legend).
-
-### 20.2 Plot Phase Tensor (`mth5.plot.phase_tensor`, emptyui-mth5, Display)
-
-- **Input**: `tf` → `plot`. Computation per period: `Φ = X⁻¹·Y` with
-  `Z = X + iY` (2×2 real; `pinv` + condition guard for singular Re(Z)).
-- **Presentation decision (user, 2026-09-12): Caldwell-style PT ellipses
-  vs period, colored by skew** — ellipses drawn from the SVD/polar form
-  (semi-axes = singular values σ1 ≥ σ2 of Φ, principal azimuth θ, skew
-  β = (α1+α2)/2 from the polar decomposition Φ = R(α1)·diag(σ1,σ2)·R(α2)),
-  colorbar for skew. §15 conventions.
-- **Errors (MVP)**: no PT error bars — Z_err → PT covariance propagation
-  is nontrivial (linearized through the inverse); noted in the plot label
-  and left as a follow-up, consistent with §15's "classical math only"
-  stance for error bars.
-- **Invariants under test**: 1D earth → Φ scalar × I (circular ellipses,
-  θ ≡ 0, β ≡ 0, ellipticity ≡ 0); 2D earth rotated by θ → PT azimuth
-  recovers the strike, skew ≡ 0; 3D synthetic → β ≠ 0.
-
-### 20.3 Placement
-
-Both nodes follow §15 via the shared plotting helpers; zero core changes;
-manifests carry the usual tooltip/description/palette protocol. The
-coherency plot node lives in `emptyui-aurora` (imports the band machinery
-and the shared coherence helper); the PT node in `emptyui-mth5` (a
-tf-consuming Display node like Plot AppRes & Phase).
-
----
-
-## 21. Portable local disk cache (designed 2026-09-12; NOT yet implemented)
-
-User decisions (2026-09-12): **workspace-embedded** (the cache travels with
-the data folder), **type-native serialization** (no pickle), **opt-in per
-node**, **GB + TTL combined** eviction. Two-tier design — the existing
-in-memory `NodeCache` stays the fast path; the disk tier adds restart
-persistence and relocation. Consequence of "workspace-embedded": the cache
-lives in a **user-designated project directory**, NOT the ephemeral per-run
-workspaces (TTL-cleaned) — a third storage realm (§17.2).
-
-### 21.1 Project directory
-
-`EMPTYUI_PROJECT_DIR` (env) / `create_app(project_dir=…)` — a stable,
-writable directory the user designates, typically where the survey data
-lives. Cache root: `<project_dir>/.emptyui-cache/`; copying/moving the
-project folder moves the cache with it. Unset → disk cache disabled (no
-silent `~` writes); the in-memory tier always works. A Settings-dialog
-field is a natural follow-up (MVP: env + kwarg).
-
-### 21.2 Key design (relocation-friendly)
-
-The executor's structural sha256 (§7) plus: payload-format version, node
-plugin version, emptyui version — version bumps invalidate cleanly.
-**File params become relocatable**: `_value_signature` uses the path
-relative to the data root/project dir (plus size, mtime) when the file
-lives under them; absolute stat signature otherwise (graceful degradation —
-entries involving outside files simply do not relocate).
-
-### 21.3 Layout & codecs (type-native, no pickle)
-
-```
-<project_dir>/.emptyui-cache/
-  entries/<key[:2]>/<key>/
-    meta.json          # node type/version, key inputs, created, atime,
-                       #   format versions
-    payload/…          # type-native: fc / ts.run → netCDF (per decimation
-                       #   level), tf → XML, tables/arrays → JSON / npz
-    artifacts/<stem><suffix>   # published files, centrally stored (also
-                               #   fixes the stale-artifact-path issue)
-```
-
-- Codec registry `{payload-kind → (save, load, suffix)}`; payload kinds not
-  in the registry → the node skips disk caching with a log note (graceful,
-  plugin-extensible later).
-- Atomic writes (temp dir + rename). Deserialize failures → invalidate +
-  re-execute (never half-serve — same contract as the in-memory artifact
-  existence check).
-
-### 21.4 Opt-in per node
-
-`disk_cache: ClassVar[bool] = False` on `Node`; `True` for ComputeFC and
-EstimateTF (the real recomputation cost: STFT/decimation + robust solves).
-Plots/tables stay memory-only. The manifest records the flag (properties
-panel: "disk-cached").
-
-### 21.5 Executor integration (two-tier)
-
-```
-mem.get(key) → hit: as today (by-reference payloads)
-disk.get(key) → hit: materialize a CacheEntry (deserialize payloads, touch
-              atime) → the same restore path as memory hits
-execute → mem.put(key, entry); if manifest.disk_cache: disk.put(key, entry)
-```
-
-Disk I/O failures log and continue — **the cache must never break a run**.
-Plugin disable clears the memory tier (as today); stale disk entries age
-out (keys embed the manifest version, so stale reuse is impossible).
-
-### 21.6 Eviction (GB + TTL combined)
-
-`EMPTYUI_CACHE_MAX_GB` (default 10) — LRU by atime until under budget;
-`EMPTYUI_CACHE_TTL_DAYS` (default 30). Cleanup pass on server start +
-piggybacked on the existing workspace-TTL cleanup loop; `DELETE
-/api/cache?tier=disk|memory|all`. Per-entry size accounting from file
-sizes (structural keys stay cheap — no content hashing).
-
-### 21.7 Tests (planned)
-
-Round-trip per codec (fc multi-level, tf, table); restart persistence (new
-Executor/server instance, same project dir → cached rerun); relocation
-(move project dir + data root to a renamed path → still hits); eviction
-(GB + TTL); corruption → re-execute; opt-in flag respected; injected I/O
-error → the cache never breaks a run.
-
----
-
-## 22. Runtime settings mechanism (delivered 2026-09-12)
-
-The ⚙ Settings dialog is the single settings surface; the backend is the
-source of truth (`GET/PUT /api/settings`).
-
-- **Precedence (§5.1 rule, generalized)**: env/platform baseline wins →
-  UI edits recorded on top → defaults. Knobs whose start value arrived
-  from env/kwarg are **platform-baselined and not UI-editable** (PUT →
-  409 naming the knob) — confinement/serving semantics stay
-  restart-level decisions.
-- **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
-  `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
-  (null/0 = unlimited), `cache_max_entries` (default 256). Applied
-  immediately (TTL loop re-reads per pass, admission check reads the
-  live holder, `NodeCache.resize()` trims). `RuntimeSettings` is the
-  mutable holder the app closures read.
-- **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
-  `cors_origins`, `root_path` — changing confinement/serving mid-flight
-  is an architecture change; env + restart only.
-- **Planned (reserved, inert)**: `project_dir`, `cache_max_gb`,
-  `cache_ttl_days` — the §21 disk cache lands into this scaffolding.
-- **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
-  (`disabled_plugins` + `settings` sections; atomic write; unknown keys
-  ignored on load — files may travel). Opt-in: unset = memory-only, no
-  file is created. Settings PUT validates against the whitelist
-  (numbers ≥ 0 or null-for-off; null not allowed for knobs with a
-  non-null default).
-- **Frontend**: Settings dialog sections — Server & retention (live
-  numbers, empty = off, explicit Save), Deployment (read-only code
-  values), Planned (disabled rows, "planned" tag), Plugins (§5.1,
-  unchanged).
-
----
-
-## 23. Plot Tipper restyle + fc-based Plot Spectrogram (delivered 2026-09-12)
-
-### 23.1 Plot Tipper — AppRes grammar alignment + y-limit param
-- **Layout** (user decision: the MT standard): panels = **Re / Im** (top /
-  bottom), series = components — the exact mirror of AppRes & Phase
-  (panels = parts, series = components): **Tzx = ○ open circle (blue)**,
-  **Tzy = ✕ cross (red)** via the shared `MARKERS`/`COLORS`.
-- **Open-circle correction (user)**: the USArray reference figure draws XY
-  as an OPEN circle — `MARKER_FACES = {"xy": "white"}` added to the shared
-  style; **AppRes & Phase XY is now open too** (was filled).
-- Symbols only (no connecting lines), shared log-period x-limits
-  (`_decade_limits`), same width (6.5), markersize 5, capsize 2.5,
-  elinewidth 0.8, boxed legend in the Re panel only.
-- **New param** `tipper_ylim` ("auto" | "min,max"), mirroring `rho_ylim`;
-  auto keeps the smart default ([-1, 1], auto-expand when |T| > 1 near
-  2D/3D contrasts — correct behavior, kept).
-
-### 23.2 Plot Spectrogram — fc input (no in-line FFT)
-- **New node `aurora.plot.spectrogram`** (emptyui-aurora, Display): input
-  `fc` from Compute FC; power = 10·log10|FC|² per (frequency, time) — the
-  coefficients are reused, no second FFT. pcolormesh, **log y
-  (frequency)**, x = time (datetime64 ConciseDateFormatter when persisted,
-  relative seconds otherwise), viridis + dB colorbar, §15 conventions.
-- **Params**: `channel` (string, empty = first electric channel; standard
-  names map via the fc's nomenclature) — **`split_inherited` Param flag
-  (new, generic §4 extension)**: inherited comma-separated candidates
-  (Compute FC's `output_channels = "e1,e2,bz"`) are split into individual
-  combobox choices; `decimation_level` (integer, −1 = deepest available,
-  invalid → actionable error listing levels — a payload-dependent dropdown
-  is impossible pre-run, the frontend never sees the payload);
-  `window_samples`/`decimation_levels` are **inherited from Compute FC**
-  (§4 map on the `fc` input) for annotation; the authoritative window
-  length shown comes from the fc's `num_samples_window` attr.
-- **Old node**: `core.plot.spectrogram` (ts.run + in-line FFT) →
-  `hidden = True`, re-titled "Plot Spectrogram (TS)" — out of the palette,
-  still executable by saved workflows.
-
-### 23.3 Provenance line on the TF display figures (delivered 2026-09-13)
-The processing-provenance line (the TF's run comment, drawn under AppRes &
-Phase, Tipper and Phase Tensor) got three fixes:
-- **Toggle**: new `print_params` boolean param ("Print parameters on plot",
-  default **on** — preserves the comparison workflow; untick for production
-  images) on all three plot nodes.
-- **No overlap**: the line is anchored to the *measured* x-label bottom
-  (5 px gap), instead of a fixed `y=0.005` that collided with
-  "Period (secs)".
-- **Word-wrap**: greedy renderer-measured wrapping (`_wrap_notes`) so no
-  line is wider than the axes — the old single-line note rendered ~1100 px
-  wide on a ~310 px figure, inflating the saved canvas via
-  `bbox_inches="tight"`. When the wrapped block needs more vertical room
-  than the layout leaves, the tight bbox extends the saved image downward
-  (`impedance_layout` stays single-pass; reserving inside it compounds its
-  margin accounting — verified and rejected).
-
-### 23.4 Time selector UI (delivered 2026-09-13)
-Selecting a time slot (e.g. to avoid noisy intervals) in records spanning
-hours to days:
-- **Payload-summary run events (§23.4 mechanism)**: when the executor
-  materializes a `ts.run`/`ts.channel` output handle (fresh or restored
-  from cache), it emits `{"event": "payload", node, port, type, summary}`
-  with a duck-typed extent summary — absolute ISO bounds (UTC) when the
-  record carries a real start, relative seconds otherwise; placeholder
-  epochs (1980/1970) degrade to relative (start unknown, hygiene #10).
-  Poll/WS replay carries them like artifact events. Honest constraint:
-  the bar's extent is known only after the upstream has run once.
-- **`Param.time_bar`** (rendering-only): the input port name whose summary
-  drives the frontend time bar for this param pair.
-- **`TimeBar` widget** (custom, zero deps — vis-timeline/d3-brush/rc-slider
-  evaluated and rejected as heavyweight or generic): horizontal acquisition
-  bar with two pointer-driven handles sandwiching the slot, shaded
-  selection, extent tick labels, synced bidirectionally with the paired
-  Start/End edit boxes (which remain the node's own string params — the
-  bar only writes through their onChange). Guards: handles stay in the
-  record, cannot cross, slot kept > 1 s (server rejects ≤ 1 s; widget
-  clamps ≥ 2 s at second resolution); out-of-extent box values draw at the
-  track edge (server clamps with a warning — degrade, never reject).
-- **Plot Time Series** hosts it: new `start`/`end` params (ISO UTC or bare
-  seconds; empty = record boundary; ISO bounds measure from the record
-  start, so `data.start` offsets are subtracted). The legacy `seconds`
-  duration caps the slot from its start and keeps its old no-minimum
-  behavior (a 1 s waveform view of a 500 Hz run is legitimate).
-- **Node sizing**: standard node width 250 → 280 px so the bar fits with
-  consistent look across the palette.
-- Extract Run / Align Runs / Merge Runs hosting is deferred: their extent
-  source is an `mth5` archive payload (per-run extents inside one object),
-  not a streamed `ts.run` summary — needs its own summary mechanism.
-
-#### 23.4.1 Phase 2 hosts (delivered 2026-09-13)
-The time selector extended to the mth5-backed hosts:
-- **Payload summaries extended**: the executor's summarizer now duck-types
-  a third shape — an **open MTH5 archive** (`.run_summary`, populated right
-  after open): `kind: "mth5"` with per-run extents
-  (survey/station/run/start/end/sample_rate); single-channel payloads
-  (ChannelTS, the `ts.channel` ports) summarize as one-channel `ts`. A
-  hard-won detail: mt_timeseries objects raise **NameError** (not
-  AttributeError) for missing attrs, so `getattr(x, "attr", None)` is not
-  safe on them — explicit try/except.
-- **`Param.time_bar` multi-port binding**: comma-separated port list;
-  the frontend *intersects* the connected ports' extents (Align Runs shows
-  the overlap of both inputs; identical extents intersect to themselves).
-- **Extract Run**: start/end get the bar bound to `mth5` — the extent is
-  the run matching the node's survey/station/run params (client-side
-  mirror of the server's first-run fallbacks), absolute GMT. Server-side:
-  bounds clamp into the run extent (metadata time_period, falling back to
-  the station's channel-derived run summary) — the extent axis is used
-  as-is, so even a 1980/1970 placeholder record is a valid *within-record*
-  selection axis (placeholders matter for cross-record alignment, not for
-  in-record selection). Extent-unknown → passthrough with warning.
-- **Align Runs**: one `start`/`end` pair (NOT per-input bars — the node's
-  contract is identical-interval outputs, so a single window within the
-  aligned overlap is the correct semantics; recorded over the earlier
-  two-bar sketch). ISO bounds anchor at the overlap start; without GPS
-  time only relative seconds are accepted. Bounds applied after the
-  overlap crop (clamped; slot > 1 s).
-- **Merge Channels**: `start`/`end` crop the merged run
-  (`_crop_to_runts`), bar bound to the first connected channel port.
-- **Bug fixes found on the way**: `is_unknown_start` failed on tz-aware
-  stamps (aware-vs-naive comparison is False) — placeholders are now
-  compared in their own zone; `_warn_if_uncorrelated` crashed when the
-  overlap was shorter than one coherence segment (skipped below 256
-  samples).
-- **Merge Runs deliberately skipped**: its per-run windows already live in
-  the selection table rows (edited via View Selection) — a bar per row is
-  a table-UI feature, not a node-param widget.
-
-### 23.5 Estimate TF shortest-period (t_short) honored for the uniform scheme (fixed 2026-09-13)
-**Bug**: `t_short` (head clip) was applied only inside `_l2u_band_table`
-→ `_clip_head_bands`, i.e. only on the primary l2u container-level table.
-For `band_style="uniform"` the clip never ran — the per-level
-`_resolve_period_bands` → `_period_bands` chain has no `t_short` at all —
-so the shortest-period parameter was silently ignored. The same gap hit
-Coherence Sort and Plot Coherency (both advertise the param) and the l2u
-**fallback** path (`_period_bands_indexed`, metadata-less fcs).
-
-**Fix (single choke point)**: `_resolve_period_bands(..., t_short=None)`
-post-filters BOTH schemes with the identical geometric-mean center-period
-criterion (`period >= t_short`, same as `_clip_head_bands`); `estimate_tf`,
-`coherence_sort_fc` and Plot Coherency thread the param through; the l2u
-primary path is untouched (mutually exclusive with this branch — no
-double-clip). Fully-clipped levels are skipped in `estimate_tf_levels`
-(mirroring the l2u `if not bands: continue`), and Plot Coherency raises
-its existing "no usable frequency bands" error when everything is clipped
-(uniform now behaves like l2u). Verified: `t_short=0`/`None` remains a
-no-op for both schemes (legacy behavior).
-
-## 24. Physics parity with classical EMTF — discrepancy inventory & research plan (started 2026-09-13)
-
-**Motivation.** The SDG31 experiment case is a controlled physics experiment,
-not just a regression test: identical input data (4P.SDG31 + remote 4P.SDH28
-MTH5 archives, 1 Hz NIMS/100 m dipoles) and a ground-truth output (the
-official EMTF/SPUD `USArray.SDG31.2017.edi`) allow *ablation* — change one
-processing factor at a time and measure which classical-EMTF ingredient
-actually closes the gap. Classical EMTF (Kelbert et al.) is the traditional
-gold standard; emptyUI delegates its estimators to aurora 0.6.2 but computes
-its own Fourier coefficients, so the FC stage is where the schemes diverge.
-
-### 24.1 Fixed comparison protocol (the "exact" approach)
-
-Every parity experiment keeps these FIXED and changes exactly one factor:
-
-- **Band table**: reconstructed exactly from the official EDI band-center
-  frequencies (`exact_official_bands` — 6,6,6,6,4,2 bands per level, edges at
-  geometric midpoints; `bands_override`). NOT the l2u default — the residual
-  grid difference (§14.9: 93% vs 98% pass) must not confound physics deltas.
-- **Frame**: fixed −5.7° true-north rotation (documented coordinate-frame
-  rotation, §16.3) — never a per-variant rotation fit.
-- **Estimator**: Robust (RME_RR) with the remote reference; aurora defaults.
-- **STFT base**: window 128 samples, factor 4, 5 decimations, 50% overlap.
-- **Metrics** (matched nearest-period rows, off-diagonal xy/yx,
-  reliable band [15 s, 18 725 s] plus a **short-period split [15, 100) s**
-  — the low-hanging-fruit target):
-  median / p90 / max |Δlog₁₀ρ| and |Δφ| (folded convention), pass rates at
-  the §16.3 gates (0.1 decades / 10°), and — added for statistics — **error
-  -bar agreement** (our σ vs official `.VAR`, ratio statistics), which the
-  original metrics never tested (§16.2/C2 bias makes our OLS dof inflated;
-  RME errors are the production path).
-- **Statistics discipline**: paired deltas on the identical matched grid;
-  one factor per variant; every variant's full kwargs recorded in the
-  metrics JSON (fc attrs already carry `prewhitening`/`per_window_detrend`
-  provenance, §19-style).
-
-Harness: `examples/data/lims-usarray-test/verify_sdg31.py` (importable
-helpers) and `parity_sdg31.py` (the ablation driver).
-
-### 24.2 Discrepancy inventory (2026-09-13 full audit)
-
-**FC/STFT stage** (emptyUI = taper→FFT only; aurora default = first-
-difference PW + per-window linear detrend + boxcar 25% overlap + LSDL
-factor; original EMTF = AR(3) PW + Slepian-family taper + 128/32):
-
-| # | Discrepancy | Priority | SDG31 signal |
-|---|---|---|---|
-| A1 | No prewhitening/recoloring | **E1 (first)** | T < 30 s leakage-limited end |
-| A2 | No per-window detrend (global node only) | **E2** | long-period tail |
-| A3 | Taper family: Hamming 50% vs boxcar 25% vs EMTF Slepian | **E1** (with A1) | in-band p90 gap |
-| A4 | No clock-zero truncation | low | negligible (aurora default also ignores) |
-| A5 | FC normalization scipy 'spectrum' vs LSDL factor | none for TF (ratios scale-equivariant); blocks FC round-trip comparison with aurora | — |
-| A6 | DC bin retained (NaN'd under PW) | cosmetic | spectrogram log-axis row |
-
-**Band grid**: B1 l2u ≈ official (0.020 median, 93% vs exact 0.019/98%);
-B2 uniform anchors extend half a bandwidth past Fs/4 · window/4 (documented);
-B3 boundary-bin drift via fs-recovery (low probability); B4 hand-authored
-band files = M4 #9 (E4).
-
-**Estimation**: C1 estimator parity verified (delegated to aurora, incl.
-`RME_RR.qr_input="Z"`); C2 row-pooling independence assumption → OLS dof
-inflation, σ² underestimated (uncorrected; robust engines less sensitive);
-C3 no error floors anywhere (also absent in pinned aurora); C4 coherence
-statistic = per-window broadband heuristic, biased high ≈ n_in/(N_eff−1), no
-DOF correction (§16.2, M4 #7); C5 √w weighting exact for OLS, approximate for
-robust engines; C6 degenerate-band min-pairwise fallback (conservative,
-documented); C7 ref_fc silently ignored by non-RR engines (behavior bug, not
-physics); C8 merge deepest-wins parity OK, 1-D `Z_err` fallback latent crash.
-
-**Frame/units** (resolved): −5.7° frame rotation (documented, not a bug);
-EDI declination 0.0-override bug (`tf.py`, parsing); units verified
-analytically incl. the `_default_unit` hx-mislabel fix (2026-09-13).
-
-### 24.3 Research plan (staged ablations, gain-ordered)
-
-- **E1 — Prewhitening + taper at short periods** (enablers delivered
-  2026-09-13; **ablated 2026-09-13**, `parity_sdg31.py`):
-  opt-in `prewhitening` ("first difference") and taper family on ComputeFC.
-  Ablation grid: taper ∈ {hamming, boxcar, hann} × PW ∈ {off, first
-  difference}, all else fixed per §24.1 (exact bands, −5.7° rotation,
-  Robust RME_RR). Results (paired medians |Δlog₁₀ρ| / p90, pass = ρ/φ
-  gates; short = [15, 100) s, tail = [100, 18 725] s):
-
-  | variant | short med/p90 | tail med/p90 | pass ρ/φ |
-  |---|---|---|---|
-  | hamming, no PW (**current default**) | 0.015 / 0.065 | 0.019 / 0.044 | 94% / 88% |
-  | hamming + PW | 0.010 / 0.016 | 0.009 / 0.030 | 100% / 100% |
-  | boxcar, no PW | **0.98 / 1.53** | 0.85 / 1.44 | 0% / 75% |
-  | boxcar + PW | 0.008 / 0.023 | 0.009 / 0.031 | 100% / 100% |
-  | hann, no PW | 0.008 / 0.016 | 0.008 / 0.032 | 100% / 100% |
-  | hann + PW | 0.009 / 0.016 | 0.008 / 0.030 | 100% / 100% |
-
-  **Findings** (statistics on matched official periods):
-  1. The current default's entire deficit vs the official product is
-     concentrated at T = 7.3–15.1 s (worst: Δlog₁₀ρ +9.7, Δφ +152° at
-     11.6 s — a noise-floor band); above 19.7 s all variants agree to
-     ≤0.03 decades / 4°.
-  2. The controlling factor is **DC/edge leakage suppression**, not PW per
-     se: the calibrated SDG31 series carry significant DC offsets
-     (|mean|/std up to 0.38 on ey). Hamming's nonzero (0.08) endpoints let
-     that offset leak; Hann's zero endpoints kill it — which is why
-     hann+noPW already matches hamming+PW. Boxcar without PW is
-     catastrophic (~1 decade, all periods) — a clean quantification of why
-     classical pipelines (aurora boxcar+PW default, EMTF AR-PW) never
-     taper with a nonzero-DC window unwhitened.
-  3. First-difference PW with the **exact** inverse recoloring preserves
-     clean-signal FCs to ~1e-4 relative (unit-tested) and drops red-noise
-     leakage hard (synthetic: >2× out-of-band mean amplitude reduction).
-  4. **Error-bar signature (E5 preview)**: our σ_Z vs official σ tracks the
-     taper, not PW (median ratio: boxcar 1.7 > hamming 1.1 > hann 0.66) —
-     the official EMTF σ convention embeds its taper/DOF choices; the PW
-     shrinkage (0.66→0.68 on hamming) needs the DOF study before any
-     interpretation. Do not tune error floors against this yet.
-  5. Cross-check: hamming+noPW tail median 0.019 reproduces the §16.3
-     record (0.019) — the review fixes since 2026-09-10 did not shift the
-     reliable band.
-  **Decision (pending E2)**: leakage-suppressed variants are pairwise
-  statistically indistinguishable; per the §24.3 rule PW qualifies for
-  default adoption, but the default flip is deferred until E2 (per-window
-  detrend) is ablated and the persisted-FC convention (A5/E6) is settled —
-  PW changes persisted FC amplitudes.
-  Comparison figures (boxcar+PW vs official, §24.1 protocol):
-  `examples/data/lims-usarray-test/sdg31_parity_boxcar_first_difference_vs_official.png`
-  (raw overlay, each dataset at its own periods, ours rotated −5.7°) and
-  `sdg31_parity_boxcar_first_difference_appres_phase.png` (§15
-  EMTF-convention figure via the plot node); rendered with
-  `parity_sdg31.py --plot <taper> <pw>`. Working-recipe figures (full
-  remote b+c + weight sort 0.7):
-  `sdg31_parity_boxcar_first_difference_b-c_sort0.7_vs_official.png`
-  (the head now sits on the official points, 7.3–11.6 s included) and
-  `sdg31_parity_boxcar_first_difference_b-c_sort0.7_appres_phase.png`;
-  `--plot <taper> <pw> <remote-runs e.g. b,c> [coh_min]`.
-- **E1b — Data selection / remote coverage: the short-period gap closed**
-  (2026-09-13, `short_period_sdg31.py`). The residual deficit at the first
-  three official periods (7.3/9.1/11.6 s) was **not** an estimator or FC
-  factor — it was **remote-data coverage**. The official product's tag is
-  `SDG31b_H28coh` (RUNLIST=SDG31a SDG31b, REMOTESITE=SDH28): an EMTF-FCU
-  coherence-processed product using all SDH28 data (runs b+c, ~14.7 d),
-  while our alignment against SDH28-b only cropped away the last ~29% of
-  SDG31-b (SDH28-b ends 2017-10-23, SDG31-b 2017-10-26). Findings:
-  - **Full remote (b+c) alone fixes 9.1 s and 11.6 s with no sorting**
-    (Δlog₁₀ρ ≤ 0.07, Δφ ≤ 3.2°; head [7.3, 15) s median 0.534 → 0.050);
-    window-64 also becomes viable (it was harmful under b-only coverage —
-    the earlier "window 64 remedy" was confounded by the missing remote
-    data). EMTF's decset.cfg uses 128-sample windows at ALL levels;
-    window reduction is confirmed NOT the classical lever.
-  - **7.3 s closes with mild coherence selection** (weight,
-    coherence_min=0.7: Δlog₁₀ρ −0.046/−0.050, Δφ +3.7/−1.3° — 119/13348
-    windows retained; fragile — the estimate rides on 0.9% of windows).
-    The official `…H28coh` tag supports coherence processing as the FCU's
-    actual lever; the principled form is the per-frequency window-ensemble
-    statistic (M4 #7/E7), not our broadband per-window heuristic.
-  - **Self-reference quantifies the fluxgate noise floor**: RR-off
-    underestimates ρ by up to 5.8 decades below 15 s (smooth SNR
-    degradation with period) — the remote reference does the heavy
-    lifting; below ~50 s the local-H noise floor ≈ signal (user hypothesis
-    confirmed quantitatively).
-  - **σ-honesty discrepancy (E5 input)**: the un-cleaned estimate reports
-    σ/|Z| ≈ 0.3–0.9 at 7.3–11.6 s (honest) while the official .VAR claims
-    0.053/0.030/0.008 — the FCU error convention at noise-floor periods is
-    far more optimistic than the raw data support; reconcile before any
-    error-floor tuning.
-  - Level-0 sort diagnostics: E–remote-H multiple coherence
-    0.32/0.49/0.52 at 7.3/9.1/11.6 s — most of E is noise there, yet the
-    cleaned estimates match the official to ≤5%: coherence selection at
-    the noise floor works because the *clean subset* is consistent.
-  - Trade-off: weight-0.7 selection slightly regresses the deepest tail
-    (tail p90 0.039 → 0.069, pass 97 → 95) — selection belongs at the
-    noise-floor end. A period-dependent selection schedule is the natural
-    refinement (E7).
-  **Working recipe (SDG31)**: boxcar + first-difference PW, window 128,
-  exact band table, −5.7° rotation, Robust RME_RR, **full remote coverage
-  (SDH28 b+c)**, optional weight-mode coherence selection at the head.
-- **E2 + tail probes — long-period mismatches** (2026-09-13,
-  `long_period_sdg31.py`). With the recipe baseline (full remote), the tail
-  picture changed completely: 18 724.6 s was a remote-coverage artifact
-  (now Δlog₁₀ρ ≤ 0.044, within the official's own σ/|Z| = 0.098 there).
-  Tail level geometry: level 4 (window 9.1 h, ~52 windows) owns
-  2 260–7 282 s; level 5 (window 36.4 h, ~13 windows ≈ 6 independent)
-  owns 11 916–18 725 s. Findings:
-  - **The dominant tail factor is the taper** — the diurnal (Sq) magnetic
-    variation (~24 h + harmonics) lies inside every level-4/5 window, and
-    boxcar's −13 dB sidelobes leak that huge line into the tail bands;
-    zero-endpoint tapers suppress it (4681 s: Δ −0.075 → −0.025; 11 916 s
-    xy: +0.249 → +0.130; 18 725 s Δφ: −3.2° → −0.3°; boxcar → hann).
-  - **Per-window detrend (E2) is NOT the lever**: negligible on the tail
-    (it removes the linear trend, not the periodic Sq line), and slightly
-    harmful at the head (pass 83 → 67 with boxcar). Verdict: keep off —
-    emptyUI's PW chain does not need aurora's per-window default.
-  - **A per-level taper schedule combines the wins**: the dominant
-    contamination differs by scale — white-ish fluxgate noise (post-PW) at
-    level 0, where boxcar maximizes dof, vs line-spectra leakage at the
-    day-scale windows where hann wins. boxcar L0–2 / hann L3–5 gives head
-    0.050 (83/83) AND tail 0.010/0.036 (97/100); hann at level 0 destroys
-    the 7.3 s band (Δ +4.3 decades, σ/|Z| = 8.1) — the schedule is
-    physically motivated, not tuned. (Code path needed: compute_fc_levels
-    takes one window_type; the investigation merges per-level fc dicts.)
-  - **Level resolution**: deepest-wins assigns 11 916/18 725 s to level 5;
-    the level-4 estimates at its own bands are clean (≤0.075 boxcar,
-    ≤0.033 hann). The residual 11 916 s xy (+0.13) rides on ~6 independent
-    windows — few-windows statistics, and the official σ/|Z| = 0.082
-    there; E5/E7 territory (DOF correction, per-frequency ensemble
-    statistic).
-  **Refined recipe (SDG31, full band)**: boxcar + PW at levels 0–2, hann +
-  PW at levels 3–5, full remote b+c, weight sort 0.7 at level 0 →
-  head 0.034/0.080, short 0.007/0.022, tail 0.010/0.036;
-  **reliable full band: median 0.009 / p90 0.029 / 98% pass** — vs the
-  §16.3 original record 0.019/0.045/98%. Worst remaining rows: 9.1 s yx
-  (−0.110, marginal) and the 11 916 s few-windows band. Figures:
-  `sdg31_parity_final_recipe_vs_official.png`,
-  `sdg31_parity_final_recipe_appres_phase.png`.
-- **E2 — Per-window detrend** (enabled, ablation pending): hypothesis:
-  closes the long-period tail bias.
-- **E3 — EMTF Slepian multitaper** (research): multi-taper FC ensemble;
-  only if E1 leaves a measurable in-band gap.
-- **E4 — Exact EMTF band ladder as a node option** (M4 #9): the ablation
-  harness uses `bands_override` internally; expose a band-table node.
-- **E5 — Error-bar statistics + error floors**: add σ-agreement metrics to
-  the SDG31 harness; then evaluate EMTF-style floors (C2/C3).
-- **E6 — aurora FC round-trip** (blocked by A5): persist emptyUI FCs and
-  compare amplitudes against aurora's own persisted FC layer for the same
-  run — requires settling a shared normalization convention first.
-- **E7 — True EMTF per-frequency coherence sort** (= M4 #7) and C2 DOF
-  correction: statistics work, after the deterministic factors are settled.
-
-Decision rule: adopt a factor into the **defaults** only when it improves
-the paired short-period AND reliable-band medians without regressing the
-pass rates; keep every adopted factor opt-in-able (provenance attrs) so
-legacy workflows and the verified §16.3 record stay reproducible.
-
-### 24.4 Workflow enablement — missing nodes/params for the parity recipe (2026-09-13)
-
-The refined recipe (§24.3) cannot yet be expressed end-to-end in the node
-UI. Recipe step → current node state → gap (effort):
-
-1. **Merge remote runs (b+c)** — ✗ **blocking**. `Merge Runs`
-   (`mth5.runs.merge`) has NO ts.run input ports: both modes require a
-   `selection` payload whose producer node is M4-deferred, so merging
-   SDH28-b + SDH28-c is impossible in the UI (the investigation merged
-   physically via `RunTS.merge` in code). Needed (medium):
-   (a) physical merge node taking `ts.run` inputs directly (pairwise
-   `RunTS.merge`, gap-aware — 28-min interpolation caveat, ~0.2% windows);
-   (b) production-grade: FC-level concatenation (aurora `merge_stfts`,
-    `xr.concat` along time — fabricates nothing; makes the gap a no-window
-   region).
-2. **Compute FC taper vocabulary** — ✗ trivial. `window_type` select offers
-   only `hamming`/`hanning`; the recipe needs **`boxcar`** (it wins at the
-   short-period levels). The API already passes any scipy window name
-   through `_window`; only the manifest vocabulary must grow.
-3. **Per-level taper schedule** — ✗ medium. Recipe: boxcar L0–2 / hann L3–5;
-   `compute_fc_levels` takes one global `window_type` (the investigation
-   merged per-level fc dicts in code). Natural shape: `window_type` per
-   decimation level (list/schedule param), or a `deep_level_taper`
-   override for levels ≥ N. Physically motivated (white-noise scale vs
-   Sq-line-leakage scale), not tuned.
-4. **Coherence Sort level/period schedule** — ✗ medium. The node sorts ALL
-   levels; the recipe uses weight-0.7 at level 0 only (sorting perturbs the
-   deepest tail: p90 0.039 → 0.069 with boxcar). Needed: an
-   `apply_below_period` (or level-schedule) param so the sort can be
-   scoped to the noise-floor head.
-5. **Exact band table** — ✗ M4 #9 (already backlog). The parity protocol's
-   exact-official-bands table (`bands_override`) is low-level only; the UI
-   offers l2u/uniform (l2u is statistically equivalent — this is for
-   apples-to-apples comparisons).
-6. **Estimate TF** — ✓ nothing missing (Robust, remote reference + `ref_fc`
-   port, `min_bins_per_band`/`t_short`, inherit-from-sort).
-7. **Rotate TF** — ✓ manual angle entry covers the −5.7° documented frame
-   rotation (declination auto-pickup exists; the SDG31 −5.7° = IGRF 4.26° +
-   1.4° site azimuth is site-specific, not in any archive the node reads).
-8. **Align Runs / Merge TF Levels / Calibrate / Export** — ✓ nothing missing.
-
-Priority: (1) is the workflow blocker (the recipe's single most important
-factor — remote coverage — has no UI path today); (2) is a one-line
-manifest change; (3)/(4) are the per-level schedule generalization; (5)
-stays M4 #9. `overlap` also lacks a max validation (crashes mid-node for
-overlap ≥ 1 — review item B13, now user-reachable while experimenting).
-
-### 24.5 Implementation plan for §24.4 (decided 2026-09-13)
-
-Decisions (user-confirmed): merge = **both routes, TS-physical first** (FC
-concat as the later production-grade addition); **rebuild
-`mth5.runs.merge` in place** (drop the dead `selection`/DataFrame path —
-params-based run list like Extract Run); per-level taper = **minimal
-override** (`window_type` base + `window_type_deep` + `deep_from_level`);
-manual bands = **folded into Estimate TF** (`band_style="manual"`,
-`enabled_when`-gated `band_centers` + `bands_per_level` → geometric-
-midpoint edges, the harness-proven reconstruction).
-
-- **P1 Merge Runs rebuild**: inputs `mth5`; params `survey`/`station`/
-  `runs` (comma list; empty = all runs)/`gap_method`/`new_run_id`; output
-  `merged_run: ts.run`. Core merge operates on a list of RunTS (unit-
-  testable without an archive). **P1 v2 — Merge FC node (delivered this
-  round)**: fixed `fc1..fc4` ports (burst-mode bulk mth5 ingestion is a
-  recorded follow-up — it needs special care because a merged-TS cascade
-  cannot decimate *across* burst slots; per-run cascades within a slot are
-  fine, deep levels starve naturally in short slots); **best-effort
-  intersect** validation (frequency grids intersected with tolerance,
-  mismatched channels dropped with warnings, sample-rate mismatch errors);
-  output feeds `Estimate TF`'s strict identical-grid check.
-- **P1 v2b — clock-zero window anchoring (user-corrected: required)**:
-  ComputeFC gains `clock_zero` ("" = off/run-start anchoring, "epoch" =
-  Unix epoch, or an explicit ISO datetime): window starts anchor to
-  ``t0 + k·step`` per level and the head partial window is dropped, so
-  per-run FCs of *different* runs/stations share one window grid — the
-  prerequisite for remote-reference pairing across separately-computed
-  runs (gapped continuous runs, burst mode). Note: anchoring each station
-  to "the first station's start" (the initial proposal) does not generalize
-  — run starts are not whole window-steps apart, so the shared reference
-  must be run-independent (epoch) or passed explicitly (ISO). Levels with
-  fewer samples than one window (burst slots at deep levels) are skipped
-  with a warning. Estimate TF keeps the **strict** identical-grid policy;
-  a time-value-matching loosening is recorded for GPS-stray clocks on
-  semi-permanent stations (not uncommon) — later option.
-- **P2 ComputeFC per-level taper**: `window_type_deep` (select, empty =
-  base) + `deep_from_level` (integer); per-level window recorded in the
-  fc attrs.
-- **P3 CoherenceSort scope**: `apply_below_period` — band-center periods
-  at/above the threshold pass through unsorted (default empty = all, the
-  recipe scopes the head remedy to level 0 without touching the tail).
-- **P4 EstimateTF manual bands**: `band_style` + `"manual"`; shared
-  `manual_bands(freqs, counts)` helper in `_processing.py` (descending
-  frequency list + per-level counts → per-level `(f_hi, f_lo)` pairs at
-  geometric midpoints — identical to the parity harness's
-  `exact_official_bands`).
-- **P5 verification**: synthetic multi-run e2e through the executor
-  (merge → align → FC → scoped sort → estimate → rotate); manual-band
-  parity against `bands_override`; per-level attr checks. SDG31 recipe
-  workflow JSON template: after P1–P4 land.
-- **P5 head-to-head (delivered 2026-09-14,
-  `node_vs_harness_sdg31.py`)**: the refined recipe as a stock node graph
-  (Load ×2 → Extract → **Merge Runs b,c** → Calibrate ×2 (archived
-  responses apply to the merged raw run — the filter attrs survive
-  `RunTS.merge`) → Align → Compute FC ×2 (boxcar/deep-hanning/PW) →
-  Coherence Sort (weight 0.7, apply-below-20 s) → Estimate TF
-  (Robust RR, **band_style="manual"** with the official centers +
-  "6,6,6,6,4,2") → Rotate (−5.7°)), executed by the `Executor`, vs the
-  recorded harness numbers. Result: **reliable full band identical
-  (0.009 median / 0.029 p90 / 98% pass)**; short/tail identical; the only
-  deviation is the 7.3 s band (node +0.180/−0.269 vs harness −0.046/
-  −0.050) — the node sort bands with the l2u scheme (it has no band-table
-  input; the harness sorted on the exact official table), so the head
-  weights differ slightly. Extending the manual band table to the sort
-  node (or feeding it one) would close that; the executor gained an
-  opt-in `include_store` summary flag so scripts can resolve output
-  handle ids to payloads. Metrics:
-  `sdg31_node_vs_harness_metrics.json`.
-
-### 24.6 Per-bin coherence statistic (E7/M4 #7 — the banding-independent sort)
-
-**Grounding (2026-09-14).** aurora 0.6.2 has no reusable per-frequency
-coherence routine: `compute_squared_coherence` (TRME lineage,
-`m_estimator.py:315`) is a per-band explained-variance R² = 1 − SSR/SSYc
-of the band regression on the *cleaned* data, per output channel — only
-logged, never used for selection; `adjust_band_for_coherence_sorting`/
-`get_band_for_coherence_sorting` are WIP band-widening placeholders
-("min3" rule, never delivered). The EMTF-style per-frequency
-window-ensemble statistic is therefore implemented fresh in emptyUI.
-
-**Statistic (as implemented, opt-in `statistic="per_bin"`)**: for every
-frequency bin f and window w, the multiple coherence² of each output on
-the magnetic inputs estimated over a **sliding window ensemble**
-(±`ensemble_windows` windows, center included — leave-one-out would
-penalize isolated clean windows) with optional pooling over
-±`smooth_bins` adjacent bins (a FIXED smoothing scale — deliberately not
-the estimate's band table; restores dof at deep levels with few windows).
-Adjusted-R² correction removes the p/(W−1) high bias of sample coherence
-(the §16.2 C2 bias — the ensemble count is known, so the correction is
-applicable here; note the implemented form leaves a small residual under
-the null (~1/(W−p), ≈0.03 at the default ensemble) versus the textbook
-null-zeroing adjusted-R² — empirically immaterial for the ens=16
-thresholds, and the ablation record (§24.6 tables) was measured with the
-implemented form). Weights are per (bin, window) — finer than the
-per-window scalars, frequency-dependent like EMTF's, and independent of
-the band-average method (the band table survives only as the diagnostics
-table's aggregation view). Failure mode trade-off: isolated clean windows
-in noisy neighborhoods get down-weighted (conservative; the robust
-estimator still sees the retained rows).
-
-**SDG31 ablation (2026-09-14, recipe baseline: full remote b+c, exact
-bands, −5.7°, all sorts scoped < 20 s, weight 0.7):**
-
-| sort variant | head med/p90 (pass ρ/φ) | full med/p90 (pass) |
+| Milestone | State | Scope |
 |---|---|---|
-| band (l2u-banded sort) | 0.020 / 0.156 (67/67) | 0.008 / 0.029 (98/100) |
-| per_bin ens=8 sm=0 | 0.223 / 0.399 (33/83) | 0.008 / 0.038 (98/100) |
-| **per_bin ens=16 sm=0** | **0.043 / 0.064 (100/100)** | 0.008 / 0.037 (98/100) |
-| per_bin ens=8 sm=1 | 0.161 / 0.341 (33/67) | 0.009 / 0.036 (98/100) |
-| **per_bin ens=16 sm=1** | **0.040 / 0.043 (100/100)** | 0.008 / 0.037 (98/100) |
-
-Findings: (1) **the per-bin statistic with ens=16 is the best head
-variant — 100/100 within gate, and BAND-INDEPENDENT** (no exact-table
-needed; the node-sort banding deviation from §24.5 P5 vanishes by
-construction); 7.3 s: +0.041/−0.044 with sm=1. (2) Small ensembles (8 →
-17-window segments) fail at the head — the noise-floor bins need the
-ensemble dof for the debiased coherence to discriminate. (3) The debias
-correction is what makes the thresholds transferable (the raw sample
-coherence would sit at ~n_in/W ≈ 0.12 under the null). (4) Full-band
-p90 (0.037) is marginally above the band statistic's 0.029 — the debias
-makes the sort slightly stricter at short periods. **Recommendation**:
-use `statistic="per_bin", ensemble_windows=16` in the recipe; node
-default stays "band" pending the Plot Coherency counterpart (§20.1's
-"the plot shows exactly the statistic the sort applies" holds only for
-the band mode).
-
-**Default flip (2026-09-14, user-directed).** The recommendation was
-adopted as the DEFAULT everywhere user-facing:
-
-- Coherence Sort node + `coherence_sort_fc`/`coherence_sort_fcs`:
-  `statistic="per_bin"`, `ensemble_windows=16`;
-- Coherence Sort / Estimate TF / Plot Coherency nodes +
-  `estimate_tf`/`estimate_tf_levels`: `periods_per_octave=3`,
-  `min_bins_per_band=20` (SDG31-recipe values, replacing the
-  ablation-era 4/40);
-- `_per_bin_coherence` helper default aligned to `ensemble_windows=16`.
-
-Internal geometry helpers (`_period_bands`, `_period_bands_indexed`,
-`_resolve_period_bands`, `_l2u_band_table`) keep their historical
-defaults — every call site passes explicit values, so they never leak.
-Pinned by `tests/test_defaults.py`; the legacy band-statistic tests now
-pass `statistic="band"` (and `periods_per_octave=4` where their
-assertions assume the old grid) explicitly. Caveat retained: Plot
-Coherency renders the **band** statistic, so §20.1's "the plot shows
-exactly the statistic the sort applies" now holds only when the sort is
-explicitly set to `statistic="band"` — the node description documents
-this. A browser e2e run with the per_bin default is pending.
-
-### 24.7 Burst-mode data (MTU-5C / MTU-5A) — prior art & ingestion design (2026-09-14)
-
-**Motivation.** The deferred follow-up to the Merge FC node (§24.5 P1 v2):
-bulk ingestion of burst-mode archives — recorders that interleave
-**scheduled high-rate slots ("mini-runs") with continuous low-rate
-streams** — into the per-run-cascade + FC-merge pipeline.
-
-**Hardware data model (Phoenix MTU-5C / MTU-5A).** Both recorders write
-*several simultaneous streams at different sample rates*; only the low
-rates are continuous. Rate families are mode-dependent — MTU-5C: sparse
-24 kHz + continuous 150 Hz ("24 kHz continuous or decimation with sparse
-24 kHz and continuous 150 Hz", GEF equipment spec); MTU-5A adds a fourth
-rate: 24K/2.4K/150/15, where AMT tasks use 24K+2.4K+150 and MT tasks use
-2.4K+150+15. Duty cycles can be extreme (the official MTU-5A test file
-records 1 s per 10 min at 2400 Hz).
-
-**Official IAGA test data** (`github.com/IAGA-DVI-DataStandards/
-mth5-test-data`, master): `phoenix/phoenix_test_data.zip` (44 MB,
-MTU-5C session folders: per-channel subdirs, `td_150` continuous +
-`td_24k` segment files, `recmeta.json`) and `phoenix_mtu/
-phoenix_mtu_test_data.zip` (21 MB, MTU-5A: `1690C16C.{TBL,TS3,TS4,TS5}`).
-Both downloaded and decoded locally (2026-09-14); the MTU-5A file's TBL
-schedule decodes as: TS5 = 15 Hz continuous 20.3 h; TS4 = 150 Hz in
-16-second slots every 10 min (122 slots); TS3 = 2400 Hz in 1-second
-slots every 10 min, staggered +5 min against TS4 — and the TBL's own
-STIM/ETIM are placeholders (2009–2011), not the data extent.
-
-**Prior art — mth5's representation: burst becomes runs.**
-`mt_io.phoenix.phoenix_collection.PhoenixCollection.assign_run_names`
-(mt_io/phoenix/phoenix_collection.py:325): files < 1000 Hz group into ONE
-run split on temporal gaps; files ≥ 1000 Hz become **one run per
-segment** (`sr24k_0001…`). No special burst container — the burst model
-is *many short runs at multiple sample rates* in one station.
-`PhoenixClient.make_mth5_from_phoenix` (mth5/clients/phoenix.py) writes
-each as a RunGroup.
-
-**Prior art — aurora's processing answer: never merge in the time
-domain.** `aurora.pipelines`: one dataset row per run; per decimation
-level each run is decimated + STFT'd **independently** (per-run cascade,
-`clock_zero_type="ignore"` default) and `merge_stfts` (time_series/
-spectrogram_helpers.py) plain-`xr.concat`s the per-run STFT arrays along
-time — exactly the per-run-cascade + MergeFC decision of §24.5 P1 v2.
-Two upstream weaknesses confirmed in code: (1) **chunk-positional RR
-pairing** — `shape_check_spectrograms` (issue #289 glb/lub trim) +
-`time_axis_check_spectrograms` assume local and remote share the same
-chunk structure; our epoch-anchored `clock_zero` is strictly stronger
-(pairable grids regardless of run partitioning); (2) **deep-level
-starvation is punted** — run-decimation rows yielding <
-`min_num_stft_windows` are marked invalid and skipped
-(transfer_function_kernel.py:316, with an explicit WCGW note that short
-chunks cannot reach deep levels); our skip-with-warning matches.
-(3) **Mixed sample rates are NOT handled**: `prototype_decimate` blindly
-applies the config factor to every run, so 150 Hz and 24 kHz runs land
-on incompatible frequency grids in one concat — upstream users process
-one rate family per config.
-
-**Upstream gaps found in the installed stack (mt_io 2025-12 lineage).**
-(1) **Latent correctness bug**: `MTUTSN.read()`
-(mt_io/phoenix/readers/mtu/mtu_ts.py:435) densely concatenates all
-25-byte-headed 32-byte-header data blocks (`ts[:,
-iblock*n_scan:(iblock+1)*n_scan]`, skipping the block header) and stamps
-the whole array with the file start + uniform rate — but **each 32-byte
-block header carries a true timestamp** (verified: TS3 block 0 =
-07:55:00, block 1 = 08:05:00). For burst files every slot after the
-first gets a wrong, compressed implicit clock (121 slots over 10 h come
-out as a dense 121-second array). (2) `PhoenixCollection` crashes on a
-flat MTU-5A directory (AttributeError in `_set_df_dtypes`; it only
-walks MTU-5C-style station folders). Net: **no working MTU-5A burst →
-MTH5 path exists upstream**.
-
-**Design direction (decided 2026-09-14).** Two distinct **load nodes**
-for ingestion, both feeding the per-run cascade builder (ComputeFC per
-run, epoch-anchored `clock_zero`) + Merge FC:
-
-- `mth5.io.load_phoenix_5c` (MTU-5C): walk session folders via the
-  collection convention; continuous rates → gap-split runs, high rates →
-  run-per-slot; persist as an mth5 archive.
-- `mth5.io.load_phoenix_5a` (MTU-5A): parse the TBL schedule
-  (HSMP/L3NS/L4NS/SRL3-5) **and the per-block 32-byte headers** for true
-  slot times (fixing the upstream dense-concat bug); emit run-per-slot
-  at each burst rate + continuous runs.
-
-The staggered slot schedules across rate families make the epoch-anchored
-window grid essential; families meet at shared frequency coverage only at
-Merge FC (the 2.4K cascade's deep levels overlap the 150/15 continuous
-coverage), so the cross-cascade merge is where the full-spectrum TF
-assembles — v1 scope: single-family many-slots first, then cross-family.
-Test corpora: the two IAGA archives (44 MB / 21 MB, gitignored data
-dir); a synthesized burst collection remains the fallback for e2e.
-
-### 24.8 MTU-5A burst ingestion — format reference, upstream scheme, design (started 2026-09-14)
-
-Focus of the first burst-mode delivery (§24.7): the **legacy MTU-5A**
-format; MTU-5C (already-working upstream collection) follows once the
-procedure is proven.
-
-**Format reference (verified byte-level on the official IAGA test
-recording `1690C16C`, mth5-test-data/phoenix_mtu).**
-
-- `TBL` — station metadata + acquisition schedule + scalar calibrations,
-  a series of 25-byte blocks (12-byte tag + 13-byte value, mixed types;
-  decoded by `mt_io.phoenix.readers.mtu.mtu_table.MTUTable`). Key tags:
-  site/serial (`SITE`/`SNUM`), location (`LATG`/`LNGG` DDM formats,
-  `ELEV`, `DECL`), channel map (`CHEX`..`CHHZ`, 1-indexed positions),
-  dipole lengths (`EXLN`/`EYLN`), gains (`HGN`/`HGNC`, `EGN`/`EGNC`,
-  `HATT`, `HNOM` normalization mA/nT, `FSCV` full-scale V), coil serials
-  (`HXSN`..), powerline (`LFRQ`), GPS satellites (`NSAT`), firmware
-  (`HW`), and the **slot schedule**: `SRL3/SRL4/SRL5` = sample rates per
-  level (here 2400/150/15 Hz), `L3NS`/`L4NS` = seconds recorded per slot,
-  `HSMP` = slot period. `STIM`/`ETIM` are schedule placeholders in the
-  test file (2009-01-01..2011-01-01) — **never use them as the data
-  time period**; actual block timestamps are the truth.
-- `TSn` — one file per rate level (TS3 = SRL3 rate, TS4 = SRL4, TS5 =
-  SRL5; TS2/TSL/TSH also exist): a sequence of **data blocks**, each a
-  32-byte tag followed by `n_scan × n_ch × 3` bytes of 24-bit
-  little-endian samples (channel-interleaved per scan, sign via two's
-  complement on 24 bits). The **per-block tag carries its own UTC
-  timestamp** (bytes 0-5: sec/min/hour/day/month/year-2000), serial
-  (8-9), `n_scan` (10-11), `n_ch` (12), tag length (13, 32 = MTU-5 /
-  16 = V5-2000), status (14), **saturation flags** (15), sample length
-  (17), **sample rate** (18-19), rate units (20), **clock status** (21),
-  **clock error in seconds** (22-25). Empirically confirmed on the test
-  file across all three rates (rate field matches per level, clock
-  status constant 4, clock error 0).
-
-**Upstream processing scheme (mt_io, installed) — and its burst gap.**
-
-- `MTUTable` decodes the TBL into mt_metadata Survey/Station/Run objects
-  (incl. per-channel metadata) and three **scalar** calibrations
-  (`ex_calibration`/`ey_calibration`/`magnetic_calibration` — here
-  1.9073e-4 counts→mV/km-ish and 2.7287e-7 counts→nT).
-- `MTUTSN.read()` allocates `(n_ch, n_scan·n_block)` and **densely
-  concatenates every block**, skipping the 32-byte per-block tags
-  (`ts_fid.seek(32, 1)`) — only the FILE header's start time is kept.
-  `to_runts()` wraps the dense array as ONE RunTS `sr{rate}_001` stamped
-  with the file start and the nominal rate, multiplying the TBL scalar
-  calibrations into the data and stamping units (mV/km, nT).
-- Consequence for burst recordings: **every slot after the first gets a
-  wrong, compressed implicit clock** (the test TS3: 121 one-second slots
-  spread over 10 h come out as a dense 121-second array). Continuous
-  rates (TS5; TS4 when configured continuous) are coincidentally correct.
-- There is **no mth5 client for MTU-5A**: `mth5.clients.phoenix` is
-  MTU-5C-only (folder collection), and `PhoenixCollection` crashes on a
-  flat MTU-5A directory. The only MTU-5A→mth5 path is the single-file
-  `read_phoenix` (with the dense-concat defect above).
-
-**emptyUI design (two nodes, feeding the existing graph).**
-
-1. `mth5.io.phoenix_mtu` ("Load Phoenix MTU-5A", mirrors LoadLemi's
-   contract): params `data_path` (directory), `survey_id`/`station_id`
-   (defaults from TBL `SRVY`/`SITE`), `save_path`/`mth5_filename`,
-   `sample_rates` (comma list; empty = every TS file present),
-   `calibration_path` (optional FAP files via `attach_filters`, like
-   LEMI; TBL scalar calibrations always applied + recorded in run
-   metadata), `gap_method` unused — runs are never merged. Core
-   `read_phoenix_mtu(data_path)`:
-   - parse the TBL once (schedule, metadata, calibrations);
-   - stream each TS file block-by-block, reading the per-block tags:
-     true UTC time, rate, `n_scan`/`n_ch` consistency, clock status /
-     clock error, saturation flags — **the fix for the upstream
-     dense-concat defect**;
-   - group contiguous blocks (`t[k+1] == t[k] + n_scan/rate`) into
-     segments; **one mth5 run per maximal segment**, id
-     `sr{rate}_{NNNN:04d}` (the mth5/aurora convention, §24.7);
-     continuous rates collapse to a single run per rate naturally;
-   - metadata: TBL survey/station/run metadata + per-run sample_rate and
-     time period from ACTUAL block times; units stamped mV/km / nT
-     (TBL scalars applied); per-block clock/saturation anomalies
-     aggregated into node warnings (feeds the GPS-stray awareness of
-     §24.5 P1 v2b);
-   - cross-check parsed segment times against the TBL slot schedule
-     (`HSMP`/`L3NS`/`L4NS`); report deviations, never reject.
-   Output `{"mth5": archive}` open in "a" mode (LoadLemi contract).
-
-2. `aurora.fc.build` ("Build FC Database"): input `mth5` (+ the
-   ComputeFC STFT parameter set + `survey`/`station`/`runs`); iterates
-   the listed runs, `compute_fc_levels` per run (epoch-anchored
-   `clock_zero` default **"epoch"** here — staggered slot schedules make
-   run-start anchoring useless), `merge_fc_containers` per station →
-   output `fc` container. Optional `persist` writes each run's FC levels
-   into the archive's FC layer keyed by run (aurora
-   `save_fourier_coefficients` pattern) for reuse/caching. This node is
-   the "per-run cascade builder" — it also serves the gapped-continuous
-   route without any new machinery. Rationale for a node rather than N×
-   ComputeFC + Merge FC: burst recordings yield 100+ slot runs and the
-   Merge FC ports are fixed (fc1..fc4); the builder owns the iteration.
-
-**Downstream data flow (all existing nodes).** Load MTU-5A (local) →
-Build FC; Load MTU-5A (remote) → Build FC; Estimate TF (`fc`,
-`ref_fc`) — the epoch-anchored grids pair slots across stations despite
-staggered schedules (flagship e2e of test_fc_merge generalizes to real
-slots); Coherence Sort (per_bin default) → Rotate. Coverage model:
-2400 Hz slots populate the top octaves (level-0 FCs only — 1 s of
-samples per slot), 150 Hz slots the mid-band, 15 Hz continuous the
-tail; Merge FC's level-set union assembles the full spectrum
-cross-family, EMpower-style. Starved slot levels skip with warnings
-(§24.5 P1 v2b behavior).
-
-**Test plan.** Corpus: the official IAGA archive (21 MB, gitignored
-data dir). Unit: block-header parsing (times/rates/clock fields vs the
-empirically decoded values); segment grouping (TS5 → 1 run of 73036 s;
-TS4 → 122 runs of 16 s; TS3 → 121 runs of 1 s); schedule cross-check;
-archive structure (run ids `sr2400_0001...`). e2e: Build FC with
-`clock_zero="epoch"` over all runs; single-station Estimate TF spanning
-the families; RR e2e with a synthesized second station (the corpus is
-single-station) to pin slot-level remote pairing. Negative controls:
-truncated block (short read), inconsistent `n_scan` across blocks,
-clock-error ≠ 0 → warnings not rejections.
-
-**Core-logic dry run (2026-09-14, validated).** A prototype of the
-block-stream → segment grouping (per-block tag timestamps, contiguous
-`next_start == prev_end` regrouping) reproduces the expected structure
-on the real recording exactly: TS3 → 121 segments of 1 s, TS4 → 122
-segments of 16 s, TS5 → 1 segment of 73036 s (07:46:52..04:04:08) —
-consistent with the TBL schedule (`L3NS=1`, `L4NS=16`, 10-min slots)
-and confirming the per-block-tag fix against the upstream dense-concat
-defect. The staggered starts across rates (TS5 07:46:52, TS4 07:50:00,
-TS3 07:55:00) confirm run-start anchoring cannot pair these streams —
-the epoch-anchored grid (§24.5 P1 v2b) is the required mechanism.
-
-**Prior art — the multi-run problem in aurora's tracker (surveyed
-2026-09-14; corroborates the design).** aurora #80 (closed 2021,
-"Handling of multiple acquisition runs as a single processing run"):
-the frequency-domain solution — per-run decimation cascades + STFT
-concat — is exactly Build FC's route; the closing comment defers
-time-domain merging to #152 (still OPEN: NaN-fill corrupts anti-alias
-filters — cf. #328 where a few NaNs at run edges propagate to all-NaN
-series through `prototype_decimate`; informal community preference is
-median-fill plus a max-gap-length knob, unimplemented — the
-`fill_gaps_by_*` hooks in `run_summary.py` are TODO stubs). Our Merge
-Runs' `gap_method` interpolation matches the median-fill preference;
-Build FC avoids the whole problem for burst data. #103 (short runs
-crash deep decimation levels) is the upstream face of the starvation
-our skip-with-warning handles. MTU-5A specifics upstream: the mth5
-legacy notebook (`make_mth5_from_phoenix_legacy_mtu.ipynb`) assembles
-runs manually with a TODO to accommodate the format in
-`PhoenixCollection` (its run-assignment never landed — the §24.7
-crash), `MakeMTH5` lists "Phoenix legacy MTU (TODO)", and the TBL tag
-semantics are partly guesses (the notebook asks the community for
-contributions — our byte-verified layout, including per-block clock
-status/error/saturation fields, is a candidate contribution). MTU-5C
-segmented readers track per-segment GPS time, `missing_count` and
-saturation counts in a sub-header — the analog of our per-block tags,
-relevant for the later 5C loader.
-
-**Performance note (2026-09-14, updated after the browser e2e).** The
-real-browser e2e (workflow: load all rates → Build FC → sort → estimate →
-plot) exposed two mth5/mt_metadata cost centers far beyond parsing:
-
-- **`RunGroup.to_runts` ≈ 7 s per run** — a pydantic
-  `validate_assignment` + deepcopy storm (2M deepcopy calls per run,
-  station metadata re-copied per channel). Build FC bypasses it:
-  channels are read via `ChannelDataset.to_xarray` (0.17 s for 5
-  channels — `metadata.to_dict` without validation) and wrapped in a
-  duck payload (`.dataset`/`.sample_rate`/`.start`); ~40x faster.
-- **`StationGroup.metadata` ≈ 20 s per access** on a burst archive (full
-  HDF5 metadata rebuild incl. pyproj datum validation per attribute) —
-  Build FC originally touched it once per run (~80 min for 244 runs:
-  the "never finishes" report). Fixed by hoisting the access out of the
-  run loop; per-run rate/start come from the channel attrs/time coords.
-- `RunGroup.from_runts` ≈ 0.55 s per run in the loader — replaced by
-  `add_run(run_metadata=...)` + `from_channel_ts` (5x cheaper). Ingest
-  of the full corpus is ~2.5 min (one-time; mt_metadata object churn
-  dominates — a future optimization target if slot counts reach
-  thousands).
-
-Measured pipeline (full corpus, user params: window 256, 3 decimation
-levels, hanning + deep taper from L3, first-difference PW, epoch anchor):
-ingest 159 s; **Build FC 265 s** (244 runs); Coherence Sort (per_bin)
-7.4 s; Estimate TF 0.8 s → 78 periods. The merged FC database carries
-**8 rate-keyed levels** (2400 / 600 / 150 / 37.5 / 15 / 3.75 / 0.9375 /
-0.234 Hz) — the cross-family union assembling exactly as designed.
-
-**Mixed-rate merge correctness (fixed 2026-09-14).** The first e2e
-attempt crashed in `merge_fc_containers`: decimation-level INDICES do
-not correspond across rate families (a 150 Hz run's L0 is 150 Hz while a
-2400 Hz run's L2 is also 150 Hz; alphabetical run order interleaves
-`sr15`/`sr150`/`sr2400` families arbitrarily). Levels are now keyed by
-their ACTUAL sample rate (the only commensurable identity across
-cascades) and the output re-keyed to consecutive ints in DESCENDING
-rate order — single-rate inputs reproduce the input indices exactly
-(backward compatible; the old same-index rate-mismatch error is
-superseded: mixing rates is the feature, not an error).
-
-**Open decisions — resolved (2026-09-14).** (a) run ids follow the mth5
-convention `sr{rate}_{NNNN:04d}`; (b) Build FC persists per-run FCs OFF
-by default (the param exists; turn on when the procedure is settled);
-(c) TBL scalar calibrations are applied at ingest (upstream behavior);
-filter/FAP + Calibrate-node handling is later work.
-
-**Delivered (2026-09-14).** `emptyui_mth5.phoenix_mtu`: core
-`read_phoenix_mtu` (TBL parse, per-block tag streaming with true
-timestamps, contiguous segment grouping, run-per-segment archive build,
-TBL scalar calibration at ingest, quality aggregation — clock status /
-clock error / saturation / truncated tails as warnings, loose TBL slot
-schedule cross-check) + `LoadPhoenixMtu` node (`mth5.io.phoenix_mtu`,
-LoadLemi contract). `emptyui_aurora.process.BuildFC` (`aurora.fc.build`):
-mth5 + the ComputeFC STFT parameter set, `clock_zero` default "epoch",
-per-run `compute_fc_levels` → `merge_fc_containers`, identity attrs per
-run, optional persist. Tests: synthetic binary corpus writer (CI-safe;
-TBL tags encoded via `MTUTable.TBL_TAG_TYPES`, TS blocks per the
-verified layout) covering block-tag decode, slot/continuous grouping,
-archive structure, sample-rate filter, quality warnings, truncated
-tails, schedule cross-check; real-corpus structure test (121/122/1
-runs, skipif absent); Build FC node tests (epoch-anchored merged grid,
-identity attrs, Estimate TF flow). Full suite 385 passing. The tz
-alignment fix in `_clock_zero_head_skip` (naive epoch vs aware/naive
-payload starts) came out of the Build FC tests.
-
-**Browser e2e round (2026-09-15): speed + duplicate-period fixes.** The
-user's e2e (load all rates → Build FC → sort → estimate) reported
-hundreds of seconds for the load and >10 min without finishing for
-Build FC. Root causes — upstream mt_metadata/mth5 pathologies plus one
-burst-specific correctness bug:
-
-- **pyproj CRS rebuild storm (the big one)**: mt_metadata's datum
-  validator (`Location.validate_datum`) constructs a fresh
-  `pyproj.CRS` on essentially EVERY metadata attribute update — 25,625
-  CRS constructions (75 s) for a single Build FC pass over 121 slot
-  runs, triggered by mth5's uncached `get_channel`/`metadata`/recache
-  paths. Fix: `emptyui_mth5._compat.apply_crs_cache()` LRU-caches
-  `pyproj.CRS.from_user_input` (CRS objects are immutable, datum strings
-  repeat exhaustively; applied at package import). Build FC 5 slots:
-  126 s → 22 s.
-- **`RunGroup.to_runts` ≈ 7 s/run** (deepcopy + validation storm,
-  station metadata re-copied per channel): Build FC reads channels via
-  `ChannelDataset.to_xarray` (0.17 s/run) wrapped in a duck payload.
-- **`StationGroup.metadata` ≈ 20 s per access** (full HDF5 metadata
-  rebuild incl. pyproj): hoisted out of Build FC's run loop; per-run
-  rate/start come from the channel attrs/time coords.
-- **`RunGroup.from_runts` ≈ 0.55 s/run** in the loader →
-  `add_run(run_metadata=...)` + `from_channel_ts` (5x cheaper).
-- Ingest 160 → 48 s; Build FC 265 → 72 s; total pipeline ~2 min.
-
-**Duplicate/overlapping long-period points (fixed).** A rigorous
-cascade should tile the spectrum without duplicates; two causes: (a)
-`_container_geometry` bailed (→ the l2u table silently fell back to the
-per-level bin walk) because the burst families' rate steps are not a
-single uniform cascade (37.5/15 = 2.5) — the geometry now only requires
-a constant window and per-level df (the template applies per level
-anyway; `factor` is None for non-uniform steps); (b) the misaligned
-families (150/15 = 10, not a power of 2) interleave near-duplicate band
-centers that the exact log2 dedup could not collide. Fixes at the
-source: `_l2u_band_table` gains `_resolve_cross_level_claims` —
-deepest-rate-first period tiling (a period is estimated by the deepest
-level that covers it; shallower bands are clipped to the unclaimed
-remainder), the same deepest-wins rule as the merge, applied so sort
-diagnostics and estimate share one table — and `merge_tf_levels` dedups
-tolerance-based within half the level's center spacing (1/(2·ppo)
-octaves; aligned cascades still collide exactly). Aligned single-rate
-cascades are untouched (the template's level spans abut — claims never
-bite; SDG31 parity uses manual-band overrides anyway).
-
-**Per-family decimation trim (user scheme, implemented).** The
-continuous (lowest-rate) family carries the full `decimation_levels`
-cascade; higher-rate families decimate only until their rate would
-reach the next family's native rate (`d_max = ceil(log2(r/r_next)/
-log2(factor)) − 1`): 2400 Hz slots decimate once (→ 600), 150 Hz slots
-once (→ 37.5), the 15 Hz stream takes the full parameter. Beyond the
-compute saving this prevents same-rate levels computed from different
-families from double-covering identical acquisition windows.
-
-Measured e2e (full corpus, user params): ingest 48 s; Build FC 72 s (8
-rate-keyed levels); sort + estimate 7 s → 46 periods, strictly
-monotonic, min gap 0.263 octave (the template's own ladder spacing — no
-near-duplicates).
-
-### 24.9 Unit-chain regression (NIMS/SDG31 UI workflow) + sort simplification (2026-09-15)
-
-**Unit-chain regression (user report).** A hand-built SDG31 node graph
-(no Calibrate, core Detrend in the chain) produced apparent resistivities
-anywhere between 10^-6 and 10^8 ohm-m depending on `magnetic_unit` —
-never right. Two compounding defects, both fixed:
-
-- **Units stripped at the core-node boundary.** `coerce_run` (RunTS →
-  core TimeSeries) dropped the per-channel `units` attrs, and the core
-  filter nodes rebuilt payloads without them — Compute FC then ran blind
-  (electric counts hit the legacy ×1e-6 "mV/km assumed"; magnetic counts
-  stayed untouched). Fix: `TimeSeries` carries a `units` dict, `coerce_run`
-  extracts it from the RunTS dataset attrs, Detrend/Bandpass preserve it,
-  Align re-stamps it on its RunTS outputs, Compute FC reads it.
-- **Raw counts passed through with only a log warning.** FDSN-built mth5
-  archives store raw counts with the response attached (Calibrate
-  mandatory); Compute FC's unrecognized-units branch warned and passed
-  counts through. Fix: `_reject_counts` hard-errors on count-family units
-  ("digital counts"/"count"/"counts") with an actionable message. The
-  unitless path (synthetic fixtures, core payloads) is unchanged — LEMI
-  workflows are unaffected (LEMI data arrive in physical units).
-
-Reproduced magnitudes (Executor, the user's exact graph): mag=auto/h →
-ρ max 111 (accidental counts/counts partial cancellation, ~0.1× low);
-mag=b → ρ max 1.75e8 (mode 'b' force-converts counts as if nT → H ÷1.26e9
-→ ρ ×1.6e17 vs the counts passthrough). With Calibrate inserted:
-ρ 82–1.06e3, matching the official SDG31 maximum (~1e3).
-
-**Coherence sort simplification: band-free sort (user decision, §24.9).**
-The per-bin statistic is the common convention (EMTF et al.) and has been
-the default since the §24.6 flip — the band-aggregated statistic had no
-remaining weighting consumer. Removed: the `statistic` param (per-bin is
-the only behavior), `periods_per_octave`, `band_style`,
-`min_bins_per_band`, `t_short` (all band-geometry — the estimator owns
-banding), and `coherence_trim` (band-level trimming is meaningless
-without sort-side banding; hard per-window exclusion is `mode="drop"`).
-The sort node surface shrinks to coherence_min/coherence_max/mode/
-apply_below_period/ensemble_windows/smooth_bins. Estimate TF drops its
-chain-walking inherit of band params from the sort — banding is the
-estimator's concern, one parameter set, no duplication.
-
-**Silent-drop grammar made loud (user report).** The sort never removes
-bins from the FC (grid verified preserved), but a band whose every sample
-was fully down-weighted (per-bin ensemble collapses to ≤ n_in valid
-windows on starved levels → statistic scores 0 → weight 0 → NaN) left
-the band regression with no usable rows: estimate_tf skipped it and
-merge_tf_levels dropped the all-zero band silently — the TF just lacked
-period points. Now: estimate_tf warns naming the skipped band periods
-and retained-row counts; merge_tf_levels warns naming dropped degenerate
-bands; the Estimate TF progress line reports merged/offered band-periods
-and the processing notes record both counts. Kill + warn semantics
-confirmed as the desired policy (a "can't estimate → pass through"
-alternative rejected: it would re-admit un-QC'd data).
-
-**Plot Coherency reworked to per-bin rendering** (per (bin, window)
-window-ensemble coherence, median across windows, guidance band at the
-sort bounds; one series per decimation level) — it renders exactly the
-statistic the sort applies, per §20.1, and loses its duplicated banding
-params and inherit declaration.
-
-**Executor: stale params warn (user decision).** Saved workflows carrying
-params a node no longer declares are processed unchanged — the executor
-resolves only manifest params — but each stale param now emits a
-node-level progress note ("ignoring params not declared by node type…")
-instead of failing silently.
-
-### 24.10 MTU-5A calibration — TBL scalar constants verified, per-coil response gap (2026-09-15)
-
-Groundwork for frequency-domain calibration of the MTU-5A system: the
-TBL's calibration contents were decoded and cross-checked end to end on
-the official IAGA corpus (`1690C16C.TBL`, site 10441W10, logger serial
-1690, cugb, 41°00.388'N 104°00.536'E, 1304 m).
-
-**What the TBL stores (verified values).**
-
-- Magnetic (coil) chain: `FSCV=6.4` V (ADC full scale), `HGN=12` (final
-  H gain), `HATT=0.233` (H attenuation), `HNOM=1000` mA/nT (coil
-  normalization), `HTIM=000000000000` (H calibration time — zero
-  placeholder: no in-field coil calibration recorded).
-- Electric chain: `EGN=40`, `EXLN=EYLN=100.0` m, `TSTV=2.5e-3` V.
-- Per-channel gain-control `EGNC=HGNC=2`; per-channel AC/DC tags
-  `HXAC/HXDC`, `HYAC/HYDC`, `HZAC/HZDC`, `EXAC/EXDC`, `EYAC/EYDC`
-  (e.g. HXAC=1.478e-3, HXDC=0.0139, EXDC=-9.348e-3 V-ish) — per-channel
-  gain/offset corrections, terse descriptions, currently NOT applied by
-  the ingest.
-- `STDE`/`STDH` are 2.12e-314 subnormals — placeholder zeros.
-
-**Derived scalar calibrations** (formulas as implemented upstream and
-used by the ingest via `MTUTable.read_tbl()`; verified identical):
-
-- magnetic: nT/count = FSCV/2²³ × 1000/(HGN × HATT × HNOM)
-  = 7.6294e-7 × 1000/2796 = **2.7287e-7 nT/count** (3.665e6 counts/nT;
-  full scale ±2.29 nT — plausible for the high-gain HGN=12 long-period
-  stream)
-- electric: mV/km/count = FSCV/2²³ /EGN /EXLN × 1e6 = 1.9073e-4
-  (full scale ±1600 mV/km)
-
-**Magnitude sanity (end-to-end, first 100 TS5 blocks, 15 Hz):** hx
-0.053–0.060 nT, hy 0.094–0.108 nT — quiet-site sub-nT fluctuations;
-ex −141…−139 mV/km — a ~−140 mV/km self-potential offset with ±1 mV/km
-variation (handled downstream by detrending). Physically sensible.
-
-**Findings / gaps for the frequency-response calibration work.**
-
-1. **One scalar chain, three physical coils.** The TBL carries a single
-   HGN/HATT/HNOM chain shared by hx/hy/hz, but the three channels use
-   three different coils (`HXSN=coil1693`, `HYSN=coil1694`,
-   `HZSN=coil1695`). The scalar nT is a nominal normalization; the true
-   per-coil response is complex and frequency-dependent (induction coils
-   measure dB/dt) and is NOT in the TBL — manufacturer data keyed by coil
-   serial is required (the MTU-5C analog is CAL files).
-2. **`HTIM` is a zero placeholder** on this unit — nothing
-   frequency-dependent to recover from the TBL itself.
-3. **Per-channel AC/DC tags exist and the ingest ignores them** (see
-   above); the DC offsets are handled downstream by detrending, the AC
-   factors may belong in the calibration chain.
-4. Decision (c) refined: the TBL scalar stays applied at ingest (units
-   mV/km / nT stamped); the frequency-dependent box+coil responses the
-   user is converting from proprietary formats to ASCII land in the
-   Calibrate route (FAP-style filters attached to the mth5 channels) —
-   the same framework as the LEMI FAP support (§16.1), keyed per channel
-   with the per-coil serials as the match key.
-
-### 24.11 Second MTU-5A corpus (1690618B) validated + night-window test extraction plan (2026-09-16)
-
-**Second corpus validated.** The user replaced the IAGA corpus with an
-own-station recording (`1690618B.TBL/TS3/TS4/TS5`) and copied the box +
-coil calibration responses as ASCII (`COIL1620_CLC`, `COIL2417_CLC`,
-`COIL2418_CLC`, box `MTU-1690_CLB` — filenames carry a stray space before
-`.asc`, to be renamed before parsing). Findings:
-
-- **TBL format correct**: 3000 bytes = exactly 120 × 25-byte blocks (one
-  more than the IAGA file — fine). All 65 registry-typed tags decode
-  cleanly; the ~55 untyped blocks (SGIN/ACDC/TXPR/…) behave identically
-  to the verified corpus. `MTUTable.read_tbl()` → 120 entries.
-- **Identity**: site `B0940330`, logger serial 1690 (same box as §24.10),
-  33°01.241'N 94°01.012'E, 4869 m, same firmware `3100E6`.
-- **Coil serials match the ASC response files**: HX=`COIL2417`,
-  HY=`COIL1620`, HZ=`COIL2418` — the TBL `HXSN/HYSN/HZSN` fields are the
-  match key for the per-coil frequency responses.
-- **Different gains → new derived scalars**: `EGN=10` (was 40),
-  `HGN=3` (was 12), `HATT=0.233`, `HNOM=1000`, `FSCV=6.4` →
-  7.629e-4 mV/km/count (±6400 mV/km full scale) and
-  1.0915e-6 nT/count (±9.16 nT full scale, 4× looser than §24.10's
-  ±2.29 nT — consistent with the ~3% saturated blocks observed).
-  `HTIM` is again a 2000-01-01 placeholder; STIM/ETIM placeholders as
-  before.
-- **Schedule (block-tag contiguity walk)**: 506 slots — 2 s @ 2400 Hz
-  (`L3NS=2`) and 16 s @ 150 Hz (`L4NS=16`), ~600 s spacing — plus 84.4 h
-  continuous @ 15 Hz; all three rates span the same 3.5 days
-  (2026-06-18 07:25 → 06-21 19:35 UTC). Shape differences vs the IAGA
-  corpus (denser slots; TS4 written as sixteen 1-s blocks per slot
-  instead of one 16-s block) are handled by `_group_segments` unchanged.
-- **End-to-end ingest works**: `read_phoenix_mtu` → 1013 runs
-  (506 `sr2400` × 4800 samples, 506 `sr150` × 2400, 1 `sr15` × 4.56M)
-  in 186.6 s; warnings for per-block clock status [3, 4] (GPS lock
-  events) and 9641 saturated blocks (~3%, expected at the looser full
-  scale).
-
-**Night-window test extraction (plan, user decision).** The 3.5-day
-corpus makes Build FC assembly slow; tests should use a ~12 h quiet
-window. Local night time in Tibet (UTC+8, no DST): 19:00–07:00 local ≡
-**11:00–23:00 UTC** same day. Plan:
-
-- **Filter at ingest, not downstream**: add `start`/`end` params (UTC ISO
-  or epoch, empty = full recording) to `LoadPhoenixMtu` /
-  `read_phoenix_mtu`. Implementation: filter BLOCKS by per-block tag
-  start ∈ [start, end) before `_group_segments` — per-second granularity
-  (every MTU-5A block is ≤ 1 s of data), so slots and the continuous
-  stream crop cleanly at the window edges; partial slots become short
-  runs (time periods from the tags, as always).
-- **Expected yield for 2026-06-18 11:00–23:00 UTC** (first full night;
-  recording starts 07:25 UTC): 72 slots per rate (11:05:00 → 22:55:00 =
-  144 s @ 2400 Hz, 1152 s @ 150 Hz) + 12 h continuous @ 15 Hz
-  (~648k samples/channel) → ~145 runs vs 1013; ~7× less decode+archive
-  work and ~7× less 15 Hz decimation cost in Build FC.
-- **Archive hygiene**: write the windowed set to a separate archive
-  (e.g. `from_phoenix_mtu_night.mth5`) — the original corpus stays
-  intact; station id unchanged (`B0940330`), the window is a subset.
-- **Deep-level adequacy**: 12 h @ 15 Hz with the user's e2e parameters
-  (window 256, 3 decimation levels) gives ~39 windows at the deepest
-  level (rate 0.234 Hz) — enough for a smoke test, deliberately short of
-  the 3.5-day statistics.
-- Clock zero stays "epoch" (Build FC default): the windowed subset
-  anchors on the same absolute grid as any other subset, so
-  remote-reference slot pairing is unaffected.
-- The ASC calibration responses are independent of the window and land
-  in the Calibrate route per §24.10 decision (c).
-
-**Repo data hygiene note (2026-09-16, user decision).** The heavy raw
-corpora stay out of the repo (gitignored, regenerable): the 3.5-day MTU
-corpus (~130 MB), the BGS LEMI and USArray SDG31/SDH28 archives. Once MTU
-testing is finished, commit ONLY a small in-repo smoke dataset — a ~2 h
-night-window extract (e.g. 2026-06-18 12:00–14:00 UTC: 12 slots per rate
-≈ 24 runs + 108k continuous samples, well under a few MB as an mth5
-archive) — so the MTU-5A path keeps CI coverage without carrying the full
-recording. The same policy already applies to the other instruments
-(gitignored raw data + committed synthetic/extracted fixtures; §24.7).
-
-### 24.12 Calibration placement decision — frequency-domain, inside Compute FC (2026-09-16)
-
-**Decision (user): calibrate in the frequency domain, inside Compute FC** —
-not a separate downstream node, not the time-domain route. Rationale: the
-conventional MT approach calibrates in the frequency domain (matching
-aurora's `calibrate_stft_obj`, which divides the STFT coefficients by the
-chained complex response between STFT and estimation); classical EMTF got
-away with time-domain/flat treatment because long-period stations used
-nearly-flat fluxgates. The MTU-5A makes the time-domain route impractical:
-(a) the induction-coil response falls off steeply in log domain at long
-periods (the correction factor grows without bound — synthesizing it in
-time domain gets progressively harder); (b) the burst archive has ~1000
-short slots — per-slot FFT/iFFT round trips are wasteful; (c) long-period
-calibration in time domain would require decimation or very long windows,
-while per-frequency division is trivial at every decimation level. Also
-mathematically: STFT, prewhitening/recolor, and response division are all
-linear frequency-domain operations — they commute.
-
-**Mechanism.** Compute FC applies the response right after the STFT,
-before returning/persisting the FCs — mirroring aurora exactly (their
-calibration point is inside FC production; persisted FCs are calibrated).
-No new port: the mth5 convention puts the response on the channel
-metadata (`AppliedFilter(name, applied, stage)` -> `/Survey/Filters`,
-typed filter objects: ZPK / FAP / coefficient / time delay / FIR, all
-evaluated as `complex_response(f)`), which the ts.run payloads already
-carry — Compute FC resolves the response the same way it resolves units
-(`_channel_units` precedent). Applied-flag semantics prevent
-double-calibration: only filters with `applied=False` are removed; a
-prior time-domain Calibrate flips the flags, so both routes coexist (the
-time-domain Calibrate node remains for the classical route and explicit
-control). The FC records the applied calibration in its attrs.
-
-**Response input for the MTU-5A loader (user decisions):**
-
-- `Load Phoenix MTU-5A` gains a calibration-folder param: when the TBL is
-  readable, the loader extracts the box/coil serial numbers (TBL
-  `HXSN/HYSN/HZSN` are the match key — §24.10/§24.11) and auto-picks the
-  matching calibration files from the folder; manual per-file selection
-  remains as the fallback.
-- The Phoenix response tables are NORMALIZED (per-frequency gain and
-  phase shift — directly applicable to complex FCs), not absolute
-  transductions; the TBL scalar chain (decision (c)) carries the
-  absolute scale. (Double-counting check pending the actual file
-  structure.)
-- Frequency coverage extends down to 4.196167e-04 Hz — well below
-  conventional BBMT ranges, so the FAP tables cover the deep levels
-  without extrapolation concerns at the long-period end (the FAPFilter
-  constant-extrapolation-below-table caveat is moot for these tables).
-- Calibration is PER CHANNEL: the box calibration (CLB) applies to all
-  five MTU channels; the coil calibration (CLC) applies per magnetic
-  channel (one coil each, hx/hy/hz). Magnetic channels therefore take a
-  TWO-pass chain (box -> coil, units-chained), electric channels a
-  ONE-pass chain (box only). mth5's `ChannelResponse` units-chaining
-  supports composing these as a filter list per channel.
-
-Remaining open questions deferred until the calibration files are parsed
-and their structure is understood: the exact normalization reference of
-the gain/shift tables, how the CLB/CLC composition orders with the TBL
-scalar, and the file-matching rules for the calibration folder.
-
-**ASC calibration file structure (parsed 2026-09-16).** Files (renamed,
-trailing spaces removed): `MTU-1690_CLB.asc` (box), `COIL1620/2417/
-2418_CLC.asc` (one file per coil). Format: 3 header lines + rows of
-`<channel> <freq Hz> <mV/mV> <degrees>`:
-
-- **CLB (box)**: 5 channels x 99 frequencies, ASCENDING 1.3113e-05 ->
-  317.647 Hz; amplitude 0.00266-1.448, phase -3..+90 deg. Header 2
-  carries the normalizing gains `E-gain: 10  H-gain: 3` — matching this
-  corpus's TBL `EGN=10/HGN=3` exactly. Channel numbering matches the TBL
-  `channel_keys` (ex:1, ey:2, hx:3, hy:4, hz:5). At the lowest
-  frequencies ALL channels (electric included) show +90 deg phase — the
-  box's AC-coupled low-frequency roll-off.
-- **CLC (coil)**: one coil per file, single channel column; frequencies
-  DESCENDING (Phoenix convention difference), range 1.3113e-05 Hz
-  (COIL2417) / 4.196e-04 Hz (COIL1620, COIL2418) -> 317.6/388.2 Hz;
-  amplitude 5.9e-5-1.18, phase -90..+91 deg. Header 2 carries the
-  normalizing factor `1000.0 mV/nT` — the TBL `HNOM=1000` expressed in
-  mV (the 1000 mA/nT feedback current through the 1 ohm resistor). The
-  low-frequency behavior is exactly the dB/dt induction response:
-  amplitude -> 0 proportional to f with +90 deg phase.
-- **Composition hypothesis (to be verified empirically)**: the tables
-  are SHAPE corrections — normalized to the TBL constants, so
-  true_field = TBL_scalar_field / [CLB(f) x CLC(f)] for magnetic channels
-  and / CLB(f) for electric channels (FC complex division,
-  amp*exp(i*phase)). The shape is gain-independent (linear amplifier):
-  for a corpus whose recording gains differ from the CLB normalizing
-  gains, the TBL scalar (which uses the ACTUAL gains) already absorbs
-  the ratio. Parser must not assume frequency ordering (CLB ascending,
-  CLC descending).
-
-**Implementation (2026-09-17).** Delivered in three pieces:
-
-- **ASC parser** (`emptyui_mth5/phoenix_calibration.py`): `parse_asc_calibration`
-  returns a `PhoenixCalibration` (kind CLB/CLC from the `.CLB/.CLC` marker,
-  serial + normalizing constants from the second header line, per-channel
-  tables sorted ascending — CLC files list frequencies descending);
-  `find_asc_calibrations(folder, box_serial, coil_serials)` substring-matches
-  the TBL serials (`SNUM` -> `*_CLB.asc`, `HXSN/HYSN/HZSN` -> `*_CLC.asc`,
-  case-insensitive); `build_phoenix_filters` builds one FAP filter per
-  channel (`phoenix_clb_<serial>_<comp>` / `phoenix_clc_<serial>_<comp>`)
-  with `units_in == units_out` = the archived physical units (mV/km, nT),
-  gain 1 — a SHAPE filter whose removal is the per-frequency complex
-  division. Phases are passed to mt_metadata in RADIANS: its constructor
-  applies a max(|phase|) > 6*pi degrees->radians heuristic that silently
-  misreads small-phase tables. Low-frequency extension below the measured
-  range (`extend_below`): "linear" (default) prepends f_min/1000 with
-  amplitude/f_min and the lowest phase held — the exact dB/dt (coil) and
-  AC-coupling (box) laws, and the subsequent interp1d extrapolation follows
-  the same proportional law arbitrarily deep; "flat" keeps the repo-wide FAP
-  convention (§16.1). Above the measured range the mt_metadata linear
-  extrapolation is kept (aurora parity; only the 2400 Hz level's > 317 Hz
-  bins extrapolate, outside the MT band of interest).
-- **Loader** (`read_phoenix_mtu(calibration_folder=...)` + Load Phoenix
-  MTU-5A param): empty = the data directory (the manufacturer files usually
-  sit next to the recording); a folder with no .asc files at all stays
-  silent. Matched tables are registered in `/Survey/Filters/fap` and
-  referenced per channel via `AppliedFilter(applied=True, stage=k)`
-  (box stage 1, coil stage 2) in the channel metadata — the archive round
-  trip restores both the refs and the objects (verified: `to_runts`
-  resolves `channel_response` and the dataset attrs carry the applied
-  flags). Unmatched/mismatched serials warn, never fail the ingest; the
-  TBL scalar calibration still applies (the ASC filters only correct the
-  shape on top).
-- **Compute FC** (`_calibrate_stft_vars` in emptyui_aurora._processing):
-  after the STFT of each decimation level, each channel's FCs are divided
-  by the chained complex response of its applied filters (column
-  broadcast); a zero/near-zero DC response (induction-coil tables padded
-  with the linear extension extrapolate to ~0 at DC within float error)
-  gets divisor 1 and a NaN DC column, aurora-style. The per-channel chain
-  is recorded in the fc attrs as `calibration_applied`
-  (`"hx=box+coil; ex=box"`). No new node, no new port: the chains travel
-  with the payload — core `TimeSeries.calibration`
-  (`{channel: [(filter, applied), ...]}`) coerced from the RunTS dataset
-  attrs + object registry (`channel_calibration`), preserved by
-  TimeSeries.copy, the core Detrend/Bandpass nodes, and rebuilt on the
-  Align Runs / Split Channels -> Merge Channels outputs (ChannelTS
-  `channel_response` + metadata refs; the refs must be set AFTER
-  `channel_response` — the setter clobbers flags when `filter_names`
-  mismatch). Composition with the time-domain Calibrate node is safe by
-  the applied-flag semantics: RunTS.calibrate divides by all chain filters
-  and flips them to applied=False, after which Compute FC divides by
-  nothing.
-
-**Coupling audit (2026-09-17, user question).** The box CLB's low-frequency
-tail is a first-order high-pass, not box gain structure: single-pole fits
-give -3 dB corners of 5.02/5.04 mHz (E channels) and 4.08/4.13/4.16 mHz
-(H channels) — period ~200-245 s, tau 32-39 s — with phase residuals under
-2 deg. The official Phoenix MTU/MTU-A User Guide (phoenixgeophysics.com,
-V5 System 2000 MTU/MTU-A User Guide v1.8) documents exactly this filter:
-"Setting coupling parameters — The coupling setting governs the high pass
-filter. When the MTU is set to AC coupling, it uses a high pass filter with
-a corner frequency of 0.005 Hz that removes self-potential from the dipole"
-(MTU chapter, p. 95); the MTU-A chapter (p. 120/123) documents the same
-setting with a 2 Hz corner and states "for MT soundings, the MTU-A should
-be set to DC coupling for both E and H channels". The TBL's `ACDC` byte
-records the deployed coupling; the upstream mt_io docstring reads it as
-"DC = 0, AC = 1; MT should always be DC", and this corpus has `ACDC = 0`.
-Empirical confirmation: the electric channel carries a ~-140 mV/km
-self-potential offset (§24.11) — a static offset can only survive DC
-coupling. So the recording is DC-coupled (no high-pass in the data), while
-the CLB table was measured with the 0.005 Hz coupling high-pass in the path
-(the manual's claim that calibration files are "independent of ... the mode
-of operation (e.g., line frequency, AC/DC coupling)" refers to the
-calibration measurement procedure, not to the coupling filter being absent
-from the measured response — the fitted corner identifies it as present).
-Consequence for the §24.12 shape chain: for a DC-coupled recording the CLB
-response below its coupling corner must NOT be divided out (the deployed
-input is flat there); applying it as-is over-amplifies long periods
-(dividing by amplitude proportional to f). The coil CLC tables are unaffected
-(an induction coil is inherently AC-coupled; its proportional-to-f tail is
-physics, not a coupling setting). Open decision: coupling-aware CLB
-neutralization below the corner (estimate the corner per channel from the
-table's -3 dB crossing, or use the documented 0.005 Hz) vs. documenting the
-caveat only.
-
-**Coupling comparison (2026-09-17, user-requested A/B).** Two TF images from
-the full 3.5-day record (BuildFC window 256/factor 4/11 levels, clock zero
-epoch, per-bin coherence sort defaults, self-reference Robust estimate,
-58 merged periods): `plot_appres_phase_asis_full.png` (CLB as-is) vs
-`plot_appres_phase_dropped_full.png` (CLB neutralized below its per-channel
--3 dB corner: amp 1, phase 0). Numeric deltas (dropped/asis):
-
-- periods <= 182 s: bit-identical (the CLB is unity there) — both windows
-  and the full record agree;
-- 230 s (right at the coupling corner): rho ratio 0.72 (xy) / 0.60 (yx),
-  phase +39/+40 deg — the noisiest, most divergent band;
-- 292-2295 s: a stable rho ratio 0.815/0.798 (-0.09 decade) with ZERO phase
-  delta — exactly the signature predicted from dividing E and H by the
-  coupling high-pass amplitudes (E's 5.02 mHz corner vs H's 4.08 mHz: the
-  phase corrections nearly cancel in E/H while the amplitudes do not);
-- 4009/6131 s: single/few-window bands, ratios scatter.
-
-The as-is variant therefore inflates long-period apparent resistivity by
-~0.09 decade relative to the dropped variant. Under the DC-coupling
-evidence (ACDC=0, the ex self-potential offset, the manual's DC = no
-high-pass), the dropped variant is the physically consistent one; the
-user's alternative reading (the MTU-5A CLB already embeds the deployed
-coupling) would require the CLB to be flat below the corner, which it is
-not. Decision pending the user's review of the images. Reproduction:
-test/verification/clb_coupling_comparison.py (--full for the 3.5-day run).
-
-**Full-record scatter investigation (2026-09-17, user question "why is the
-full result miserable").** The one-night TF is smooth; the full 3.5-day TF
-scattered even at short periods. Diagnosis, in order of discovery:
-
-1. **(Fixed) STIM-anchored channel time axes**: the ingest set an undeclared
-   `start_time` attribute on the shared channel metadata while ChannelTS
-   anchors its time index on `time_period.start` — every archived dataset
-   started at the TBL STIM, `from_channel_ts` propagated it into the run
-   metadata, and the merged FC time axes collapsed across slot runs. Fixed
-   (commit d487658): set `time_period.start/end` per segment. Self-reference
-   estimates were never affected (a night-slot selection from the full
-   archive reproduces the night archive bit for bit).
-2. **June 21 daytime is saturated** (block tags byte 15): TS3 15/1012,
-   TS4 120/8096, TS5 4169/303742 blocks that day, peaking h07-h12 UTC
-   (653/367/304/506/766/844 blocks/h) — the instrument clipped during the
-   final day (local 12:00-21:00). Saturation also appears in every day's
-   daytime hours at lower rates (June 19 up to 342/h, June 20 up to 589/h).
-   Estimating the slot families with June 21 excluded: L0-L3 perfectly
-   smooth (rho 13->10->14, phases -114 -> -141 deg, matching the night
-   archive) — the slot machinery is sound.
-3. **The MTU cancels the self-potential offset on its slot paths but NOT on
-   the continuous stream**: TS3/TS4 ex/ey means are ~0 (AC rms 0.2-3.3
-   mV/km) while TS5 ex/ey carry raw offsets of -740 / +1360 mV/km with a
-   slow electrode drift of ~15 mV/km rms. The drift sits in the same
-   frequency band as the MT signal at 5-1000 s. On quiet night data the
-   stream TF agrees with the slot TF (L3 ~ L4 ~ L5 at 0.3-1.9 s); during
-   daytime (cultural noise + drift) the stream levels' TFs are garbage:
-   yx inflates ~10x at 0.5-10 s (Ey/Hx), xy/yx collapse at 20-2000 s, and
-   June 18 daytime is catastrophic (rho ~1e-5, phases near +/-180 deg) while
-   the same hours' slots stay clean.
-4. **Stronger coherence sorting AMPLIFIES the scatter (negative result)**:
-   with self-reference, raising coherence_min (weight 0.25 -> drop 0.5/0.7/
-   0.85) selects a biased high-coherence subset (coherent noise passes the
-   E-on-H criterion) and collapses statistics; the merged long-period TF
-   gets wilder, not cleaner. The sort as designed is not the lever for this
-   failure mode.
-5. Per-window linear detrending (aurora's per-window default) changed
-   nothing — the corruption is in the data's slow drift, not STFT leakage.
-
-Consequence: the trustworthy full-band recipe for this station is
-session-based — slots (offset-cancelled) for 0.002-10 s from all data, the
-stream only from quiet sessions for >10 s. The ingest window filter
-applies to ALL rates at once, so a per-rate session selection is a missing
-capability (candidate 24.13 feature). Decision pending user review.
-
-**Coupling decision — CLB AS-IS (2026-09-17, official-EDI discrimination).**
-The user supplied the official Phoenix MT-Editor EDI for the SAME one-night
-window (`B0940330_z.edi`: START-UP 2026/06/18 11:00:00, END-TIME 23:00:00,
-"Reference Field: Local H - Ref.", rotation 0.00). Converting our SI Z to
-EDI units (mV/km per nT = Z_SI x 1e6 x 1e-9/mu0 = x795.77) and folding the
-180-deg sign-convention flip (Phoenix EDI uses exp(+i omega t)):
-
-- **asis (full CLB table applied): median dlog10rho +0.0005 (xy) / +0.0045
-  (yx), IQR 0.015/0.027 decades; median dphi +0.21/+0.15 deg, IQR
-  0.7/0.6 deg — over the ENTIRE 0.003-500 s band.** The burst pipeline
-  reproduces the official Phoenix TF essentially exactly.
-- dropped (CLB neutralized below the -3 dB coupling corner): identical at
-  short periods but deviates -0.11..-0.35 decades and +33..35 deg at
-  182-505 s — exactly where the coupling tail acts.
-
-Verdict: the official processing applies the CLB table as-is — the user's
-reading (the MTU-5A CLB output already includes the deployed coupling) is
-confirmed empirically. The committed loader behavior (full table, no
-coupling neutralization) is correct and already the default; the
-`extend_below` extrapolation options remain available for tables with
-narrower measured range. The DC-coupling physics question (ACDC=0 vs the
-table's 0.005 Hz high-pass tail) is moot for parity purposes — Phoenix's
-convention governs the official product.
-
-**Saturation QC — zero-weight saturated FC windows (2026-09-17).**
-
-The scatter investigation showed the remaining full-record garbage is the
-instrument's own saturation flags (tag byte 15): daytime saturation peaks
-h07-h12 UTC on June 18-21 (up to 844 blocks/h on June 21), and every
-day's daytime carries some. Stronger coherence sorting amplified the
-scatter (rejected as the lever); per-window detrending changed nothing.
-The fix is to trust the instrument: blocks flagged saturated mark every
-scan in them, so a per-sample mask can drive window-level rejection.
-
-Implementation (commit `f19e2ac`):
-- `read_phoenix_mtu` emits a per-sample "saturated" auxiliary channel
-  (0/1 float, aligned to the block-tag times) per run — written only when
-  the recording contains at least one saturated block; clean recordings
-  carry no mask channel.
-- `_decimate_channels` max-pools the binary mask through decimation
-  (edge-padded to the factor), so a flagged stretch survives to every FC
-  level.
-- `compute_fc_levels` gained `reject_saturated=True`: every FC window
-  overlapping >=1 flagged sample is NaN'd in all in/out FCs and the count
-  is recorded in attrs (`saturated_windows_rejected`); NaN FCs carry zero
-  weight through the band-free sort and the estimates unchanged. The
-  param rides ComputeFC/BuildFC (default on, off-switch for A/B) and is a
-  no-op for payloads without the mask.
-
-Verification on the real corpus (clean window, end 2026-06-21T00:00 UTC,
-decimation 10, both CLB variants re-ingested with the mask):
-- **A/B (rejection on vs off)**: medians barely move (dlog10rho -0.001
-  xy / -0.05 yx dec, dphi -0.2/-0.7 deg) but the IQRs are large
-  (-0.19..+0.00 / -0.69..+0.00 dec; -33/-55 deg) — surgical changes
-  exactly where daytime garbage dominated; night estimates untouched.
-- **Parity vs official EDI (`B0940330_z.edi`) preserved**: the 3-day
-  rejection-on chain reproduces the official one-night product to
-  dlog10rho +0.0024/+0.0023 (IQR -0.005..+0.008 / -0.011..+0.023 dec),
-  dphi +0.11/+0.08 deg (IQR 0.32/0.60) over 0.003-109 s; the committed
-  one-night chain (pre-fix control) still reproduces +0.0007/+0.0033,
-  +0.16/+0.13 deg over 0.003-417 s. Conversion restated for the record:
-  the EDI's Z is standard SEG mV/km per nT, so Z_SI = Z_EDI x
-  1e-6 x mu0/1e-9 (= /795.77), and the exp(+i omega t) convention adds a
-  180-deg flip.
-- **Result**: the clean-record TF image is now smooth 0.003-109 s
-  (previously garbage >10 s); the chain tops out at ~109 s because the
-  rejection trims the daytime windows that previously (wrongly) filled
-  the longest bands. Longer periods still need the session-based recipe
-  (per-rate night selection, deferred §24.13 candidate) to add quiet
-  stream time.
-
-### 24.13 Run-level QC — Select Runs with a soft diurnal prior (2026-09-17)
-
-The station sits near a solar power plant: daytime noise tracks solar
-output (clouds, season), not the clock, so blind day/night removal is
-wrong — a cloudy day can be quiet, a bright evening noisy. Decisions
-(user, 2026-09-17): data-driven rejection; run-level granularity only;
-soft diurnal prior; power-density metric first (the residual-based
-two-pass selector is orthogonal — it fits the model rather than the noise
-floor — and is queued behind validation).
-
-**Literature synthesis.** Weckmann, Magunia & Ritter (2005, GJI 161:635,
-single-site frequency-domain noise selection — the canonical reference for
-exactly our situation, no uncorrelated remote available): power density
-and coherence alone are misleading (both signal and noise can be high or
-low power, and cultural noise is often correlated across E and H, which
-defeats robust processing and coherence sorting — matching our §24.12
-negative sorting result); the working discriminators are the magnetic
-polarization direction (natural H has no preferred direction; strongly
-polarized horizontal H = local noise, Szarka 1988) and the response-error
-/ cluster shape (per-window Z estimates should form a circular Argand
-cluster with the mean near its centre); BOTH tails are bad (they found
-noise intervals where E power DROPPED > 2 decades); natural signal power
-follows a smooth diurnal envelope (Szarka 1988; Garcia & Jones 2002,
-"Atmospheric sources for AMT sounding") — noise appears as deviations
-from that envelope, which is the physical basis for the soft prior (the
-clock enters as an expectation of the noise floor, not as a delete rule);
-pre-selection belongs BEFORE robust processing, and long recordings are
-needed since often only a few percent of events are clean. Recent
-taxonomy (Liu, EGU 2026 abstract EGUSPHERE-EGU26-2095) confirms the
-coherence/stability metric + hard-rejection-vs-soft-weighting framework.
-
-**Implementation** (commits `eca756f`, `a58ca13`):
-- `read_phoenix_mtu` gains `stream_session_hours` (0 = off): runs longer
-  than the target are cut into consecutive fixed-length sessions on block
-  boundaries (greedy block fill, tag-truth periods, continued per-family
-  numbering). The 84.7-h continuous stream would otherwise make run-level
-  selection all-or-nothing; hourly sessions give the stream the same
-  selection semantics as the slot families.
-- Build FC stamps every merged FC window with a per-window `run_id`
-  coordinate — the FC-database merge keeps only the first contributor's
-  attrs, so run identity must travel with the windows.
-- `Select Runs` node (between Compute FC and Coherence Sort): per-level
-  scoring (levels have different frequency axes), per-run per-bin median
-  of the per-window |Z|^2 (bivariate E/H from the run's own calibrated
-  FCs) within the reference band (default 1-10 s); station-wide clean
-  level per bin = a configurable percentile (default 50 = plain median)
-  over the runs' medians — self-calibrating: storms raise every run
-  equally and cancel; cultural noise raises single runs. One-sided up
-  check (noise only ever inflates E): drop if run/level > deviation_max
-  (default 2) scaled by the prior. Separate instrument-fault check,
-  prior-independent: drop if level/run > dead_max (default 2) — Weckmann's
-  low-power noise tail. Runs without in-band bins (a rate family whose
-  cascade never reaches the band) pass through unscored. The soft diurnal
-  prior scales the threshold: prior_factor(h_local) = 1 + (prior_max-1) *
-  0.5 * (1 + cos(2 pi (h - 12)/24)), h = (utc + offset) mod 24, offset
-  default 8 h (Tibet, §24.11) — daytime runs are judged up to prior_max
-  times stricter, night runs by the full threshold; a measured-clean day
-  still passes and a noisy night is still dropped. Per-run diagnostics
-  published as a table artifact; kept/dropped lists ride the fc attrs.
-  Relative-time payloads disable the prior with a warning.
-
-**Tuning (real corpus sweep, `select_runs_sweep.json`).** Reference
-percentile 10/25/50 x deviation_max 1.5/2/3 (prior on): pct 10/25 select
-a low-|Z| tail that biases yx up ~+0.03 decades (tight xy but biased yx);
-the plain median (pct 50, dev 2) is best overall — dlog10rho +0.004 (xy)
-/ +0.007 (yx), IQR -0.000..+0.016 / -0.014..+0.022 dec, dphi +0.04/+0.00.
-Night keeps ~1/3 of runs; deviation correlates with local time as
-expected (night median up-deviation ~2.5, noon ~14, zero noon keeps).
-
-**Self-test (the selector validates itself).** Full record (no ingest
-window), hourly stream sessions, prior on: the automatic chain —
-ingest -> Build FC -> Select Runs -> Coherence Sort -> Estimate TF
-(self-reference) — reproduces the official one-night B0940330_z.edi to
-**dlog10rho +0.0048/+0.0051 (IQR +0.0001..+0.0163 / -0.0092..+0.0181
-dec), dphi +0.03/-0.02 deg over 0.003-109 s (46 periods)**; the committed
-one-night chain (pre-fix control) still reproduces +0.0007/+0.0033,
-+0.16/+0.13 deg over 0.003-417 s. The selector recovered the night
-result on its own — it was never told about day or night. The full-band
-image is smooth 0.003-109 s with error bars only at the longest periods
-(few kept stream hours).
-
-**Queued**: H-polarization-concentration feature (Weckmann/Szarka) and
-per-window Z cluster circularity as additional scores; residual-based
-two-pass selector as the orthogonal complement; the ~500 dropped runs
-represent wasted Build FC compute — a pre-BuildFC cheap scorer could
-skip them once the features are settled.
-
-**Stage-1 separation study — the polarization lever does not exist here
-(2026-09-18).** Before building any of the queued features, the data was
-interrogated directly (`test/verification/investigate_polarization.py`,
-`polarization_features.json`; one Build FC of the
-sessions archive, QC band 1-10 s, 1352 run-level rows, 31.2k window
-angles):
-
-- **Magnetic polarization concentration (Weckmann's strongest
-  discriminator) is LOW everywhere**: window-ensemble resultant R =
-  0.08 (sr15 night), 0.15 (sr15 day), 0.29 (sr150 night), 0.14 (sr150
-  day) — nowhere near the strongly-polarized regime (R ~ 1) of the
-  paper's Jordan/Namibia cases.
-- **The dominant major-axis angle ROTATES with time**: night ~90-120
-  deg, day ~60 deg with much broader scatter — natural source geometry
-  (the Sq current system), not a fixed local noise direction. A local
-  polarized noise source would pin one angle across all conditions.
-- Per-run concentration has no day/night discrimination either (sr150:
-  0.67 vs 0.68; sr15: night 0.38 > day 0.26 — opposite to a plant-noise
-  hypothesis), and the borderline official-night hours are
-  indistinguishable from kept hours on both pol (0.33-0.85) and spread
-  (0.27-0.59).
-- **Single-event cluster spread is weak**: sr15 day 0.60 vs night 0.54;
-  structurally unavailable for the short sr150 slots (3 windows per
-  slot, the feature needs >= 4).
-
-Interpretation: consistent with the noise physics — the solar plant
-couples galvanically/inverter-wise (lands on E, broadband, unpolarized
-in H); the magnetic contamination here is diffuse, not a polarized
-near-field source. Consequences: the polarization feature is DROPPED
-from the workflow plan (the negative result is the deliverable — a
-lever ruled out with data before it was built); the cluster spread is
-kept as a diagnostic column only. The QC effort redirects to the
-residual-based two-pass selector, which measures "does this window fit
-the model" rather than "is the floor high" — the right complement for
-diffuse noise. (Implementation notes from the study: einsum operands
-MUST share the frequency index label — "akt,blt->abt" sums k and l
-independently and silently computes the outer product of the bin sums;
-near-degenerate pooled S_hh windows (zero power, parallel h vectors)
-must be excluded via det > 1e-12 P^2 before the 2x2 solve.)
-
-**Pre-cascade hour-level QC + contiguous cascade spans (2026-09-18,
-commits `2e83279`).** Two structural additions to Build FC, driven by the
-sessions verification:
-
-- The split ceiling: hourly sessions starve the deep decimations per
-  slice — an hour cannot form a level below ~0.23 Hz (210 decimated
-  samples vs a 256-sample window), so the merged database topped out at
-  109.2 s. Merging itself combines windows fine (L7 had 388 windows);
-  the blockage is that NO slice can form the deeper levels. `regroup_
-  contiguous` cascades maximal contiguous spans of same-rate runs as one
-  payload (adjacency within two samples, from the run_summary columns) —
-  the physically right unit for unbroken acquisitions; gapped slot runs
-  stay separate.
-- `reject_noisy_runs` — **superseded by commit `623e541` (same day)**:
-  hour-level QC was first built before any cascade (one rfft per channel
-  per run, score = MEDIAN over in-band bins (default 1-10 s) of the
-  per-bin E/H power ratio; a MEAN over bins proved spike-dominated and a
-  RATIO OF CHANNEL-TOTAL MEDIANS shape-sensitive — the median of per-bin
-  ratios was the right statistic). It then folded into **Select Runs**:
-  the FC payload already carries those spectra (the rfft was only ever a
-  Parseval stand-in for what the FC stage sees), and regrouping had
-  stamped `run_id` per-span, destroying hour granularity at the FC stage.
-  Build FC now builds cascade spans from ALL sessions (regroup before any
-  QC — spans never depend on QC outcomes), reads each span exactly once,
-  and stamps per-window `run_id` at SESSION granularity (windows
-  straddling an internal boundary follow the session their start falls
-  in); Select Runs scores sessions by per-window |Z| straight from the
-  FCs and gained the conservative overlap guard — windows of NEIGHBOR
-  sessions that overlap a rejected one picked up its samples through the
-  decimation cascade and are dropped too (one window duration wide;
-  start-time attribution already puts right straddlers in the rejected
-  session). The grouped-span channel concat unions channels across
-  members and pads a missing `saturated` mask with zeros.
-
-**Full-band data-driven result.** Sessions ingest + FC-stage session QC
-(Select Runs, deviation_max 3 at the time) + regroup + sort +
-self-reference estimate: dlog10rho +0.0013/+0.0060
-(IQR -0.0079..+0.0068 / -0.0069..+0.0229 dec), dphi +0.08/+0.11 deg over
-0.003-109 s. The deep bands (143-417 s) formed at the deepest merged
-level (~19 windows) but the coherence sort's +/-16-window ensemble
-diluted them to zero — Coherence Sort's `apply_below_period` knob was
-built for exactly this ("the deep tail is healthy; weighting it only
-perturbs the estimate", §24.9): with apply_below_period=20 the deep bins
-pass unsorted and the tail extends to **416.6 s: 50 periods,
-dlog10rho +0.0005/+0.0072 (IQR -0.0095..+0.0058 / -0.0029..+0.0288),
-dphi +0.11/+0.11 deg** — the data-driven recipe now matches the official
-night-window TF over the ENTIRE band, with no clock rule anywhere. The
-committed recipe for this site: `stream_session_hours=1`,
-`regroup_contiguous=True`, Select Runs (defaults), sort with
-`apply_below_period=20`.
-
-**Residual-based two-pass selector — delivered (2026-09-18, commits
-`85dc3b3`, `c09f923`).** The orthogonal complement of power and coherence
-screening: a first-pass TF predicts each FC window's outputs from the
-pooled magnetic vector; the per-window unexplained-power fraction is
-aggregated per run (median over windows, then median over the run's bands
-after per-band normalization against the station-wide median). Design:
-- an INDEPENDENT, cascadeable node — inputs are the fc payload and the
-  first pass's `tf levels`; the chain BuildFC -> EstimateTF -> Residual
-  Sort -> EstimateTF is a loop-free DAG, and further iterations compose
-  naturally;
-- `estimate_tf_levels` now returns each level's band geometry
-  (`band_intervals`) — the pooling key;
-- decision rule: ONE-SIDED up-check only. A LOW unexplained fraction
-  means the data fit the model WELL, not dead channels (zero-power
-  windows are excluded as NaN) — the corpus showed an inherited
-  down-check would wrongly flag 340 good-fit slots (413/682 dropped),
-  and because run-level drops remove a span's deep windows too, it cost
-  the long-period tail;
-- semantics from the tests: a tight-but-wrong run (consistent impedance
-  different from the model) DOES drop — it disagrees with the model —
-  but with a bounded, structured raw fraction (~(Z_ratio-1)^2/Z_ratio^2)
-  rather than the explosive score of incoherent noise. The residual
-  lever separates 'model-inconsistent' from 'floor-high'; scale
-  questions remain Select Runs' business;
-- an empty period scope warns and passes the payload unfiltered;
-  unscored runs pass through; the shared soft diurnal prior applies.
-
-Corpus tuning and result: unexplained_max 2 over-rejected the
-local-morning stream span whose 3 deep-level windows tip the l2u
-coarsening (19 -> 16 windows kills the 143-417 s bands — the deep tail's
-pass-1 model is itself built from ~19 windows, so testing it harshly
-against itself is circular and fragile); 3 keeps it. Final recipe:
-Select Runs (dev 3) + regroup + ResidualSort(unexplained_max 3) +
-CoherenceSort(apply_below_period 20) -> **50 periods down to 416.6 s,
-parity vs the official one-night EDI dlog10rho +0.0005/+0.0087 (IQR
--0.0088..+0.0061 / -0.0028..+0.0289 dec), dphi +0.11/+0.08 deg** — the
-model-consistency refinement composes with the power screen and keeps
-the full band, with 73 genuine drops (vs 413 with the broken check).
+| M0 — Skeleton | ✅ | monorepo scaffold, CI, core Node API + registry + schema validation + echo node, web shell |
+| M1 — First real pipeline | ✅ | `load_csv → bandpass → timeseries/spectrogram`, topo executor with WS progress/artifacts, manifest-driven properties panel, workflow save/load |
+| M2 — MT ecosystem integration | ✅ (2026-09-06) | mth5 plugin (Load/Save, ExtractRun, channels, TF I/O, Merge Runs, FC read/write), aurora plugin (ComputeFC/EstimateTF/MergeTFLevels; OLS/RME/RME_RR), plot standardization (§10.6) |
+| M3 — Power features | ✅ (2026-09-09) | nomenclature-aware auto channel configuration; remote reference end-to-end; run cancellation + artifact download; headless Playwright suite; robustness batches; caching + partial execution; calibration framework + LEMI; coherence sort; plugin guide + template; plugin enable/disable; remote-server contract |
+| Post-M3 | ✅ | l2u automatic frequency grid (default), TF rotation node, per-bin coherence sort (default), MTU-5A burst ingestion + Build FC, Phoenix ASC calibration, saturation QC, run-level QC (Select Runs / Residual Sort), settings, time selector, plot nodes |
+| M4 — backlog | **in progress** | ranked table below |
+
+Processing-correctness milestones (all verified): unit normalization
+(magnetic nT→A/m both archive types, electric mV/km→V/m — §10.5); impedance
+phase convention matches aurora (Zxy≈+45°, Zyx≈−135°); USArray SDG31
+ground-truth verification (median |Δlog₁₀ρ| = 0.019 after the documented
+−5.7° rotation, 98% within gate on the exact official grid; history §16.3);
+MTU-5A parity with the official Phoenix TF (Δlog₁₀ρ ~0.005, history §24.12);
+data-driven full-band recipe reaching 416.6 s parity without any clock rule
+(history §24.13).
+
+### 12.2 M4 — community & advanced backlog (ranked by gain/effort)
+
+| # | Task | Gain | Effort | Notes |
+|---|------|------|--------|-------|
+| 1 | ~~Plot Coherency + Plot Phase Tensor nodes~~ | — | — | **delivered** (§10.6) |
+| 2 | **Merge Runs: remote multi-row warning** | Medium | Trivial | warn when a local run spans multiple remote runs (aurora TODO) |
+| 3 | **Batch/queue runner** | High | Medium | multi-station processing is the real repetition pattern; headless `POST /api/runs` + a small queue UI/CLI |
+| 4 | **In-band smoothing taper (Parzen/Hann)** | Medium | Low | `√weight` FC rows by band-center proximity before regression; composes with all estimators — genuine enhancement (neither EMTF nor aurora does this) |
+| 5 | **Disk-persisted result cache** | Medium | Medium | designed (§12.3); implementation pending |
+| 6 | **Calibration absolute-gain verification** | Medium | Low | process one site independently (mtpy/other) and compare — validation, not a feature |
+| 7 | **DOF correction + error statistics** | Medium | Medium | estimate-side DOF inflation (§10.3 caveat), error-bar agreement metrics, EMTF-style error floors |
+| 8 | **mtpy golden-image plot comparison** | Low-Med | Low | test-only dev extra; guards plot regressions |
+| 9 | **Hand-authored band-config files** | Low-Med | Medium | load exact EMTF band-setup files as a preset layer (manual bands already cover parity comparisons) |
+| 10 | **Paradigm B: cross-decimation FC pooling** | High | High | pool raw FCs across levels per band for statistically stronger long-period estimates; novel, unproven, highest scientific upside |
+| 11 | **FC→TS inverse node** | Low | Low-Med | inverse STFT/overlap-add for frequency-domain denoising demos |
+| 12 | **Executor thread-pool concurrency** | Low | Medium | `cpu_bound` hints; MT pipelines are 5–10 mostly-linear nodes |
+| 13 | **Sub-workflows (nested DAGs)** | Medium | High | **deferred**: typical MT pipelines are 5–10 mostly-linear nodes; copy/paste + example templates + the batch runner cover the repetition patterns; revisit only if workflows outgrow them |
+| 14 | **Docs site** | Low-Med | Med-High | plugin guide + deployment guide exist; a hosted site is onboarding, not functionality |
+| 15 | **Plugin index/publish flow** | Low | High | PyPI + the plugin-guide checklist already cover distribution |
+| 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | only matters once ML noise-suppression plugins exist |
+| 17 | ~~Improved auto frequency grid~~ | — | — | **delivered** (§10.2 l2u) |
+| 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
+| 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
+
+### 12.3 Planned — portable local disk cache (designed, not yet implemented)
+
+User decisions: **workspace-embedded** (the cache travels with the data
+folder), **type-native serialization** (no pickle), **opt-in per node**,
+**GB + TTL combined** eviction. Two-tier design — the existing in-memory
+`NodeCache` stays the fast path; the disk tier adds restart persistence and
+relocation. The cache lives in a **user-designated project directory**, not
+the ephemeral per-run workspaces — a third storage realm (§11.2).
+
+- **Project directory**: `EMPTYUI_PROJECT_DIR` (env) / `create_app(project_dir=…)`
+  — a stable, writable directory the user designates, typically where the
+  survey data lives. Cache root: `<project_dir>/.emptyui-cache/`. Unset →
+  disk cache disabled (no silent `~` writes).
+- **Key design (relocation-friendly)**: the executor's structural sha256 (§7.1)
+  plus payload-format version, node plugin version, emptyui version — version
+  bumps invalidate cleanly. File params become relocatable: the signature uses
+  the path relative to the data root/project dir when the file lives under
+  them (already implemented in §7.1 cache keys); absolute stat signature
+  otherwise.
+- **Layout & codecs**: `entries/<key[:2]>/<key>/{meta.json, payload/…,
+  artifacts/…}`; payload kinds → netCDF (fc per level), XML (tf), JSON/npz
+  (tables/arrays). Codec registry; kinds not in the registry skip disk caching
+  with a log note (plugin-extensible later). Atomic writes; deserialize
+  failures → invalidate + re-execute (never half-serve).
+- **Opt-in per node**: `disk_cache: ClassVar[bool] = False` on `Node`; `True`
+  for ComputeFC and EstimateTF (the real recomputation cost). Plots/tables
+  stay memory-only. The manifest records the flag.
+- **Executor integration**: `mem.get` → `disk.get` (materialize a CacheEntry,
+  touch atime) → the same restore path as memory hits; `execute → mem.put`,
+  and `disk.put` when manifest.disk_cache. Disk I/O failures log and continue —
+  **the cache must never break a run**. Stale disk entries age out (keys embed
+  the manifest version).
+- **Eviction**: `EMPTYUI_CACHE_MAX_GB` (default 10) — LRU by atime until under
+  budget; `EMPTYUI_CACHE_TTL_DAYS` (default 30). Cleanup on server start +
+  piggybacked on the workspace-TTL loop; `DELETE /api/cache?tier=disk|memory|all`.
+- **Tests (planned)**: round-trip per codec; restart persistence; relocation
+  (move project dir + data root → still hits); eviction; corruption →
+  re-execute; opt-in flag respected; injected I/O error → the cache never
+  breaks a run.
+
+### 12.4 Open questions
+
+- **FC→TS inverse node** (M4 #11) — plugin-tier coercion when needed.
+- **ML plugin GPU availability** (M4 #16) — `ctx.resources.gpu_count`?
+- **Sub-workflows** (M4 #13) — deferred, see the backlog note.
+- **Authentication model** — resolved by design (not implementation): emptyUI
+  stays identity-blind behind the platform gateway; see §11.
+
+---
+
+## Appendix — history map
+
+| Former DESIGN.md sections | Now |
+|---|---|
+| §1–§6 | unchanged in this document (§1–§6) |
+| §7 execution, §8 API, §22 settings | §7 |
+| §9 frontend, §23.4 time selector | §8 |
+| §10 repo layout | §2 |
+| §11 roadmap, §12 open questions, §21 disk cache | §12 |
+| §13–§14 (M2 plan/decisions/banding history) | `docs/history/m2-delivery.md` |
+| §15 plot standardization, §23.1–23.3 | §10.6 |
+| §16 M3 (calibration, sort, USArray verification) | §9.1–9.2, §10.3; verification record in `docs/history/m3-delivery.md` |
+| §17 remote deployment | §11 |
+| §18 code review record | `docs/history/m4-delivery.md` |
+| §19 electric scaling | §10.5 |
+| §20 plot nodes | §10.6 |
+| §21 disk cache | §12.3 |
+| §22 settings | §7.4 |
+| §23.4 time selector | §8.3 |
+| §23.5 t_short | §10.2 |
+| §24 physics parity | §9.2–9.3, §10.1–10.4; full research record in `docs/history/m4-delivery.md` |
+
+References to §13–§24 in code docstrings and commit messages resolve in the
+history files, which preserve the original numbering verbatim.

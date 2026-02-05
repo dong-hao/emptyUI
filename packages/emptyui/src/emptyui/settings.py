@@ -43,19 +43,19 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
     ),
 }
 
-#: Knobs reserved for the postponed §21 disk cache — defined in the schema
+#: Knobs reserved for the postponed §12.3 disk cache — defined in the schema
 #: so the UI/API scaffolding is ready, without any effect yet.
 PLANNED_KNOBS: dict[str, tuple[type, object, str]] = {
     "project_dir": (
         str, None,
         ("Project directory: stable, relocatable state home "
-         "(.emptyui-cache) — reserved for the §21 disk cache"),
+         "(.emptyui-cache) — reserved for the §12.3 disk cache"),
     ),
     "cache_max_gb": (
-        float, 10.0, "Disk-cache size budget in GB — reserved (§21)",
+        float, 10.0, "Disk-cache size budget in GB — reserved (§12.3)",
     ),
     "cache_ttl_days": (
-        float, 30.0, "Disk-cache entry expiry in days — reserved (§21)",
+        float, 30.0, "Disk-cache entry expiry in days — reserved (§12.3)",
     ),
 }
 

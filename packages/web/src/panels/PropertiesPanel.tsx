@@ -3,7 +3,7 @@ import { useRun } from "../stores/run";
 import { useWorkflow } from "../stores/workflow";
 
 /**
- * Metadata panel (DESIGN.md §9, ComfyUI paradigm): node identity, ports and
+ * Metadata panel (DESIGN.md §8, ComfyUI paradigm): node identity, ports and
  * description live here — parameters are edited inline on the node itself.
  * Partial execution: "Run to here" runs the selected node plus its upstream
  * ancestry only (DESIGN.md §7); unchanged nodes are reused from the cache.

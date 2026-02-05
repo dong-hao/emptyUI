@@ -187,7 +187,7 @@ Model weights (e.g. CNN noise-suppression networks) are **never bundled**
 inside the plugin wheel — the same rule ComfyUI's ecosystem converged on.
 Declare the requirement in the manifest; binaries live in a configured model
 directory (`EMPTYUI_MODELS_PATH`), platform-provisioned in embedded remote
-mode (DESIGN.md §17's read-only data root):
+mode (DESIGN.md §11's read-only data root):
 
 ```python
 class Denoiser(Node):
@@ -224,7 +224,7 @@ Rules:
   payloads as untrusted structure (duck-type, don't assume).
 - No network access, subprocesses, or filesystem writes outside the
   workspace without declaring it in the node `description`; remote/embedded
-  deployments (§17) confine file access to the data root — path parameters
+  deployments (§11) confine file access to the data root — path parameters
   must resolve inside it.
 - No `eval`/`exec` of workflow-borne strings; no secrets in params (they are
   stored in plain workflow JSON).
@@ -244,7 +244,7 @@ Rules:
   third-party APIs that move.
 - A plugin index/publish flow (marketplace-style) is an M4 item; PyPI plus
   the guide's conventions are the MVP distribution path.
-- Embedded/remote deployments (DESIGN.md §17) decide plugin availability at
+- Embedded/remote deployments (DESIGN.md §11) decide plugin availability at
   the platform level — `EMPTYUI_DISABLED_PLUGINS` sets the baseline there;
   runtime toggling is in-memory only for now (settings-file persistence is
   optional behind `EMPTYUI_SETTINGS_PATH`, §5.1).

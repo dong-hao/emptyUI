@@ -77,7 +77,7 @@ function useInputPlotArtifact(nodeId: string) {
 }
 
 /**
- * Custom node renderer (DESIGN.md §9 + Port rendering conventions):
+ * Custom node renderer (DESIGN.md §8 + Port rendering conventions):
  * typed ports inside the edges aligned with labels, and — following the
  * ComfyUI paradigm — the node's parameters rendered inline on the node
  * body. The right-hand panel keeps metadata (id, version, ports,

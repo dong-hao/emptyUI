@@ -49,7 +49,7 @@ export interface MTNodeData extends Record<string, unknown> {
   params: Record<string, unknown>;
 }
 
-/** Internal clipboard for copy/paste (DESIGN.md §9): a subgraph snapshot of
+/** Internal clipboard for copy/paste (DESIGN.md §8): a subgraph snapshot of
  *  selected nodes + the edges among them (external edges are not copied —
  *  the pasted copy is independent, ComfyUI parity). */
 interface NodeClipboard {
@@ -99,7 +99,7 @@ export function connectionCreatesCycle(
 }
 
 /**
- * Full client-side connection rule (DESIGN.md §3 + §9): known ports, type
+ * Full client-side connection rule (DESIGN.md §3 + §8): known ports, type
  * compatibility, no self-loop, no cycle. Used by the live
  * `isValidConnection` (drag feedback) and as defense-in-depth in
  * `onConnect`; the server re-validates before every run.
@@ -139,7 +139,7 @@ interface WorkflowState {
   onNodesChange: (changes: NodeChange<Node<MTNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
-  /** Disconnect gestures (DESIGN.md §9): remove edges by id (drag-handle-
+  /** Disconnect gestures (DESIGN.md §8): remove edges by id (drag-handle-
    *  away unlink, edge-endpoint drop on the pane) and re-route an existing
    *  edge to a new connection (validated with the full connection rule). */
   detachEdges: (edgeIds: string[]) => void;
@@ -155,14 +155,14 @@ interface WorkflowState {
    *  (with an empty catalog every manifest check passes vacuously —
    *  edges referencing renamed/removed ports would survive). */
   revalidateEdges: () => void;
-  /** Copy/paste of the selected subgraph (Ctrl+C/Ctrl+V/Ctrl+D, DESIGN §9). */
+  /** Copy/paste of the selected subgraph (Ctrl+C/Ctrl+V/Ctrl+D, DESIGN §8). */
   copySelection: () => void;
   pasteSelection: () => void;
   duplicateSelection: () => void;
   loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[], name?: string) => void;
 }
 
-/** The workflow document is the single source of truth (DESIGN.md §9). */
+/** The workflow document is the single source of truth (DESIGN.md §8). */
 export const useWorkflow = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],

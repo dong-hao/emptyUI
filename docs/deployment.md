@@ -1,7 +1,7 @@
 # emptyUI deployment — embedded/remote mode
 
 How to deploy emptyUI as an embedded module behind an existing
-authentication gateway. The contract is designed in **DESIGN.md §17** —
+authentication gateway. The contract is designed in **DESIGN.md §11** —
 read it first; this guide is the operational counterpart.
 
 ## Deployment shape
@@ -27,7 +27,7 @@ read it first; this guide is the operational counterpart.
 | `EMPTYUI_BASE_PATH` | ASGI sub-path for module embedding (e.g. `/tools/emptyui`) — sets FastAPI `root_path`. Usually provided by the proxy/uvicorn `--root-path` instead. | unset |
 | `EMPTYUI_WORKSPACE_TTL` | Retain completed run workspaces and artifacts for this many seconds before cleanup. `0` or unset disables cleanup. | disabled |
 | `EMPTYUI_MAX_CONCURRENT_RUNS` | Maximum queued/running runs per backend process. `0` or unset is unlimited. Excess submissions receive HTTP 429. | unlimited |
-| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime settings (plugin enable/disable §5.1 + live knobs §22: retention TTL, run limit, cache size). **Unset = in-memory only** — no settings file is created. | unset (memory-only) |
+| `EMPTYUI_SETTINGS_PATH` | JSON settings file for runtime settings (plugin enable/disable §5.1 + live knobs §7.4: retention TTL, run limit, cache size). **Unset = in-memory only** — no settings file is created. | unset (memory-only) |
 | `EMPTYUI_DISABLED_PLUGINS` | Comma-separated plugin entry-point names disabled at startup (the platform-level baseline; unknown names are silently ignored). | none |
 
 All knobs are mirrored as `create_app(...)` keyword arguments
