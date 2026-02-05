@@ -21,8 +21,9 @@ packages/web/dist/
 prompt.md
 screenshot-comfyUI.png
 
-# User workflow documents saved from the UI (kept out of the repo)
-*.emptyui.json
+# User workflow documents saved from the UI (repo ROOT only — the curated
+# examples under examples/workflow/ are tracked)
+/*.emptyui.json
 
 # TS build cache
 packages/web/tsconfig.tsbuildinfo

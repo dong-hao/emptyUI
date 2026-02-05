@@ -11,6 +11,16 @@ packages/
 ├── emptyui/              # Python core: node API, registry, DAG executor, FastAPI server
 ├── emptyui-core-nodes/   # bundled minimal node plugin
 └── web/                  # React + React Flow frontend (Vite)
+
+examples/
+├── workflow/             # ready-to-load example workflow documents (kept in sync
+│                         #   with the current node manifests; regenerate by loading
+│                         #   and re-saving when node surfaces change)
+├── data/                 # sample datasets (raw instrument corpora are gitignored;
+│                         #   see the notes in each subdirectory)
+└── verification/ … test/verification/
+                         # recorded parity/metrics JSONs + the verification
+                         #   scripts that reproduce them (DESIGN §24)
 ```
 
 ## Development

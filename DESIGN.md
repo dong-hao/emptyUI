@@ -702,6 +702,13 @@ emptyui/
 │           ├── api/             # REST/WS clients, generated types
 │           └── stores/
 ├── examples/                    # sample workflows + tiny sample datasets
+│   ├── workflow/                # ready-to-load workflow documents, kept in sync
+│   │                            #   with the current node manifests (regenerate by
+│   │                            #   loading and re-saving when surfaces change)
+│   ├── data/                    # sample datasets; raw instrument corpora are
+│   │                            #   gitignored (regenerable, see each subdir)
+│   └── (test/verification/)     # recorded parity/metrics JSONs + the verification
+│                                #   scripts that reproduce them (§24 records)
 ├── docs/
 └── scripts/                     # dev up/down, codegen
 ```
@@ -1177,9 +1184,9 @@ policy), components distinguished by color only, no site/processing metadata in
 titles, low DPI (110), inconsistent style.
 
 **Status: delivered** (P1–P4). Conventions implemented as decided below.
-Reference figures: `SDG31b_H28coh.png` (USArray convention — primary style
-reference) and `202511.PNG` (MTpy-style combined response — tipper Re/Im panel
-layout). We do **not** build a combined plot — `Plot AppRes & Phase` and
+Reference figure: `SDG31b_H28coh.png` (USArray convention — primary style
+reference; repo root). We do **not** build a combined plot — `Plot AppRes &
+Phase` and
 `Plot Tipper` stay separate nodes.
 
 ### Conventions implemented (the spec)
@@ -3266,7 +3273,7 @@ high-pass), the dropped variant is the physically consistent one; the
 user's alternative reading (the MTU-5A CLB already embeds the deployed
 coupling) would require the CLB to be flat below the corner, which it is
 not. Decision pending the user's review of the images. Reproduction:
-examples/output/clb_coupling_comparison.py (--full for the 3.5-day run).
+test/verification/clb_coupling_comparison.py (--full for the 3.5-day run).
 
 **Full-record scatter investigation (2026-09-17, user question "why is the
 full result miserable").** The one-night TF is smooth; the full 3.5-day TF
@@ -3473,8 +3480,8 @@ skip them once the features are settled.
 
 **Stage-1 separation study — the polarization lever does not exist here
 (2026-09-18).** Before building any of the queued features, the data was
-interrogated directly (`investigate_polarization.py`,
-`polarization_features.json`, `pol_rose.png`; one Build FC of the
+interrogated directly (`test/verification/investigate_polarization.py`,
+`polarization_features.json`; one Build FC of the
 sessions archive, QC band 1-10 s, 1352 run-level rows, 31.2k window
 angles):
 
