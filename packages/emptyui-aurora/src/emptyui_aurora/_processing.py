@@ -1038,6 +1038,64 @@ def _check_remote_grid(ref_freq, local_freq, ref_time, local_time):
         )
 
 
+def _warn_remote_gaps(local_fc, ref_fc) -> None:
+    """M4 #2: warn when local windows pair with interpolated remote samples.
+
+    The remote-reference fc's provenance (Merge Runs' ``merged_gap_intervals``
+    attr, carried through Align Runs and stamped on the fc by Compute FC)
+    records the acquisition gaps its physical merge bridged by interpolation.
+    A local run spanning such a gap pairs its windows inside the gap with
+    FABRICATED remote samples — the grids still match (that is the point of
+    the interpolation), so nothing errors and the estimate silently degrades.
+
+    Burst-mode archives are deliberately out of scope: their slot runs are
+    separated by scheduled gaps, the epoch-anchored window grid pairs slots
+    across stations by design, and the FC-database route (Build FC / Merge FC)
+    never fabricates samples — see DESIGN.md §3 for the rationale.
+    """
+    gaps = (getattr(ref_fc, "attrs", None) or {}).get("merged_gap_intervals")
+    if not gaps:
+        return
+    t = np.asarray(local_fc["time"].values)
+    if not np.issubdtype(t.dtype, np.datetime64):
+        return  # relative time axes: gap intervals are not interpretable
+    import pandas as pd
+
+    # naive stamps are assumed UTC (the repo-wide convention); the recorded
+    # intervals may be naive while the fc time axis is tz-aware (or vice
+    # versa) — normalize both before comparing
+    def _as_utc(ts):
+        return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+    t_idx = pd.DatetimeIndex(t)
+    if t_idx.tz is None:
+        t_idx = t_idx.tz_localize("UTC")
+    else:
+        t_idx = t_idx.tz_convert("UTC")
+    affected = np.zeros(t_idx.size, dtype=bool)
+    hits = []
+    for g in gaps:
+        try:
+            gs, ge = _as_utc(pd.Timestamp(g[0])), _as_utc(pd.Timestamp(g[1]))
+        except Exception:  # noqa: BLE001 — malformed interval, skip it
+            continue
+        m = (t_idx >= gs) & (t_idx < ge)
+        if m.any():
+            hits.append(f"[{gs.isoformat()}, {ge.isoformat()})")
+            affected |= m
+    if not affected.any():
+        return
+    _log.warning(
+        "remote-reference fc carries interpolated gap(s) %s inside the "
+        "local run's span — %d of %d local window(s) pair with fabricated "
+        "(interpolated) remote samples and silently degrade the estimate. "
+        "Use Merge FC (concatenates Fourier coefficients without "
+        "fabrication) or exclude the gap intervals via the time-selector "
+        "window (M4 #2).",
+        ", ".join(hits), int(affected.sum()), t_idx.size,
+    )
+
+
 def _level_ref(ref_levels, level):
     """Remote fc for one decimation level, failing loudly on a partial match.
 
@@ -1349,6 +1407,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
             ref["frequency"].values, local["frequency"].values,
             ref["time"].values, local["time"].values,
         )
+        _warn_remote_gaps(local, ref)
     ins = [c for c in input_channels if c in local.data_vars]
     outs = [c for c in output_channels if c in local.data_vars]
     if not ins or not outs:
@@ -1471,6 +1530,7 @@ def estimate_tf(
             ref_fc["frequency"].values, freq[ok],
             ref_fc["time"].values, fc["time"].values,
         )
+        _warn_remote_gaps(fc, ref_fc)
 
     # Realistic, octave-aligned period bands for this decimation level
     # (DESIGN.md §14.9: band_style selects the uniform log2-grid partition

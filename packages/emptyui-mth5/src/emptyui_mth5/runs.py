@@ -546,6 +546,7 @@ class AlignRuns(Node):
         # bounds anchor at the overlap start when the runs carry GPS time;
         # without GPS time only relative seconds are accepted (the shared
         # resolver raises otherwise).
+        n_overlap = n_common  # the natural overlap, before the window crop
         if str(start).strip() or str(end).strip():
             rec_len = n_common / sr
             s0, s1 = resolve_window_s(
@@ -563,12 +564,121 @@ class AlignRuns(Node):
 
         out1 = _crop_to_runts(data1, ch1, sr, i1, n_common, start_iso)
         out2 = _crop_to_runts(data2, ch2, sr, i2, n_common, start_iso)
+        # M4 #2: merged-run provenance (interpolated gap intervals) travels
+        # across the crop so Compute FC can stamp it on the fc attrs and the
+        # remote-reference pairing can warn about fabricated remote samples.
+        _carry_merge_provenance(data1, out1)
+        _carry_merge_provenance(data2, out2)
+        _warn_merge_gaps_in_overlap(
+            ctx, (data1, data2), (out1, out2),
+            (start_iso, n_common, sr))
+        # §24.3 E1b: aligning against a partial remote silently discards
+        # local data (the official SDG31 comparison lost 29% of the local
+        # run this way) — warn when the overlap leaves a large share of an
+        # input out.
+        _warn_partial_coverage(ctx, (n1, n2), n_overlap)
         _warn_if_uncorrelated(ctx, out1, out2, sr, n_common)
         ctx.progress(
             1.0,
             f"aligned runs: {n_common} samples ({n_common / sr:.1f} s) overlap",
         )
         return {"data1": out1, "data2": out2}
+
+
+def _merge_gap_attrs(payload):
+    """(gap_intervals, source_runs) provenance attrs from a merged ts.run
+    payload (Merge Runs), or (None, None) on payloads without them."""
+    ds = getattr(payload, "dataset", None)
+    attrs = getattr(ds, "attrs", None) or {}
+    return attrs.get("merged_gap_intervals"), attrs.get("merged_source_runs")
+
+
+def _carry_merge_provenance(source, out) -> None:
+    """Copy Merge Runs' gap provenance onto a cropped output payload (the
+    crop rebuilds the RunTS and loses dataset attrs)."""
+    gaps, runs = _merge_gap_attrs(source)
+    if gaps is None and runs is None:
+        return
+    try:
+        if gaps is not None:
+            out.dataset.attrs["merged_gap_intervals"] = gaps
+            gm = (getattr(source, "dataset", None).attrs
+                  or {}).get("merged_gap_method")
+            if gm is not None:
+                out.dataset.attrs["merged_gap_method"] = gm
+        if runs is not None:
+            out.dataset.attrs["merged_source_runs"] = runs
+    except Exception:  # noqa: BLE001 — duck-typed payloads without dataset attrs
+        pass
+
+
+def _warn_merge_gaps_in_overlap(ctx, inputs, outputs, overlap) -> None:
+    """M4 #2: warn when the aligned overlap includes interpolated gap(s).
+
+    Merge Runs bridges inter-run gaps by interpolation — the samples inside
+    those intervals are fabricated. When the aligned overlap (the interval
+    both stations will be FC-computed over) includes such an interval, the
+    local windows falling inside it pair with fabricated remote samples
+    (silent degradation — the time grids still match, so no error fires).
+    """
+    start_iso, n_common, sr = overlap
+    if not start_iso or n_common < 1:
+        return  # relative alignment: gap intervals are not interpretable
+    for tag, src, out in zip(("input 1", "input 2"), inputs, outputs):
+        gaps, _runs = _merge_gap_attrs(src)
+        if not gaps:
+            continue
+        try:
+            t0 = pd.Timestamp(start_iso)
+            t1 = t0 + pd.Timedelta(seconds=n_common / sr)
+        except Exception:  # noqa: BLE001 — malformed stamps degrade to no-op
+            return
+        hit = []
+        for g in gaps:
+            try:
+                gs, ge = _utc(pd.Timestamp(g[0])), _utc(pd.Timestamp(g[1]))
+            except Exception:  # noqa: BLE001 — malformed interval, skip it
+                continue
+            lo, hi = max(gs, t0), min(ge, t1)
+            if hi > lo:
+                hit.append((lo.isoformat(), hi.isoformat()))
+        if not hit:
+            continue
+        n_hit = 0
+        for lo, hi in hit:
+            a = max(pd.Timestamp(lo), t0)
+            b = min(pd.Timestamp(hi), t1)
+            n_hit += max(0, int((b - a).total_seconds() * sr))
+        share = min(1.0, n_hit / max(1, n_common))
+        ctx.logger.warning(
+            "%s was merged across acquisition gap(s) %s — %.0f%% of the "
+            "aligned overlap falls inside interpolated gap(s) (%d of %d "
+            "samples): windows over them pair with fabricated "
+            "(interpolated) remote samples. Prefer Merge FC (Fourier "
+            "coefficients concatenate without fabrication) or exclude the "
+            "gap intervals via the time-selector window.",
+            tag, ", ".join(f"[{a}, {b})" for a, b in hit), 100 * share,
+            n_hit, n_common,
+        )
+
+
+def _warn_partial_coverage(ctx, lengths, n_common) -> None:
+    """Warn when the overlap crop discards a large share of an input.
+
+    The E1b failure mode: a local run aligned against a partial remote is
+    cropped to the remote's extent — local data is silently dropped and the
+    estimate quietly loses the coverage the remote cannot supply.
+    """
+    for i, n in enumerate(lengths, start=1):
+        if n > 0 and n_common < 0.9 * n:
+            ctx.logger.warning(
+                "alignment discards %.0f%% of input %d (%d of %d samples) "
+                "— the other run starts/ends inside it; for remote "
+                "reference, merge the remote station's runs first (Merge "
+                "Runs) so alignment sees the station's full coverage "
+                "(DESIGN §24.3 E1b)",
+                100 * (1 - n_common / n), i, n - n_common, n,
+            )
 
 
 def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
@@ -592,7 +702,9 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     # standard-named local site paired with a LEMI-named remote).
     std1 = {actual_to_standard(infer_keyword(names1), c): c for c in names1}
     std2 = {actual_to_standard(infer_keyword(names2), c): c for c in names2}
-    mags = [std1[s] for s in ("hx", "hy") if s in std1 and s in std2]
+    # each station is indexed with ITS OWN actual channel name — the two
+    # stations may use different naming (standard local + LEMI-named remote)
+    mags = [s for s in ("hx", "hy") if s in std1 and s in std2]
     if not mags:
         return
     # the coherence segments need room: a very short overlap (short windows,
@@ -602,8 +714,8 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     from scipy.signal import coherence
 
     nperseg = min(4096, max(256, int(n_common // 4)))
-    x = np.asarray(out1.dataset[mags[0]].values, dtype=float)
-    y = np.asarray(out2.dataset[mags[0]].values, dtype=float)
+    x = np.asarray(out1.dataset[std1[mags[0]]].values, dtype=float)
+    y = np.asarray(out2.dataset[std2[mags[0]]].values, dtype=float)
     f, C = coherence(x, y, fs=float(sr), nperseg=nperseg, noverlap=nperseg // 2)
     band = (f >= 1.0 / 1024.0) & (f <= 1.0 / 64.0)
     if not band.any():

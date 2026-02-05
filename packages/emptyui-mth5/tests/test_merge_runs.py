@@ -54,6 +54,27 @@ def test_merge_runts_contiguous():
     assert merged.dataset.sizes["time"] == 128
 
 
+def test_merge_runts_records_gap_provenance():
+    """M4 #2: a gap-bridged merge records the interpolated intervals and the
+    contributing runs on the payload, so the remote-reference pairing can
+    warn about fabricated remote samples; a contiguous merge records none."""
+    r1 = _synthetic_runts(start="2024-01-01T00:00:00", n=64)
+    r1.run_metadata.id = "b"
+    r2 = _synthetic_runts(start="2024-01-01T00:02:08", n=64)  # 64 s gap
+    r2.run_metadata.id = "c"
+    merged = merge_runts([r1, r2], new_run_id="bc")
+    attrs = merged.dataset.attrs
+    assert attrs["merged_source_runs"] == ["b", "c"]
+    assert attrs["merged_gap_method"] == "slinear"
+    assert attrs["merged_gap_intervals"] == [
+        ["2024-01-01T00:01:04", "2024-01-01T00:02:08"]]
+
+    contig = merge_runts([_synthetic_runts(start="2024-01-01T00:00:00", n=64),
+                          _synthetic_runts(start="2024-01-01T00:01:04", n=64)])
+    assert "merged_gap_intervals" not in contig.dataset.attrs
+    assert "merged_source_runs" in contig.dataset.attrs
+
+
 def _two_run_archive(tmp_path: Path):
     """A tiny mth5 archive with two 1 Hz runs 64 s apart (32-s runs, no
     overlap; the merge bridges a 32-s gap)."""

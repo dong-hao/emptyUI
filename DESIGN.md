@@ -271,7 +271,8 @@ The aurora processing run is split at the Fourier-coefficient boundary:
   reference (**RME_RR**, aurora-backed) pairs local/remote FC samples by row, so
   the ref fc must share the local fc's **frequency AND time grids** (both
   validated with clear errors); the runs must be aligned first (see
-  `Align Runs`).
+  `Align Runs`). When the ref fc's provenance records interpolated merge
+  gaps inside the local span, the pairing warns (§3, M4 #2).
 - **`Align Runs` node (`mth5.runs.align`)** — two `ts.run` inputs → two `ts.run`
   outputs, both normalized to an mth5 `RunTS` cropped to their **common
   acquisition overlap**. Required for remote reference: same sample rate
@@ -336,8 +337,32 @@ modes:
 
 Constraints: all runs must share the same native sample rate, and channel
 components must be consistent. Remote-reference multi-row intersection is an
-open aurora TODO — the node warns when a local run spans multiple remote runs
-(M4 #2).
+open aurora TODO — emptyUI resolves it structurally (pairing by the identical
+absolute window grid, §3 Estimate TF), and the residual silent hazard is
+warned about explicitly (below).
+
+**Remote-reference pairing hazard (M4 #2)**. The harmful variant is a remote
+merge that bridged acquisition gaps by interpolation (physical `Merge Runs`):
+local windows inside the gap pair with **fabricated** remote samples while
+the identical-grid check still passes. The provenance chain: `Merge Runs`
+records the bridged intervals on the merged payload
+(`merged_gap_intervals`, plus `merged_source_runs`); `Align Runs` warns when
+the aligned overlap includes them and carries the provenance through the
+crop, `Compute FC` stamps it on the fc attrs, and the RR pairing sites
+(`Estimate TF`, two-FC `Coherence Sort`) warn naming the affected windows —
+with the remedy (Merge FC concatenates Fourier coefficients without
+fabrication; or exclude the gap interval via the time-selector window).
+`Align Runs` also warns when the overlap crop discards >10% of an input
+(the E1b partial-remote silent loss).
+
+**Burst-mode caveat.** For burst archives (scheduled high-rate slots +
+continuous streams) inter-slot gaps are normal acquisition geometry, not
+defects — the gap warning does not apply to the `Build FC` / `Merge FC`
+route (which never fabricates samples; the epoch-anchored window grid pairs
+slots across stations by design). A burst-mode generalization — per-slot
+coverage QC derived from the per-window `run_id` coordinate — is a recorded
+follow-up; the delivered warning is anchored to Merge Runs' interpolation
+provenance, which the burst route does not produce.
 
 ### Data passing between nodes
 
@@ -1286,7 +1311,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | # | Task | Gain | Effort | Notes |
 |---|------|------|--------|-------|
 | 1 | ~~Plot Coherency + Plot Phase Tensor nodes~~ | — | — | **delivered** (§10.6) |
-| 2 | **Merge Runs: remote multi-row warning** | Medium | Trivial | warn when a local run spans multiple remote runs (aurora TODO) |
+| 2 | ~~Merge Runs: remote multi-row warning~~ | — | — | **delivered**: gap-provenance warning chain (Merge Runs → Align Runs → fc attrs → RR pairing sites), §3 |
 | 3 | **Batch/queue runner** | High | Medium | multi-station processing is the real repetition pattern; headless `POST /api/runs` + a small queue UI/CLI |
 | 4 | **In-band smoothing taper (Parzen/Hann)** | Medium | Low | `√weight` FC rows by band-center proximity before regression; composes with all estimators — genuine enhancement (neither EMTF nor aurora does this) |
 | 5 | **Disk-persisted result cache** | Medium | Medium | designed (§12.3); implementation pending |

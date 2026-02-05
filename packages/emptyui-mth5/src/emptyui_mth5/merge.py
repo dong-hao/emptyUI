@@ -53,7 +53,13 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     # §3: channel components must be consistent — RunTS.merge cannot
     # combine runs with unequal channel sets (xarray MergeError), so this
     # is a hard error with an actionable message, not a warning
-    comp_sets = [set(map(str, rt.channels)) for rt in run_ts_list]
+    def _rt_channels(rt):
+        chans = getattr(rt, "channels", None)
+        if chans is not None:
+            return set(map(str, chans))
+        return {str(v) for v in getattr(rt, "dataset").data_vars}
+
+    comp_sets = [_rt_channels(rt) for rt in run_ts_list]
     union = set.union(*comp_sets)
     for rt, comps in zip(run_ts_list, comp_sets):
         missing = sorted(union - comps)
@@ -66,7 +72,14 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     # index combination fails on non-monotonic global time indexes (the
     # overlap would also be interpolated over, fabricating samples).
     # Reject with an actionable message instead of the raw xarray error.
+    # GAPS between runs are bridged by interpolation — the provenance of
+    # those fabricated stretches is recorded on the merged payload
+    # (merged_gap_intervals / merged_source_runs) so the remote-reference
+    # pairing can warn when a local run's windows fall inside them
+    # (M4 #2: a local run spanning multiple remote runs silently pairs
+    # with interpolated remote samples).
     prev_end = None
+    gaps: list[list[str]] = []
     for rt in run_ts_list:
         try:
             span = _rt_span(rt)
@@ -84,6 +97,8 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
                 "acquisitions cannot be concatenated (check the run "
                 "selection; Merge FC concatenates Fourier coefficients "
                 "without fabricating samples)")
+        if prev_end is not None and start > prev_end:
+            gaps.append([prev_end.isoformat(), start.isoformat()])
         prev_end = end
     merged = run_ts_list[0]
     for rt in run_ts_list[1:]:
@@ -91,6 +106,16 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     try:
         merged.run_metadata.id = new_run_id
     except Exception:  # noqa: BLE001, S110 — duck-typed payloads without run metadata
+        pass
+    try:
+        # provenance survives on the dataset (RunTS wrappers rebuild the
+        # wrapper object, not the xarray payload)
+        merged.dataset.attrs["merged_source_runs"] = [
+            _rt_id(rt) for rt in run_ts_list]
+        if gaps:
+            merged.dataset.attrs["merged_gap_intervals"] = gaps
+            merged.dataset.attrs["merged_gap_method"] = str(gap_method)
+    except Exception:  # noqa: BLE001 — duck-typed payloads without dataset attrs
         pass
     return merged
 
@@ -103,8 +128,10 @@ def _rt_id(rt):
 
 
 def _rt_span(rt):
-    """(start, end) datetimes of a RunTS payload; None without an absolute
-    time axis (overlap checks need absolute time)."""
+    """(start, exclusive end) datetimes of a RunTS payload; None without an
+    absolute time axis (overlap checks need absolute time). The exclusive
+    end (last sample + 1/sr) is what gap/overlap arithmetic needs: a run
+    starting exactly at another's end is contiguous, not overlapping."""
     import numpy as np
     import pandas as pd
 
@@ -112,7 +139,13 @@ def _rt_span(rt):
     if not np.issubdtype(ts.dtype, np.datetime64):
         return None
     idx = pd.DatetimeIndex(ts)
-    return idx[0], idx[-1]
+    try:
+        sr = float(rt.sample_rate)
+    except Exception:  # noqa: BLE001 — duck-typed payloads without a rate
+        sr = 0.0
+    end = idx[-1] + (pd.Timedelta(seconds=1.0 / sr) if sr > 0
+                     else pd.Timedelta(seconds=1))
+    return idx[0], end
 
 
 class MergeRuns(Node):

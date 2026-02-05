@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from _synthetic import synthetic_runts, synthetic_source
+from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
 from _workflow import edge, node
 from emptyui.context import RunContext
 from emptyui.executor import Executor
@@ -318,3 +318,142 @@ def test_placeholder_epoch_start_warns_and_aligns_by_relative(caplog):
 
     _ch, _s, a, _r = _run_time_info(P(pd.Timestamp("1957-06-15T12:00:00")))
     assert a == pd.Timestamp("1957-06-15T12:00:00", tz="UTC")
+
+
+# ---------------------------------------------------------------------------
+# M4 #2: warn when a local run spans multiple remote runs. The harmful
+# variant is a remote merge that bridged acquisition gaps by interpolation
+# (Merge Runs): the local windows inside the gap pair with fabricated remote
+# samples while the identical-grid check still passes. Provenance rides the
+# payloads (merged_gap_intervals) from Merge Runs through Align Runs /
+# Compute FC to the pairing sites.
+
+
+def test_merge_runts_gap_provenance_travels_through_align(tmp_path, caplog):
+    """Align Runs warns when the aligned overlap includes interpolated
+    gap(s) and carries the provenance onto both outputs."""
+    import logging
+
+    from emptyui_mth5.merge import merge_runts
+
+    local = synthetic_runts(synthetic_source(31, n=8192, kind="white"),
+                            start_datetime="2024-01-01T00:00:00", seed=31)
+    # remote = two gapped runs physically merged (the E1b recipe): r1 ends
+    # 00:12:32, r2 starts 00:14:00 — an 88-s interpolated gap inside the
+    # aligned overlap [00:04:00, 00:17:04). Real RunTS objects are required
+    # (merge_runts concatenates via RunTS.merge).
+    from mt_timeseries import ChannelTS, RunTS
+
+    rng = np.random.default_rng(32)
+    pieces = []
+    for rid, start, n in (("b", "2024-01-01T00:04:00", 4096),
+                          ("c", "2024-01-01T00:14:00", 4096)):
+        chs = []
+        for comp in ("bx", "by"):
+            c = ChannelTS("magnetic", data=rng.standard_normal(n),
+                          start=start, sample_rate=8.0)
+            c.component = comp
+            chs.append(c)
+        rt = RunTS(array_list=chs)
+        rt.run_metadata.id = rid
+        pieces.append(rt)
+    remote = merge_runts(pieces, new_run_id="bc")
+    attrs = remote.dataset.attrs
+    assert attrs["merged_gap_intervals"]
+
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        out = AlignRuns().execute(_ctx(tmp_path), local, remote)
+    a, b = out["data1"], out["data2"]
+    # the local run (00:00:00, 1024 s) overlaps the remote from 00:04:00 on;
+    # the remote's gap (00:20:48..00:21:20 for 8192-sample r1) is inside the
+    # overlap -> the warning fires and the provenance is carried
+    assert any("interpolated gap" in r.message for r in caplog.records)
+    # the provenance rides the merged (remote) output — not the local one
+    assert "merged_gap_intervals" not in a.dataset.attrs
+    assert b.dataset.attrs["merged_gap_intervals"] == attrs["merged_gap_intervals"]
+
+
+def test_align_runs_warns_partial_coverage(tmp_path, caplog):
+    """Aligning against a partial remote discards local data — warn with the
+    discarded share (the E1b silent-loss failure mode)."""
+    import logging
+
+    local = synthetic_runts(synthetic_source(34, n=8192, kind="white"),
+                            start_datetime="2024-01-01T00:00:00", seed=34)
+    # remote: starts with the local but covers only half its span
+    remote = synthetic_runts(synthetic_source(35, n=4096, kind="white"),
+                             start_datetime="2024-01-01T00:00:00", seed=35)
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        AlignRuns().execute(_ctx(tmp_path), local, remote)
+    assert any("alignment discards" in r.message and "input 1" in r.message
+               for r in caplog.records)
+
+
+def _aligned_pair_fcs():
+    """(local_fc, ref_fc) with identical absolute time grids."""
+    source = synthetic_source(36, n=8192, kind="white")
+    local = synthetic_runts(source, magnetic=("hx", "hy"),
+                            electric=("ex", "ey"), z=(1.0, 3.0, -1.0, 4.0),
+                            start_datetime="2024-01-01T00:00:00", seed=36)
+    remote = synthetic_runts(source, magnetic=("hx", "hy"), with_e=False,
+                             start_datetime="2024-01-01T00:00:00", seed=37)
+    fc = synthetic_fc(local, ("hx", "hy"), ("ex", "ey"))
+    ref = synthetic_fc(remote, ("hx", "hy"), ("hx", "hy"))
+    return fc, ref
+
+
+def test_estimate_tf_warns_on_remote_gaps(caplog):
+    """The RR pairing warns when the ref fc's provenance marks interpolated
+    gap(s) inside the local span; silent when the gaps do not overlap."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _aligned_pair_fcs()
+    # no provenance -> no warning even with remote reference
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref)
+    assert not any("interpolated gap" in r.message for r in caplog.records)
+
+    # a gap interval that overlaps some local windows -> warning
+    t = pd.DatetimeIndex(fc["time"].values)
+    g0, g1 = t[3], t[6]
+    ref.attrs["merged_gap_intervals"] = [
+        [g0.isoformat(), g1.isoformat()]]
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref)
+    assert any("interpolated gap" in r.message for r in caplog.records)
+
+    # a gap interval entirely outside the local span -> silent
+    outside = t[0] - pd.Timedelta(days=1)
+    ref.attrs["merged_gap_intervals"] = [
+        [outside.isoformat(),
+         (outside + pd.Timedelta(hours=1)).isoformat()]]
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref)
+    assert not any("interpolated gap" in r.message for r in caplog.records)
+
+
+def test_coherence_sort_warns_on_remote_gaps(caplog):
+    """The two-FC sort pairs remote rows too — the same provenance warning
+    applies there."""
+    import logging
+
+    from emptyui_aurora._processing import coherence_sort_fc
+
+    fc, ref = _aligned_pair_fcs()
+    t = pd.DatetimeIndex(fc["time"].values)
+    ref.attrs["merged_gap_intervals"] = [
+        [t[2].isoformat(), t[5].isoformat()]]
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        coherence_sort_fc(fc, ref, ("hx", "hy"), ("ex", "ey"))
+    assert any("interpolated gap" in r.message for r in caplog.records)

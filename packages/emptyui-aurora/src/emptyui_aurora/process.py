@@ -242,6 +242,17 @@ class ComputeFC(Node):
         # headers (DESIGN.md §15).
         surv, stat, run_id = runts_context(data, survey, station, run)
         identity = _station_identity_attrs(data, surv, stat, run_id)
+        # M4 #2: Merge Runs' gap provenance (interpolated intervals) travels
+        # with the fc so the remote-reference pairing can warn when local
+        # windows fall inside fabricated remote samples.
+        try:
+            src_attrs = data.dataset.attrs
+            for key in ("merged_gap_intervals", "merged_source_runs",
+                        "merged_gap_method"):
+                if src_attrs.get(key) is not None:
+                    identity[key] = src_attrs[key]
+        except AttributeError:  # noqa: S110 — payloads without dataset attrs
+            pass
         for level, fc in levels.items():
             fc.attrs.update(identity)
         if persist:
