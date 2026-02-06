@@ -60,7 +60,7 @@ def _write_tbl(path: Path, **overrides) -> None:
         "ETIM": "2011-01-01T00:00:00",  # placeholders — never data times
         "EXLN": 50.0, "EYLN": 50.0, "EAZM": 0.0, "HAZM": 90.0,
         "CHEX": 1, "CHEY": 2, "CHHX": 3, "CHHY": 4, "CHHZ": 5,
-        "HSMP": 5, "L3NS": 1, "L4NS": 16,
+        "HSMP": 600, "L3NS": 1, "L4NS": 16,
         "SRL3": 2400, "SRL4": 150, "SRL5": 15,
         "FSCV": 6.4, "EGN": 2, "HGN": 2, "HATT": 1.0, "HNOM": 1000.0,
     }
@@ -601,3 +601,110 @@ def test_read_phoenix_mtu_stream_split(tmp_path):
                 t0 + pd.to_timedelta(4 * k, "s")
             assert pd.Timestamp(tp.end.isoformat()) == t0 + pd.to_timedelta(
                 4 * k + n / 15.0 - 1 / 15.0, "s")
+
+
+# --- slot schedule table (Option 1 foundation) ---------------------------
+
+def test_slot_schedule_table(tmp_path):
+    """The loader emits the integer slot grid per burst family: 0-based slot
+    indices anchored at the family's first actual run start, slot_end =
+    slot_start + LxNS, and one row per run. The continuous family leaves the
+    slot columns empty. The synthetic corpus deliberately staggers TS3
+    against TS4 (the IAGA quirk) — each family's grid is its own."""
+    _synthetic_corpus(tmp_path)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    df = res["slot_schedule"]
+    assert list(df.columns) == ["run_id", "sample_rate", "slot_index",
+                                "slot_start", "slot_end", "start", "end",
+                                "n_samples"]
+    by = {r: g.reset_index(drop=True) for r, g in df.groupby("sample_rate")}
+    # block-tag times are UTC-aware ISO strings
+    # TS3: slots every 600 s from 07:55:00, L3NS=1 s each
+    t3 = by[2400.0]
+    assert list(t3["run_id"]) == ["sr2400_0001", "sr2400_0002"]
+    assert list(t3["slot_index"]) == [0.0, 1.0]
+    assert t3["slot_start"][0] == "2009-12-16T07:55:00+00:00"
+    assert t3["slot_start"][1] == "2009-12-16T08:05:00+00:00"
+    assert t3["slot_end"][0] == "2009-12-16T07:55:01+00:00"
+    assert t3["start"][0] == t3["slot_start"][0]
+    # TS4: slots every 600 s from 07:50:00 (staggered vs TS3), L4NS=16 s
+    t4 = by[150.0]
+    assert list(t4["slot_index"]) == [0.0, 1.0]
+    assert t4["slot_start"][0] == "2009-12-16T07:50:00+00:00"
+    assert t4["slot_end"][0] == "2009-12-16T07:50:16+00:00"
+    # TS5: continuous — no slot identity, one row per run
+    t5 = by[15.0]
+    assert pd.isna(t5["slot_index"]).all()
+    assert t5["slot_start"][0] == ""
+
+
+def test_slot_schedule_hsmp_mismatch_warns(tmp_path):
+    """A TBL HSMP that disagrees with the observed slot spacing warns and
+    uses the observed spacing (block timestamps are the truth) — never
+    nonsense slot indices."""
+    _write_tbl(tmp_path / "SYNTH01.TBL", HSMP=5)  # 5 s vs the real 600 s
+    _write_ts(tmp_path / "SYNTH01.TS3", 2400,
+              [(datetime(2009, 12, 16, 7, 55, 0), 1),
+               (datetime(2009, 12, 16, 8, 5, 0), 1)], seed=5)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    df = res["slot_schedule"]
+    t3 = df[df["sample_rate"] == 2400.0]
+    assert list(t3["slot_index"]) == [0.0, 1.0]
+    assert t3["slot_start"][1] == "2009-12-16T08:05:00+00:00"
+    assert any("HSMP says 5 s" in w for w in res["warnings"])
+
+
+# --- macro flow: Load -> Extract Run -> Align -> Compute FC --------------
+
+def _two_station_corpora(base: Path) -> tuple[Path, Path]:
+    """Two synthetic stations, identical schedule, station B's continuous
+    stream starting 300 s later (Align Runs must find the overlap)."""
+    dir_a, dir_b = base / "st_a", base / "st_b"
+    dir_a.mkdir(), dir_b.mkdir()
+    _synthetic_corpus(dir_a)
+    _synthetic_corpus(dir_b)
+    # station B: re-write the TBL with its own site id
+    _write_tbl(dir_b / "SYNTH01.TBL", SITE="SYNTH02")
+    return dir_a, dir_b
+
+
+def test_macro_flow_extract_align(tmp_path):
+    """The Option-1 macro flow is plausible today: Load MTU-5A -> Extract
+    Run (per slot run OR the continuous stream) -> Align Runs crops two
+    stations to their common overlap — the classic single-rate RR flow on
+    burst archives."""
+    from emptyui_aurora._processing import compute_fc
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_mth5.phoenix_mtu import LoadPhoenixMtu
+    from emptyui_mth5.runs import AlignRuns, ExtractRun
+
+    dir_a, dir_b = _two_station_corpora(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    a = LoadPhoenixMtu().execute(ctx, data_path=str(dir_a),
+                                 save_path=str(dir_a))["mth5"]
+    b = LoadPhoenixMtu().execute(ctx, data_path=str(dir_b),
+                                 save_path=str(dir_b))["mth5"]
+    # slot runs expose ts.run (time-domain extension surface: e.g. NN
+    # denoising consumes per-slot series)
+    slot = ExtractRun().execute(ctx, a, survey="SYNTH_SURVEY",
+                                station="SYNTH01", run="sr2400_0001")["data"]
+    assert slot.dataset.sizes["time"] == 2400  # 1 s @ 2400 Hz
+    # continuous streams: the RR workhorse — align crops both to the
+    # common overlap (station B starts 300 s later)
+    s_a = ExtractRun().execute(ctx, a, survey="SYNTH_SURVEY",
+                               station="SYNTH01", run="sr15_0001")["data"]
+    s_b = ExtractRun().execute(ctx, b, survey="SYNTH_SURVEY",
+                               station="SYNTH02", run="sr15_0001")["data"]
+    out = AlignRuns().execute(ctx, s_a, s_b)
+    r_a, r_b = out["data1"], out["data2"]
+    assert len(r_a.dataset.time) == len(r_b.dataset.time)
+    assert str(r_a.start) == str(r_b.start)
+    # and FCs computed from the aligned pair share the identical grid
+    fc = compute_fc(r_a, ("hx", "hy"), ("ex", "ey"),
+                    window_length_s=32.0, overlap=0.5,
+                    window_type="hamming", start_datetime=str(r_a.start))
+    ref = compute_fc(r_b, ("hx", "hy"), ("hx", "hy"),
+                     window_length_s=32.0, overlap=0.5,
+                     window_type="hamming", start_datetime=str(r_b.start))
+    assert np.array_equal(fc["time"].values, ref["time"].values)

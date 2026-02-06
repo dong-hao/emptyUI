@@ -315,6 +315,88 @@ def _prepare_asc_calibration(
     return chains
 
 
+def _slot_schedule(seg_info, table, warnings: list[str]):
+    """Slot-grid table for a burst recording (the Option-1 foundation).
+
+    The TBL schedule defines each rate family's burst slots: ``HSMP`` is the
+    slot period in seconds (MTU-5A) and the instrument records ``L3NS``/
+    ``L4NS`` seconds at the BEGINNING of every slot (mt_io's tag reference).
+    Slot identity is derived from the ACTUAL block timestamps (tag truth)
+    with the schedule as the cross-check: per burst family, the slot period
+    is the observed median spacing of consecutive run starts (falling back
+    to ``HSMP`` when a family has a single slot); a disagreement with
+    ``HSMP`` is a warning, never a rejection — the block timestamps are the
+    truth, and the official IAGA corpus is known to stagger TS3/TS4 against
+    the TS5 slot grid (upstream documentation issue).
+
+    Returns a DataFrame with one row per run: ``run_id, sample_rate,
+    slot_index, slot_start, slot_end, start, end, n_samples`` — burst
+    families carry the integer slot grid (0-based, anchored at the
+    family's first actual run start); continuous families (``SRL5``, no
+    slot tag) leave the slot columns empty and report one row per run
+    (sessions included).
+    """
+    import numpy as np
+    import pandas as pd
+
+    tbl = getattr(table, "tbl_dict", {}) or {}
+    hsmp = float(tbl.get("HSMP", 0) or 0)
+    rate_to_slot = {}
+    for lv, slot_tag in _SLOT_TAGS.items():
+        rate = float(tbl.get(_RATE_TAGS[lv], 0) or 0)
+        slot_len = float(tbl.get(slot_tag, 0) or 0)
+        if rate > 0 and slot_len > 0:
+            rate_to_slot[rate] = slot_len
+    by_rate: dict[float, list] = {}
+    for run_id, rate, start, end, n in seg_info:
+        by_rate.setdefault(float(rate), []).append((run_id, start, end, n))
+    rows = []
+    for rate in sorted(by_rate, reverse=True):
+        entries = sorted(by_rate[rate], key=lambda x: x[1])
+        slot_len = rate_to_slot.get(rate)
+        if slot_len is None:
+            for run_id, start, end, n in entries:
+                rows.append((run_id, rate, np.nan, "", "",
+                             _iso(start), _iso(end), n))
+            continue
+        starts = np.array([pd.Timestamp(s).value for _, s, _, _ in entries]) / 1e9
+        diffs = np.diff(starts) if starts.size > 1 else np.array([])
+        period = hsmp
+        if diffs.size:
+            median = float(np.median(diffs))
+            if hsmp > 0 and abs(median - hsmp) > max(2.0, 0.05 * hsmp):
+                warnings.append(
+                    f"TBL HSMP says {hsmp:g} s but the observed {rate:g} Hz "
+                    f"slot spacing is {median:g} s — using the observed "
+                    "spacing (actual block timestamps are the truth)")
+                period = median
+        elif hsmp <= 0:
+            period = 0.0
+        anchor = starts[0]
+        for (run_id, start, end, n), k_start in zip(entries, starts):
+            k = int(round((k_start - anchor) / period)) if period > 0 else 0
+            grid_start = (pd.Timestamp(anchor, unit="s")
+                          + pd.to_timedelta(k * period, unit="s"))
+            # block-tag times are UTC (the tags carry no zone, but the
+            # instrument timestamps are UTC by definition — the repo-wide
+            # naive-assumed-UTC convention); the grid matches that stamp
+            # convention
+            if grid_start.tzinfo is None:
+                grid_start = grid_start.tz_localize("UTC")
+            grid_end = grid_start + pd.to_timedelta(slot_len, unit="s")
+            rows.append((run_id, rate, float(k), grid_start.isoformat(),
+                         grid_end.isoformat(), _iso(start), _iso(end), n))
+    return pd.DataFrame(
+        rows,
+        columns=["run_id", "sample_rate", "slot_index", "slot_start",
+                 "slot_end", "start", "end", "n_samples"],
+    )
+
+
+def _iso(dt) -> str:
+    return pd.Timestamp(dt).isoformat()
+
+
 def read_phoenix_mtu(
     data_path: str | Path,
     sample_rates: list[int] | None = None,
@@ -389,6 +471,7 @@ def read_phoenix_mtu(
 
     runs: list[tuple[str, Any, list]] = []  # (run_id, run_metadata, ChannelTS list)
     n_samples_by_run: list[int] = []
+    seg_info: list[tuple] = []  # (run_id, rate, start, end, n_samples) per run
     statuses: set[int] = set()
     max_clock_error = 0.0
     n_saturated = 0
@@ -509,6 +592,8 @@ def read_phoenix_mtu(
             # §24.8 performance note)
             runs.append((run_id, run_meta, array_list))
             n_samples_by_run.append(array_list[0].ts.size)
+            seg_info.append((run_id, float(seg.rate), seg.start, seg.end,
+                             n_samples_by_run[-1]))
         blocks = None  # free the sample chunks
 
     if not runs:
@@ -531,6 +616,7 @@ def read_phoenix_mtu(
 
     save = (Path(save_path).expanduser().resolve() if save_path
             else data_path)
+    slot_schedule = _slot_schedule(seg_info, table, warnings)
     target = save / mth5_filename
     if target.exists():
         _log.warning("overwriting existing MTH5 at %s", target)
@@ -557,6 +643,7 @@ def read_phoenix_mtu(
 
     return {
         "path": str(target),
+        "slot_schedule": slot_schedule,
         "runs": [(rid, float(meta.sample_rate), n)
                  for (rid, meta, _chs), n in zip(runs, n_samples_by_run)],
         "warnings": warnings,
@@ -586,7 +673,8 @@ class LoadPhoenixMtu(Node):
     )
     category = "Data I/O"
     inputs = ()
-    outputs = (Output("mth5", "mth5"),)
+    outputs = (Output("mth5", "mth5"),
+               Output("slot_schedule", "table", label="slot schedule"),)
     params = (
         Param("data_path", "directory", label="MTU-5A data directory",
               path_kind="in"),
@@ -669,4 +757,4 @@ class LoadPhoenixMtu(Node):
             f"loaded MTU-5A -> {Path(res['path']).name}: "
             f"{len(res['runs'])} run(s)",
         )
-        return {"mth5": archive}
+        return {"mth5": archive, "slot_schedule": res["slot_schedule"]}

@@ -905,6 +905,32 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   tails become warnings; the TBL slot schedule is cross-checked loosely
   (report, never reject). Runs with any saturated block carry a per-sample
   `saturated` auxiliary channel (§10.1).
+- **Slot schedule output (second output `slot_schedule`, a `table`)**: the
+  integer slot grid per burst family — the TBL schedule defines each
+  family's slots (`HSMP` slot period in seconds, `L3NS`/`L4NS` seconds
+  recorded at the BEGINNING of every slot); slot identity is derived from
+  the actual block timestamps (tag truth) with the schedule as the
+  cross-check: the slot period is the observed median spacing of
+  consecutive run starts, a disagreement with `HSMP` warns (never
+  rejects — the official IAGA corpus is known to stagger TS3/TS4 against
+  the TS5 slot grid; per the standard the bursts should align with the
+  slot start, an upstream documentation issue to be filed). One row per
+  run (`run_id, sample_rate, slot_index, slot_start, slot_end, start,
+  end, n_samples`); continuous families leave the slot columns empty and
+  report one row per run (sessions included). This is the pairing
+  foundation: two stations' runs pair by slot, and a slot *range*
+  selection feeds Extract Run / Build FC directly.
+- **Macro flow (current stage)**: `Load Phoenix MTU-5A → Extract Run →
+  Align Runs → Compute FC` is the plausible path today — Extract Run
+  exposes `ts.run` for any run (each burst slot, or the continuous
+  stream as one run), so the classic single-rate alignment/cropping flow
+  works on burst archives. **Remote reference with burst slots is
+  FC-level**: although a 1-s slot is too short for meaningful time-domain
+  RR, the pairing happens in the frequency domain — as long as the local
+  and remote FCs from the time slots are matched (identical epoch-anchored
+  window grids, §10.1), RME_RR pools the paired rows across all windows
+  and the slots are fully usable. Per-slot `ts.run` extraction is also
+  the input surface for time-domain extensions (e.g. NN denoising).
 
 #### Build FC Database (`aurora.fc.build`)
 
