@@ -215,12 +215,15 @@ def test_align_runs_sample_rate_mismatch_errors(tmp_path):
 # --- coherence sort error / boundary surfaces ----------------------------
 
 def test_grid_mismatch_coherence_sort_errors():
-    """The coherence-sort two-FC mode validates the shared grid itself."""
+    """The coherence-sort two-FC mode validates the shared grid itself
+    (pairing='strict' — the legacy identical-grid contract; the default
+    'intersect' mode pairs by window time with row drops instead)."""
     local = synthetic_fc(synthetic_runts(synthetic_source(9), seed=9),
                          ["hx", "hy"], ["ex", "ey"])
     remote = local.isel(time=slice(None, -1))
     with pytest.raises(ValueError, match="different time grid"):
-        coherence_sort_fc(local, remote, ["hx", "hy"], ["ex", "ey"])
+        coherence_sort_fc(local, remote, ["hx", "hy"], ["ex", "ey"],
+                          pairing="strict")
 
 
 def test_estimate_tf_skips_nonfinite_rows():

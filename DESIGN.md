@@ -944,10 +944,27 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   slots are matched (identical epoch-anchored window grids, §10.1),
   RME_RR pools the paired rows across all windows and the slots are
   fully usable. Per-slot `ts.run` extraction is also the input surface
-  for time-domain extensions (e.g. NN denoising). The remaining fine
-  layer — window-grid intersection at the RR pairing sites (tolerant
-  matching for the residual coverage differences that whole-slot
-  selection cannot remove) — is the recorded next step.
+  for time-domain extensions (e.g. NN denoising).
+- **Window-grid intersection pairing (fine layer — delivered)**: the
+  pairing sites (`Estimate TF`, two-FC `Coherence Sort`) accept a
+  `pairing` mode — **`intersect` (default)** matches local/remote windows
+  by absolute start time (one-to-one, closest pairs first) and drops the
+  unmatched rows on BOTH sides with a loud per-level report (counts plus
+  the affected slots via the per-window `run_id` coordinate);
+  **`strict`** preserves the legacy identical-grid contract (Align Runs /
+  parity harnesses). `pair_tolerance_s` (default 0 = exact match) covers
+  GPS-stray clocks: window starts shift by the receiver's clock error and
+  the closest pairs still match. The mapping to the official Phoenix
+  processing (SSMT2000) is deliberate: the **frequency grid stays strict
+  in both modes** — a window-settings/duty-cycle mismatch refuses to
+  work, exactly as upstream — while the time dimension follows SSMT2000's
+  "drop the slot whose clocks cannot match" semantics (never
+  interpolate). The default flip is safe: identical grids take the fast
+  no-op path, so the Align Runs and parity workflows behave exactly as
+  before. Not a mandatory feature — the slot-level Build FC window (the
+  coarse layer above) remains the de-facto workflow; the fine layer only
+  trims the residual coverage differences that whole-slot selection
+  cannot remove.
 
 #### Build FC Database (`aurora.fc.build`)
 

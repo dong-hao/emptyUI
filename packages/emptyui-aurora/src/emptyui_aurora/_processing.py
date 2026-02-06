@@ -1038,6 +1038,132 @@ def _check_remote_grid(ref_freq, local_freq, ref_time, local_time):
         )
 
 
+def _time_key(t):
+    """Comparable int64 key for a window-time array (datetime64 -> ns epoch,
+    float seconds as-is)."""
+    t = np.asarray(t)
+    if np.issubdtype(t.dtype, np.datetime64):
+        return t.astype("datetime64[ns]").astype(np.int64)
+    return t.astype(np.float64)
+
+
+def _pair_remote_times(local_t, ref_t, tol_s):
+    """One-to-one window-time matching -> (local_idx, ref_idx).
+
+    ``tol_s == 0``: exact-value intersection (sort + searchsorted — the
+    epoch-anchored grids of two GPS-locked stations coincide exactly where
+    their coverage overlaps). ``tol_s > 0``: greedy nearest matching within
+    the tolerance, closest pairs first (GPS-stray clocks shift a station's
+    whole grid by its clock error; the closest pairs still pair 1:1).
+    Unmatched rows on either side are the caller's business (reported and
+    dropped — the SSMT2000 semantics: a slot whose clocks cannot match is
+    dropped, not interpolated).
+    """
+    li, ri = _time_key(local_t), _time_key(ref_t)
+    if tol_s and tol_s > 0:
+        tol = float(tol_s)
+        if np.issubdtype(np.asarray(local_t).dtype, np.datetime64):
+            tol_ns = int(round(tol * 1e9))
+        else:
+            tol_ns = tol
+        # candidate pairs: each local's nearest ref (within tol), greedy
+        # assignment closest-diff-first, one-to-one
+        pos = np.searchsorted(ri, li)
+        cand = []
+        for k, p in enumerate(pos):
+            for j in (p - 1, p):
+                if 0 <= j < ri.size:
+                    d = abs(int(li[k]) - int(ri[j]))
+                    if d <= tol_ns:
+                        cand.append((d, k, j))
+        cand.sort()
+        used_l, used_r, li_out, ri_out = set(), set(), [], []
+        for _d, k, j in cand:
+            if k in used_l or j in used_r:
+                continue
+            used_l.add(k)
+            used_r.add(j)
+            li_out.append(k)
+            ri_out.append(j)
+        return (np.asarray(li_out, dtype=int), np.asarray(ri_out, dtype=int))
+    # exact intersection
+    order = np.argsort(ri, kind="stable")
+    rs = ri[order]
+    pos = np.searchsorted(rs, li)
+    ok = pos < rs.size
+    idx = np.clip(pos, 0, max(rs.size - 1, 0))
+    ok &= rs[idx] == li
+    return (np.nonzero(ok)[0], order[pos[ok]])
+
+
+def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
+                    level=None):
+    """Validate + pair the remote-reference fc to the local window grid.
+
+    Frequency grids stay STRICT (a mismatch is a window-settings/duty-cycle
+    inconsistency — the official SSMT2000 refuses to work there too). The
+    TIME dimension follows the ``pairing`` mode:
+
+    - ``"intersect"`` (default): match windows by absolute start time
+      (exact, or within ``tol_s`` for GPS-stray clocks) and drop the
+      unmatched rows on BOTH sides with a loud warning naming counts and —
+      when the per-window ``run_id`` coordinate exists (Build FC) — the
+      affected slots. This is the slot-level pairing made de-facto: the
+      coarse layer is the Build FC window (§9.3), the fine layer trims the
+      residual coverage differences. Identical grids are a fast no-op.
+    - ``"strict"``: the legacy identical-grid requirement (parity
+      harnesses; the pre-burst single-rate contract).
+
+    Returns ``(local_fc, ref_fc)`` — both row-reduced to the matched
+    windows (the positional row contract requires both sides aligned 1:1).
+    """
+    if not np.array_equal(np.asarray(ref_fc["frequency"].values),
+                          np.asarray(local_fc["frequency"].values)):
+        raise ValueError(
+            "remote-reference fc has a different frequency grid than the "
+            "local fc — compute both with the same window settings")
+    lt, rt = local_fc["time"].values, ref_fc["time"].values
+    if np.array_equal(lt, rt):
+        return local_fc, ref_fc
+    if pairing == "strict":
+        raise ValueError(
+            "remote-reference fc has a different time grid than the local "
+            "fc — the runs are not aligned; crop both to their common "
+            "acquisition overlap (Align Runs) before computing FCs, or "
+            "use pairing='intersect' to match window times with row drops"
+        )
+    li, ri = _pair_remote_times(lt, rt, tol_s)
+    if li.size == 0:
+        raise ValueError(
+            f"no remote-reference windows match the local time grid "
+            f"(0 of {lt.size} local windows)"
+            + (f" within {tol_s:g} s" if tol_s else "")
+            + " — check the clock-zero anchors (both stations must use "
+            "'epoch' or the same explicit anchor), the window settings, "
+            "or raise 'Pair tolerance (s)' for GPS-stray clocks")
+    n_local_drop, n_ref_drop = lt.size - li.size, rt.size - ri.size
+    if n_local_drop or n_ref_drop:
+        detail = ""
+        if "run_id" in local_fc.coords:
+            runs = np.asarray(local_fc["run_id"].values)[
+                np.setdiff1d(np.arange(lt.size), li)]
+            uniq = sorted({str(r) for r in np.unique(runs)})
+            if uniq:
+                shown = ", ".join(uniq[:5]) + (
+                    f" (+{len(uniq) - 5} more)" if len(uniq) > 5 else "")
+                detail = f"; affected local slots: {shown}"
+        _log.warning(
+            "remote-reference pairing%s: kept %d of %d local and %d of %d "
+            "remote window(s); dropped %d on each side (unmatched window "
+            "times — GPS stray clocks? raise 'Pair tolerance (s)'; or "
+            "coverage differences — restrict both stations to the same "
+            "Build FC window)%s",
+            f" at level {level}" if level is not None else "",
+            li.size, lt.size, ri.size, rt.size, n_local_drop, detail,
+        )
+    return local_fc.isel(time=li), ref_fc.isel(time=ri)
+
+
 def _warn_remote_gaps(local_fc, ref_fc) -> None:
     """M4 #2: warn when local windows pair with interpolated remote samples.
 
@@ -1377,7 +1503,8 @@ def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
 def coherence_sort_fc(local, ref, input_channels, output_channels,
                       coherence_min=0.25, coherence_max=0.98, mode="weight",
                       apply_below_period=None,
-                      ensemble_windows=16, smooth_bins=0):
+                      ensemble_windows=16, smooth_bins=0,
+                      pairing="intersect", tol_s=0.0):
     """EMTF-style per-frequency coherence sort of one decimation level's FC
     (DESIGN §16.2, §24.9).
 
@@ -1403,10 +1530,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
     if ref is not None:
-        _check_remote_grid(
-            ref["frequency"].values, local["frequency"].values,
-            ref["time"].values, local["time"].values,
-        )
+        local, ref = _pair_remote_fc(local, ref, pairing=pairing, tol_s=tol_s)
         _warn_remote_gaps(local, ref)
     ins = [c for c in input_channels if c in local.data_vars]
     outs = [c for c in output_channels if c in local.data_vars]
@@ -1429,7 +1553,8 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
                        coherence_min=0.25, coherence_max=0.98, mode="weight",
                        apply_below_period=None,
-                       ensemble_windows=16, smooth_bins=0):
+                       ensemble_windows=16, smooth_bins=0,
+                       pairing="intersect", tol_s=0.0):
     """Coherence-sort every decimation level (see :func:`coherence_sort_fc`).
 
     ``levels`` is the multi-level fc container; ``ref_levels`` is an optional
@@ -1448,6 +1573,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, apply_below_period=apply_below_period,
             ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
+            pairing=pairing, tol_s=tol_s,
         )
         out_levels[int(level)] = l_out
         if ref_levels is not None:
@@ -1469,6 +1595,8 @@ def estimate_tf(
     band_style="l2u",
     bands_override=None,
     t_short=None,
+    pairing="intersect",
+    pair_tolerance_s=0.0,
 ):
     """MT transfer-function estimate -> (periods, Z[n_out x n_in complex], Z_err).
 
@@ -1526,10 +1654,8 @@ def estimate_tf(
     if ref_fc is not None:
         ref_fc = _normalize_fc_layout(ref_fc)
         ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
-        _check_remote_grid(
-            ref_fc["frequency"].values, freq[ok],
-            ref_fc["time"].values, fc["time"].values,
-        )
+        fc, ref_fc = _pair_remote_fc(fc, ref_fc, pairing=pairing,
+                                     tol_s=pair_tolerance_s)
         _warn_remote_gaps(fc, ref_fc)
 
     # Realistic, octave-aligned period bands for this decimation level
@@ -2518,6 +2644,8 @@ def estimate_tf_levels(
     min_bins_per_band=20.0,
     t_short=None,
     bands_override=None,
+    pairing="intersect",
+    pair_tolerance_s=0.0,
 ):
     """Estimate a per-level TF for every decimation level in a multi-level fc
     container.
@@ -2587,6 +2715,8 @@ def estimate_tf_levels(
             band_style=band_style,
             bands_override=bands,
             t_short=t_short,
+            pairing=pairing,
+            pair_tolerance_s=pair_tolerance_s,
         )
         if periods.size == 0:
             continue  # fully head-clipped — this level contributes nothing

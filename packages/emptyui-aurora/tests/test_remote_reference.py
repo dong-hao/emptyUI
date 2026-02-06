@@ -457,3 +457,89 @@ def test_coherence_sort_warns_on_remote_gaps(caplog):
     with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
         coherence_sort_fc(fc, ref, ("hx", "hy"), ("ex", "ey"))
     assert any("interpolated gap" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Window-grid intersection pairing (§9.3 fine layer): the time dimension
+# pairs by matched window times with loud row drops (the SSMT2000 slot
+# semantics); the frequency grid stays strict (duty-cycle/window mismatch
+# refuses, as upstream). Default mode 'intersect'; 'strict' preserved for
+# the Align Runs / parity contract.
+
+
+def _paired_pair_fcs(extra_ref=2, offset_s=0.0):
+    """(local_fc, ref_fc) with the ref carrying `extra_ref` extra windows
+    (and, when offset_s > 0, every ref time shifted by that offset)."""
+    import xarray as xr
+
+    fc, ref = _aligned_pair_fcs()
+    if extra_ref:
+        step = (ref["time"].values[-1] - ref["time"].values[-2])
+        extra = ref.isel(time=[-1] * extra_ref).assign_coords(
+            time=("time", [ref["time"].values[-1] + step * (k + 1)
+                           for k in range(extra_ref)]))
+        ref = xr.concat([ref, extra], dim="time")
+    if offset_s:
+        t = ref["time"].values.astype("datetime64[ns]") + np.timedelta64(
+            int(offset_s * 1e9), "ns")
+        ref = ref.assign_coords(time=("time", t))
+    return fc, ref
+
+
+def test_pairing_intersect_drops_unmatched(caplog):
+    """The default pairing matches window times: extra remote windows drop
+    with a loud report; the estimate runs on the matched rows."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _paired_pair_fcs(extra_ref=2)
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        periods, Z, Z_err = estimate_tf(
+            fc, ("hx", "hy"), ("ex", "ey"), estimator_engine="RME_RR",
+            remote_reference=True, ref_fc=ref)
+    assert any("kept" in r.message and "remote window" in r.message
+               for r in caplog.records)
+    assert np.all(np.isfinite(Z))
+    # strict mode rejects the same input with the legacy error
+    with pytest.raises(ValueError, match="different time grid"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref, pairing="strict")
+
+
+def test_pairing_intersect_tolerance_recovers(caplog):
+    """GPS-stray clocks: with tolerance 0 nothing matches (actionable
+    error); raising the tolerance pairs the shifted rows one-to-one."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _paired_pair_fcs(extra_ref=0, offset_s=0.5)
+    with pytest.raises(ValueError, match="no remote-reference windows"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref, pairing="intersect", pair_tolerance_s=0.0)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref, pairing="intersect", pair_tolerance_s=1.0)
+    assert not any("kept" in r.message for r in caplog.records)  # all paired
+
+
+def test_pairing_frequency_grid_stays_strict():
+    """A window-settings (frequency) mismatch refuses in BOTH modes — the
+    official SSMT2000 semantics (inconsistent duty cycles refuse to work)."""
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _paired_pair_fcs(extra_ref=0)
+    ref2 = ref.isel(frequency=slice(None, -1))
+    with pytest.raises(ValueError, match="different frequency grid"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref2, pairing="intersect")
+    with pytest.raises(ValueError, match="different frequency grid"):
+        estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                    estimator_engine="RME_RR", remote_reference=True,
+                    ref_fc=ref2, pairing="strict")

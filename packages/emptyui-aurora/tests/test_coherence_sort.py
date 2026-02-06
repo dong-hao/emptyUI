@@ -192,7 +192,7 @@ def test_node_has_no_banding_params():
     declared = {p.name for p in CoherenceSort.params}
     assert declared == {"coherence_min", "coherence_max", "mode",
                         "apply_below_period", "ensemble_windows",
-                        "smooth_bins"}
+                        "smooth_bins", "pairing", "pair_tolerance_s"}
 
 
 def test_mode_off_is_passthrough():

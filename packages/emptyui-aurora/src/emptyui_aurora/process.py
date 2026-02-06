@@ -795,6 +795,18 @@ class CoherenceSort(Node):
                           "ensemble (a FIXED smoothing scale, not the "
                           "estimate's band table) — restores dof where "
                           "windows are few (deep levels)."),
+        Param("pairing", "select", label="Remote pairing",
+              options=("intersect", "strict"), default="intersect",
+              optional=True,
+              description="How local and remote FC windows pair before "
+                          "sorting (§9.3): 'intersect' (default) matches "
+                          "window times, unmatched rows drop with a loud "
+                          "report; 'strict' requires identical time "
+                          "grids. Frequency grids stay strict either way."),
+        Param("pair_tolerance_s", "number", label="Pair tolerance (s)",
+              default=0.0, min=0, optional=True,
+              description="Matching tolerance for window start times "
+                          "(0 = exact). Raise for GPS-stray clocks."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
@@ -802,7 +814,9 @@ class CoherenceSort(Node):
                 mode: str = "weight",
                 apply_below_period: float = 0.0,
                 ensemble_windows: int = 16,
-                smooth_bins: int = 0) -> dict[str, Any]:
+                smooth_bins: int = 0,
+                pairing: str = "intersect",
+                pair_tolerance_s: float = 0.0) -> dict[str, Any]:
         import json
 
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -815,6 +829,7 @@ class CoherenceSort(Node):
             coherence_min=coherence_min, coherence_max=coherence_max,
             mode=mode, apply_below_period=apply_below_period or None,
             ensemble_windows=ensemble_windows, smooth_bins=smooth_bins,
+            pairing=pairing, tol_s=pair_tolerance_s,
         )
         path = ctx.artifact_path("coherence_sort", ".json")
         path.write_text(json.dumps(rows))
@@ -1341,6 +1356,27 @@ class EstimateTF(Node):
                           "the official USArray grid clips at ~7.3 s for "
                           "the 1 Hz NIMS band (data-driven — noise exceeds "
                           "signal below 10-20 s)."),
+        Param("pairing", "select", label="Remote pairing",
+              options=("intersect", "strict"), default="intersect",
+              optional=True,
+              description="How local and remote FC windows pair "
+                          "(§9.3): 'intersect' (default) matches window "
+                          "times — unmatched rows drop with a loud "
+                          "report (the SSMT2000 slot semantics: a slot "
+                          "whose clocks cannot match is dropped, not "
+                          "interpolated); frequency grids stay strict "
+                          "either way (duty-cycle/window mismatch refuses "
+                          "to work, as upstream). 'strict' requires "
+                          "identical time grids (the Align Runs / parity "
+                          "contract)."),
+        Param("pair_tolerance_s", "number", label="Pair tolerance (s)",
+              default=0.0, min=0, optional=True,
+              description="Matching tolerance for window start times "
+                          "(0 = exact — GPS-locked stations on the "
+                          "epoch-anchored grid match exactly). Raise for "
+                          "GPS-stray clocks: window starts shift by the "
+                          "receiver's clock error; the closest pairs "
+                          "still match one-to-one."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
@@ -1351,7 +1387,9 @@ class EstimateTF(Node):
                 min_bins_per_band: float = 20.0,
                 t_short: float = 0.0,
                 band_centers: str = "",
-                bands_per_level: str = "") -> dict[str, Any]:
+                bands_per_level: str = "",
+                pairing: str = "intersect",
+                pair_tolerance_s: float = 0.0) -> dict[str, Any]:
         # Accept either a single fc (treated as level 0) or a multi-level
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
@@ -1395,6 +1433,8 @@ class EstimateTF(Node):
             min_bins_per_band=min_bins_per_band,
             t_short=t_short,
             bands_override=manual,
+            pairing=pairing,
+            pair_tolerance_s=pair_tolerance_s,
         )
         periods, Z, Z_err = merge_tf_levels(per_level)
         offered = sum(len(e["periods"]) for e in per_level.values())
