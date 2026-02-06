@@ -380,3 +380,32 @@ def test_clock_zero_in_the_future_warns(caplog):
             start_datetime="2024-01-01T00:00:00")
     assert any("AFTER the record start" in rec.message for rec in caplog.records)
     assert 0 in levels
+
+
+def test_build_fc_window_selection(tmp_path):
+    """The UTC window keeps only runs whose time period intersects it —
+    whole runs, never cropped (slot-aware selection: the slot grid in the
+    loader's slot-schedule table maps UTC windows to slots)."""
+    archive = _two_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = BuildFC().execute(
+        ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=16, overlap=0.5,
+        window_type="boxcar", clock_zero="epoch",
+        start="2024-01-01T00:01:00", end="2024-01-01T00:02:00")
+    fc = res["fc"]
+    # only sr2400_0002 (00:01:36..00:02:08) intersects the window
+    t = fc[0]["time"].values.astype("datetime64[ns]")
+    assert t.min() >= np.datetime64("2024-01-01T00:01:36", "ns")
+    assert t.max() < np.datetime64("2024-01-01T00:02:09", "ns")
+    archive.close_mth5()
+
+
+def test_build_fc_window_outside_raises(tmp_path):
+    archive = _two_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with pytest.raises(ValueError, match="no runs fall within"):
+        BuildFC().execute(
+            ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+            start="2024-06-01T00:00:00", end="2024-06-01T01:00:00")
+    archive.close_mth5()

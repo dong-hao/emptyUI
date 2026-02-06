@@ -708,3 +708,37 @@ def test_macro_flow_extract_align(tmp_path):
                      window_length_s=32.0, overlap=0.5,
                      window_type="hamming", start_datetime=str(r_b.start))
     assert np.array_equal(fc["time"].values, ref["time"].values)
+
+
+def test_session_by_slot(tmp_path):
+    """session_by_slot cuts the continuous stream at the TBL slot grid
+    (every HSMP seconds): slot-granular QC units that preserve longer
+    contiguous spans than fixed-hour splitting."""
+    _write_tbl(tmp_path / "SYNTH01.TBL", HSMP=20)  # 20-s slot grid
+    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 100)], seed=11)  # 100 s
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                           session_by_slot=True)
+    ids = [r[0] for r in res["runs"]]
+    ns = [r[2] for r in res["runs"]]
+    assert ids == [f"sr15_{k:04d}" for k in range(1, 6)]
+    assert ns == [300] * 5  # 20 s x 15 Hz per session
+
+
+def test_session_by_slot_falls_back_without_hsmp(tmp_path):
+    """No HSMP in the TBL -> warn and fall back to stream_session_hours."""
+    _write_tbl(tmp_path / "SYNTH01.TBL")
+    # strip HSMP by rewriting the TBL without it
+    tags_path = tmp_path / "SYNTH01.TBL"
+    raw = tags_path.read_bytes()
+    tags_path.write_bytes(b"".join(
+        blk for blk in (raw[i:i + 25] for i in range(0, len(raw), 25))
+        if not blk.startswith(b"HSMP")))
+    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 10)], seed=11)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                           session_by_slot=True, stream_session_hours=4e-4)
+    assert any("no HSMP" in w for w in res["warnings"])
+    # 10 one-second blocks at a 1.44-s session target -> one block each
+    assert [r[0] for r in res["runs"]] == [f"sr15_{k:04d}"
+                                           for k in range(1, 11)]

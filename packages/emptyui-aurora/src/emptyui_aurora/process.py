@@ -322,6 +322,19 @@ class BuildFC(Node):
               optional=True, placeholder="auto (first available)"),
         Param("runs", "string", label="Runs", default="", optional=True,
               placeholder="e.g. sr2400_0001,... (empty = all runs)"),
+        Param("start", "string", label="Start (UTC)", default="", optional=True,
+              time_bar="mth5",
+              description="Keep only runs overlapping this UTC window "
+                          "(ISO datetime or epoch seconds; empty = all "
+                          "runs). Slot-aware for burst archives: whole "
+                          "runs are kept, never cropped — the slot grid "
+                          "in the loader's slot-schedule table maps UTC "
+                          "windows to slots. The same window on two "
+                          "stations' Build FC nodes is the coarse "
+                          "remote-reference pairing (§9.3)."),
+        Param("end", "string", label="End (UTC)", default="", optional=True,
+              time_bar="mth5",
+              description="Window end (empty = no bound)."),
         Param("input_channels", "string", default="", optional=True),
         Param("output_channels", "string", default="", optional=True),
         Param("channel_nomenclature", "select", label="Channel nomenclature",
@@ -399,7 +412,8 @@ class BuildFC(Node):
     )
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
-                runs: str = "", input_channels: str = "",
+                runs: str = "", start: str = "", end: str = "",
+                input_channels: str = "",
                 output_channels: str = "", channel_nomenclature: str = "auto",
                 magnetic_unit: str = "auto", e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
@@ -411,6 +425,7 @@ class BuildFC(Node):
                 saturated_max: float = 0.01,
                 persist: bool = False,
                 regroup_contiguous: bool = False) -> dict[str, Any]:
+        from emptyui_mth5.phoenix_mtu import _window_bounds
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
 
         survey_obj = _resolve_survey(mth5, survey)
@@ -422,6 +437,45 @@ class BuildFC(Node):
         if missing:
             raise ValueError(
                 f"run(s) {missing} not in station archive {available}")
+        # slot-aware run selection (§9.3): a UTC window keeps every run
+        # whose time period intersects it — whole runs, never cropped (a
+        # burst slot is either in or out). The same window on two
+        # stations' Build FC nodes is the coarse remote-reference pairing.
+        win = _window_bounds(start, end)
+        if win[0] is not None or win[1] is not None:
+            import pandas as pd
+
+            summ = station_obj.run_summary.set_index("id")
+
+            def _utc(value):
+                ts = pd.Timestamp(str(value))
+                return (ts.tz_localize("UTC") if ts.tzinfo is None
+                        else ts.tz_convert("UTC"))
+
+            kept, dropped = [], []
+            for r in wanted:
+                try:
+                    rs, re_ = _utc(summ.loc[r, "start"]), _utc(summ.loc[r, "end"])
+                except (KeyError, TypeError, ValueError):
+                    ctx.logger.warning(
+                        "run %s has no parseable time period — dropped "
+                        "from the window selection", r)
+                    continue
+                lo = win[0] or rs
+                hi = win[1] or re_
+                (kept if (rs < hi and re_ > lo) else dropped).append(r)
+            if not kept:
+                raise ValueError(
+                    "no runs fall within the requested window "
+                    f"[{win[0]}, {win[1]}) — the archive spans "
+                    f"{_utc(summ['start'].min())} .. "
+                    f"{_utc(summ['end'].max())}")
+            if dropped:
+                ctx.logger.warning(
+                    "Build FC window [%s, %s): dropped %d run(s) outside "
+                    "the window (%s kept)", win[0], win[1], len(dropped),
+                    len(kept))
+            wanted = kept
         surv = str(survey_obj.metadata.id)
         stat = str(station_obj.metadata.id)
 

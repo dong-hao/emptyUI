@@ -408,6 +408,7 @@ def read_phoenix_mtu(
     end: str | float = "",
     calibration_folder: str | Path = "",
     stream_session_hours: float = 0.0,
+    session_by_slot: bool = False,
 ) -> dict[str, Any]:
     """Convert a legacy Phoenix MTU-5A recording (TBL + TSn files) into an
     mth5 archive with one run per maximal contiguous segment.
@@ -469,6 +470,20 @@ def read_phoenix_mtu(
     chains = _prepare_asc_calibration(data_path, calibration_folder, table,
                                       warnings)
 
+    # session length: slot-grid sessions (session_by_slot) cut the
+    # continuous stream every HSMP seconds — slot-granular QC preserves
+    # longer contiguous spans than fixed-hour splitting (§24.13/§9.3)
+    session_seconds = stream_session_hours * 3600.0
+    if session_by_slot:
+        hsmp = float((table.tbl_dict or {}).get("HSMP", 0) or 0)
+        if hsmp > 0:
+            session_seconds = (min(session_seconds, hsmp)
+                               if session_seconds > 0 else hsmp)
+        else:
+            warnings.append(
+                "session_by_slot requested but the TBL carries no HSMP — "
+                "falling back to stream_session_hours")
+
     runs: list[tuple[str, Any, list]] = []  # (run_id, run_metadata, ChannelTS list)
     n_samples_by_run: list[int] = []
     seg_info: list[tuple] = []  # (run_id, rate, start, end, n_samples) per run
@@ -522,7 +537,7 @@ def read_phoenix_mtu(
                         f"{path.name}: segment {seg.start} spans {got:g} s, "
                         f"TBL schedule says {expected_len:g} s ({slot_tag})")
         for i, seg in enumerate(
-                _split_segments(segs, stream_session_hours * 3600.0), 1):
+                _split_segments(segs, session_seconds), 1):
             run_id = f"sr{seg.rate}_{i:04d}"
             run_meta = table.run_metadata.copy()
             run_meta.id = run_id
@@ -718,6 +733,21 @@ class LoadPhoenixMtu(Node):
                           "otherwise forms one giant run whose run-level "
                           "QC (Select Runs) could only be dropped or kept "
                           "whole (§24.13)."),
+        Param("session_by_slot", "boolean", label="Session by slot",
+              default=False,
+              description="Cut the continuous stream into sessions at the "
+                          "TBL slot grid (every HSMP seconds) instead of a "
+                          "fixed length — slot-granular QC: a bad slot "
+                          "interval is masked without sacrificing the "
+                          "surrounding hours, so the surviving stream "
+                          "stays contiguous over much longer spans than "
+                          "hour-splitting allows (the deep decimation "
+                          "levels cascade the KEPT contiguous span, "
+                          "regardless of how sessions are labelled). "
+                          "Anchored at the stream's own start; families "
+                          "with staggered slot grids keep their own "
+                          "rhythm. Falls back to 'Stream session length' "
+                          "with a warning when the TBL carries no HSMP."),
     )
 
     def execute(self, ctx, data_path: str, survey_id: str = "",
@@ -725,7 +755,8 @@ class LoadPhoenixMtu(Node):
                 mth5_filename: str = "from_phoenix_mtu.mth5",
                 save_path: str = "", start: str = "",
                 end: str = "", calibration_folder: str = "",
-                stream_session_hours: float = 0.0) -> dict[str, Any]:
+                stream_session_hours: float = 0.0,
+                session_by_slot: bool = False) -> dict[str, Any]:
         rates = ([int(x) for x in str(sample_rates).split(",") if x.strip()]
                  if str(sample_rates).strip() else None)
         res = read_phoenix_mtu(
@@ -739,6 +770,7 @@ class LoadPhoenixMtu(Node):
             end=end,
             calibration_folder=calibration_folder,
             stream_session_hours=stream_session_hours,
+            session_by_slot=session_by_slot,
         )
         for w in res["warnings"]:
             ctx.logger.warning(w)

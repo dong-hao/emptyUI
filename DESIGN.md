@@ -900,7 +900,17 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   filtered at ingest, per-second granularity, partial slots become short
   runs), `stream_session_hours` (0 = off; runs longer than the target are cut
   into consecutive fixed-length sessions on block boundaries so the
-  continuous stream gets run-level QC granularity, §10.4).
+  continuous stream gets run-level QC granularity, §10.4),
+  `session_by_slot` (cut the continuous stream at the TBL slot grid,
+  every `HSMP` seconds, instead of a fixed length — **slot-granular QC**:
+  a bad slot interval is masked without sacrificing the surrounding
+  hours, so the surviving stream stays contiguous over much longer spans
+  than hour-splitting allows. The cascade is unaffected by the session
+  labels — `regroup_contiguous` cascades the kept contiguous span and
+  spans never depend on QC outcomes — so finer session labels only
+  refine rejection granularity; the Select Runs overlap guard bounds the
+  collateral at ±1 FC window per dropped session. Falls back to
+  `stream_session_hours` with a warning when the TBL carries no HSMP).
 - Quality aggregation: per-block clock/saturation anomalies and truncated
   tails become warnings; the TBL slot schedule is cross-checked loosely
   (report, never reject). Runs with any saturated block carry a per-sample
@@ -924,13 +934,20 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   Align Runs → Compute FC` is the plausible path today — Extract Run
   exposes `ts.run` for any run (each burst slot, or the continuous
   stream as one run), so the classic single-rate alignment/cropping flow
-  works on burst archives. **Remote reference with burst slots is
-  FC-level**: although a 1-s slot is too short for meaningful time-domain
-  RR, the pairing happens in the frequency domain — as long as the local
-  and remote FCs from the time slots are matched (identical epoch-anchored
-  window grids, §10.1), RME_RR pools the paired rows across all windows
-  and the slots are fully usable. Per-slot `ts.run` extraction is also
-  the input surface for time-domain extensions (e.g. NN denoising).
+  works on burst archives. For the burst-native route
+  (`Load → Build FC`), the **slot-based selection layer** is delivered:
+  the loader's `slot_schedule` table + Build FC's UTC window (whole-slot
+  selection) — the same window on two stations is the coarse pairing.
+  **Remote reference with burst slots is FC-level**: although a 1-s slot
+  is too short for meaningful time-domain RR, the pairing happens in the
+  frequency domain — as long as the local and remote FCs from the time
+  slots are matched (identical epoch-anchored window grids, §10.1),
+  RME_RR pools the paired rows across all windows and the slots are
+  fully usable. Per-slot `ts.run` extraction is also the input surface
+  for time-domain extensions (e.g. NN denoising). The remaining fine
+  layer — window-grid intersection at the RR pairing sites (tolerant
+  matching for the residual coverage differences that whole-slot
+  selection cannot remove) — is the recorded next step.
 
 #### Build FC Database (`aurora.fc.build`)
 
@@ -940,6 +957,15 @@ iterates the listed runs, `compute_fc_levels` per run (epoch-anchored
 anchoring useless), `merge_fc_containers` per station → output `fc` container.
 Optional `persist` writes each run's FC levels into the archive's FC layer
 keyed by run (off by default).
+
+- **Slot-aware run selection (`start`/`end` params)**: a UTC window keeps
+  every run whose time period intersects it — **whole runs, never cropped**
+  (a burst slot is either in or out; the loader's `slot_schedule` table maps
+  UTC windows to slot indices). This is the slot-based selection layer
+  driving Build FC, and the same window on two stations' Build FC nodes is
+  the **coarse remote-reference pairing** (§9.3): both stations compute FCs
+  over the same acquisition window, in slot granularity, without any
+  time-domain alignment machinery.
 
 - **Cascade spans (`regroup_contiguous`)**: maximal contiguous spans of
   same-rate runs are cascaded as ONE payload (adjacency within two samples,
