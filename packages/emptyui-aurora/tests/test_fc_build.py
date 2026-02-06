@@ -409,3 +409,83 @@ def test_build_fc_window_outside_raises(tmp_path):
             ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
             start="2024-06-01T00:00:00", end="2024-06-01T01:00:00")
     archive.close_mth5()
+
+
+def test_build_fc_session_labels(tmp_path):
+    """Universal session labels (§9.3): session_hours tiles every run into
+    '{run id}_sNNNN' units; with regroup_contiguous a run's own sessions
+    merge back into one cascade span (they are contiguous) while gapped
+    runs stay separate — and each FC window carries its session id."""
+    archive = _two_run_archive(tmp_path)  # two 32-s runs, 64 s apart
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = BuildFC().execute(
+        ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=16, overlap=0.5,
+        window_type="boxcar", clock_zero="epoch",
+        regroup_contiguous=True, session_hours=16.0 / 3600.0)
+    fc = res["fc"]
+    sample = fc[sorted(fc)[0]]
+    runs = np.asarray(sample["run_id"].values)
+    # two sessions per run, session labels at window granularity
+    assert sorted(set(runs)) == ["sr2400_0001_s0001", "sr2400_0001_s0002",
+                                 "sr2400_0002_s0001", "sr2400_0002_s0002"]
+    # windows sorted in time follow the session order
+    t = sample["time"].values.astype("datetime64[ns]")
+    order = np.argsort(t)
+    seq = [runs[i] for i in order]
+    assert seq == sorted(seq, key=lambda r: (r.split("_s")[0],
+                                             int(r.split("_s")[1])))
+    archive.close_mth5()
+
+
+def test_build_fc_session_selection_feeds_select_runs(tmp_path):
+    """The session labels make run-level QC work on ordinary (non-burst)
+    archives: Select Runs scores and drops per session."""
+    from emptyui_aurora.process import CoherenceSort  # noqa: F401
+    from emptyui_aurora.process import SelectRuns
+
+    archive = _two_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = BuildFC().execute(
+        ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=16, overlap=0.5,
+        window_type="boxcar", clock_zero="epoch",
+        regroup_contiguous=True, session_hours=16.0 / 3600.0)
+    out = SelectRuns().execute(ctx, res["fc"])
+    # the selector runs end-to-end on session labels: the diagnostics
+    # artifact is published and the surviving windows carry session ids
+    assert out["table"] is not None
+    runs = np.asarray(out["fc"][sorted(out["fc"])[0]]["run_id"].values)
+    assert set(runs).issubset({
+        "sr2400_0001_s0001", "sr2400_0001_s0002",
+        "sr2400_0002_s0001", "sr2400_0002_s0002"})
+    archive.close_mth5()
+
+
+def test_compute_fc_stamps_run_id(tmp_path):
+    """The classic single-run flow (Extract -> Compute FC) carries the
+    per-window 'run_id' coordinate too — session QC works without routing
+    through Build FC (whole runs = all-or-nothing QC)."""
+    from mt_timeseries import ChannelTS, RunTS
+
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_aurora.process import ComputeFC
+
+    rng = np.random.default_rng(7)
+    chs = []
+    for comp in ("hx", "hy"):
+        c = ChannelTS("magnetic", data=rng.standard_normal(256),
+                      start="2024-01-01T00:00:00", sample_rate=1.0)
+        c.component = comp
+        chs.append(c)
+    runts = RunTS(array_list=chs)
+    runts.run_metadata.id = "b"
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ComputeFC().execute(ctx, runts, input_channels="hx,hy",
+                              output_channels="hx,hy", decimation_levels=0,
+                              window_samples=16, overlap=0.5,
+                              window_type="boxcar", run="b")
+    sample = res["fc"][sorted(res["fc"])[0]]
+    assert "run_id" in sample.coords
+    assert set(np.asarray(sample["run_id"].values)) == {"b"}

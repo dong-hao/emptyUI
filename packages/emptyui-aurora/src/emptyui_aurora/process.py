@@ -266,6 +266,19 @@ class ComputeFC(Node):
                         "skipping persistence."
                     )
                     break
+        # per-window run identity (§9.3 universality): Select Runs / Residual
+        # Sort key on the per-window 'run_id' coordinate — the classic
+        # single-run flow (Extract -> Compute FC) now carries it too, so
+        # session QC works without routing through Build FC. Whole runs get
+        # their own id (all-or-nothing QC — the giant-run problem is what
+        # Build FC's session_hours solves); stamped AFTER persistence so the
+        # verified mth5 round trip is untouched.
+        if run_id:
+            import numpy as np
+
+            for level, fc in levels.items():
+                levels[level] = fc.assign_coords(run_id=(
+                    "time", np.full(int(fc.sizes["time"]), run_id)))
         summary = ", ".join(
             f"L{lv}:{fc.sizes['frequency']}f×{fc.sizes['time']}w" for lv, fc in levels.items()
         )
@@ -409,6 +422,25 @@ class BuildFC(Node):
                           "lives in Select Runs, so spans never depend on "
                           "QC outcomes and each window is stamped with the "
                           "session it came from."),
+        Param("session_hours", "number", label="Session length (h)",
+              default=0.0, min=0, optional=True,
+              description="Cut every run into fixed-length sessions "
+                          "(0 = off) before cascading — the universal "
+                          "session-label mechanism (§9.3): Select Runs / "
+                          "Residual Sort score and reject at session "
+                          "granularity, so a noisy hour no longer condemns "
+                          "an entire acquisition day (LEMI/NIMS runs are "
+                          "whole days). The statistical unit is FC windows "
+                          "per session: ~1 h at 1 Hz with window 256 gives "
+                          "~28 windows (the validated MTU-5A stream "
+                          "recipe); higher-rate data supports shorter "
+                          "sessions. Whole runs are tiled — sessions never "
+                          "cross run boundaries, and the cascade spans "
+                          "(regroup_contiguous) are built from ALL "
+                          "sessions, never from QC outcomes. Sessions are "
+                          "labelled '{run id}_sNNNN'. Use with "
+                          "regroup_contiguous to keep the deep levels "
+                          "(per-session cascades starve them)."),
     )
 
     def execute(self, ctx, mth5, survey: str = "", station: str = "",
@@ -424,7 +456,8 @@ class BuildFC(Node):
                 reject_saturated: bool = True,
                 saturated_max: float = 0.01,
                 persist: bool = False,
-                regroup_contiguous: bool = False) -> dict[str, Any]:
+                regroup_contiguous: bool = False,
+                session_hours: float = 0.0) -> dict[str, Any]:
         from emptyui_mth5.phoenix_mtu import _window_bounds
         from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
 
@@ -563,38 +596,130 @@ class BuildFC(Node):
         # the time series is read exactly once.
         import pandas as pd
 
+        # session units (§9.3 universal session labels): with
+        # session_hours > 0, every run is tiled into fixed-length
+        # contiguous time intervals, each an independent QC unit with a
+        # generated id '{run id}_sNNNN'. Whole runs pass through as one
+        # unit. Sessions are read lazily (sliced by time when their span
+        # is processed — each source run is read at most once per span).
+        session_seconds = float(session_hours) * 3600.0
+        units: list[tuple] = []  # (unit_id, rate, start, end, run_id, lo, hi)
+        starts_raw = dict(zip(summary["id"].astype(str), summary["start"]))
+        ends_raw = dict(zip(summary["id"].astype(str), summary["end"]))
+
+        def _parse_period(rid):
+            try:
+                r_start = pd.Timestamp(str(starts_raw[rid]))
+                r_end = pd.Timestamp(str(ends_raw[rid]))
+            except (KeyError, TypeError, ValueError):
+                return None, None
+            for attr in ("start", "end"):
+                ts = r_start if attr == "start" else r_end
+                fixed = (ts.tz_localize("UTC") if ts.tzinfo is None
+                         else ts.tz_convert("UTC"))
+                if attr == "start":
+                    r_start = fixed
+                else:
+                    r_end = fixed
+            return r_start, r_end
+
+        if session_seconds > 0:
+            for rid in wanted:
+                rate = rate_of[rid]
+                r_start, r_end = _parse_period(rid)
+                if r_start is None:
+                    ctx.logger.warning(
+                        "run %s has no parseable time period — it cannot "
+                        "be session-split and passes through whole", rid)
+                    units.append((rid, rate, None, None, rid, None, None))
+                    continue
+                # the summary end is the last SAMPLE (inclusive) — tile the
+                # exclusive interval [start, end + one sample)
+                run_hi = r_end + pd.to_timedelta(1.0 / rate, unit="s")
+                half = pd.to_timedelta(0.5 / rate, unit="s")
+                k = 0
+                t = r_start
+                while t < run_hi:
+                    t2 = min(t + pd.to_timedelta(session_seconds, unit="s"),
+                             run_hi)
+                    units.append((f"{rid}_s{k + 1:04d}", rate, t, t2, rid,
+                                  t, t2 - half))
+                    t = t2
+                    k += 1
+        else:
+            for rid in wanted:
+                r_start, r_end = _parse_period(rid)
+                units.append((rid, rate_of[rid], r_start, r_end, rid,
+                              None, None))
+
         spans: list[list[str]] = []
         if not regroup_contiguous:
-            spans = [[rid] for rid in wanted]
+            spans = [[u[0]] for u in units]
         else:
+            u_rate = {u[0]: u[1] for u in units}
+            u_start = {u[0]: u[2] for u in units}
+            u_end = {u[0]: u[3] for u in units}
             per_rate: dict[float, list[str]] = {}
-            for rid in wanted:
-                per_rate.setdefault(rate_of[rid], []).append(rid)
-            starts = dict(zip(summary["id"].astype(str),
-                              pd.to_datetime(summary["start"])))
-            ends = dict(zip(summary["id"].astype(str),
-                            pd.to_datetime(summary["end"])))
+            for u in units:
+                per_rate.setdefault(u[1], []).append(u[0])
             for rate in sorted(per_rate, reverse=True):
-                ordered = sorted(per_rate[rate], key=lambda r: starts[r])
+                ordered = sorted(per_rate[rate], key=lambda r: u_start[r])
                 cur: list[str] = []
                 prev_end = None
-                for rid in ordered:
-                    start, end = starts[rid], ends[rid]
+                for uid in ordered:
+                    start, end = u_start[uid], u_end[uid]
                     if prev_end is not None and (
                             start - prev_end).total_seconds() > 2.0 / rate:
                         spans.append(cur)
                         cur = []
-                    cur.append(rid)
+                    cur.append(uid)
                     prev_end = end
                 if cur:
                     spans.append(cur)
 
+        unit_by_id = {u[0]: u for u in units}
         for i, span in enumerate(spans, 1):
             members = []
-            for rid in span:
-                run_obj = _resolve_run(station_obj, rid)
-                data_vars, sample_rate, start = _read_channels(run_obj)
-                members.append((rid, data_vars, sample_rate, start))
+            memo: dict[str, dict] = {}
+            for uid in span:
+                _uid, rate, u_start, u_end, rid, lo, hi = unit_by_id[uid]
+                if lo is None:  # whole run (no session split, or unsplit)
+                    data_vars, sample_rate, start = _read_channels(
+                        _resolve_run(station_obj, rid))
+                else:
+                    if rid not in memo:
+                        memo[rid] = _read_channels(_resolve_run(station_obj,
+                                                                rid))[0]
+                    base = memo[rid]
+                    sample = next(iter(base.values()))
+                    t_arr = np.asarray(sample["time"].values)
+                    if np.issubdtype(t_arr.dtype, np.datetime64):
+                        idx = pd.DatetimeIndex(t_arr)
+                        if idx.tz is None:  # naive archive, aware bounds
+                            blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
+                        else:  # aware archive: localize naive bounds
+                            blo = (lo.tz_localize("UTC") if lo.tzinfo is None
+                                   else lo)
+                            bhi = (hi.tz_localize("UTC") if hi.tzinfo is None
+                                   else hi)
+                        data_vars = {
+                            name: da.sel(time=slice(blo, bhi))
+                            for name, da in base.items()}
+                    else:
+                        ctx.logger.warning(
+                            "run %s has no absolute time axis — its "
+                            "sessions cannot be sliced by UTC window and "
+                            "the whole run is used", rid)
+                        data_vars = base
+                    sample_rate = rate
+                    # naive-UTC numpy datetime64: matches what the channel
+                    # coords provide (the archive convention — aware stamps
+                    # would make the merged fc time coordinate an object
+                    # array downstream)
+                    ts = u_start.tz_convert("UTC").tz_localize(None) \
+                        if u_start.tzinfo is not None else u_start
+                    start = ts.to_datetime64()
+                members.append((uid, data_vars, sample_rate, start))
             sample_rate = members[0][2]
             span_id = (span[0] if len(span) == 1
                        else f"sr{sample_rate:g}_span{i:04d}")
@@ -691,8 +816,10 @@ class BuildFC(Node):
                 for level, fc in levels.items():
                     t = np.asarray(fc["time"].values)
                     if np.issubdtype(t.dtype, np.datetime64):
-                        t0 = np.asarray(members[0][3],
-                                        dtype="datetime64[ns]")
+                        t0 = members[0][3]
+                        if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
+                            t0 = t0.tz_convert("UTC").tz_localize(None)
+                        t0 = np.asarray(t0, dtype="datetime64[ns]")
                         off = ((t - t0) / np.timedelta64(1, "s")).astype(float)
                     else:
                         off = t.astype(float)
