@@ -185,14 +185,29 @@ class Executor:
         return seen
 
     @staticmethod
-    def _value_signature(value: Any, data_root=None, path_kind: str = "") -> Any:
+    def _value_signature(
+        value: Any,
+        data_root=None,
+        path_kind: str = "",
+        widget: str = "",
+        project_dir=None,
+    ) -> Any:
         """Cache-signature form of one effective param value.
 
-        String values that point at existing files contribute their stat
-        signature ``(path, size, mtime_ns)`` instead of the path text alone
+        Only path params (``widget`` ``file``/``directory``) pointing at an
+        existing path contribute a stat signature ``(path, size, mtime_ns)``
         (Nextflow-style: cheap, detects externally modified inputs; content
         hashing is deliberately avoided — too expensive for data files).
-        Everything else is used as-is (workflow params are JSON-borne).
+        Every other value is used as-is (workflow params are JSON-borne), so
+        a plain string that coincidentally names an existing path never
+        becomes a stat signature.
+
+        The path part is taken data-root-relative (POSIX form) when the
+        file lives under the data root or project dir, so cache keys
+        survive relocation (DESIGN.md §7.1, §12.3); the absolute path is
+        used otherwise. The stat half still moves with the file: a plain
+        copy refreshes ``mtime_ns`` and misses the cache (recompute — the
+        safe direction); only mtime-preserving moves stay cache hits.
 
         ``data_root`` + ``path_kind="in"``: a RELATIVE input path is
         resolved under the data root before statting (execution resolves
@@ -200,16 +215,30 @@ class Executor:
         remote-mode workflows and external modifications never
         invalidated the cache.
         """
-        if isinstance(value, str):
-            p = Path(value).expanduser()
-            if path_kind == "in" and data_root is not None and not p.is_absolute():
-                p = Path(data_root) / p
+        if not isinstance(value, str) or widget not in ("file", "directory"):
+            return value
+        p = Path(value).expanduser()
+        if path_kind == "in" and data_root is not None and not p.is_absolute():
+            p = Path(data_root) / p
+        try:
+            st = p.stat()
+        except (OSError, ValueError):
+            return value
+        try:
+            resolved = p.resolve()
+        except OSError:
+            resolved = p
+        for root in (data_root, project_dir):
+            if not root:
+                continue
             try:
-                st = p.stat()
+                base = Path(root).resolve()
+                if resolved.is_relative_to(base):
+                    return [resolved.relative_to(base).as_posix(),
+                            st.st_size, st.st_mtime_ns]
             except (OSError, ValueError):
-                return value
-            return [str(p), st.st_size, st.st_mtime_ns]
-        return value
+                continue
+        return [str(p), st.st_size, st.st_mtime_ns]
 
     def _node_key(
         self,
@@ -217,6 +246,7 @@ class Executor:
         manifest,
         incoming: list[dict[str, str]],
         data_root=None,
+        project_dir=None,
     ) -> str:
         """Structural cache signature for one node (DESIGN.md §7).
 
@@ -247,7 +277,10 @@ class Executor:
                          else round(float(value)))
             params[param.name] = self._value_signature(
                 value, data_root=data_root,
-                path_kind=getattr(param, "path_kind", ""))
+                path_kind=getattr(param, "path_kind", ""),
+                widget=getattr(param, "widget", ""),
+                project_dir=project_dir,
+            )
         payload = {
             "type": wnode.type,
             "version": manifest.version,
@@ -348,6 +381,7 @@ class Executor:
         cache: NodeCache | None = None,
         targets: list[str] | None = None,
         data_root=None,
+        project_dir=None,
         include_store: bool = False,
     ) -> dict[str, Any]:
         """Execute the workflow; returns a run summary.
@@ -366,7 +400,9 @@ class Executor:
 
         `data_root` (DESIGN.md §17.2) confines input path params to a
         read-only root and resolves output path params into the run
-        workspace; None keeps local-dev behavior.
+        workspace; None keeps local-dev behavior. `project_dir` (§12.3,
+        planned) is the stable user-designated directory whose relative
+        layout cache keys may share; inert until the disk cache lands.
         """
         if cancel_event is None:
             cancel_event = threading.Event()
@@ -431,7 +467,8 @@ class Executor:
             ]
             try:
                 keys[node_id] = self._node_key(wnode, manifest, incoming,
-                                               data_root=data_root)
+                                               data_root=data_root,
+                                               project_dir=project_dir)
             except ValueError as exc:
                 # param coercion now happens at key time (§7 hashes the
                 # EFFECTIVE params) — surface the failure as the same

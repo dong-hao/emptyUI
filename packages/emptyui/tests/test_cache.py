@@ -194,7 +194,7 @@ def test_file_param_signature_detects_external_modification(tmp_path: Path):
     class ReadFile(Node):
         type = "test.readfile"
         outputs = (Output("text", "any"),)
-        params = (Param("path", "string", default=""),)
+        params = (Param("path", "file", default=""),)
         calls = 0
 
         def execute(self, ctx, path=""):
@@ -358,3 +358,103 @@ def test_string_and_number_params_share_cache_entry():
     ex.run(wf(4), emit=lambda e: None, cache=cache)
     ex.run(wf("4"), emit=lambda e: None, cache=cache)
     assert calls["n"] == 1  # second run hit the cache
+
+
+def test_stat_signature_requires_path_widget(tmp_path: Path):
+    """§7.1: only ``file``/``directory`` widgets get stat signatures — a
+    plain string param whose value coincidentally names an existing path
+    stays a plain string (no CWD-dependent stat quirk)."""
+    real = tmp_path / "NO46.txt"
+    real.write_text("x")
+    ex = Executor(Registry())
+    assert ex._value_signature(str(real), widget="string") == str(real)
+    assert ex._value_signature("NO46.txt", widget="string") == "NO46.txt"
+    sig = ex._value_signature(str(real), widget="file")
+    assert sig == [str(real), real.stat().st_size, real.stat().st_mtime_ns]
+    # missing file ⇒ value as-is (unchanged)
+    assert ex._value_signature(str(tmp_path / "absent.txt"),
+                               widget="file") == str(tmp_path / "absent.txt")
+
+
+def test_file_signature_survives_data_root_relocation(tmp_path: Path):
+    """§7.1/§12.3: the path part of a file-param signature is taken
+    data-root-relative (POSIX form), so relocating the data root with an
+    identical relative layout keeps the cache key stable. A file outside
+    any root keeps its absolute-path signature."""
+    import shutil
+
+    root_a, root_b = tmp_path / "root_a", tmp_path / "root_b"
+    for root in (root_a, root_b):
+        (root / "site").mkdir(parents=True)
+    file_a = root_a / "site" / "data.txt"
+    file_a.write_text("payload")
+    shutil.copy2(file_a, root_b / "site" / "data.txt")  # mtime preserved
+
+    sig_a = Executor._value_signature("site/data.txt", data_root=root_a,
+                                      path_kind="in", widget="file")
+    sig_b = Executor._value_signature("site/data.txt", data_root=root_b,
+                                      path_kind="in", widget="file")
+    assert sig_a == sig_b
+    assert sig_a[0] == "site/data.txt"
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("y")
+    sig = Executor._value_signature(str(outside), widget="file")
+    assert sig[0] == str(outside)
+
+    # project dir shares the same relative rule (§12.3 scaffolding)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "state.bin").write_text("z")
+    sig_p = Executor._value_signature(str(proj / "state.bin"),
+                                      widget="file", project_dir=proj)
+    assert sig_p[0] == "state.bin"
+
+
+def test_relocated_data_root_hits_cache(tmp_path: Path):
+    """End-to-end §7.1: the same relative workflow on a relocated data
+    root (mtime-preserving copy) hits the cache; editing the relocated
+    file's content still invalidates (stat half of the signature)."""
+    import shutil
+
+    from emptyui import Node, Output, Param
+
+    class ReadFile(Node):
+        type = "test.reloc_read"
+        outputs = (Output("text", "any"),)
+        params = (Param("path", "file", path_kind="in"),)
+        calls = 0
+
+        def execute(self, ctx, path=""):
+            ReadFile.calls += 1
+            return {"text": Path(path).read_text()}
+
+    reg = Registry()
+    reg.add(ReadFile)
+
+    root_a, root_b = tmp_path / "root_a", tmp_path / "root_b"
+    for root in (root_a, root_b):
+        (root / "site").mkdir(parents=True)
+    src = root_a / "site" / "data.txt"
+    src.write_text("payload")
+    shutil.copy2(src, root_b / "site" / "data.txt")
+
+    def wf():
+        return Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.reloc_read",
+                                params={"path": "site/data.txt"})],
+            edges=[],
+        )
+
+    cache = NodeCache()
+    ex = Executor(reg)
+    ex.run(wf(), emit=lambda e: None, cache=cache, data_root=root_a)
+    ex.run(wf(), emit=lambda e: None, cache=cache, data_root=root_a)
+    assert ReadFile.calls == 1  # second run cached
+
+    ex.run(wf(), emit=lambda e: None, cache=cache, data_root=root_b)
+    assert ReadFile.calls == 1  # relocated root ⇒ same key ⇒ cache hit
+
+    (root_b / "site" / "data.txt").write_text("changed-content")
+    ex.run(wf(), emit=lambda e: None, cache=cache, data_root=root_b)
+    assert ReadFile.calls == 2  # external modification still invalidates

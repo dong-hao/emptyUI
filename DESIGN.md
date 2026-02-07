@@ -631,11 +631,14 @@ One file = one reproducible pipeline.
   `sha256(type, manifest version, effective params, per-input upstream
   signatures)` — node ids excluded (copy/paste duplicates share entries);
   signatures recurse through the DAG so invalidation propagates. Data payloads
-  are **never hashed** (xarray/RunTS impractical to digest); string params
-  pointing at existing files hash `(path, size, mtime_ns)` (Nextflow-style; path
-  is taken **data-root-relative** when the file lives under the data root or
-  project dir, so cache keys survive relocation), so externally modified input
-  files invalidate. On a cache hit the executor re-registers outputs and
+  are **never hashed** (xarray/RunTS impractical to digest); path params
+  (`file`/`directory` widgets only) pointing at existing files hash
+  `(path, size, mtime_ns)` (Nextflow-style; the path is taken
+  **data-root-relative** when the file lives under the data root or project
+  dir, so cache keys survive relocation — a plain copy refreshes `mtime_ns`
+  and misses the cache (recompute, the safe direction); only mtime-preserving
+  moves stay hits), so externally modified input files invalidate. On a cache
+  hit the executor re-registers outputs and
   **copies artifact files into the new run's workspace** (renamed for the
   restoring node); vanished artifact files re-execute the node. Cached nodes
   emit `node_status` with `"cached": true`. **Immutability contract**
