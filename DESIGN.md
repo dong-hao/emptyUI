@@ -117,8 +117,12 @@ Dependency policy:
 - `emptyui` core deps: `fastapi`, `uvicorn`, `pydantic`, `numpy` only.
 - `emptyui-core-nodes`: adds `matplotlib` (+ optional `pandas`, `scipy`).
 - Everything else (mth5, aurora, mt_metadata, …): plugin extras.
-- Frontend pinned via lockfile; API types generated from OpenAPI spec
-  (`scripts/codegen`).
+- Frontend pinned via lockfile; API types are **handwritten** in
+  `packages/web/src/api/client.ts` — the node manifest is plugin-open
+  (unknown fields are ignored downstream), so catalog types stay
+  deliberately loose; the server-side shapes the frontend depends on are
+  pinned by a contract test (`packages/emptyui/tests/test_api_contract.py`),
+  so removals/renames of API keys fail loudly.
 
 ---
 
