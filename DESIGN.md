@@ -140,7 +140,7 @@ are open-ended strings so plugins can add their own):
 
 | Category | Role | Examples |
 |----------|------|----------|
-| **Data I/O** | Bring data in/out of the graph; convert formats | LoadMTH5, LoadNIMS, LoadCSV, SaveMTH5, SaveEDI, ExportXML, MetadataEditor |
+| **Data I/O** | Bring data in/out of the graph; convert formats | LoadMTH5, LoadCSV, SaveMTH5, SaveEDI, ExportXML, MetadataEditor |
 | **Processing** | Transform data; produce new typed outputs | Decimate, Detrend, BandpassFilter, NotchFilter, Calibrate(RemoveResponse), STFT, RobustEstimate, MergeTFLevels |
 | **Display** | Render data to `plot` outputs (no data deps downstream) | PlotTimeSeries, PlotSpectrogram, PlotAppResPhase, PlotTipper, PlotCoherency, PlotPhaseTensor |
 
@@ -325,21 +325,30 @@ to interpret names:
 ### Merging multiple runs into one TF estimate
 
 A single TF estimate is often built from **several acquisition runs** (e.g.
-Phoenix MTU-5 segments). aurora supports this by allowing multiple
-`KernelDataset` rows and **concatenating their STFTs at the FC level** — it does
-*not* merge in the time domain. emptyUI offers a **`Merge Runs` node** with two
-modes:
-1. **`selection` (FC-level, default)** — multiple run rows in a `KernelDataset`;
-   aurora concatenates the FCs. No fabricated samples. The idiomatic path.
-2. **`ts.run` (physical)** — combines raw series via `RunTS.merge()` into a new
-   mth5 run group; explicitly opt-in because it **interpolates across gaps**
-   (gap policy is a param).
+Phoenix MTU-5 segments). aurora's canonical mechanism allows multiple
+`KernelDataset` rows and **concatenates their STFTs at the FC level** — it
+does *not* merge in the time domain. emptyUI delivers this route through the
+aurora plugin's **`Merge FC` node / `Build FC Database`** (§9.3), which
+concatenate the per-run Fourier coefficients along time, per decimation
+level — no fabricated samples; the idiomatic route for burst archives and
+for building one TF from many runs.
 
-Constraints: all runs must share the same native sample rate, and channel
-components must be consistent. Remote-reference multi-row intersection is an
-open aurora TODO — emptyUI resolves it structurally (pairing by the identical
-absolute window grid, §3 Estimate TF), and the residual silent hazard is
-warned about explicitly (below).
+The **`Merge Runs` node** (`mth5.runs.merge`) is the *physical* counterpart:
+it combines the raw series of one station via `RunTS.merge()` into a new mth5
+run group. It is explicitly opt-in because it **interpolates across gaps**
+(gap policy is a param) — the fabricated samples stay limited to the gaps and
+are stamped as provenance (`merged_gap_intervals`, hazard below). The
+kernel-dataset `selection`-payload route once described here was never
+delivered (its producer node remains M4-deferred; `View Selection` ships
+hidden with no producer).
+
+Constraints (both routes): all runs must share the same native sample rate,
+and channel components must be consistent. Remote-reference multi-row
+intersection is an open aurora TODO — emptyUI resolves it structurally
+(pairing by the identical absolute window grid, §3 Estimate TF; the
+`intersect` pairing mode of §9.3 covers residual clock/coverage
+differences), and the residual silent hazard is warned about explicitly
+(below).
 
 **Remote-reference pairing hazard (M4 #2)**. The harmful variant is a remote
 merge that bridged acquisition gaps by interpolation (physical `Merge Runs`):
@@ -873,11 +882,23 @@ and rebuilt on Align Runs / Split → Merge Channels outputs.
 | Loader | Notes |
 |---|---|
 | Load MTH5 | Native archives; runs/FCs/TFs |
-| Load CSV / Load NIMS | Generic series; NIMS via the mth5 USArray tooling |
+| Load CSV | Generic series |
 | Load LEMI-424 | `channel_nomenclature` select (lemi12/lemi34), FAP `.chn`/`.def` calibration auto-pickup |
 | Extract / Split / Merge Channels, Align Runs, Merge Runs | Archive/series manipulation (§3) |
 | **Load Phoenix MTU-5A** | Burst-mode ingestion — see below |
 | TF Import/Export | EDI/XML/ZMM/AVG/J |
+
+**NIMS (USArray) note.** Native NIMS ingestion is **not delivered** — USArray
+NIMS recordings are automatically uploaded to the IRIS Data Center and
+archived as miniSEED (a seismic-data format, repurposed here for MT), so
+there is no local NIMS corpus to read. The `nims` *nomenclature keyword*
+(mt_metadata `CHANNEL_MAPS`) remains fully supported — it names the channel
+convention of IRIS-acquired archives, not a loader. The upstream mth5 FDSN
+client (`mth5.clients.FDSN.make_mth5_from_fdsn_client`) already fetches
+IRIS-held data into MTH5; wrapping it as a **`Load from FDSN`** node is a
+recorded follow-up (§12.2). Until then, IRIS-sourced data is consumed from a
+pre-fetched MTH5 via `Load MTH5` (see the `nims-remote-reference` example
+workflow, which loads an archive fetched that way).
 
 #### Phoenix MTU-5A burst ingestion
 
@@ -1443,6 +1464,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 17 | ~~Improved auto frequency grid~~ | — | — | **delivered** (§10.2 l2u) |
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
 | 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
+| 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
 
 ### 12.3 Planned — portable local disk cache (designed, not yet implemented)
 
