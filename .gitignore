@@ -20,6 +20,7 @@ packages/web/dist/
 # Local notes / scratch
 prompt.md
 screenshot-comfyUI.png
+issues.md
 
 # User workflow documents saved from the UI (repo ROOT only — the curated
 # examples under examples/workflow/ are tracked)
