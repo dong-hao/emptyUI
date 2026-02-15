@@ -160,6 +160,9 @@ interface WorkflowState {
   pasteSelection: () => void;
   duplicateSelection: () => void;
   loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[], name?: string) => void;
+  /** Start a fresh document (toolbar "New", §8.1): empty canvas, default
+   *  name — the run state is reset by the caller. */
+  newWorkflow: () => void;
 }
 
 /** The workflow document is the single source of truth (DESIGN.md §8). */
@@ -352,6 +355,14 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       edges,
       selectedNodeId: null,
       ...(name ? { docName: name } : {}),
+    }),
+  newWorkflow: () =>
+    set({
+      nodes: [],
+      edges: [],
+      selectedNodeId: null,
+      clipboard: null,
+      docName: "untitled",
     }),
 }));
 

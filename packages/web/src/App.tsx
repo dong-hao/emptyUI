@@ -4,6 +4,7 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  SelectionMode,
   type Node,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -336,6 +337,16 @@ export default function App() {
     }
   };
 
+  const handleNew = () => {
+    if (nodes.length > 0 &&
+        !window.confirm("Clear the canvas? The current workflow is not saved.")) {
+      return;
+    }
+    useRun.getState().reset();
+    useWorkflow.getState().newWorkflow();
+    setMessage(null);
+  };
+
   return (
     <div className="app">
       <header className="toolbar">
@@ -349,6 +360,13 @@ export default function App() {
           disabled={runStatus !== "running" && runStatus !== "queued"}
         >
           ✕ Cancel
+        </button>
+        <button
+          onClick={handleNew}
+          disabled={runStatus === "running" || runStatus === "queued"}
+          title="Start a new (empty) workflow"
+        >
+          New
         </button>
         <button onClick={handleSave} disabled={nodes.length === 0}>
           Save
@@ -400,6 +418,8 @@ export default function App() {
             onNodeClick={(_, node) => useWorkflow.getState().selectNode(node.id)}
             onPaneClick={() => useWorkflow.getState().selectNode(null)}
             deleteKeyCode={["Backspace", "Delete"]}
+            selectionMode={SelectionMode.Full}
+            selectionKeyCode="Shift"
             onInit={(instance) => {
               rfInstance.current = instance;
             }}
