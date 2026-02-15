@@ -18,9 +18,10 @@ examples/
 │                         #   and re-saving when node surfaces change)
 ├── data/                 # sample datasets (raw instrument corpora are gitignored;
 │                         #   see the notes in each subdirectory)
-└── verification/ … test/verification/
-                         # recorded parity/metrics JSONs + the verification
-                         #   scripts that reproduce them (DESIGN history)
+└── plugin-template/      # working plugin template
+
+test/verification/        # recorded parity/metrics JSONs + the verification
+                          #   scripts that reproduce them (DESIGN history)
 ```
 
 ## Development

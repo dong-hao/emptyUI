@@ -1099,8 +1099,11 @@ emptyUI implements **taper → FFT only** (Hamming default, 50% overlap,
   noise dominates level 0 (boxcar maximizes dof), the diurnal Sq line lies
   inside day-scale windows (hann suppresses its sidelobe leakage). Per-level
   window recorded in the fc attrs.
-- **No per-window detrend (by design)** — emptyUI detrends globally via the
-  upstream `Detrend` node; ablated as NOT a lever for the long-period tail
+- **Per-window detrend (opt-in, off by default)** — `per_window_detrend`
+  ("linear") detrends each STFT window before tapering, keeping window-level
+  trends out of the low-frequency bins. The default stays off: emptyUI
+  detrends globally via the upstream `Detrend` node, and per-window
+  detrending was ablated as NOT a lever for the long-period tail
   (history §24.3 E2).
 - **No clock-zero truncation by default**: `clock_zero` ("" = run-start
   anchoring, "epoch" = Unix epoch, or explicit ISO) anchors window starts to
@@ -1231,7 +1234,8 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   disable the prior with a warning. **Overlap guard**: windows of neighbor
   sessions that overlap a rejected one picked up its samples through the
   decimation cascade and are dropped too (one window duration wide).
-- **Residual Sort** (`aurora.sort.residual`, the orthogonal complement): a
+- **Residual Sort** (`aurora.process.residual_sort`, the orthogonal
+  complement): a
   first-pass TF predicts each FC window's outputs from the pooled magnetic
   vector; the per-window unexplained-power fraction is aggregated per run
   (median over windows, then median over the run's bands after per-band
