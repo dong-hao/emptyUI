@@ -12,6 +12,28 @@ from emptyui.api import Node
 
 ENTRY_POINT_GROUP = "emptyui.nodes"
 
+#: UI metadata for the core port types (DESIGN.md §3) — the backend is the
+#: single source of truth for socket colors; the frontend's built-in table
+#: is only a fallback. Colors mirror the frontend table verbatim so the
+#: rendered result is unchanged. Node-declared ``port_types`` (plugin guide
+#: §"Port types") override these per tag.
+CORE_PORT_TYPES: dict[str, dict[str, str]] = {
+    "any": {"color": "#95a5a6", "label": "Any"},
+    "table": {"color": "#f39c12", "label": "Table"},
+    "plot": {"color": "#d81b8c", "label": "Plot"},
+    "mth5": {"color": "#9b59b6", "label": "MTH5 Archive"},
+    "calibration": {"color": "#af7ac5", "label": "Calibration / Instrument Response"},
+    "selection": {"color": "#8e44ad", "label": "Run Selection"},
+    "decimation": {"color": "#a569bd", "label": "Decimation Level"},
+    "config": {"color": "#6c3483", "label": "Processing Config"},
+    "bands": {"color": "#d2b4de", "label": "Frequency Bands"},
+    "ts.run": {"color": "#2980b9", "label": "Run Time Series"},
+    "ts.channel": {"color": "#7fb3d5", "label": "Channel Time Series"},
+    "fc": {"color": "#186a3b", "label": "Fourier Coefficients"},
+    "tf.level": {"color": "#e74c3c", "label": "TF (decimation level)"},
+    "tf": {"color": "#c0392b", "label": "Transfer Function"},
+}
+
 logger = logging.getLogger("emptyui")
 
 
@@ -77,10 +99,13 @@ class Registry:
         return sorted(self._nodes)
 
     def manifests(self) -> dict[str, Any]:
-        # port_types: UI metadata for every port type declared by any node
-        # (plugin guide §"Port types") — the frontend colors edges with it,
-        # falling back to gray for undeclared types
-        port_types: dict[str, dict[str, str]] = {}
+        # port_types: UI metadata for every port type (DESIGN.md §3) — the
+        # backend decides the colors (the frontend table is only a fallback).
+        # The core tags ship here; node-declared ``port_types`` (plugin guide
+        # §"Port types") override per tag, first declaration wins among nodes.
+        port_types: dict[str, dict[str, str]] = {
+            tag: dict(meta) for tag, meta in CORE_PORT_TYPES.items()
+        }
         for node in self._nodes.values():
             for ptype, meta in getattr(node, "port_types", {}).items():
                 port_types.setdefault(ptype, dict(meta))

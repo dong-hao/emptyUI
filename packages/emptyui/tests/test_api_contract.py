@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from emptyui import Input, Node, Output, Param
-from emptyui.registry import PluginInfo, Registry
+from emptyui.registry import CORE_PORT_TYPES, PluginInfo, Registry
 from emptyui.server.app import create_app
 
 
@@ -111,6 +111,12 @@ def test_port_types_metadata_shape(client: TestClient):
     catalog = client.get("/api/nodes").json()
     assert catalog["port_types"]["test.kind"] == {
         "color": "#123456", "label": "Test"}
+    # §3: the backend decides the core port colors (the frontend table is
+    # only a fallback) — every core tag ships UI metadata with color+label,
+    # and a node declaration overrides the core entry per tag
+    for tag, meta in CORE_PORT_TYPES.items():
+        assert catalog["port_types"][tag] == meta, tag
+    assert catalog["port_types"]["fc"]["color"] == "#186a3b"
 
 
 def test_plugins_shape():

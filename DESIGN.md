@@ -208,9 +208,13 @@ Rules:
   renders unknown types with a neutral color.
 - **Port colors are decided by the backend** (UI metadata per tag via
   `GET /api/nodes`); connection lines render thick and in the source port's
-  color. Fallback families: blue = time series, dark green = frequency domain
-  (`fc`), red = transfer functions (`tf`), purple = metadata/config,
-  gray/yellow = generic (`any`, `table`, `plot`).
+  color. The core tags ship as `CORE_PORT_TYPES` in the registry
+  (`packages/emptyui/src/emptyui/registry.py`); node-declared `port_types`
+  override per tag, and the frontend keeps a mirroring built-in table only
+  as a fallback for older/offline backends. Fallback families: blue = time
+  series, dark green = frequency domain (`fc`), red = transfer functions
+  (`tf`), purple = metadata/config, gray/yellow = generic (`any`, `table`,
+  `plot`).
 - Connection rule: source and target tags must be equal, or the target port
   declares `accepts: [...]`. `any` matches all.
 - Subtyping is deliberately **not** implemented; explicit coercion nodes
