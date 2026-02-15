@@ -1865,7 +1865,7 @@ def _l2u_intervals(lv, template, geom):
     return [((k2 + 0.5) * df, (k1 - 0.5) * df) for k1, k2 in template]
 
 
-def _l2u_band_table(levels, min_bins_per_band=40.0, t_short=None):
+def _l2u_band_table(levels, min_bins_per_band=20.0, t_short=None):
     """Reference-template band table with log-uniform window-starvation
     coarsening (DESIGN.md §14.9, the default frequency-grid method).
 

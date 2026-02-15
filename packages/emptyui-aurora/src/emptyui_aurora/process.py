@@ -1427,6 +1427,10 @@ class EstimateTF(Node):
               default=False,
               description="Robust remote reference (RME_RR). Only applies to "
                           "the 'Robust' estimator.",
+              # enabled_when deliberately lists the legacy engine vocabulary
+              # (RME/RME_RR) alongside Robust: _resolve_estimator still
+              # accepts it so previously saved workflows keep loading, and
+              # the widget must stay editable there too.
               enabled_when=("estimator_engine", ("Robust", "RME", "RME_RR")),
               cascade={True: (("estimator_engine", "Robust"),)}),
         Param("periods_per_octave", "integer", label="Periods per octave",

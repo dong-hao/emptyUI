@@ -260,16 +260,6 @@ def discover_plugins(
     return infos
 
 
-def find_plugins(registry: Registry) -> list[str]:
-    """Discover plugins advertising the ``emptyui.nodes`` entry point group.
-
-    Backward-compatible wrapper returning the loaded entry-point names
-    (all plugins enabled). See :func:`discover_plugins` for plugin
-    metadata and enable/disable support.
-    """
-    return [info.name for info in discover_plugins(registry)]
-
-
 def build_default_registry(disabled_plugins: Iterable[str] = ()) -> Registry:
     registry = Registry()
     discover_plugins(registry, set(disabled_plugins))

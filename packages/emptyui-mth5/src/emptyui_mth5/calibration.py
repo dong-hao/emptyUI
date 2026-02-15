@@ -347,7 +347,7 @@ class LoadCalibration(Node):
     inputs = ()
     outputs = (Output("calibration", "calibration"),)
     params = (
-        Param("data_path", "file", label="Calibration file", path_kind="in"),
+        Param("path", "file", label="Calibration file", path_kind="in"),
         Param("extend_flat", "boolean", label="Flat below table",
               default=True,
               description="Treat the response as constant (first row, zero "
@@ -355,8 +355,8 @@ class LoadCalibration(Node):
                           "log-extrapolation was found to be worse."),
     )
 
-    def execute(self, ctx, data_path: str,
+    def execute(self, ctx, path: str,
                 extend_flat: bool = True) -> dict[str, Any]:
-        filters = load_calibration(data_path, extend_flat=extend_flat)
+        filters = load_calibration(path, extend_flat=extend_flat)
         ctx.progress(1.0, f"loaded calibration for {sorted(filters)}")
         return {"calibration": filters}
