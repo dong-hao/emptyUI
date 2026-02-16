@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from emptyui import Input, Node, Output, Param
 from emptyui_core_nodes._timewindow import resolve_window_s
+from emptyui_core_nodes.types import is_run_collection
 from emptyui_core_nodes.types import is_unknown_start, warn_placeholder_start
 
 from .nomenclature import (
@@ -495,6 +496,11 @@ class SplitChannels(Node):
 
     def execute(self, ctx, data,
                 channel_nomenclature: str = "auto") -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "Split Channels requires a single run — Extract Run 'time "
+                "range' produces a run collection; extract one run ('run id' "
+                "mode) for channel tooling")
         names = _channel_names(data)
         kw = (channel_nomenclature if channel_nomenclature != "auto"
               else infer_keyword(names))
@@ -787,6 +793,13 @@ class AlignRuns(Node):
 
     def execute(self, ctx, data1, data2, start: str = "",
                 end: str = "") -> dict[str, Any]:
+        for name, value in (("time series 1", data1), ("time series 2", data2)):
+            if is_run_collection(value):
+                raise ValueError(
+                    f"{name} is a run collection — Align Runs works on single "
+                    "time series: burst-mode remote reference pairs at the FC "
+                    "level (Estimate TF pairing='intersect'), not in the time "
+                    "domain; extract single runs to align")
         ch1, sr1, a1, r1 = _run_time_info(data1)
         ch2, sr2, a2, r2 = _run_time_info(data2)
         if abs(sr1 - sr2) > 1e-9 * max(sr1, sr2, 1.0):

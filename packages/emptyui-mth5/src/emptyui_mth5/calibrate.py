@@ -16,6 +16,8 @@ series edges):
 from __future__ import annotations
 
 import logging
+
+from emptyui_core_nodes.types import is_run_collection
 from typing import Any
 
 import numpy as np
@@ -126,6 +128,10 @@ class Calibrate(Node):
     def execute(self, ctx, data, calibration=None,
                 include_decimation: bool = False,
                 include_delay: bool = False) -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "Calibrate requires a single time series — collection mapping "
+                "is planned (M4 backlog)")
         kwargs = {"include_decimation": include_decimation,
                   "include_delay": include_delay}
         # Idiomatic mth5 path: the run carries its own channel responses.

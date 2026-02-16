@@ -1070,6 +1070,10 @@ first-run fallback — but a bounded window that misses the resolved run's
 extent entirely now rejects with an actionable message naming the matched
 run, its extent, and the station's longest runs (a burst archive's first
 summary row is a short slot; the continuous stream is what users want).
+Conversely, the singular-semantics ts tooling (Split/Merge Channels, Align
+Runs, Calibrate, Detrend/Bandpass, ts plots) **rejects collections loudly**
+with node-appropriate remedies — collection mapping and per-family viewing
+are M4 backlog #21.
 
 ### 9.4 Universality — session labels for continuous instruments
 
@@ -1514,6 +1518,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
 | 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
+| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, ts plots) reject collections loudly. Tier 1 — Plot Time Series: NOT one plot per member (thousands of runs overwhelm); a **sample-rate selection** mechanism (24000/2400/150/15 …) picks the family to view — the Extract-Run-style inclusive gather within a time range. Tier 2 — element-wise maps (Detrend/Bandpass/Calibrate): apply the single-ts recipe to every member; Detrend trivial; Bandpass/Calibrate **quick-reject when the operation is out of the member's sampling-frequency scope** (e.g. a 50–100 Hz bandpass on 1 Hz data); needs a static-output-tag decision for map nodes (outputs depend on input shape at run time) |
 
 ### 12.3 Planned — portable local disk cache (designed, not yet implemented)
 

@@ -286,3 +286,50 @@ def test_load_read_only_holds_no_hdf5_lock(tmp_path, monkeypatch):
     assert captured["locking"] is False
     LoadMth5().execute(ctx, str(tmp_path / "lk.h5"), mode="r+")
     assert "locking" not in captured
+
+
+# --- Tier 3: singular-semantics nodes reject run collections loudly ------
+
+
+def _coll_stub():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(runs=[object()], extents=[{"run": "r1"}])
+
+
+def test_split_channels_rejects_collection(tmp_path):
+    from emptyui_mth5.runs import SplitChannels
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        SplitChannels().execute(ctx, _coll_stub())
+    except ValueError as exc:
+        assert "requires a single run" in str(exc)
+        assert "'run id'" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")
+
+
+def test_align_runs_rejects_collections(tmp_path):
+    from emptyui_mth5.runs import AlignRuns
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        AlignRuns().execute(ctx, _coll_stub(), _coll_stub())
+    except ValueError as exc:
+        assert "time series 1 is a run collection" in str(exc)
+        assert "pairing='intersect'" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")
+
+
+def test_calibrate_rejects_collection(tmp_path):
+    from emptyui_mth5.calibrate import Calibrate
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        Calibrate().execute(ctx, _coll_stub())
+    except ValueError as exc:
+        assert "planned (M4 backlog)" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")

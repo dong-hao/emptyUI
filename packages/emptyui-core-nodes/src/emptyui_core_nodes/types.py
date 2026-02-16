@@ -205,6 +205,21 @@ def coerce_run(value):
 #: from the 1950s on is legitimate).
 UNKNOWN_EPOCH_STARTS = ("1980-01-01T00:00:00", "1970-01-01T00:00:00")
 
+
+def is_run_collection(value) -> bool:
+    """True for a run collection (Extract Run ``time range`` payload).
+
+    Import-free duck type (core stays mth5-free): a collection carries
+    ``runs`` (list of member payloads) + ``extents`` (identity/extent
+    rows). NB: mt_timeseries objects convert missing-attribute
+    AttributeError into NameError, hence the broad except.
+    """
+    try:
+        extents = value.extents
+    except Exception:  # noqa: BLE001
+        return False
+    return (isinstance(extents, list) and hasattr(value, "runs"))
+
 _log = logging.getLogger("emptyui")
 
 

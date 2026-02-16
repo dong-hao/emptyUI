@@ -6,7 +6,7 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
-from .types import TimeSeries, coerce_run, ensure_finite
+from .types import TimeSeries, coerce_run, ensure_finite, is_run_collection
 
 
 class Bandpass(Node):
@@ -27,6 +27,11 @@ class Bandpass(Node):
 
     def execute(self, ctx, data, low_freq=None, high_freq=None,
                 order: int = 4) -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "received a run collection — element-wise mapping is planned "
+                "(M4 backlog): extract a single run ('run id' mode), or "
+                "connect the collection to Compute FC directly")
         data = coerce_run(data)
         ensure_finite(data.channels, "Bandpass Filter")
         from scipy.signal import butter, filtfilt
@@ -90,6 +95,12 @@ class Detrend(Node):
     )
 
     def execute(self, ctx, data, method: str = "linear") -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "received a run collection — element-wise mapping is planned "
+                "(M4 backlog): extract a single run ('run id' mode), or "
+                "connect the collection to Compute FC directly")
+
         data = coerce_run(data)
         if method != "none":
             ensure_finite(data.channels, "Detrend")

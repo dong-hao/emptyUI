@@ -72,3 +72,48 @@ def test_detrend_none_passthrough_allows_nan(ctx):
     ts = TimeSeries(channels={"ex": x}, sample_rate=8.0)
     out = Detrend().execute(ctx, ts, method="none")["data"]
     assert np.isnan(out.channels["ex"][0])
+
+
+# --- run collections are rejected by singular/linear ts tooling ----------
+
+
+def _collection():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(runs=[object()], extents=[{"run": "r1"}])
+
+
+def test_detrend_rejects_run_collection(tmp_path):
+    from emptyui_core_nodes.filters import Detrend
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        Detrend().execute(ctx, _collection())
+    except ValueError as exc:
+        assert "run collection" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")
+
+
+def test_bandpass_rejects_run_collection(tmp_path):
+    from emptyui_core_nodes.filters import Bandpass
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        Bandpass().execute(ctx, _collection())
+    except ValueError as exc:
+        assert "run collection" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")
+
+
+def test_plot_time_series_rejects_run_collection(tmp_path):
+    from emptyui_core_nodes.plots import PlotTimeSeriesNode
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        PlotTimeSeriesNode().execute(ctx, _collection())
+    except ValueError as exc:
+        assert "sample-rate" in str(exc)
+    else:
+        raise AssertionError("collection input must be rejected")

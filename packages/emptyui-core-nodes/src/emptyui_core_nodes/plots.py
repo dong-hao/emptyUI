@@ -21,6 +21,7 @@ import numpy as np
 from emptyui import Input, Node, Output, Param
 
 from ._channels import auto_channel, resolve_channels
+from .types import is_run_collection
 from ._plotstyle import DPI, apply_style, channel_unit_hint
 from ._timewindow import resolve_window_s
 from .types import TimeSeries, coerce_run
@@ -118,6 +119,11 @@ class PlotTimeSeriesNode(Node):
 
     def execute(self, ctx, data, channels: str = "", seconds=None,
                 start: str = "", end: str = "") -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "received a run collection — per-family viewing (sample-rate "
+                "selection) is planned (M4 backlog): extract a single run to "
+                "plot")
         data = coerce_run(data)
         names = _select_channels(data, channels)
         n0, n1 = _time_window(data, start, end, seconds)
@@ -175,6 +181,11 @@ class PlotSpectrogramNode(Node):
 
     def execute(self, ctx, data, channel: str = "",
                 window_s: float = 10.0) -> dict[str, Any]:
+        if is_run_collection(data):
+            raise ValueError(
+                "received a run collection — per-family viewing (sample-rate "
+                "selection) is planned (M4 backlog): extract a single run to "
+                "plot")
         data = coerce_run(data)
         from scipy.signal import spectrogram
 
