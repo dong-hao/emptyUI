@@ -436,15 +436,24 @@ class ExtractRun(Node):
                 "range [%s, %s]: dropped %d run(s) outside the window "
                 "(%s kept)", start or "start", end or "end", len(dropped),
                 len(kept))
-        # hoist the identity ONCE: the group .metadata properties trigger
-        # the mt_metadata/HDF5 storm per access (~20 s on a burst archive,
-        # DESIGN §24.8 performance note) — never inside the run loop
-        surv_id = str(survey_obj.metadata.id)
-        stat_id = str(station_obj.metadata.id)
+        # identity from the HDF5 group names (free): the group .metadata
+        # properties trigger the mt_metadata/HDF5 storm per access — ~20 s
+        # each on a burst archive, ~250 s for the survey's all-station walk
+        # (DESIGN §24.8 performance note) — never inside the run loop
+        surv_id = survey_obj.hdf5_group.name.split("/")[-1]
+        stat_id = station_obj.hdf5_group.name.split("/")[-1]
         members, extents = [], []
+        registry_cache: dict[tuple, dict] = {}
         for i, (rid, rs, re_, clo, chi) in enumerate(kept, 1):
             run_obj = _resolve_run(station_obj, rid)
             payload = _run_duck_payload(survey_obj, run_obj, lo=clo, hi=chi)
+            # §24.12: the response-chain filters are the same few objects
+            # across members of one survey — resolve each name-set once
+            names = tuple(sorted(getattr(payload, "filters", {}) or {}))
+            if names and names not in registry_cache:
+                registry_cache[names] = resolve_filter_registry(
+                    survey_obj, payload.dataset)
+                payload.filters = registry_cache[names]
             members.append(payload)
             extents.append({
                 "survey": surv_id,
