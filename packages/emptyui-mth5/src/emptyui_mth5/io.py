@@ -29,7 +29,13 @@ class LoadMth5(Node):
         if not p.exists():
             raise FileNotFoundError(f"MTH5 not found: {p}")
         archive = mth5.MTH5()
-        archive.open_mth5(str(p), mode=mode)
+        # read-only handles live for the server lifetime (cached payload) —
+        # hold no HDF5 lock (mth5 passes kwargs to h5py.File), so external
+        # tooling and other opens are never blocked by our reader. Write
+        # modes keep the default lock (a real writer needs it); HDF5's
+        # consistency flag still rejects new opens of write-active files.
+        kwargs = {"locking": False} if mode == "r" else {}
+        archive.open_mth5(str(p), mode=mode, **kwargs)
         ctx.logger.info("opened %s (mode=%s)", p, mode)
         return {"mth5": archive}
 

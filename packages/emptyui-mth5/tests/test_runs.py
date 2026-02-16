@@ -258,3 +258,31 @@ def test_run_id_mode_default_unchanged(archive, tmp_path: Path):
     res = ExtractRun().execute(ctx, archive, run="")
     assert res["data"] is not None
     assert "runs" not in res
+
+
+def test_load_read_only_holds_no_hdf5_lock(tmp_path, monkeypatch):
+    """Read-only handles live for the server lifetime (cached payload) —
+    they must hold no HDF5 lock, or external tooling and later opens of
+    the same file are blocked until restart. Write modes keep the lock."""
+    from _archive import multi_run_archive
+
+    multi_run_archive(tmp_path / "lk.h5", rids=["r1"],
+                      starts=["2024-01-01T00:00:00"])
+    from mth5 import mth5 as m5
+
+    from emptyui_mth5.io import LoadMth5
+
+    captured = {}
+    orig = m5.MTH5.open_mth5
+
+    def spy(self, fn, mode="a", **kw):
+        captured.clear()
+        captured.update(mode=mode, **kw)
+        return orig(self, fn, mode, **kw)
+
+    monkeypatch.setattr(m5.MTH5, "open_mth5", spy)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    LoadMth5().execute(ctx, str(tmp_path / "lk.h5"), mode="r")
+    assert captured["locking"] is False
+    LoadMth5().execute(ctx, str(tmp_path / "lk.h5"), mode="r+")
+    assert "locking" not in captured
