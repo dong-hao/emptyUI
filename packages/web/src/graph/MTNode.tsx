@@ -30,6 +30,21 @@ function toExtent(
         (!station || r.station === station) &&
         (!run || r.run === run),
     );
+    // 'time range' selection: the bar shows the union extent over all
+    // matching runs (the whole coverage the range mode extracts), not the
+    // first run's slice
+    if (String(params.selection ?? "").trim() === "time range") {
+      const starts = pick.map((r) => parseIsoGmt(String(r.start)));
+      const ends = pick.map((r) => parseIsoGmt(String(r.end)));
+      if (starts.some((s) => s === null) || ends.some((s) => s === null)) {
+        return null;
+      }
+      const startSec = Math.min(...(starts as number[]));
+      const endSec = Math.max(...(ends as number[]));
+      return endSec > startSec
+        ? { startSec, endSec, absolute: true }
+        : null;
+    }
     const picked = pick[0] ?? runs[0];
     if (!picked) return null;
     return tsExtent(picked.start, picked.end, true);

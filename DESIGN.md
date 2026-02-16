@@ -164,6 +164,7 @@ so a node boundary ≈ an aurora pipeline stage:
 |-----|--------------|--------------------|---------------|
 | `mth5` | MTH5 Archive | `mth5.MTH5` | HDF5 archive; stateful source of runs/FCs/TFs. *(was `mt.archive`)* |
 | `ts.run` | Run Time Series | `mth5.timeseries.RunTS` (= `mt_timeseries.RunTS`) | Multi-channel time series — the main signal-processing currency; wrap the `RunTS` object directly (emptyUI is mth5-native) |
+| `ts.runs` | Run Collection | list of `mth5.timeseries.RunTS` | Extract Run's `time range` mode: ALL runs intersecting a UTC window (the inclusive burst-mode selection); consumed by Compute FC (Build FC's route, §9.3) |
 | `ts.channel` | Channel Time Series | `mth5.timeseries.ChannelTS` | Single channel (ex/ey/hx/hy/hz); split/merge nodes convert ⇄ `ts.run` |
 | `calibration` | Calibration / Instrument Response | `mt_metadata.filters.*` (Coefficient/PoleZero/FIR/TimeDelay/FAP) | `Calibrate` takes `ts.run` + `calibration` → calibrated `ts.run`. *(was `mt.response`)* |
 | `selection` | Run Selection | `mth5.processing.KernelDataset` (DataFrame) | Which stations/runs/intervals process; local+remote roles. *Plugin-tier / M4-deferred — superseded by ExtractRun → ComputeFC* |
@@ -232,8 +233,12 @@ outputs near the right edge with names to their left (ComfyUI grammar).
 LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ ExportEDI
 (LoadLemi / LoadCsv)                        │                        ├▶ PlotAppResPhase
                                               └─fc─▶ Denoise ─fc─▶ EstimateTF
-                                                                    ├─tf.level─▶ MergeTFLevels
-                                                                    └─tf─▶ PlotTipper
+                                                                     ├─tf.level─▶ MergeTFLevels
+                                                                     └─tf─▶ PlotTipper
+
+LoadMTH5 ─mth5─▶ ExtractRun(selection=time range) ─ts.runs─▶ ComputeFC ─fc─▶ ...
+                (all runs intersecting the UTC window — the inclusive
+                 burst-mode selection; Build FC's route, §9.3)
 
 LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ ComputeFC ─fc─▶ PlotSpectrogram
 
@@ -824,7 +829,9 @@ to days:
   out-of-extent box values draw at the track edge (server clamps with a
   warning — degrade, never reject).
 - **Hosts**: Plot Time Series (start/end of the streamed record), Extract Run
-  (bar bound to the matched `mth5` run extent, absolute GMT), Align Runs (one
+  (bar bound to the matched `mth5` run extent, absolute GMT; in `time range`
+  selection the bar shows the union extent over all runs — the whole
+  coverage the mode extracts), Align Runs (one
   pair over the aligned overlap — identical-interval outputs), Merge Channels
   (crop of the merged run). Extract Run / Align Runs bounds clamp into the run
   extent; extent-unknown → passthrough with warning. Merge Runs is
@@ -1033,6 +1040,36 @@ keyed by run (off by default).
   LRU cache (`_compat.apply_crs_cache`), `ChannelDataset.to_xarray` channel
   reads (~40× faster than `RunGroup.to_runts`), station metadata hoisted out
   of the run loop, `add_run`+`from_channel_ts` archive writes.
+
+#### Extract Run time-range selection (ts route)
+
+Extract Run carries two selection modes: **`run id`** (legacy surface — one
+run, cropped by the time bar; empty id falls back to the first run-summary
+row) and **`time range`** — the inclusive selection for burst-mode
+instruments: **ALL runs of the station whose period intersects the UTC
+window** are extracted, each cropped to the window overlap (the
+time-selector semantic — clamped, never fabricated). A `sample_rates`
+param scopes the families (empty = every family: the staggered burst slots
+plus the continuous stream). The output is a **`ts.runs` run collection**
+(second output port; the legacy `ts.run` output stays for run-id mode).
+
+Compute FC consumes the collection on **Build FC's route**: per-run
+cascades (`compute_fc_levels`) merged along time per decimation level
+(`merge_fc_containers`), with Build FC's **per-family decimation trim**
+(higher-rate families decimate only until their rate would reach the next
+family's native rate — §24.8) and **per-window `run_id`** stamping (§9.3).
+A multi-run collection without `clock_zero` anchoring warns naming the
+remedy (`epoch`): run-start grids differ per run, which is fine without
+remote reference and refuses loudly at the RR pairing sites. Parity
+anchor: for a window that fully contains the runs, Extract(range) +
+Compute FC produces **identical FC levels** to Build FC (regression
+`test_compute_fc_collection.py::test_collection_route_parity_with_build_fc`).
+
+The classic single-run flow keeps the legacy semantics — including the
+first-run fallback — but a bounded window that misses the resolved run's
+extent entirely now rejects with an actionable message naming the matched
+run, its extent, and the station's longest runs (a burst archive's first
+summary row is a short slot; the continuous stream is what users want).
 
 ### 9.4 Universality — session labels for continuous instruments
 

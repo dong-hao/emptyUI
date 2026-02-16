@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import numpy as np
@@ -18,6 +21,111 @@ from .nomenclature import (
     is_magnetic_name,
     standard_name,
 )
+
+_log = logging.getLogger("emptyui")
+
+
+@dataclass
+class RunCollection:
+    """A collection of run time series (Extract Run ``time range`` mode).
+
+    Members are duck payloads (``.dataset`` xr.Dataset, ``.sample_rate``,
+    ``.start`` — the same shape ``compute_fc_levels`` already consumes);
+    :attr:`extents` carries each member's identity/extent row
+    (survey/station/run/start/end/sample_rate) so downstream nodes can
+    stamp per-run identity and the executor can summarize the collection
+    for the time selector (§23.4).
+    """
+
+    runs: list[Any] = field(default_factory=list)
+    extents: list[dict[str, Any]] = field(default_factory=list)
+
+
+def read_run_channels(run_obj):
+    """Fast channel read for one archive run (Build FC's data path).
+
+    Returns ``(data_vars, sample_rate, start)`` — reading channels via
+    ``to_xarray`` avoids ``RunGroup.to_runts``'s mt_metadata
+    deepcopy/validation storm (~7 s per run, ~40x the data read itself;
+    DESIGN §24.8 performance note). The caller wraps the result in a duck
+    payload (``SimpleNamespace(dataset=..., sample_rate=..., start=...,
+    filters=...)``).
+    """
+    import xarray as xr
+
+    data_vars = {}
+    sample_rate = 0.0
+    start = None
+    for name in run_obj.groups_list:
+        da = run_obj.get_channel(name).to_xarray()
+        sample_rate = float(da.attrs.get("sample_rate", sample_rate))
+        if start is None and "time" in da.coords:
+            start = da.coords["time"].values[0]
+        data_vars[str(name)] = da
+    if not sample_rate:
+        # defensive: a division by zero deep in the STFT is worse than a
+        # loud error naming the run
+        raise ValueError(
+            f"run '{run_obj.metadata.id}' carries no sample_rate in "
+            "its channel metadata — cannot build FCs")
+    return data_vars, sample_rate, start
+
+
+def resolve_filter_registry(survey_obj, data_vars) -> dict:
+    """Resolve the response-chain filter objects once from the archive
+    (§24.12): the channel attrs carry filter *names*, the objects live in
+    /Survey/Filters — a duck payload needs the objects for the FC-level
+    calibration to divide by."""
+    filter_names: set = set()
+    for da in data_vars.values():
+        for ref in da.attrs.get("filters") or []:
+            try:
+                filter_names.add(ref["applied_filter"]["name"])
+            except (TypeError, KeyError):
+                continue
+    registry = {}
+    if filter_names:
+        fg = survey_obj.filters_group
+        for fn in sorted(filter_names):
+            try:
+                registry[fn] = fg.to_filter_object(fn)
+            except Exception:  # noqa: BLE001
+                _log.warning(
+                    "filter '%s' referenced by the archive channels "
+                    "could not be resolved — its response will not "
+                    "be removed by Compute FC", fn)
+    return registry
+
+
+def _run_duck_payload(survey_obj, run_obj, lo=None, hi=None):
+    """One run as a duck payload (fast path), sliced to ``[lo, hi]`` when
+    the run carries an absolute time axis."""
+    import xarray as xr
+
+    data_vars, sample_rate, _start = read_run_channels(run_obj)
+    if lo is not None and hi is not None:
+        sample = next(iter(data_vars.values()))
+        t_arr = np.asarray(sample["time"].values)
+        if np.issubdtype(t_arr.dtype, np.datetime64):
+            idx = pd.DatetimeIndex(t_arr)
+            if idx.tz is None:  # naive archive, aware bounds
+                blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
+            else:  # aware archive: localize naive bounds
+                blo = (lo.tz_localize("UTC") if lo.tzinfo is None else lo)
+                bhi = (hi.tz_localize("UTC") if hi.tzinfo is None else hi)
+            data_vars = {
+                name: da.sel(time=slice(blo, bhi))
+                for name, da in data_vars.items()}
+            sample = next(iter(data_vars.values()))
+            if sample.sizes.get("time", 0):
+                _start = sample["time"].values[0]
+    filters = resolve_filter_registry(survey_obj, data_vars)
+    return SimpleNamespace(
+        dataset=xr.Dataset(data_vars),
+        sample_rate=sample_rate,
+        start=_start,
+        filters=filters,
+    )
 
 
 def _resolve_survey(mth5, survey: str):
@@ -71,38 +179,109 @@ def _resolve_run(station_obj, run: str):
     return station_obj.get_run(ids[0])
 
 
+def _utc_timestamp(value) -> pd.Timestamp:
+    """Naive stamps are localized to UTC (the archive convention is UTC)."""
+    ts = pd.Timestamp(str(value))
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
+def _range_bounds(start: str, end: str):
+    """Parse the range-mode selection window: UTC ISO datetime or epoch
+    seconds (the time bar writes ISO); naive stamps localize to UTC."""
+    lo = _window_bounds(start, "")[0] if str(start).strip() else None
+    hi = _window_bounds(end, "")[0] if str(end).strip() else None
+    if lo is not None and hi is not None and hi <= lo:
+        raise ValueError(
+            f"selected time range is empty: end ({hi}) <= start ({lo})")
+    return lo, hi
+
+
+from .phoenix_mtu import _window_bounds  # noqa: E402  (local import cycle)
+
+
+def _largest_runs_hint(summary, limit: int = 3) -> str:
+    """The longest runs of a station summary — the auto-match hint in
+    out-of-overlap errors (a burst archive's first summary row is a short
+    slot; the continuous stream is what users usually want)."""
+    try:
+        spans = (pd.to_datetime(summary["end"]) - pd.to_datetime(summary["start"]))
+        order = spans.sort_values(ascending=False).index[:limit]
+        rows = summary.loc[order]
+        return "; ".join(
+            f"{r['id']} ({pd.Timestamp(r['start']):%Y-%m-%d %H:%M}.."
+            f"{pd.Timestamp(r['end']):%Y-%m-%d %H:%M}, "
+            f"{float(r['sample_rate']):g} Hz)" for _, r in rows.iterrows())
+    except Exception:  # noqa: BLE001 — hint only, never blocks the error
+        return ""
+
+
 class ExtractRun(Node):
     type = "mth5.io.extract_run"
     title = "Extract Run"
-    tooltip = "Extract one run's time series from an MTH5 archive."
-    description = "Extract a run's time series as a RunTS."
+    tooltip = "Extract one run's — or all runs' — time series from an MTH5 archive."
+    description = (
+        "Extract a run's time series as a RunTS ('run id' mode), or all "
+        "runs intersecting a UTC time range as a run collection "
+        "('time range' mode — the inclusive selection for burst-mode "
+        "archives: the 150/2400 Hz slots and the continuous stream are "
+        "each cropped to the window, so Compute FC can cascade and merge "
+        "them per level exactly like Build FC does).")
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
-    outputs = (Output("data", "ts.run", label="time series"),)
+    outputs = (
+        Output("data", "ts.run", label="time series",
+               description="populated in 'run id' mode"),
+        Output("runs", "ts.runs", label="run collection",
+               description="populated in 'time range' mode"),
+    )
     params = (
+        Param("selection", "select", label="Selection",
+              options=("run id", "time range"), default="run id",
+              description="'run id' extracts one run (empty = the first in "
+                          "the run summary); 'time range' extracts ALL runs "
+                          "whose period intersects the UTC window (the "
+                          "inclusive burst-mode selection — whole coverage, "
+                          "each run cropped to the window)"),
         Param("survey", "string", label="Survey id", default=""),
         Param("station", "string", label="Station id", default=""),
-        Param("run", "string", label="Run id", default=""),
+        Param("run", "string", label="Run id", default="",
+              enabled_when=("selection", ("run id",))),
+        Param("sample_rates", "string", label="Sample rates (Hz)",
+              default="", optional=True,
+              enabled_when=("selection", ("time range",)),
+              placeholder="e.g. 15,150 (empty = all families)",
+              description="Comma list of sample rates to keep in 'time "
+                          "range' mode; empty = every family (the "
+                          "staggered burst families + the continuous "
+                          "stream)"),
         Param("start", "string", label="Start (UTC)", default="", optional=True,
               time_bar="mth5", placeholder="run start",
               description="Slot start: ISO datetime (UTC, e.g. "
                           "2023-06-01 12:00:00) or seconds into the run; "
-                          "empty = run start. Driven by the time bar."),
+                          "empty = run start. Driven by the time bar. In "
+                          "'time range' mode this selects the window: all "
+                          "runs intersecting it are extracted."),
         Param("end", "string", label="End (UTC)", default="", optional=True,
               time_bar="mth5", placeholder="run end",
               description="Slot end: ISO datetime (UTC) or seconds into "
                           "the run; empty = run end. Driven by the time "
-                          "bar."),
+                          "bar. In 'time range' mode this selects the "
+                          "window."),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
         "mth5": {"survey": "survey_id", "station": "station_id",
                  "channel_nomenclature": "channel_nomenclature"},
     }
 
-    def execute(self, ctx, mth5, survey: str = "", station: str = "",
-                run: str = "", start: str = "", end: str = "") -> dict[str, Any]:
+    def execute(self, ctx, mth5, selection: str = "run id",
+                survey: str = "", station: str = "",
+                run: str = "", sample_rates: str = "",
+                start: str = "", end: str = "") -> dict[str, Any]:
         survey_obj = _resolve_survey(mth5, survey)
         station_obj = _resolve_station(survey_obj, station)
+        if str(selection).strip() == "time range":
+            return self._execute_range(
+                ctx, survey_obj, station_obj, sample_rates, start, end)
         run_obj = _resolve_run(station_obj, run)
         start_dt = end_dt = None
         if str(start).strip() or str(end).strip():
@@ -150,6 +329,9 @@ class ExtractRun(Node):
                 start_dt = _iso_or_none(start)
                 end_dt = _iso_or_none(end)
             else:
+                self._check_overlap(
+                    ctx, start, end, ext0, ext1, station_obj,
+                    str(run_obj.metadata.id))
                 rec_len = (ext1 - ext0).total_seconds()
                 s0, s1 = resolve_window_s(
                     start, end, rec_len=rec_len,
@@ -161,6 +343,124 @@ class ExtractRun(Node):
         runts = run_obj.to_runts(start=start_dt, end=end_dt)
         ctx.progress(1.0, f"extracted {survey_obj.metadata.id}/{station_obj.metadata.id}/{run_obj.metadata.id}")
         return {"data": runts}
+
+    @staticmethod
+    def _check_overlap(ctx, start: str, end: str, ext0, ext1,
+                       station_obj, run_id: str) -> None:
+        """An explicitly bounded window that misses the resolved run's
+        extent entirely yields a 0 s clamp — reject with an actionable
+        message naming the matched run (a burst archive's first summary
+        row is a short slot; the continuous stream is what users want)."""
+        if not (str(start).strip() or str(end).strip()):
+            return
+        e0 = ext0.tz_localize("UTC") if ext0.tzinfo is None else ext0
+        e1 = ext1.tz_localize("UTC") if ext1.tzinfo is None else ext1
+
+        def _abs_bound(text, fallback):
+            """Bare numbers are RELATIVE seconds (resolve_window_s
+            semantics); ISO/epoch via _window_bounds."""
+            s = str(text).strip()
+            if not s:
+                return fallback
+            try:
+                rel = float(s)
+            except ValueError:
+                return _window_bounds(s, "")[0]
+            return e0 + pd.Timedelta(seconds=rel)
+
+        try:
+            lo = _abs_bound(start, e0)
+            hi = _abs_bound(end, e1)
+            if lo is not None and hi is not None and lo < e1 and hi > e0:
+                return  # overlaps
+        except ValueError:
+            return  # not ISO/epoch — resolve_window_s reports it properly
+        hint = _largest_runs_hint(station_obj.run_summary)
+        raise ValueError(
+            f"requested window {lo}..{hi} does not overlap run "
+            f"'{run_id}' ({e0:%Y-%m-%d %H:%M:%S}..{e1:%Y-%m-%d %H:%M:%S}) — "
+            f"set the 'run' param (station '{station_obj.metadata.id}' "
+            f"holds {len(station_obj.run_summary)} runs"
+            + (f"; longest: {hint})" if hint else ")"))
+
+    def _execute_range(self, ctx, survey_obj, station_obj, sample_rates,
+                       start: str, end: str) -> dict[str, Any]:
+        """'time range' mode: ALL runs of the station whose period
+        intersects the UTC window (inclusive, burst-mode semantics), each
+        loaded via the fast channel read and cropped to the window."""
+        summary = station_obj.run_summary
+        if summary is None or not len(summary):
+            raise ValueError(
+                f"station '{station_obj.metadata.id}' has no runs to select "
+                "from — set 'survey'/'station' or check the archive")
+        wanted = list(summary["id"].astype(str))
+        rates = ([float(r.strip()) for r in str(sample_rates).split(",")
+                  if r.strip()] if str(sample_rates).strip() else None)
+        if rates is not None:
+            rate_of = dict(zip(summary["id"].astype(str),
+                               summary["sample_rate"].astype(float)))
+            wanted = [r for r in wanted
+                      if any(abs(rate_of[r] - x) <= 1e-6 for x in rates)]
+            if not wanted:
+                have = sorted(set(rate_of.values()))
+                raise ValueError(
+                    f"no runs match sample rates {rates} — the station "
+                    f"carries rates {have} Hz")
+        lo, hi = _range_bounds(start, end)
+        kept, dropped = [], []
+        for rid in wanted:
+            row = summary[summary["id"].astype(str) == rid].iloc[0]
+            try:
+                rs, re_ = (_utc_timestamp(row["start"]),
+                           _utc_timestamp(row["end"]))
+            except (TypeError, ValueError):
+                ctx.logger.warning(
+                    "run %s has no parseable time period — dropped from "
+                    "the range selection", rid)
+                continue
+            if (lo is not None and re_ <= lo) or (hi is not None and rs >= hi):
+                dropped.append(rid)
+                continue
+            clo = rs if lo is None else max(lo, rs)
+            chi = re_ if hi is None else min(hi, re_)
+            kept.append((rid, rs, re_, clo, chi))
+        if not kept:
+            span = (f"{_utc_timestamp(summary['start'].min()):%Y-%m-%d %H:%M} .. "
+                    f"{_utc_timestamp(summary['end'].max()):%Y-%m-%d %H:%M}")
+            raise ValueError(
+                f"no runs fall within the requested range "
+                f"[{start or 'record start'}, {end or 'record end'}] — the "
+                f"archive spans {span}")
+        if dropped:
+            ctx.logger.warning(
+                "range [%s, %s]: dropped %d run(s) outside the window "
+                "(%s kept)", start or "start", end or "end", len(dropped),
+                len(kept))
+        # hoist the identity ONCE: the group .metadata properties trigger
+        # the mt_metadata/HDF5 storm per access (~20 s on a burst archive,
+        # DESIGN §24.8 performance note) — never inside the run loop
+        surv_id = str(survey_obj.metadata.id)
+        stat_id = str(station_obj.metadata.id)
+        members, extents = [], []
+        for i, (rid, rs, re_, clo, chi) in enumerate(kept, 1):
+            run_obj = _resolve_run(station_obj, rid)
+            payload = _run_duck_payload(survey_obj, run_obj, lo=clo, hi=chi)
+            members.append(payload)
+            extents.append({
+                "survey": surv_id,
+                "station": stat_id,
+                "run": rid,
+                "start": clo.isoformat(),
+                "end": chi.isoformat(),
+                "sample_rate": float(payload.sample_rate),
+            })
+            ctx.progress(i / len(kept), f"extracted {rid} ({i}/{len(kept)})")
+        rates_seen = sorted({e["sample_rate"] for e in extents})
+        ctx.progress(
+            1.0,
+            f"range [{start or 'start'}, {end or 'end'}]: {len(kept)} "
+            f"run(s) at rates {[f'{r:g}' for r in rates_seen]} Hz")
+        return {"runs": RunCollection(runs=members, extents=extents)}
 
 
 class SplitChannels(Node):

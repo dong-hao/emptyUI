@@ -155,3 +155,106 @@ def test_core_timeseries_placeholder_epoch_and_utc(tmp_path, caplog):
     ctx_ts.start_datetime = "2024-01-01T00:00:00"
     _ch, _sr, a, _rel = _run_time_info(ctx_ts)
     assert a == pd.Timestamp("2024-01-01T00:00:00", tz="UTC")
+
+
+# --- 'time range' mode (inclusive burst-mode selection) ------------------
+
+
+def _three_run_archive(tmp_path: Path):
+    from _archive import multi_run_archive
+
+    return multi_run_archive(
+        tmp_path / "three.h5",
+        rids=["r1", "r2", "r3"],
+        starts=["2024-01-01T00:00:00", "2024-01-01T00:02:00",
+                "2024-01-01T01:00:00"])
+
+
+def test_range_mode_extracts_intersecting_runs(tmp_path):
+    """'time range' keeps the runs intersecting the UTC window (inclusive),
+    each cropped to the window; only the 'runs' output is populated."""
+    archive = _three_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(
+        ctx, archive, selection="time range",
+        start="2024-01-01 00:01:00", end="2024-01-01 00:03:00")
+    coll = res["runs"]
+    assert res.get("data") is None
+    assert [e["run"] for e in coll.extents] == ["r2"]
+    e = coll.extents[0]
+    assert e["start"] == "2024-01-01T00:02:00+00:00"
+    assert e["end"] == "2024-01-01T00:02:31+00:00"
+    assert coll.runs[0].dataset.sizes["time"] == 32
+    assert coll.runs[0].sample_rate == 1.0
+
+
+def test_range_mode_inclusive_window_crops(tmp_path):
+    """A window slicing INTO a run keeps that run, cropped to the overlap."""
+    archive = _three_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(
+        ctx, archive, selection="time range",
+        start="2024-01-01 00:00:10", end="2024-01-01 00:00:20")
+    coll = res["runs"]
+    assert [e["run"] for e in coll.extents] == ["r1"]
+    assert coll.runs[0].dataset.sizes["time"] == 11  # slice endpoints inclusive
+
+
+def test_range_mode_empty_window_error(tmp_path):
+    """No runs in the window -> a loud error naming the archive span."""
+    archive = _three_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        ExtractRun().execute(
+            ctx, archive, selection="time range",
+            start="2024-01-01 02:00:00", end="2024-01-01 03:00:00")
+    except ValueError as exc:
+        assert "no runs fall within" in str(exc)
+        assert "archive spans" in str(exc)
+    else:
+        raise AssertionError("empty range selection must raise")
+
+
+def test_range_mode_sample_rates_filter(tmp_path):
+    from _archive import multi_run_archive
+
+    archive = multi_run_archive(
+        tmp_path / "rates.h5", rids=["a1", "b1"],
+        starts=["2024-01-01T00:00:00", "2024-01-01T00:00:00"],
+        rates=[1.0, 2.0])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(
+        ctx, archive, selection="time range", sample_rates="1",
+        start="2024-01-01 00:00:00", end="2024-01-01 00:01:00")
+    assert [e["run"] for e in res["runs"].extents] == ["a1"]
+    res2 = ExtractRun().execute(
+        ctx, archive, selection="time range", sample_rates="2",
+        start="2024-01-01 00:00:00", end="2024-01-01 00:01:00")
+    assert [e["run"] for e in res2["runs"].extents] == ["b1"]
+
+
+def test_run_id_mode_no_overlap_error(tmp_path):
+    """A bounded window missing the resolved run names the run and hints
+    at the longest runs (the cryptic 0 s clamp is gone)."""
+    archive = _three_run_archive(tmp_path)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    try:
+        ExtractRun().execute(
+            ctx, archive, run="r1",
+            start="2024-01-01 02:00:00", end="2024-01-01 03:00:00")
+    except ValueError as exc:
+        msg = str(exc)
+        assert "does not overlap run 'r1'" in msg
+        assert "holds 3 runs" in msg
+        assert "longest:" in msg
+    else:
+        raise AssertionError("out-of-overlap window must raise")
+
+
+def test_run_id_mode_default_unchanged(archive, tmp_path: Path):
+    """'run id' (default) keeps the legacy single-run surface: 'data'
+    populated, no crop without bounds."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(ctx, archive, run="")
+    assert res["data"] is not None
+    assert "runs" not in res

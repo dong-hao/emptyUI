@@ -91,7 +91,8 @@ class ComputeFC(Node):
         "an absolute start time is available."
     )
     category = "Processing"
-    inputs = (Input("data", "ts.run", label="time series"),)
+    inputs = (Input("data", "ts.run", label="time series",
+                    accepts=("ts.runs",)),)
     outputs = (Output("fc", "fc"),)
     params = (
         Param("channel_nomenclature", "select", label="Channel nomenclature",
@@ -217,9 +218,29 @@ class ComputeFC(Node):
                 saturated_max: float = 0.01,
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
+        if data is None:
+            raise ValueError(
+                "no time series input — Extract Run populates its 'runs' "
+                "output (not 'data') in 'time range' mode; connect that "
+                "port instead")
         # Channel names resolve inside compute_fc_levels (empty fields = auto
         # from nomenclature + data; tipper included when the vertical channel
         # is present, missing outputs dropped with a warning).
+        # NB: mt_timeseries objects convert missing-attribute AttributeError
+        # into NameError — getattr's default does not catch it (same quirk
+        # the executor's payload summary works around)
+        try:
+            extents = data.extents
+        except Exception:  # noqa: BLE001
+            extents = None
+        if (isinstance(extents, list) and hasattr(data, "runs")):
+            return self._execute_collection(
+                ctx, data, input_channels, output_channels,
+                channel_nomenclature, magnetic_unit, e_dipole_length_m,
+                decimation_levels, factor, window_samples, overlap,
+                window_type, window_type_deep, deep_from_level, clock_zero,
+                prewhitening, per_window_detrend, reject_saturated,
+                saturated_max, persist, survey, station, run)
         levels = compute_fc_levels(
             data, input_channels, output_channels,
             num_decimations=decimation_levels, factor=factor,
@@ -284,6 +305,100 @@ class ComputeFC(Node):
         )
         ctx.progress(1.0, f"computed FC levels [{summary}]")
         return {"fc": levels}
+
+    def _execute_collection(
+        self, ctx, collection, input_channels: str, output_channels: str,
+        channel_nomenclature: str, magnetic_unit: str, e_dipole_length_m,
+        decimation_levels: int, factor: int, window_samples: int,
+        overlap: float, window_type: str, window_type_deep: str,
+        deep_from_level, clock_zero: str, prewhitening: str,
+        per_window_detrend: str, reject_saturated: bool,
+        saturated_max: float, persist: bool, survey: str, station: str,
+        run: str,
+    ) -> dict[str, Any]:
+        """Build FC's route on already-extracted runs ('time range' mode):
+        per-run cascades merged along time, per level (DESIGN §9.3)."""
+        import numpy as np
+
+        from emptyui_mth5.persist import persist_fc_level
+
+        members = list(collection.runs)
+        extents = list(collection.extents)
+        if not members:
+            raise ValueError(
+                "run collection is empty — Extract Run's 'time range' "
+                "selection matched no runs")
+        if len(members) > 1 and not str(clock_zero).strip():
+            ctx.logger.warning(
+                "%d runs without clock_zero anchoring: each run's window "
+                "grid anchors at its own start — remote-reference pairing "
+                "across separately-computed runs needs clock_zero='epoch' "
+                "(or an explicit ISO datetime)", len(members))
+        # per-family decimation trim (Build FC's rule, §24.8): on a
+        # mixed-rate collection the lowest-rate family carries the full
+        # 'decimation_levels' cascade; higher-rate families decimate only
+        # until their rate would reach the next family's native rate.
+        rates = [float(getattr(m, "sample_rate", 0.0) or 0.0)
+                 for m in members]
+        family_rates = sorted(set(rates))
+        containers = []
+        for i, (member, ext) in enumerate(zip(members, extents), 1):
+            r = rates[i - 1]
+            lower = [x for x in family_rates if x < r * (1 - 1e-9)]
+            if not lower:
+                dec_of_member = decimation_levels
+            else:
+                d_max = max(0, int(np.ceil(np.log2(r / max(lower))
+                                           / np.log2(factor))) - 1)
+                dec_of_member = min(decimation_levels, d_max)
+            levels = compute_fc_levels(
+                member, input_channels, output_channels,
+                num_decimations=dec_of_member, factor=factor,
+                num_samples_window=window_samples, overlap=overlap,
+                window_type=window_type,
+                magnetic_unit=magnetic_unit,
+                e_dipole_length_m=e_dipole_length_m,
+                channel_nomenclature=channel_nomenclature,
+                prewhitening=prewhitening,
+                per_window_detrend=per_window_detrend,
+                window_type_deep=window_type_deep,
+                deep_from_level=deep_from_level,
+                clock_zero=clock_zero,
+                reject_saturated=reject_saturated,
+                saturated_max=saturated_max,
+            )
+            surv = str(ext.get("survey", "")) or survey
+            stat = str(ext.get("station", "")) or station
+            rid = str(ext.get("run", "")) or run
+            identity = _station_identity_attrs(member, surv, stat, rid)
+            for level, fc in levels.items():
+                fc.attrs.update(identity)
+            if persist:
+                for level, fc in levels.items():
+                    if "datetime64" in str(fc.time.dtype):
+                        persist_fc_level(
+                            ctx, fc, level, fc.attrs["sample_rate"],
+                            survey=surv, station=stat, run=rid)
+                    else:
+                        ctx.logger.warning(
+                            "run %s level %d has no absolute time axis — "
+                            "skipping persistence", rid, level)
+                        break
+            # per-window run identity (§9.3): QC nodes group windows by run
+            for level, fc in levels.items():
+                levels[level] = fc.assign_coords(run_id=(
+                    "time", np.full(int(fc.sizes["time"]), rid)))
+            containers.append(levels)
+            ctx.progress(
+                i / len(members),
+                f"FC {i}/{len(members)}: run {rid} ({len(levels)} level(s))")
+        merged = merge_fc_containers(containers)
+        n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
+        ctx.progress(
+            1.0,
+            f"run collection: {len(members)} run(s) -> {len(merged)} "
+            f"level(s), {n_win} window(s)")
+        return {"fc": merged}
 
 
 def _diurnal_prior_factor(start, use_prior: bool, prior_max: float,
@@ -529,64 +644,28 @@ class BuildFC(Node):
         family_rates = sorted({rate_of[r] for r in wanted})
         dipole = e_dipole_length_m or None
         containers = []
-        # fast per-run data path: reading channels via to_xarray and
-        # wrapping in a duck payload avoids RunGroup.to_runts — whose
-        # mt_metadata deepcopy/validation storm costs ~7 s per run (40x
-        # the data read itself; DESIGN §24.8 performance note). The same
-        # storm lives in the group .metadata properties (~20 s per access
-        # on a burst archive) — access station metadata ONCE and derive
-        # per-run rate/start from the channel attrs/coords.
+        # fast per-run data path (shared with Extract Run 'time range'):
+        # reading channels via to_xarray and wrapping in a duck payload
+        # avoids RunGroup.to_runts — whose mt_metadata deepcopy/validation
+        # storm costs ~7 s per run (40x the data read itself; DESIGN §24.8
+        # performance note). The same storm lives in the group .metadata
+        # properties (~20 s per access on a burst archive) — access station
+        # metadata ONCE and derive per-run rate/start from the channel
+        # attrs/coords.
         from types import SimpleNamespace
 
         import xarray as xr
+
+        from emptyui_mth5.runs import read_run_channels, resolve_filter_registry
 
         station_md = station_obj.metadata
         identity_base = _station_identity_attrs(
             SimpleNamespace(station_metadata=station_md), surv, stat, "")
 
-        def _read_channels(run_obj):
-            data_vars = {}
-            sample_rate = 0.0
-            start = None
-            for name in run_obj.groups_list:
-                da = run_obj.get_channel(name).to_xarray()
-                sample_rate = float(da.attrs.get("sample_rate",
-                                                 sample_rate))
-                if start is None and "time" in da.coords:
-                    start = da.coords["time"].values[0]
-                data_vars[str(name)] = da
-            if not sample_rate:
-                # defensive: a division by zero deep in the STFT is worse
-                # than a loud error naming the run
-                raise ValueError(
-                    f"run '{run_obj.metadata.id}' carries no sample_rate in "
-                    "its channel metadata — cannot build FCs")
-            return data_vars, sample_rate, start
-
-        def _resolve_registry(data_vars):
-            # §24.12: resolve the response-chain filter objects once from
-            # the archive so the duck payload carries the calibration the
-            # FC-level calibration divides by (to_xarray carries the refs,
-            # but the objects live in /Survey/Filters)
-            filter_names: set[str] = set()
-            for da in data_vars.values():
-                for ref in da.attrs.get("filters") or []:
-                    try:
-                        filter_names.add(ref["applied_filter"]["name"])
-                    except (TypeError, KeyError):
-                        continue
-            registry = {}
-            if filter_names:
-                fg = survey_obj.filters_group
-                for fn in sorted(filter_names):
-                    try:
-                        registry[fn] = fg.to_filter_object(fn)
-                    except Exception:  # noqa: BLE001
-                        ctx.logger.warning(
-                            "filter '%s' referenced by the archive channels "
-                            "could not be resolved — its response will not "
-                            "be removed by Compute FC", fn)
-            return registry
+        # (the former _read_channels/_resolve_registry closures are the
+        # shared emptyui_mth5.runs helpers — one implementation for Build
+        # FC and Extract Run 'time range', §24.12 filter resolution
+        # included)
 
         # cascade spans: singletons by default; with regroup_contiguous,
         # maximal contiguous spans of same-rate runs (adjacency within two
@@ -684,11 +763,11 @@ class BuildFC(Node):
             for uid in span:
                 _uid, rate, u_start, u_end, rid, lo, hi = unit_by_id[uid]
                 if lo is None:  # whole run (no session split, or unsplit)
-                    data_vars, sample_rate, start = _read_channels(
+                    data_vars, sample_rate, start = read_run_channels(
                         _resolve_run(station_obj, rid))
                 else:
                     if rid not in memo:
-                        memo[rid] = _read_channels(_resolve_run(station_obj,
+                        memo[rid] = read_run_channels(_resolve_run(station_obj,
                                                                 rid))[0]
                     base = memo[rid]
                     sample = next(iter(base.values()))
@@ -747,7 +826,7 @@ class BuildFC(Node):
                                 xr.zeros_like(next(iter(mv[1].values()))))
                     data_vars[name] = xr.concat(parts, dim="time")
                 start = members[0][3]
-            registry = _resolve_registry(data_vars)
+            registry = resolve_filter_registry(survey_obj, data_vars)
             ds = xr.Dataset(data_vars)
             run_ts = SimpleNamespace(
                 dataset=ds,

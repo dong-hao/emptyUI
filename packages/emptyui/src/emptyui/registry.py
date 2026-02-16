@@ -29,6 +29,7 @@ CORE_PORT_TYPES: dict[str, dict[str, str]] = {
     "bands": {"color": "#d2b4de", "label": "Frequency Bands"},
     "ts.run": {"color": "#2980b9", "label": "Run Time Series"},
     "ts.channel": {"color": "#7fb3d5", "label": "Channel Time Series"},
+    "ts.runs": {"color": "#5dade2", "label": "Run Collection"},
     "fc": {"color": "#186a3b", "label": "Fourier Coefficients"},
     "tf.level": {"color": "#e74c3c", "label": "TF (decimation level)"},
     "tf": {"color": "#c0392b", "label": "Transfer Function"},

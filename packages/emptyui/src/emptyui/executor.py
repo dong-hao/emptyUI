@@ -68,6 +68,32 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                 "sample_rate": float(row.get("sample_rate", 0.0) or 0.0),
             })
         return {"kind": "mth5", "runs": runs}
+    # run collection (Extract Run 'time range' mode): union bounds on top,
+    # per-member extents for provenance — the frontend renders the union
+    # track directly (non-mth5 kinds use the top-level start/end)
+    try:
+        extents = value.extents
+    except Exception:  # noqa: BLE001
+        extents = None
+    if (extents is not None and hasattr(value, "runs")
+            and isinstance(extents, list) and extents):
+        starts = [str(e.get("start", ""))[:19] for e in extents]
+        ends = [str(e.get("end", ""))[:19] for e in extents]
+        runs = [{
+            "survey": str(e.get("survey", "")),
+            "station": str(e.get("station", "")),
+            "run": str(e.get("run", "")),
+            "start": str(e.get("start", ""))[:19],
+            "end": str(e.get("end", ""))[:19],
+            "sample_rate": float(e.get("sample_rate", 0.0) or 0.0),
+        } for e in extents]
+        return {
+            "kind": "ts.runs",
+            "start": min(s for s in starts if s),
+            "end": max(e for e in ends if e),
+            "absolute": True,
+            "runs": runs,
+        }
     try:
         sample_rate = float(value.sample_rate)
     except Exception:  # noqa: BLE001
