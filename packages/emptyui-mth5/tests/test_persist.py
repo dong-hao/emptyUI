@@ -107,3 +107,67 @@ def test_read_back_fc_feeds_estimate_tf(tmp_path: Path, fake_runts):
                                 periods_per_octave=8)
     assert periods.size > 1
     assert np.all(np.isfinite(Z))
+
+
+# --- payload-truth identity (runts_context) -------------------------------
+
+
+class _Duck:
+    """Payload without metadata: params are the only id source."""
+
+    def __init__(self):
+        self.survey = "S"
+        self.station = "B"
+        self.run = "r"
+
+
+class _WithRunMd:
+    """mth5-style payload: run_metadata.id is the truth."""
+
+    class _Md:
+        def __init__(self, i):
+            self.id = i
+
+    def __init__(self, run_id):
+        self.run_metadata = self._Md(run_id)
+
+
+def test_runts_context_param_wins_without_payload_metadata(tmp_path):
+    from emptyui_mth5.persist import runts_context
+
+    assert runts_context(_Duck()) == ("S", "B", "r")
+    # the payload's plain fields are metadata too — a disagreeing param
+    # loses (same payload-truth rule); params fill only the true gap
+    survey, station, run = runts_context(
+        _Duck(), run="override",
+        logger=__import__("logging").getLogger("emptyui.test"))
+    assert run == "r"
+
+    class _Bare:
+        pass
+
+    assert runts_context(_Bare()) == ("workspace", "local", "run")
+    assert runts_context(_Bare(), run="override") == (
+        "workspace", "local", "override")
+
+
+def test_runts_context_payload_truth_overrides_stale_param(caplog):
+    """A stale param (e.g. a hand-typed run id from a previous test) must
+    not poison the fc/TF metadata: the payload id wins, loudly."""
+    from emptyui_mth5.persist import runts_context
+
+    survey, station, run = runts_context(
+        _WithRunMd("sr1_0001"), survey="NO46", station="NO46", run="a,b",
+        logger=__import__("logging").getLogger("emptyui.test"))
+    assert run == "sr1_0001"
+    assert "disagrees with the payload's own id" in caplog.text
+    assert "'a,b'" in caplog.text
+
+
+def test_runts_context_agreeing_params_pass_through():
+    from emptyui_mth5.persist import runts_context
+
+    assert runts_context(_WithRunMd("sr1_0001"), run="sr1_0001") == (
+        "workspace", "local", "sr1_0001")
+    assert runts_context(_WithRunMd("sr1_0001")) == (
+        "workspace", "local", "sr1_0001")

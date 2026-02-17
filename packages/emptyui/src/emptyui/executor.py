@@ -50,12 +50,11 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     """
     if isinstance(value, dict):
         return None
-    # NB: getattr(..., None) is not enough here — mt_timeseries objects
-    # convert missing-attribute AttributeError into NameError
-    try:
-        rs = value.run_summary
-    except Exception:  # noqa: BLE001
-        rs = None
+    # NB: mt_timeseries objects convert missing-attribute AttributeError into
+    # NameError AND log an ERROR line — probe via dir() (no __getattr__
+    # invocation) so summarizing an mth5 RunTS stays quiet
+    visible = dir(value)
+    rs = getattr(value, "run_summary") if "run_summary" in visible else None
     if rs is not None and hasattr(rs, "iterrows") and len(rs):
         runs = []
         for _, row in rs.iterrows():
@@ -71,11 +70,8 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     # run collection (Extract Run 'time range' mode): union bounds on top,
     # per-member extents for provenance — the frontend renders the union
     # track directly (non-mth5 kinds use the top-level start/end)
-    try:
-        extents = value.extents
-    except Exception:  # noqa: BLE001
-        extents = None
-    if (extents is not None and hasattr(value, "runs")
+    extents = getattr(value, "extents") if "extents" in visible else None
+    if (extents is not None and "runs" in visible
             and isinstance(extents, list) and extents):
         starts = [str(e.get("start", ""))[:19] for e in extents]
         ends = [str(e.get("end", ""))[:19] for e in extents]
@@ -94,18 +90,23 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
             "absolute": True,
             "runs": runs,
         }
+    if "sample_rate" not in visible:
+        return None
     try:
         sample_rate = float(value.sample_rate)
     except Exception:  # noqa: BLE001
         return None
-    try:
-        n = int(value.n_samples)
-    except Exception:  # noqa: BLE001 - mt_timeseries raises NameError
+    if "n_samples" in visible:
+        try:
+            n = int(value.n_samples)
+        except Exception as exc:  # noqa: BLE001 - mt_timeseries raises NameError
+            n = None
+    else:
         try:
             n = len(value.dataset.time)  # mth5 RunTS
         except Exception:  # noqa: BLE001
             return None
-    if sample_rate <= 0 or n <= 0:
+    if n is None or sample_rate <= 0 or n <= 0:
         return None
 
     channels: list[str] | None = None
@@ -116,7 +117,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
             channels = [str(k) for k in value.dataset.data_vars]
         except AttributeError:
             channels = None
-        raw = getattr(value, "start", None)
+        raw = getattr(value, "start", None) if "start" in visible else None
         if raw is not None:
             try:
                 start_iso = datetime.fromisoformat(str(raw)[:19]).strftime(
@@ -143,7 +144,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                 start_rel = 0.0
     elif hasattr(value, "component"):  # single channel (ts.channel port)
         channels = [str(getattr(value, "component", "channel") or "channel")]
-        raw = getattr(value, "start", None)
+        raw = getattr(value, "start", None) if "start" in visible else None
         if raw is not None:
             try:
                 start_iso = datetime.fromisoformat(str(raw)[:19]).strftime(

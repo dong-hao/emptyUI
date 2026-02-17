@@ -227,13 +227,11 @@ class ComputeFC(Node):
         # from nomenclature + data; tipper included when the vertical channel
         # is present, missing outputs dropped with a warning).
         # NB: mt_timeseries objects convert missing-attribute AttributeError
-        # into NameError — getattr's default does not catch it (same quirk
-        # the executor's payload summary works around)
-        try:
-            extents = data.extents
-        except Exception:  # noqa: BLE001
-            extents = None
-        if (isinstance(extents, list) and hasattr(data, "runs")):
+        # into NameError AND log an ERROR line — probe via dir() (no
+        # __getattr__ invocation) instead of try/getattr
+        names = dir(data)
+        extents = getattr(data, "extents") if "extents" in names else None
+        if (isinstance(extents, list) and "runs" in names):
             return self._execute_collection(
                 ctx, data, input_channels, output_channels,
                 channel_nomenclature, magnetic_unit, e_dipole_length_m,
@@ -261,7 +259,8 @@ class ComputeFC(Node):
         # Station identity travels with the fc (attrs) so EstimateTF can attach
         # it to the TF — the single point of truth for plot titles and export
         # headers (DESIGN.md §15).
-        surv, stat, run_id = runts_context(data, survey, station, run)
+        surv, stat, run_id = runts_context(data, survey, station, run,
+                                           logger=ctx.logger)
         identity = _station_identity_attrs(data, surv, stat, run_id)
         # M4 #2: Merge Runs' gap provenance (interpolated intervals) travels
         # with the fc so the remote-reference pairing can warn when local

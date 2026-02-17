@@ -489,3 +489,32 @@ def test_stale_params_warn_and_are_ignored():
     assert len(stale) == 1, stale
     assert "band_style" in stale[0]["msg"]
     assert "coherence_trim" in stale[0]["msg"]
+
+
+def test_payload_summary_probes_are_quiet_and_duck_safe():
+    """mt_timeseries' __getattr__ raises NameError AND logs an ERROR for
+    missing attrs — the dir()-based probes must never enter that fallback,
+    and unknown shapes still summarize as None (regression: the collection
+    probe spammed an ERROR line on every mth5 payload)."""
+    import logging
+    from types import SimpleNamespace
+
+    class Quirky:
+        """Duck payload whose missing attrs log + raise NameError."""
+
+        def __getattr__(self, name):
+            logging.getLogger("mt_timeseries.run_ts").error(
+                "RunTS has no attribute %s", name)
+            raise NameError(name)
+
+    p = Quirky()
+    p.sample_rate = 8.0
+    import xarray as xr
+
+    p.dataset = xr.Dataset(
+        {"ex": ("time", [1.0] * 16)}, coords={"time": list(range(16))})
+    from emptyui.executor import _ts_summary
+
+    s = _ts_summary(p)
+    assert s is not None and s["channels"] == ["ex"]
+    assert _ts_summary(SimpleNamespace()) is None

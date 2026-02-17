@@ -124,17 +124,61 @@ def load_fc_level(
         m.close_mth5()
 
 
-def runts_context(data, survey: str = "", station: str = "", run: str = "") -> tuple[str, str, str]:
-    """Derive (survey, station, run) ids from an mth5 RunTS or a core TimeSeries
-    (which carries them as plain string fields), overridden by any explicitly
-    provided values; falls back to workspace defaults."""
+def _payload_field(data, name: str) -> str:
+    """Best-effort plain-field probe that never triggers mt_timeseries'
+    logging ``__getattr__`` (missing attrs raise NameError — which
+    ``getattr``'s default does not catch — and log an ERROR line).
+
+    Instance ``__dict__`` first (core TimeSeries carries survey/station/run
+    as plain string fields); explicit attribute access only when the
+    attribute is visible via ``dir()`` (class properties — no
+    ``__getattr__`` fallback), so duck payloads are probed safely.
+    """
+    d = getattr(data, "__dict__", None)
+    if isinstance(d, dict) and name in d:
+        v = d.get(name)
+        return "" if v is None else str(v)
+    if name in dir(data):
+        try:
+            v = getattr(data, name)
+        except Exception:  # noqa: BLE001
+            return ""
+        return "" if v is None else str(v)
+    return ""
+
+
+def runts_context(data, survey: str = "", station: str = "", run: str = "",
+                  logger=None) -> tuple[str, str, str]:
+    """Derive (survey, station, run) ids for an fc's identity attrs.
+
+    The payload's own metadata is the **truth**: when the payload carries an
+    id and an explicitly provided param DISAGREES with it, the payload id
+    wins with a warning naming both — a stale param (e.g. a hand-typed run
+    id from a previous test) must not silently poison the fc/TF metadata
+    only to explode three nodes downstream at mt_metadata's id-pattern
+    validation. The params are authoritative only for payloads without
+    metadata (synthetic/duck payloads); workspace defaults come last.
+    """
     def _meta_id(obj):
         try:
             return obj.id
         except Exception:  # noqa: BLE001
             return ""
 
-    survey = survey or _meta_id(getattr(data, "survey_metadata", None)) or getattr(data, "survey", "") or "workspace"
-    station = station or _meta_id(getattr(data, "station_metadata", None)) or getattr(data, "station", "") or "local"
-    run = run or _meta_id(getattr(data, "run_metadata", None)) or getattr(data, "run", "") or "run"
-    return survey, station, run
+    fields = []
+    for param_value, meta_obj, plain_name, fallback in (
+            (survey, "survey_metadata", "survey", "workspace"),
+            (station, "station_metadata", "station", "local"),
+            (run, "run_metadata", "run", "run")):
+        payload_id = _meta_id(getattr(data, meta_obj, None)) or _payload_field(
+            data, plain_name)
+        if param_value and payload_id and str(param_value) != str(payload_id):
+            if logger is not None:
+                logger.warning(
+                    "'%s' param %r disagrees with the payload's own id %r — "
+                    "using the payload id (params are conveniences; the "
+                    "archive metadata is the truth)", plain_name,
+                    param_value, payload_id)
+            param_value = payload_id
+        fields.append(str(param_value or payload_id or fallback))
+    return fields[0], fields[1], fields[2]
