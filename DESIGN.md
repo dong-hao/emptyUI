@@ -909,6 +909,17 @@ and rebuilt on Align Runs / Split → Merge Channels outputs.
 | **Load Phoenix MTU-5A** | Burst-mode ingestion — see below |
 | TF Import/Export | EDI/XML/ZMM/AVG/J |
 
+**HDF5 locking policy (uniform).** Every emptyUI open of an HDF5 archive —
+loaders creating outputs, Load MTH5, the workspace persistence layer — passes
+`locking=False` (mth5 forwards it to `h5py.File`). Handles live for the
+server lifetime (cached payloads), so a default-locking handle would pin the
+file against every other open (errno 35) until restart; worse, HDF5 rejects
+**mixed** locking configurations across concurrent handles in one process
+(*"file locking flag values don't match"*) — exactly the loader-creates +
+Load-MTH5-reads flow inside one graph. With the uniform policy, concurrent
+opens coexist and external tooling is never blocked by our handles; HDF5's
+superblock consistency flag still rejects new opens of write-active files.
+
 **NIMS (USArray) note.** Native NIMS ingestion is **not delivered** — USArray
 NIMS recordings are automatically uploaded to the IRIS Data Center and
 archived as miniSEED (a seismic-data format, repurposed here for MT), so

@@ -50,5 +50,6 @@ def multi_run_archive(path: Path, rids: list[str], starts: list[str],
     sg.update_metadata()
     m.close_mth5()
     archive = MTH5()
-    archive.open_mth5(str(path), "r")
+    # uniform locking policy (DESIGN §9.3) — matches what emptyUI opens do
+    archive.open_mth5(str(path), "r", locking=False)
     return archive

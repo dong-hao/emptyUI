@@ -260,10 +260,13 @@ def test_run_id_mode_default_unchanged(archive, tmp_path: Path):
     assert "runs" not in res
 
 
-def test_load_read_only_holds_no_hdf5_lock(tmp_path, monkeypatch):
-    """Read-only handles live for the server lifetime (cached payload) —
-    they must hold no HDF5 lock, or external tooling and later opens of
-    the same file are blocked until restart. Write modes keep the lock."""
+def test_load_uses_uniform_locking_policy(tmp_path, monkeypatch):
+    """UNIFORM locking policy (DESIGN §9.3): every emptyUI open disables
+    HDF5 file locking. Default-locking handles live for the server
+    lifetime (cached payloads) and pin the file; worse, HDF5 rejects MIXED
+    locking configurations across concurrent handles in one process
+    ("file locking flag values don't match") — the loader-creates +
+    Load-MTH5-reads flow in one graph."""
     from _archive import multi_run_archive
 
     multi_run_archive(tmp_path / "lk.h5", rids=["r1"],
@@ -285,7 +288,7 @@ def test_load_read_only_holds_no_hdf5_lock(tmp_path, monkeypatch):
     LoadMth5().execute(ctx, str(tmp_path / "lk.h5"), mode="r")
     assert captured["locking"] is False
     LoadMth5().execute(ctx, str(tmp_path / "lk.h5"), mode="r+")
-    assert "locking" not in captured
+    assert captured["locking"] is False
 
 
 # --- Tier 3: singular-semantics nodes reject run collections loudly ------
@@ -333,3 +336,21 @@ def test_calibrate_rejects_collection(tmp_path):
         assert "planned (M4 backlog)" in str(exc)
     else:
         raise AssertionError("collection input must be rejected")
+
+
+def test_load_mth5_while_loader_handle_held(tmp_path):
+    """The exact reported flow: a loader-created archive with its handle
+    still cached, then Load MTH5 in the SAME process — uniform locking
+    makes the concurrent opens compatible."""
+    from _archive import multi_run_archive
+
+    m = multi_run_archive(tmp_path / "cc.h5", rids=["r1"],
+                          starts=["2024-01-01T00:00:00"])
+    # m holds an OPEN read handle, like a cached loader output
+    from emptyui_mth5.io import LoadMth5
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = LoadMth5().execute(ctx, str(tmp_path / "cc.h5"), mode="r")
+    assert res["mth5"] is not None
+    m.close_mth5()
+    res["mth5"].close_mth5()

@@ -70,7 +70,7 @@ def persist_fc_level(
 
     path = workspace_mth5_path(ctx)
     m = MTH5()
-    m.open_mth5(str(path), mode="a")
+    m.open_mth5(str(path), mode="a", locking=False)
     try:
         survey_obj = _ensure_survey(m, survey)
         station_obj = _ensure_station(survey_obj, station)
@@ -105,7 +105,7 @@ def load_fc_level(
     if not path.exists():
         raise FileNotFoundError(f"workspace archive not found: {path}")
     m = MTH5()
-    m.open_mth5(str(path), mode="r")
+    m.open_mth5(str(path), mode="r", locking=False)
     try:
         dec = (
             m.get_survey(survey)

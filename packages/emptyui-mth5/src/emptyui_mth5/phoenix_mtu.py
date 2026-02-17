@@ -638,7 +638,7 @@ def read_phoenix_mtu(
         target.unlink()
 
     with MTH5() as m:
-        m.open_mth5(str(target), "w")
+        m.open_mth5(str(target), "w", locking=False)
         survey_group = m.add_survey(survey_id)
         registered: set[str] = set()
         for refs in chains.values():
@@ -783,7 +783,7 @@ class LoadPhoenixMtu(Node):
         from mth5.mth5 import MTH5
 
         archive = MTH5()
-        archive.open_mth5(res["path"], mode="a")
+        archive.open_mth5(res["path"], mode="a", locking=False)
         ctx.progress(
             1.0,
             f"loaded MTU-5A -> {Path(res['path']).name}: "

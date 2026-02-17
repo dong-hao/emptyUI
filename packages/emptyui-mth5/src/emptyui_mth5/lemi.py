@@ -118,7 +118,7 @@ class LoadLemi(Node):
                 f"files under {data_path})")
 
         with MTH5(**client.h5_kwargs) as m:
-            m.open_mth5(str(target), client.mth5_file_mode)
+            m.open_mth5(str(target), client.mth5_file_mode, locking=False)
             survey_group = m.add_survey(client.collection.survey_id)
             for st_id, runs_by_id in runs.items():
                 station_group = survey_group.stations_group.add_station(st_id)
@@ -143,7 +143,7 @@ class LoadLemi(Node):
             survey_group.update_metadata()
 
         archive = MTH5()
-        archive.open_mth5(str(target), mode="a")
+        archive.open_mth5(str(target), mode="a", locking=False)
         ctx.progress(1.0, f"loaded LEMI -> {target.name}")
         return {"mth5": archive}
 
