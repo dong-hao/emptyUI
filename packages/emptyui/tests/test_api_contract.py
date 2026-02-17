@@ -23,6 +23,7 @@ MANIFEST_KEYS = {
 }
 PORT_KEYS = {"name", "type", "description", "label"}
 INPUT_KEYS = PORT_KEYS | {"required", "accepts"}
+OUTPUT_KEYS = PORT_KEYS | {"populated_when"}
 PARAM_KEYS = {
     "name", "widget", "label", "default", "optional", "options", "min",
     "max", "step", "description", "placeholder", "cascade", "path_kind",
@@ -50,7 +51,8 @@ def _registry() -> Registry:
                   description="in port"),
             Input("aux", "any", required=False),
         )
-        outputs = (Output("out", "plot", description="figure"),)
+        outputs = (Output("out", "plot", description="figure",
+                          populated_when=("mode", ("a",))),)
         params = (
             Param("path", "file", path_kind="in"),
             Param("mode", "select", options=("a", "b"),
@@ -95,7 +97,7 @@ def test_nodes_catalog_shape(client: TestClient):
     for port in manifest["inputs"]:
         assert INPUT_KEYS <= set(port)
     for port in manifest["outputs"]:
-        assert PORT_KEYS <= set(port)
+        assert OUTPUT_KEYS <= set(port)
     for param in manifest["params"]:
         assert PARAM_KEYS <= set(param), param["name"]
     by_name = {p["name"]: p for p in manifest["params"]}
@@ -105,6 +107,9 @@ def test_nodes_catalog_shape(client: TestClient):
     assert by_name["span"]["time_bar"] == "data"
     assert by_name["path"]["path_kind"] == "in"
     assert manifest["inherit"] == {"data": {"survey": "survey"}}
+    # populated_when (§4): output ports dim when their mode is inactive
+    assert manifest["outputs"][0]["populated_when"] == {
+        "param": "mode", "values": ["a"]}
 
 
 def test_port_types_metadata_shape(client: TestClient):

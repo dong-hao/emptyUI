@@ -6,7 +6,7 @@ import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
 import { ParamField } from "../panels/ParamField";
 import { parseIsoGmt, TimeBar, type TimeExtent } from "../panels/TimeBar";
-import type { ParamSpec, PayloadSummary } from "../api/client";
+import type { ParamSpec, PayloadSummary, PortSpec } from "../api/client";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
 /** payload summary → time-bar extent (epoch/relative seconds); null when
@@ -216,6 +216,17 @@ export function MTNode({ id, data, selected }: NodeProps) {
     return ew.values.includes(String(current));
   };
 
+  // Port-analog of enabled_when (DESIGN.md §4 `populated_when`): the output
+  // port is populated only when the named sibling param holds one of the
+  // listed values — inactive ports render dimmed.
+  const isOutputPopulated = (o: PortSpec): boolean => {
+    const pw = o.populated_when;
+    if (!pw) return true;
+    const sibling = manifest?.params.find((q) => q.name === pw.param);
+    const current = d.params[pw.param] ?? sibling?.default ?? "";
+    return pw.values.includes(String(current));
+  };
+
   // Time-selector bars (§23.4): params bound via `time_bar` are grouped by
   // their input port (start/end pair per port) and rendered as a draggable
   // acquisition bar once the upstream run streamed the payload extent.
@@ -358,8 +369,15 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         type="source"
                         position={Position.Right}
                         className="mt-port"
-                        style={{ background: portColor(output.type, catalog) }}
-                        title={`${output.label ?? output.name}: ${output.type}`}
+                        style={{
+                          background: portColor(output.type, catalog),
+                          opacity: isOutputPopulated(output) ? undefined : 0.25,
+                        }}
+                        title={
+                          isOutputPopulated(output)
+                            ? `${output.label ?? output.name}: ${output.type}`
+                            : `${output.label ?? output.name}: ${output.type} — not populated in the current ${output.populated_when?.param} mode`
+                        }
                       />
                     </>
                   )}

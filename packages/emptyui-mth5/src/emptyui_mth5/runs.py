@@ -231,9 +231,11 @@ class ExtractRun(Node):
     inputs = (Input("mth5", "mth5"),)
     outputs = (
         Output("data", "ts.run", label="time series",
-               description="populated in 'run id' mode"),
+               description="populated in 'run id' mode",
+               populated_when=("selection", ("run id",))),
         Output("runs", "ts.runs", label="run collection",
-               description="populated in 'time range' mode"),
+               description="populated in 'time range' mode",
+               populated_when=("selection", ("time range",))),
     )
     params = (
         Param("selection", "select", label="Selection",

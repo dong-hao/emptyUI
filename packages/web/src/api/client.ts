@@ -5,6 +5,10 @@ export interface PortSpec {
   accepts?: string[];
   description?: string;
   label?: string;
+  /** rendering-only: the port is populated only when the named sibling
+   *  param holds one of the listed values (Extract Run's dual outputs,
+   *  DESIGN.md §4) */
+  populated_when?: { param: string; values: string[] } | null;
 }
 
 export interface ParamSpec {

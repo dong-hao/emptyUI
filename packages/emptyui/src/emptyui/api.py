@@ -42,6 +42,12 @@ class Output:
     type: str = "any"
     description: str = ""
     label: str = ""
+    #: Rendering-only (DESIGN.md §4): the port is populated only when the
+    #: named sibling param holds one of the listed values (same shape as
+    #: Param.enabled_when) — Extract Run's dual outputs. The UI dims ports
+    #: that will not be populated; the executor stores unpopulated outputs
+    #: as None.
+    populated_when: tuple[str, tuple[Any, ...]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +55,11 @@ class Output:
             "type": self.type,
             "description": self.description,
             "label": self.label or self.name,
+            "populated_when": (
+                {"param": self.populated_when[0],
+                 "values": [str(v) for v in self.populated_when[1]]}
+                if self.populated_when else None
+            ),
         }
 
 
