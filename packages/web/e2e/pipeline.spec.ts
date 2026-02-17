@@ -203,6 +203,7 @@ async function buildPipeline(page: Page) {
 
   // The CSV path is server-side; fill the absolute path of the repo sample.
   await node(page, "Load CSV").locator(".path-field input").fill(CSV_PATH);
+  await node(page, "Load CSV").locator(".path-field input").press("Enter");
 
   // Load CSV (data: ts.run) -> Plot Time Series (data: ts.run)
   await connect(page, { node: "Load CSV", port: "time series: ts.run" }, {
@@ -337,6 +338,7 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
 
   // Editing the box moves the handle (bidirectional sync).
   await startBox.fill(String(Math.round(t1 / 2)));
+  await startBox.press("Enter");
   const handlePct = (nth: number) =>
     bar.locator(".time-bar-handle").nth(nth).evaluate((el) => {
       const track = el.parentElement!;
@@ -379,6 +381,7 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
   await settleViewport(page);
 
   await node(page, "Load MTH5").locator(".path-field input").fill(H5);
+  await node(page, "Load MTH5").locator(".path-field input").press("Enter");
   await connect(page, { node: "Load MTH5", port: "mth5: mth5" }, {
     node: "Extract Run",
     port: "mth5: mth5",
@@ -402,6 +405,7 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
     .locator(".param-field", { hasText: "Start (UTC)" })
     .locator("input");
   await startBox.fill("2017-10-16 17:10:00");
+  await startBox.press("Enter");
   const handlePct = await bar.locator(".time-bar-handle").nth(0).evaluate((el) => {
     const tr = el.parentElement!.getBoundingClientRect();
     const r = el.getBoundingClientRect();

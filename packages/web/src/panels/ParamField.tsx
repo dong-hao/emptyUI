@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ParamSpec } from "../api/client";
 import { FileBrowser } from "./FileBrowser";
 
@@ -15,6 +15,96 @@ interface Props {
   /** Render as a select with these options (e.g. values inherited from a
    *  connected upstream node). Falls back to the default widget when empty. */
   selectOptions?: unknown[];
+}
+
+/** ComfyUI-parity text editing (DESIGN.md §8.1): the input holds a local
+ *  draft while focused — typing never touches the workflow store, so the
+ *  caret stays wherever the user put it for as long as they like (writing
+ *  per keystroke raced the store round-trip: React re-rendered with the
+ *  stale snapshot, re-asserted `.value`, and the caret jumped to the end).
+ *  The draft commits on Enter or blur (coerced as before); Escape reverts
+ *  to the store value. While not editing, the box displays the store
+ *  value, so external updates (inherit auto-fill, cascade, workflow load,
+ *  TimeBar writes) appear immediately. */
+function CommitInput({
+  value,
+  onCommit,
+  widget,
+  disabled,
+  placeholder,
+  list,
+  type,
+  min,
+  max,
+  step,
+}: {
+  value: unknown;
+  onCommit: (v: unknown) => void;
+  widget: string;
+  disabled?: boolean;
+  placeholder?: string;
+  list?: string;
+  type?: string;
+  min?: number | string;
+  max?: number | string;
+  step?: number | string;
+}) {
+  const [draft, setDraftState] = useState<string | null>(null);
+  // mirror ref: the blur/keydown handlers must see the CURRENT draft even
+  // when cancel() flips the state and blur() fires in the same tick
+  // (otherwise Escape's cancel is re-committed by the stale onBlur closure)
+  const draftRef = useRef<string | null>(null);
+  const setDraft = (v: string | null) => {
+    draftRef.current = v;
+    setDraftState(v);
+  };
+  const current = value === null || value === undefined ? "" : String(value);
+  const editing = draft !== null;
+
+  const coerce = (raw: string): unknown => {
+    if (widget === "number" || widget === "integer") {
+      const t = raw.trim();
+      if (t === "") return null;
+      const n = Number(t);
+      if (!Number.isFinite(n)) return NaN; // invalid intermediate → revert
+      return widget === "integer" ? Math.round(n) : n;
+    }
+    return raw;
+  };
+
+  const commit = () => {
+    const d = draftRef.current;
+    if (d === null) return;
+    const v = coerce(d);
+    setDraft(null);
+    if (typeof v === "number" && Number.isNaN(v)) return; // revert, keep store
+    if (String(v) !== current) onCommit(v);
+  };
+  const cancel = () => setDraft(null);
+
+  return (
+    <input
+      list={list}
+      type={type}
+      value={editing ? draft : current}
+      disabled={disabled}
+      placeholder={placeholder}
+      min={min}
+      max={max}
+      step={step}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit();
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === "Escape") {
+          cancel();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={commit}
+    />
+  );
 }
 
 /** One schema-driven widget (widget vocabulary from the manifest).
@@ -39,20 +129,15 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         ...(value === null || value === undefined ? [] : [String(value)]),
       ]),
     );
-    const coerce = (raw: string) => {
-      if (param.widget === "number" || param.widget === "integer") {
-        return raw.trim() === "" ? null : Number(raw);
-      }
-      return raw;
-    };
     field = (
       <>
-        <input
-          list={listId}
-          value={str}
+        <CommitInput
+          value={value}
+          onCommit={set}
+          widget={param.widget}
           disabled={disabled}
           placeholder={param.placeholder}
-          onChange={(e) => set(coerce(e.target.value))}
+          list={listId}
         />
         <datalist id={listId}>
           {opts.map((o) => (
@@ -103,24 +188,15 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       case "integer":
       case "number":
         field = (
-          <input
+          <CommitInput
             type="number"
-            value={str}
-            min={param.min}
-            max={param.max}
-            step={param.step}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") {
-                set(null);
-                return;
-              }
-              // intermediate typing states ("e", "-", "1e") parse to NaN —
-              // keep the raw text in the box instead of storing NaN (which
-              // JSON-serializes to null and defeats the inherit unset check)
-              const n = Number(raw);
-              set(Number.isFinite(n) ? n : raw);
-            }}
+            value={value}
+            onCommit={set}
+            widget={param.widget}
+            disabled={disabled}
+            min={param.min ?? undefined}
+            max={param.max ?? undefined}
+            step={param.step ?? undefined}
           />
         );
         break;
@@ -128,10 +204,12 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       case "directory":
         field = (
           <span className="path-field">
-            <input
-              value={str}
+            <CommitInput
+              value={value}
+              onCommit={set}
+              widget={param.widget}
+              disabled={disabled}
               placeholder={`path to ${param.widget}…`}
-              onChange={(e) => set(e.target.value)}
             />
             <button
               className="browse-btn"
@@ -156,10 +234,12 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         break;
       default:
         field = (
-          <input
-            value={str}
+          <CommitInput
+            value={value}
+            onCommit={set}
+            widget={param.widget}
+            disabled={disabled}
             placeholder={param.placeholder}
-            onChange={(e) => set(e.target.value)}
           />
         );
     }

@@ -229,6 +229,9 @@ test("copy-paste duplicates the selected subgraph with fresh ids and params", as
   await paramField(page.locator(".mt-node").nth(0), "Coherence min")
     .locator("input")
     .fill("0.5");
+  await paramField(page.locator(".mt-node").nth(0), "Coherence min")
+    .locator("input")
+    .press("Enter");
 
   // box-select both nodes deterministically: Shift + drag a selection
   // rectangle spanning the whole canvas (RF's selectionKeyCode is Shift;
