@@ -13,11 +13,26 @@ import {
 import { useCatalog, portColor } from "./catalog";
 import type { NodeManifest } from "../api/client";
 
+/** RFC-4122 v4 UUID: crypto.randomUUID is secure-context-only (HTTPS or
+ *  localhost) — the remote single-origin serving mode is plain HTTP on the
+ *  ZeroTier LAN, so fall back to getRandomValues (available everywhere). */
+function uuid(): string {
+  if (typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 /** Collision-safe node id: full UUID space, not a 6-hex slice (16.7M —
  *  long sessions with many pastes could collide, surfacing only as a
  *  server-side 422 at run time). The `n` prefix keeps CSS selectors sane. */
 export function uniqueNodeId(): string {
-  return `n${crypto.randomUUID()}`;
+  return `n${uuid()}`;
 }
 
 /** Stale edges: endpoint node missing, or a port the manifest doesn't
@@ -202,7 +217,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
         edges: addEdge(
           {
             ...connection,
-            id: `e${crypto.randomUUID()}`,
+            id: `e${uuid()}`,
             style: { stroke: color, strokeWidth: 2.5 },
             data: { portType: outPort?.type ?? "any" },
           },
@@ -331,7 +346,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     });
     const newEdges = clip.edges.map((e) => ({
       ...e,
-      id: `e${crypto.randomUUID()}`,
+      id: `e${uuid()}`,
       source: idMap.get(e.source)!,
       target: idMap.get(e.target)!,
     }));
