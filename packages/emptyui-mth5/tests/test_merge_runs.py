@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import numpy as np
 import pytest
 from emptyui.context import RunContext
@@ -120,6 +122,55 @@ def test_merge_runs_node_missing_run(tmp_path: Path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     with pytest.raises(ValueError, match="not in station archive"):
         MergeRuns().execute(ctx, archive, runs="a,z")
+    archive.close_mth5()
+
+
+def test_merge_runs_rides_fast_read_and_keeps_registry(tmp_path: Path):
+    """Merge Runs reads each run via the fast channel path (§24.8 — the
+    per-run to_runts storm would cost ~7-19 s per run) and re-resolves the
+    filter registry on the merged output (RunTS.merge rebuilds from
+    channel arrays; the §24.12 calibration association must survive)."""
+    from emptyui_core_nodes.types import channel_calibration
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    # an archive whose channels reference one survey filter
+    from mth5.mth5 import MTH5
+
+    path = tmp_path / "merged_reg.h5"
+    m = MTH5()
+    m.open_mth5(str(path), "w")
+    sg = m.add_survey("4P")
+    fap = CoefficientFilter()
+    fap.name = "test_response"
+    fap.units_in = "nT"
+    fap.units_out = "nT"
+    fap.gain = 1.0
+    sg.filters_group.add_filter(fap)
+    stg = sg.stations_group.add_station("SDX")
+    ref = {"applied_filter": {"applied": True, "name": "test_response",
+                              "stage": 1}}
+    for i, rid in enumerate(("a", "b")):
+        start = "2024-01-01T00:00:00" if i == 0 else "2024-01-01T00:01:04"
+        runts = _synthetic_runts(start=start, n=32)
+        runts.run_metadata.id = rid
+        rg = stg.add_run(rid)
+        rg.from_runts(runts)
+        rg.get_channel("e1").hdf5_dataset.attrs.modify(
+            "filters", json.dumps([ref]))
+    stg.write_metadata()
+    sg.update_metadata()
+    m.close_mth5()
+
+    archive = MTH5()
+    archive.open_mth5(str(path), "r", locking=False)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    merged = MergeRuns().execute(ctx, archive, survey="4P", station="SDX",
+                                 runs="a,b")["merged_run"]
+    assert merged.dataset.sizes["time"] == 96
+    assert merged.dataset.attrs["merged_source_runs"] == ["a", "b"]
+    # registry re-resolved on the merged payload — the association survives
+    pairs = channel_calibration(merged).get("e1") or []
+    assert [f.name for f, _ in pairs] == ["test_response"]
     archive.close_mth5()
 
 

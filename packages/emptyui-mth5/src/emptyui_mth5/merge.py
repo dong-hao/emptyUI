@@ -206,11 +206,29 @@ class MergeRuns(Node):
             deduped.append(r)
         wanted = deduped
         run_ts_list = []
+        from .runs import (_group_id, _wrap_runts, read_run_channels,
+                           resolve_filter_registry)
         for run_id in wanted:
             run_obj = _resolve_run(station_obj, run_id)
-            run_ts_list.append(run_obj.to_runts())
+            # fast channel read (§24.8): to_runts's mt_metadata
+            # deepcopy/validation storm costs ~7-19 s PER RUN — the merge
+            # of a burst archive's slots would pay it for every run
+            data_vars, sample_rate, _start = read_run_channels(run_obj)
+            registry = resolve_filter_registry(survey_obj, data_vars)
+            run_ts_list.append(_wrap_runts(
+                run_obj, station_obj, survey_obj, data_vars, sample_rate,
+                registry))
         merged = merge_runts(run_ts_list, gap_method=gap_method,
                              new_run_id=new_run_id, logger=ctx.logger)
+        # RunTS.merge rebuilds its result from channel arrays — the filter
+        # registry does not travel; re-resolve it from the merged dataset's
+        # channel attrs (§24.12: the calibration association must survive)
+        try:
+            merged.filters = resolve_filter_registry(
+                survey_obj, {n: merged.dataset[n]
+                             for n in merged.dataset.data_vars})
+        except Exception:  # noqa: BLE001 — identity is best effort
+            _log.debug("merged run filter registry not re-resolved")
         ctx.progress(
             1.0,
             f"merged {len(wanted)} run(s) ({', '.join(wanted)}): "

@@ -28,6 +28,20 @@ from ._processing import (
 _NOMENCLATURE_OPTIONS = ("auto",) + KEYWORDS
 
 
+def _attr_float(group_obj, key: str):
+    """A float from an mth5 group's HDF5 attrs (dotted key), or None.
+
+    The group ``.metadata`` properties rebuild the FULL hierarchy through
+    pydantic on every access (~30-40 s on a burst archive, §24.8) — the
+    attrs carry the same scalars (location.*, time_period.*, ...) for free.
+    """
+    try:
+        value = group_obj.hdf5_group.attrs[key]
+        return float(value) if value is not None else None
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _station_location(data):
     """(latitude, longitude, elevation) of the run's station, or (None,)*3."""
     try:
@@ -623,8 +637,15 @@ class BuildFC(Node):
                     "the window (%s kept)", win[0], win[1], len(dropped),
                     len(kept))
             wanted = kept
-        surv = str(survey_obj.metadata.id)
-        stat = str(station_obj.metadata.id)
+        from emptyui_mth5.runs import (_group_id, read_run_channels,
+                                       resolve_filter_registry)
+
+        # survey/station ids from the HDF5 group paths (free) — the group
+        # .metadata properties rebuild the FULL hierarchy through pydantic
+        # (~30-40 s per access on a burst archive; §24.8). Location comes
+        # from the station's HDF5 attrs (dotted keys) the same way.
+        surv = _group_id(survey_obj)
+        stat = _group_id(station_obj)
 
         # per-family decimation trim (DESIGN §24.8): on a mixed-rate burst
         # archive the continuous (lowest-rate) family carries the full
@@ -657,9 +678,14 @@ class BuildFC(Node):
 
         from emptyui_mth5.runs import read_run_channels, resolve_filter_registry
 
-        station_md = station_obj.metadata
+        station_md = SimpleNamespace(
+            station_metadata=SimpleNamespace(
+                location=SimpleNamespace(
+                    latitude=_attr_float(station_obj, "location.latitude"),
+                    longitude=_attr_float(station_obj, "location.longitude"),
+                    elevation=_attr_float(station_obj, "location.elevation"))))
         identity_base = _station_identity_attrs(
-            SimpleNamespace(station_metadata=station_md), surv, stat, "")
+            station_md, surv, stat, "")
 
         # (the former _read_channels/_resolve_registry closures are the
         # shared emptyui_mth5.runs helpers — one implementation for Build

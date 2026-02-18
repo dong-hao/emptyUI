@@ -95,20 +95,44 @@ def write_fc_geometry(dec, attrs: dict[str, Any]) -> None:
 def _fc_identity_attrs(dec, station_obj) -> dict[str, Any]:
     """Station identity attrs resolved from the archive hierarchy (the
     mth5-idiomatic source — the FC group sits under the station, whose
-    metadata carries id/location)."""
+    metadata carries id/location).
+
+    Read from the HDF5 group paths/attrs (free) — the station
+    ``.metadata`` property rebuilds the FULL hierarchy through pydantic
+    (~30-40 s per access on a burst archive, §24.8).
+    """
     attrs: dict[str, Any] = {}
     try:
-        attrs["station_id"] = str(station_obj.metadata.id)
-        survey_id = str(station_obj.survey_metadata.id)
+        from .runs import _group_id
+
+        attrs["station_id"] = _group_id(station_obj)
+        # survey id = the survey group's own attrs (cheap; works for both
+        # the modern nested layout and legacy single-survey files)
+        try:
+            survey_id = str(
+                station_obj.hdf5_group.parent.parent.attrs.get("id") or "")
+        except Exception:  # noqa: BLE001 — identity is best effort
+            survey_id = ""
         if survey_id:
             attrs["survey_id"] = survey_id
-        loc = station_obj.metadata.location
-        if loc.latitude not in (None, 0.0):
-            attrs["station_latitude"] = float(loc.latitude)
-        if loc.longitude not in (None, 0.0):
-            attrs["station_longitude"] = float(loc.longitude)
-        if loc.elevation not in (None, 0.0):
-            attrs["station_elevation"] = float(loc.elevation)
+        a = station_obj.hdf5_group.attrs
+
+        def _loc(key):
+            try:
+                v = a[key]
+                return float(v) if v is not None else None
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        lat, lon, elev = (_loc("location.latitude"),
+                          _loc("location.longitude"),
+                          _loc("location.elevation"))
+        if lat not in (None, 0.0):
+            attrs["station_latitude"] = lat
+        if lon not in (None, 0.0):
+            attrs["station_longitude"] = lon
+        if elev not in (None, 0.0):
+            attrs["station_elevation"] = elev
     except Exception as exc:  # noqa: BLE001 — identity is best effort
         _log.debug("fc identity partially resolved: %s", exc)
     try:

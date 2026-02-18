@@ -1056,7 +1056,17 @@ keyed by run (off by default).
 - **Performance hardening** (mth5/mt_metadata pathologies): `pyproj.CRS`
   LRU cache (`_compat.apply_crs_cache`), `ChannelDataset.to_xarray` channel
   reads (~40× faster than `RunGroup.to_runts`), station metadata hoisted out
-  of the run loop, `add_run`+`from_channel_ts` archive writes.
+  of the run loop, `add_run`+`from_channel_ts` archive writes. The **group
+  `.metadata` properties are the same storm** — `station.metadata`/
+  `survey.metadata` rebuild the FULL hierarchy through pydantic on every
+  access (~30-40 s on a 145-run burst archive): identity (ids) is read free
+  from the HDF5 group paths (`_group_id`) and scalars (location) from the
+  group's HDF5 attrs — Apply sites: Extract Run run-id mode (fast read +
+  `_CachedRunTS` — channels are built lazily once per downstream access,
+  ~0.2 s vs ~7-19 s), Merge Runs (per-run fast read + registry re-resolve
+  on the merged output), Build FC, Save FC (`_fc_identity_attrs`). Run-level
+  `run.metadata` accesses (~10 ms) and error-path messages stay on the
+  metadata properties.
 
 #### Extract Run time-range selection (ts route)
 
