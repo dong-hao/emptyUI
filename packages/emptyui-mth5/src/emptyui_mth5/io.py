@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -45,11 +46,14 @@ class LoadMth5(Node):
 class SaveMth5(Node):
     type = "mth5.io.save"
     title = "Save MTH5"
-    tooltip = "Close (flush) the open MTH5 archive to disk."
+    tooltip = "Close (flush) the open MTH5 archive, or copy it to a new path (Save As)."
     description = (
-        "Persist the archive (close/flush) so any mth5 script can read it "
-        "back. The path parameter does not move the archive — it guards "
-        "against a mismatch with the path the archive was opened from."
+        "Persist the archive: with no path (or the archive's own path) it "
+        "is closed/flushed in place so any mth5 script can read it back. "
+        "With a DIFFERENT path it is copied byte-level to the target (Save "
+        "As) — the copy is self-contained and relocatable, while the "
+        "handle stays open and bound to its original path (moving an open "
+        "HDF5 is unsupported; downstream nodes may still consume it)."
     )
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
@@ -60,12 +64,25 @@ class SaveMth5(Node):
 
     def execute(self, ctx, mth5, path: str = "") -> dict[str, Any]:
         dest = Path(path) if path else None
-        if dest is not None and str(dest) != mth5.filename:
-            # archive is already an open mth5.MTH5; moving isn't supported yet
-            raise ValueError(
-                "moving an open archive is not supported yet — open with the "
-                "target path via Load MTH5 in mode 'w'"
-            )
+        if dest is not None and str(dest) != str(mth5.filename):
+            # Save As: byte-level copy of the on-disk archive (preserves
+            # attrs/compression). Loaders close their write phase before
+            # returning the handle, so the on-disk state is complete; flush
+            # the handle's buffers defensively anyway (a read-only handle
+            # flushes as a no-op).
+            try:
+                mth5.flush()
+            except Exception:  # noqa: BLE001 — flush best-effort
+                pass
+            if dest.exists():
+                ctx.logger.warning("overwriting existing MTH5 at %s", dest)
+                dest.unlink()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(mth5.filename, dest)
+            ctx.logger.info(
+                "saved MTH5 copy -> %s (archive remains open at %s)",
+                dest, mth5.filename)
+            return {}
         mth5.close_mth5()
         ctx.logger.info("saved MTH5 (closed)")
         return {}

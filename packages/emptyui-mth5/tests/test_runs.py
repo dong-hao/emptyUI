@@ -354,3 +354,44 @@ def test_load_mth5_while_loader_handle_held(tmp_path):
     assert res["mth5"] is not None
     m.close_mth5()
     res["mth5"].close_mth5()
+
+
+# --- Save MTH5: close-in-place vs Save As ---------------------------------
+
+
+def test_save_mth5_save_as_copies_open_archive(tmp_path):
+    """A different path copies the archive (Save As); the handle stays open
+    and usable, and the copy is self-contained/readable."""
+    from _archive import multi_run_archive
+    from emptyui_mth5.io import SaveMth5
+
+    m = multi_run_archive(tmp_path / "src.h5", rids=["r1"],
+                          starts=["2024-01-01T00:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    dest = tmp_path / "out" / "copy.h5"
+    SaveMth5().execute(ctx, m, path=str(dest))
+    assert dest.exists()
+    # the handle remains open and bound to its original path
+    assert len(m.run_summary) == 1
+    # the copy is readable and equivalent
+    import h5py
+
+    with h5py.File(dest, "r", locking=False) as h5:
+        names = []
+        h5.visit(names.append)
+        assert any(n.endswith("/r1/hx") for n in names)
+    m.close_mth5()
+
+
+def test_save_mth5_overwrites_existing_dest_with_warning(tmp_path):
+    from _archive import multi_run_archive
+    from emptyui_mth5.io import SaveMth5
+
+    m = multi_run_archive(tmp_path / "src.h5", rids=["r1"],
+                          starts=["2024-01-01T00:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    dest = tmp_path / "copy.h5"
+    dest.write_text("stale content")
+    SaveMth5().execute(ctx, m, path=str(dest))
+    assert dest.read_bytes()[:4] == (tmp_path / "src.h5").read_bytes()[:4]
+    m.close_mth5()
