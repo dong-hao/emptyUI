@@ -13,6 +13,7 @@ from emptyui import Input, Node, Output, Param
 from emptyui_core_nodes._timewindow import resolve_window_s
 from emptyui_core_nodes.types import is_run_collection
 from emptyui_core_nodes.types import is_unknown_start, warn_placeholder_start
+from mt_timeseries import RunTS
 
 from .nomenclature import (
     KEYWORDS,
@@ -98,6 +99,91 @@ def resolve_filter_registry(survey_obj, data_vars) -> dict:
     return registry
 
 
+def _slice_window(data_vars: dict, lo, hi) -> dict:
+    """Slice every channel's time axis to ``[lo, hi]`` (inclusive) when the
+    run carries an absolute time axis; naive/aware bounds are reconciled
+    against the archive's axis (the archive convention is UTC)."""
+    sample = next(iter(data_vars.values()))
+    t_arr = np.asarray(sample["time"].values)
+    if not np.issubdtype(t_arr.dtype, np.datetime64):
+        return data_vars
+    idx = pd.DatetimeIndex(t_arr)
+    if idx.tz is None:  # naive archive, aware bounds
+        blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
+    else:  # aware archive: localize naive bounds
+        blo = lo.tz_localize("UTC") if lo.tzinfo is None else lo
+        bhi = hi.tz_localize("UTC") if hi.tzinfo is None else hi
+    return {
+        name: da.sel(time=slice(blo, bhi))
+        for name, da in data_vars.items()}
+
+
+class _CachedRunTS(RunTS):
+    """RunTS with channel attribute caching (§24.8).
+
+    ``RunTS.__getattr__`` constructs a fresh ChannelTS on every attribute
+    access (``run_metadata.copy()`` + validation ≈ 2 s per channel) — the
+    bulk of the ``to_runts`` storm, paid again by every downstream node.
+    Caching builds each channel once (first access) and hands the same
+    object out afterwards; the cached channels are the real ``ChannelTS``
+    with their response chains, so Calibrate/Split/Merge behave
+    identically — Calibrate even returns a plain RunTS (its own
+    construction path), which downstream nodes handle.
+    """
+
+    def __getattr__(self, name):
+        try:
+            keys = self.dataset.keys()
+        except Exception:  # noqa: BLE001 — not constructed yet
+            return super().__getattr__(name)
+        if name in keys and not name.startswith("_"):
+            cache = self.__dict__.setdefault("_channel_cache", {})
+            if name not in cache:
+                cache[name] = super().__getattr__(name)
+            return cache[name]
+        return super().__getattr__(name)
+
+
+def _group_id(group_obj) -> str:
+    """The group's id from its HDF5 path (cheap) — ``group_obj.metadata``
+    is a property that rebuilds the FULL station/survey metadata through
+    pydantic (all 145 runs of a burst archive ≈ 30-40 s, §24.8)."""
+    try:
+        return str(group_obj.hdf5_group.name.split("/")[-1])
+    except Exception:  # noqa: BLE001 — identity only, never blocks
+        return ""
+
+
+def _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
+                sample_rate: float, registry: dict):
+    """Build a real ``RunTS`` from the fast channel read (§24.8).
+
+    ``RunTS(dataset)`` construction is ~0.2 s vs ``to_runts``'s ~7-19 s
+    mt_metadata deepcopy/validation storm. The archive's survey/station/
+    run ids travel with the payload (fc identity), the resolved filter
+    registry is attached as ``.filters`` — response chains resolve lazily
+    from the channels' applied-filter refs (the same wiring ``to_runts``
+    produces), so Calibrate/Split/Merge Channels and Compute FC all
+    behave identically downstream.
+    """
+    import xarray as xr
+
+    ds = xr.Dataset(data_vars)
+    runts = _CachedRunTS(
+        ds,
+        run_metadata={"id": _group_id(run_obj),
+                      "sample_rate": sample_rate},
+        station_metadata={"id": _group_id(station_obj)},
+        survey_metadata={"id": _group_id(survey_obj)},
+    )
+    runts.filters = dict(registry)
+    # NB: per-channel ChannelTS objects are NOT pre-built — RunTS resolves
+    # response chains lazily from the dataset attrs + ``.filters`` registry
+    # (``_get_channel_response``), and eager ``getattr(runts, name)`` would
+    # pay the full ChannelTS-construction storm right here (§24.8).
+    return runts
+
+
 def _run_duck_payload(survey_obj, run_obj, lo=None, hi=None):
     """One run as a duck payload (fast path), sliced to ``[lo, hi]`` when
     the run carries an absolute time axis."""
@@ -105,21 +191,10 @@ def _run_duck_payload(survey_obj, run_obj, lo=None, hi=None):
 
     data_vars, sample_rate, _start = read_run_channels(run_obj)
     if lo is not None and hi is not None:
+        data_vars = _slice_window(data_vars, lo, hi)
         sample = next(iter(data_vars.values()))
-        t_arr = np.asarray(sample["time"].values)
-        if np.issubdtype(t_arr.dtype, np.datetime64):
-            idx = pd.DatetimeIndex(t_arr)
-            if idx.tz is None:  # naive archive, aware bounds
-                blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
-            else:  # aware archive: localize naive bounds
-                blo = (lo.tz_localize("UTC") if lo.tzinfo is None else lo)
-                bhi = (hi.tz_localize("UTC") if hi.tzinfo is None else hi)
-            data_vars = {
-                name: da.sel(time=slice(blo, bhi))
-                for name, da in data_vars.items()}
-            sample = next(iter(data_vars.values()))
-            if sample.sizes.get("time", 0):
-                _start = sample["time"].values[0]
+        if sample.sizes.get("time", 0):
+            _start = sample["time"].values[0]
     filters = resolve_filter_registry(survey_obj, data_vars)
     return SimpleNamespace(
         dataset=xr.Dataset(data_vars),
@@ -286,6 +361,18 @@ class ExtractRun(Node):
             return self._execute_range(
                 ctx, survey_obj, station_obj, sample_rates, start, end)
         run_obj = _resolve_run(station_obj, run)
+        if not str(run).strip():
+            # the silent first-row fallback is a burst-archive footgun
+            # (the first summary row is a 16 s slot, not the continuous
+            # stream the user wants) — degrade loudly (§23.3)
+            summary = station_obj.run_summary
+            if summary is not None and len(summary) > 1:
+                hint = _largest_runs_hint(summary)
+                ctx.logger.warning(
+                    "'run' param is empty — matched the first summary row "
+                    f"'{run_obj.metadata.id}' of {len(summary)} runs; "
+                    "longest: " + (hint or "n/a") + " — set 'run' "
+                    "explicitly, or use 'time range' selection")
         start_dt = end_dt = None
         if str(start).strip() or str(end).strip():
             # time-selector guards (§23.4): clamp into the run's extent.
@@ -343,8 +430,13 @@ class ExtractRun(Node):
                     what="time slot")
                 start_dt = ext0 + pd.Timedelta(seconds=s0)
                 end_dt = ext0 + pd.Timedelta(seconds=s1)
-        runts = run_obj.to_runts(start=start_dt, end=end_dt)
-        ctx.progress(1.0, f"extracted {survey_obj.metadata.id}/{station_obj.metadata.id}/{run_obj.metadata.id}")
+        data_vars, sample_rate, _start = read_run_channels(run_obj)
+        if start_dt is not None:
+            data_vars = _slice_window(data_vars, start_dt, end_dt)
+        registry = resolve_filter_registry(survey_obj, data_vars)
+        runts = _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
+                            sample_rate, registry)
+        ctx.progress(1.0, f"extracted {_group_id(survey_obj)}/{_group_id(station_obj)}/{_group_id(run_obj)}")
         return {"data": runts}
 
     @staticmethod

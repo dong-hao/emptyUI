@@ -260,6 +260,67 @@ def test_run_id_mode_default_unchanged(archive, tmp_path: Path):
     assert "runs" not in res
 
 
+def test_first_run_fallback_warns_on_multi_run_station(archive, tmp_path: Path,
+                                                       caplog):
+    """The silent first-row fallback is a burst-archive footgun (the first
+    summary row is a short slot, not the continuous stream) — with more
+    than one run it warns naming the matched run and the longest runs
+    (§9.3); single-run stations stay silent."""
+    import logging
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.insert(0, str(_Path(__file__).parent))
+    from _archive import multi_run_archive
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        # multi-run station: the fallback warns loudly
+        multi_run_archive(tmp_path / "multi.h5",
+                          rids=["r1", "r2", "r3"],
+                          starts=["2024-01-01T00:00:00",
+                                  "2024-01-02T00:00:00",
+                                  "2024-01-03T00:00:00"])
+        from mth5.mth5 import MTH5
+
+        a1 = MTH5()
+        a1.open_mth5(tmp_path / "multi.h5", "r", locking=False)
+        res = ExtractRun().execute(ctx, a1, run="")
+        matched = res["data"].run_metadata.id
+        assert any(matched in r.message and "longest:" in r.message
+                   for r in caplog.records)
+        caplog.clear()
+        # single-run station: the fallback is unambiguous — no warning
+        multi_run_archive(tmp_path / "single.h5", rids=["r1"],
+                          starts=["2024-01-01T00:00:00"])
+        a2 = MTH5()
+        a2.open_mth5(tmp_path / "single.h5", "r", locking=False)
+        ExtractRun().execute(ctx, a2, run="")
+        assert not any("matched the first summary row" in r.message
+                       for r in caplog.records)
+
+
+def test_fast_path_payload_is_real_runts(archive, tmp_path: Path):
+    """Run-id extraction rides the fast channel read and wraps a real RunTS
+    carrying the archive's identity + filter registry (§9.3) — Calibrate/
+    Split/Merge Channels and Compute FC behave identically downstream."""
+    from emptyui_mth5.runs import _resolve_station, _resolve_survey
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(ctx, archive, run="")
+    d = res["data"]
+    assert type(d).__name__ == "_CachedRunTS"
+    st = _resolve_station(_resolve_survey(archive, ""), "")
+    assert d.run_metadata.id == st.run_summary.iloc[0]["id"]
+    assert d.station_metadata.id
+    assert d.survey_metadata.id
+    # the registry is attached: channel_calibration resolves per channel
+    from emptyui_core_nodes.types import channel_calibration
+
+    cal = channel_calibration(d)
+    assert cal, "wrapped RunTS lost the filter registry"
+
+
 def test_load_uses_uniform_locking_policy(tmp_path, monkeypatch):
     """UNIFORM locking policy (DESIGN §9.3): every emptyUI open disables
     HDF5 file locking. Default-locking handles live for the server

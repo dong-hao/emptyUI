@@ -1083,10 +1083,24 @@ Compute FC produces **identical FC levels** to Build FC (regression
 `test_compute_fc_collection.py::test_collection_route_parity_with_build_fc`).
 
 The classic single-run flow keeps the legacy semantics — including the
-first-run fallback — but a bounded window that misses the resolved run's
-extent entirely now rejects with an actionable message naming the matched
+first-run fallback — but the fallback now **warns loudly** whenever the
+station holds more than one run (naming the matched run, the station's run
+count, and its longest runs), and a bounded window that misses the resolved
+run's extent entirely rejects with an actionable message naming the matched
 run, its extent, and the station's longest runs (a burst archive's first
 summary row is a short slot; the continuous stream is what users want).
+
+Run-id mode also rides the **fast channel read** (§24.8): the run's
+channels are read via `to_xarray` (crop-before-wrap when the time bar
+bounds the window) and wrapped into a real `RunTS` via a cached-channels
+subclass — `RunTS(dataset)` construction is ~0.2 s vs `to_runts`'s ~7-19 s
+mt_metadata deepcopy/validation storm, and the cached `__getattr__` avoids
+rebuilding a fresh `ChannelTS` on every attribute access downstream. The
+wrap carries the archive's survey/station/run ids (read free from the HDF5
+group paths — the `station.metadata`/`survey.metadata` properties are the
+same pydantic storm) and the resolved filter registry, so Calibrate/Split/
+Merge Channels and Compute FC behave identically downstream (parity-
+checked: identical channel data, FC levels, and calibrated output).
 Conversely, the singular-semantics ts tooling (Split/Merge Channels, Align
 Runs, Calibrate, Detrend/Bandpass, ts plots) **rejects collections loudly**
 with node-appropriate remedies — collection mapping and per-family viewing
