@@ -208,12 +208,17 @@ export function MTNode({ id, data, selected }: NodeProps) {
   // Conditional-UX rules are manifest-driven (DESIGN.md §4 `enabled_when`):
   // a param is editable only when its named sibling param holds one of the
   // listed values (e.g. remote_reference only for the robust estimator).
+  // NB: both sides are stringified case-insensitively — the manifest
+  // serializes rule values via Python str() ("True"/"False" capitalized)
+  // while JS String(true/false) is lowercase, so a case-sensitive compare
+  // never matches boolean rules (saturated_max stayed disabled forever).
   const isParamEnabled = (p: ParamSpec): boolean => {
     const ew = p.enabled_when;
     if (!ew) return true;
     const sibling = manifest?.params.find((q) => q.name === ew.param);
     const current = d.params[ew.param] ?? sibling?.default ?? "";
-    return ew.values.includes(String(current));
+    const cur = String(current).toLowerCase();
+    return ew.values.map(String).some((v) => v.toLowerCase() === cur);
   };
 
   // Port-analog of enabled_when (DESIGN.md §4 `populated_when`): the output
