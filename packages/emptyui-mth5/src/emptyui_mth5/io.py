@@ -8,6 +8,8 @@ from typing import Any
 
 from emptyui import Input, Node, Output, Param
 
+from ._compat import ensure_h5_openable
+
 
 class LoadMth5(Node):
     type = "mth5.io.load"
@@ -29,6 +31,7 @@ class LoadMth5(Node):
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"MTH5 not found: {p}")
+        ensure_h5_openable(str(p), log=ctx.logger)
         archive = mth5.MTH5()
         # UNIFORM locking policy (DESIGN §9.3): every emptyUI open disables
         # HDF5 file locking (mth5 forwards kwargs to h5py.File). Handles live

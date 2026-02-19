@@ -47,6 +47,9 @@ def get_workspace_mth5(ctx):
         _workspace_handles.pop(key, None)
     from mth5.mth5 import MTH5
 
+    from ._compat import ensure_h5_openable
+
+    ensure_h5_openable(key)
     m = MTH5()
     m.open_mth5(key, mode="a", locking=False)
     _workspace_handles[key] = m
@@ -113,7 +116,10 @@ def persist_fc_level(
         )
     from mth5.mth5 import MTH5
 
+    from ._compat import ensure_h5_openable
+
     path = workspace_mth5_path(ctx)
+    ensure_h5_openable(str(path))
     own = m is None
     if own:
         m = MTH5()
@@ -149,9 +155,12 @@ def load_fc_level(
     """Read a persisted decimation level's FC back from the workspace mth5."""
     from mth5.mth5 import MTH5
 
+    from ._compat import ensure_h5_openable
+
     path = workspace_mth5_path(ctx)
     if not path.exists():
         raise FileNotFoundError(f"workspace archive not found: {path}")
+    ensure_h5_openable(str(path))
     m = MTH5()
     m.open_mth5(str(path), mode="r", locking=False)
     try:

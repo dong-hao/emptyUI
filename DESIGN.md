@@ -926,6 +926,14 @@ Load-MTH5-reads flow inside one graph. With the uniform policy, concurrent
 opens coexist and external tooling is never blocked by our handles; HDF5's
 superblock consistency flag still rejects new opens of write-active files.
 
+**Stale write-flag recovery.** A server killed while a loader/Save/persist
+handle had an archive open for write leaves that flag set — every later open
+fails until the flag is cleared. Load MTH5, Save MTH5 and the workspace
+persistence layer pre-check the archive (`_compat.ensure_h5_openable`) and,
+when `h5clear` is on PATH, clear the flag with a loud warning (the data is
+intact as long as the last write transaction completed); without `h5clear`
+the error names the remedy.
+
 **NIMS (USArray) note.** Native NIMS ingestion is **not delivered** — USArray
 NIMS recordings are automatically uploaded to the IRIS Data Center and
 archived as miniSEED (a seismic-data format, repurposed here for MT), so
