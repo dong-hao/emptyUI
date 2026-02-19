@@ -19,6 +19,19 @@ _log = logging.getLogger("emptyui")
 #: Window-family mapping into mth5's WindowTypeEnum vocabulary.
 _MTH5_WINDOW_TYPES = {"hanning": "hann"}
 
+#: emptyUI's human-readable per-window-detrend values -> mth5's
+#: ShortTimeFourierTransform.per_window_detrend_type enum (['linear',
+#: 'constant', '']): "off" is emptyUI's spelling of "no per-window
+#: detrend". (The former model round trip VALIDATED this value and — on a
+#: mismatch — silently dropped the whole geometry record; direct writes
+#: must map it instead.)
+_MTH5_DETREND_TYPES = {"off": "", "none": ""}
+
+#: same mapping for prewhitening (mth5's enum: ['first difference', 'other']
+#: — an empty string is NOT valid, so "off" (emptyUI's "no prewhitening")
+#: must leave the attr untouched, like the former model round trip did)
+_MTH5_PREWHITENING_TYPES = {"off": None, "none": None}
+
 #: The decimation-group attribute keys that carry the fc geometry (mth5's
 #: own metadata model). Written directly: mth5's ``write_metadata``
 #: serializes the FULL model and chokes on nested FCChannel objects once
@@ -46,43 +59,41 @@ def write_fc_geometry(dec, attrs: dict[str, Any]) -> None:
     would crash. What the FC model cannot express (electric scaling,
     calibration provenance, saturated-window counts) stays in-memory
     provenance on the fc payload only.
+
+    The geometry attrs are computed directly from the payload (same
+    serialization mth5's model produces: overlap in samples, the hann
+    type mapping, ``none`` for missing) — going through the model
+    (``dec.metadata``) costs a pydantic rebuild per level (§24.8).
     """
-    try:
-        md = dec.metadata
-        tsd = md.time_series_decimation
-        if attrs.get("decimation_level") is not None:
-            tsd.level = int(attrs["decimation_level"])
-        if attrs.get("factor"):
-            tsd.factor = float(attrs["factor"])
-        if attrs.get("sample_rate"):
-            tsd.sample_rate = float(attrs["sample_rate"])
-        stft = md.short_time_fourier_transform
-        w = stft.window
-        n = int(attrs.get("num_samples_window") or 0)
-        if n:
-            w.num_samples = n
-        ov = attrs.get("overlap")
-        if ov is not None and n:
-            w.overlap = round(float(ov) * n)  # mth5 stores samples
-        wt = str(attrs.get("window_type") or "")
-        if wt:
-            w.type = _MTH5_WINDOW_TYPES.get(wt, wt)
-        pw = str(attrs.get("prewhitening") or "")
-        if pw:
-            stft.prewhitening_type = pw
-        if attrs.get("per_window_detrend") is not None:
-            stft.per_window_detrend_type = str(attrs["per_window_detrend"])
-        flat = md.to_dict(single=True)
-    except Exception as exc:  # noqa: BLE001 — persistence must never fail a run
-        _log.debug("fc geometry metadata partially recorded: %s", exc)
-        return
+    n = int(attrs.get("num_samples_window") or 0)
+    ov = attrs.get("overlap")
+    wt = str(attrs.get("window_type") or "")
+    values: dict[str, Any] = {
+        "time_series_decimation.level": (
+            int(attrs["decimation_level"])
+            if attrs.get("decimation_level") is not None else None),
+        "time_series_decimation.factor": (
+            float(attrs["factor"]) if attrs.get("factor") else None),
+        "time_series_decimation.sample_rate": (
+            float(attrs["sample_rate"]) if attrs.get("sample_rate") else None),
+        "short_time_fourier_transform.window.num_samples": n or None,
+        "short_time_fourier_transform.window.overlap": (
+            round(float(ov) * n) if (ov is not None and n) else None),
+        "short_time_fourier_transform.window.type": (
+            _MTH5_WINDOW_TYPES.get(wt, wt) if wt else None),
+        "short_time_fourier_transform.prewhitening_type": (
+            _MTH5_PREWHITENING_TYPES.get(str(attrs["prewhitening"]).lower(),
+                                         str(attrs["prewhitening"]))
+            if attrs.get("prewhitening") else None),
+        "short_time_fourier_transform.per_window_detrend_type": (
+            _MTH5_DETREND_TYPES.get(str(attrs["per_window_detrend"]).lower(),
+                                    str(attrs["per_window_detrend"]))
+            if attrs.get("per_window_detrend") is not None else None),
+    }
     group = dec.hdf5_group
-    for key in _GEOMETRY_KEYS:
-        if key not in flat:
-            continue
-        value = flat[key]
+    for key, value in values.items():
         if value is None:
-            value = "none"  # mth5's own None serialization
+            continue
         try:
             if key in group.attrs:
                 group.attrs.modify(key, value)

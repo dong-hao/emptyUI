@@ -36,7 +36,7 @@ def _runts(start="2023-06-01T12:00:00", n=600, sr=10.0, comps=("ex", "ey", "hx",
 # ---------------------------------------------------------------- Extract Run
 def test_extract_run_slot_crops(archive, tmp_path):
     ctx = _ctx(tmp_path)
-    res = ExtractRun().execute(ctx, archive, start="1980-01-01 00:00:30",
+    res = ExtractRun().execute(ctx, archive, selection="run id", start="1980-01-01 00:00:30",
                                end="1980-01-01 00:00:40")
     runts = res["data"]
     assert len(runts.dataset.time) == 11  # 1 Hz run, 10 s inclusive-exclusive crop
@@ -48,7 +48,8 @@ def test_extract_run_out_of_range_clamped(archive, tmp_path, caplog):
 
     with caplog.at_level(logging.WARNING, logger="emptyui"):
         res = ExtractRun().execute(
-            _ctx(tmp_path), archive, start="1979-01-01 00:00:00",
+            _ctx(tmp_path), archive, selection="run id",
+            start="1979-01-01 00:00:00",
             end="2999-01-01 00:00:00")
     row = archive.run_summary.iloc[0]
     full = (pd.Timestamp(row["end"]) - pd.Timestamp(row["start"])).total_seconds()
@@ -58,13 +59,13 @@ def test_extract_run_out_of_range_clamped(archive, tmp_path, caplog):
 
 def test_extract_run_minimum_slot(archive, tmp_path):
     with pytest.raises(ValueError, match="minimum slot"):
-        ExtractRun().execute(_ctx(tmp_path), archive,
+        ExtractRun().execute(_ctx(tmp_path), archive, selection="run id",
                              start="1980-01-01 00:00:30",
                              end="1980-01-01 00:00:31")
 
 
 def test_extract_run_no_slot_guard_when_unbounded(archive, tmp_path):
-    res = ExtractRun().execute(_ctx(tmp_path), archive)
+    res = ExtractRun().execute(_ctx(tmp_path), archive, selection="run id")
     row = archive.run_summary.iloc[0]
     full = (pd.Timestamp(row["end"]) - pd.Timestamp(row["start"])).total_seconds()
     assert len(res["data"].dataset.time) == pytest.approx(full, rel=0.01)

@@ -314,12 +314,13 @@ class ExtractRun(Node):
     )
     params = (
         Param("selection", "select", label="Selection",
-              options=("run id", "time range"), default="run id",
-              description="'run id' extracts one run (empty = the first in "
-                          "the run summary); 'time range' extracts ALL runs "
-                          "whose period intersects the UTC window (the "
-                          "inclusive burst-mode selection — whole coverage, "
-                          "each run cropped to the window)"),
+              options=("time range", "run id"), default="time range",
+              description="'time range' (default) extracts ALL runs whose "
+                          "period intersects the UTC window (empty start/"
+                          "end = every run of the station) — the inclusive "
+                          "burst-mode selection; 'run id' extracts one run "
+                          "(empty = the first in the run summary, warned "
+                          "on multi-run stations)"),
         Param("survey", "string", label="Survey id", default=""),
         Param("station", "string", label="Station id", default=""),
         Param("run", "string", label="Run id", default="",
@@ -351,7 +352,7 @@ class ExtractRun(Node):
                  "channel_nomenclature": "channel_nomenclature"},
     }
 
-    def execute(self, ctx, mth5, selection: str = "run id",
+    def execute(self, ctx, mth5, selection: str = "time range",
                 survey: str = "", station: str = "",
                 run: str = "", sample_rates: str = "",
                 start: str = "", end: str = "") -> dict[str, Any]:

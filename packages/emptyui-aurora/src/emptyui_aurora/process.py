@@ -149,11 +149,12 @@ class ComputeFC(Node):
         Param("overlap", "number", default=0.5, min=0.0, max=0.99,
               description="Window overlap fraction (< 1)"),
         Param("window_type", "select", options=("hamming", "hanning", "boxcar"),
-              default="hamming",
-              description="boxcar maximizes effective dof (best with "
-                          "prewhitening at white-noise-limited scales); "
-                          "hanning/hamming suppress line-spectra leakage "
-                          "(day-scale windows)"),
+              default="boxcar",
+              description="boxcar (default) maximizes effective dof — "
+                          "pair with prewhitening (first difference) at "
+                          "white-noise-limited scales; hanning/hamming "
+                          "suppress line-spectra leakage (day-scale "
+                          "windows)"),
         Param("window_type_deep", "select", label="Deep-level taper",
               default="", options=("", "hamming", "hanning", "boxcar"),
               optional=True,
@@ -178,13 +179,14 @@ class ComputeFC(Node):
                           "separately-computed per-run FCs (Merge FC, burst "
                           "mode); empty anchors at each run's start (legacy). "
                           "Needs an absolute start time."),
-        Param("prewhitening", "select", label="Prewhitening", default="",
-              options=("", "first difference"),
-              description="Leakage-reduction prewhitening before the STFT: "
-                          "'first difference' (aurora/EMTF-style) differences "
-                          "each channel in time and recolors the FCs by the "
-                          "exact inverse filter; off (default) keeps the "
-                          "legacy emptyUI behavior."),
+        Param("prewhitening", "select", label="Prewhitening",
+              default="first difference", options=("", "first difference"),
+              description="Leakage-reduction prewhitening before the STFT "
+                          "(default: 'first difference' — aurora/EMTF-style, "
+                          "differences each channel in time and recolors the "
+                          "FCs by the exact inverse filter; required to reap "
+                          "boxcar's full dof). Empty = off (the legacy "
+                          "emptyUI behavior)."),
         Param("per_window_detrend", "select", label="Per-window detrend",
               default="", options=("", "linear"),
               description="Detrend each STFT window (linear) before "
@@ -224,10 +226,11 @@ class ComputeFC(Node):
                 e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
                 window_samples: int = 256,
-                overlap: float = 0.5, window_type: str = "hamming",
+                overlap: float = 0.5, window_type: str = "boxcar",
                 window_type_deep: str = "", deep_from_level=None,
                 clock_zero: str = "",
-                prewhitening: str = "", per_window_detrend: str = "",
+                prewhitening: str = "first difference",
+                per_window_detrend: str = "",
                 reject_saturated: bool = True,
                 saturated_max: float = 0.01,
                 persist: bool = True, survey: str = "", station: str = "",
@@ -268,7 +271,9 @@ class ComputeFC(Node):
             reject_saturated=reject_saturated,
             saturated_max=saturated_max,
         )
-        from emptyui_mth5.persist import persist_fc_level, runts_context
+        from emptyui_mth5.persist import (close_workspace_mth5,
+                                          get_workspace_mth5,
+                                          persist_fc_level, runts_context)
 
         # Station identity travels with the fc (attrs) so EstimateTF can attach
         # it to the TF — the single point of truth for plot titles and export
@@ -290,16 +295,22 @@ class ComputeFC(Node):
         for level, fc in levels.items():
             fc.attrs.update(identity)
         if persist:
-            for level, fc in levels.items():
-                if "datetime64" in str(fc.time.dtype):
-                    persist_fc_level(ctx, fc, level, fc.attrs["sample_rate"],
-                                     survey=surv, station=stat, run=run_id)
-                else:
-                    ctx.logger.warning(
-                        f"FC level {level} has no absolute (datetime64) time axis — "
-                        "skipping persistence."
-                    )
-                    break
+            wm = get_workspace_mth5(ctx)
+            try:
+                for level, fc in levels.items():
+                    if "datetime64" in str(fc.time.dtype):
+                        persist_fc_level(ctx, fc, level,
+                                         fc.attrs["sample_rate"],
+                                         survey=surv, station=stat,
+                                         run=run_id, m=wm)
+                    else:
+                        ctx.logger.warning(
+                            f"FC level {level} has no absolute (datetime64) time axis — "
+                            "skipping persistence."
+                        )
+                        break
+            finally:
+                close_workspace_mth5(ctx)
         # per-window run identity (§9.3 universality): Select Runs / Residual
         # Sort key on the per-window 'run_id' coordinate — the classic
         # single-run flow (Extract -> Compute FC) now carries it too, so
@@ -333,7 +344,9 @@ class ComputeFC(Node):
         per-run cascades merged along time, per level (DESIGN §9.3)."""
         import numpy as np
 
-        from emptyui_mth5.persist import persist_fc_level
+        from emptyui_mth5.persist import (close_workspace_mth5,
+                                          get_workspace_mth5,
+                                          persist_fc_level)
 
         members = list(collection.runs)
         extents = list(collection.extents)
@@ -386,12 +399,13 @@ class ComputeFC(Node):
             identity = _station_identity_attrs(member, surv, stat, rid)
             for level, fc in levels.items():
                 fc.attrs.update(identity)
+            wm = get_workspace_mth5(ctx) if persist else None
             if persist:
                 for level, fc in levels.items():
                     if "datetime64" in str(fc.time.dtype):
                         persist_fc_level(
                             ctx, fc, level, fc.attrs["sample_rate"],
-                            survey=surv, station=stat, run=rid)
+                            survey=surv, station=stat, run=rid, m=wm)
                     else:
                         ctx.logger.warning(
                             "run %s level %d has no absolute time axis — "
@@ -405,6 +419,8 @@ class ComputeFC(Node):
             ctx.progress(
                 i / len(members),
                 f"FC {i}/{len(members)}: run {rid} ({len(levels)} level(s))")
+        if persist:
+            close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(
@@ -500,7 +516,7 @@ class BuildFC(Node):
               default=256, min=8),
         Param("overlap", "number", default=0.5, min=0.0, max=0.99),
         Param("window_type", "select",
-              options=("hamming", "hanning", "boxcar"), default="hamming"),
+              options=("hamming", "hanning", "boxcar"), default="boxcar"),
         Param("window_type_deep", "select", label="Deep-level taper",
               default="", options=("", "hamming", "hanning", "boxcar"),
               optional=True),
@@ -514,8 +530,8 @@ class BuildFC(Node):
                           "for burst archives, and the absolute grid is "
                           "what pairs remote-reference slots across "
                           "stations (DESIGN §24.8)."),
-        Param("prewhitening", "select", label="Prewhitening", default="",
-              options=("", "first difference")),
+        Param("prewhitening", "select", label="Prewhitening",
+              default="first difference", options=("", "first difference")),
         Param("per_window_detrend", "select", label="Per-window detrend",
               default="", options=("", "linear")),
         Param("reject_saturated", "boolean", label="Reject saturated windows",
@@ -578,9 +594,10 @@ class BuildFC(Node):
                 magnetic_unit: str = "auto", e_dipole_length_m=None,
                 decimation_levels: int = 0, factor: int = 4,
                 window_samples: int = 256, overlap: float = 0.5,
-                window_type: str = "hamming", window_type_deep: str = "",
+                window_type: str = "boxcar", window_type_deep: str = "",
                 deep_from_level=None, clock_zero: str = "epoch",
-                prewhitening: str = "", per_window_detrend: str = "",
+                prewhitening: str = "first difference",
+                per_window_detrend: str = "",
                 reject_saturated: bool = True,
                 saturated_max: float = 0.01,
                 persist: bool = False,
@@ -782,6 +799,15 @@ class BuildFC(Node):
                     spans.append(cur)
 
         unit_by_id = {u[0]: u for u in units}
+        # one workspace handle for the whole execution (§24.8): the
+        # per-level open/close is quadratic — every close re-summarizes all
+        # summary tables (the fc summary recursively walks every persisted
+        # FC level)
+        if persist:
+            from emptyui_mth5.persist import (close_workspace_mth5,
+                                              get_workspace_mth5)
+
+            wm = get_workspace_mth5(ctx)
         for i, span in enumerate(spans, 1):
             members = []
             memo: dict[str, dict] = {}
@@ -896,7 +922,7 @@ class BuildFC(Node):
                         persist_fc_level(ctx, fc, level,
                                          fc.attrs["sample_rate"],
                                          survey=surv, station=stat,
-                                         run=span_id)
+                                         run=span_id, m=wm)
                     else:
                         ctx.logger.warning(
                             "run %s level %d has no absolute time axis — "
@@ -938,6 +964,8 @@ class BuildFC(Node):
                 f"FC {i}/{len(spans)}: span {span_id} "
                 f"({len(levels)} level(s), {len(span)} run(s))",
             )
+        if persist:
+            close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(

@@ -20,7 +20,7 @@ def test_empty_params_fall_back_to_first_run(archive, tmp_path: Path):
     survey/station/run instead of erroring (regression: `surveys_list` no
     longer exists on the survey group)."""
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = ExtractRun().execute(ctx, archive)
+    res = ExtractRun().execute(ctx, archive, selection="run id")
     runts = res["data"]
     assert set(runts.channels) >= {"ex", "ey", "hx", "hy"}
 
@@ -240,7 +240,7 @@ def test_run_id_mode_no_overlap_error(tmp_path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     try:
         ExtractRun().execute(
-            ctx, archive, run="r1",
+            ctx, archive, selection="run id", run="r1",
             start="2024-01-01 02:00:00", end="2024-01-01 03:00:00")
     except ValueError as exc:
         msg = str(exc)
@@ -255,7 +255,7 @@ def test_run_id_mode_default_unchanged(archive, tmp_path: Path):
     """'run id' (default) keeps the legacy single-run surface: 'data'
     populated, no crop without bounds."""
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = ExtractRun().execute(ctx, archive, run="")
+    res = ExtractRun().execute(ctx, archive, selection="run id", run="")
     assert res["data"] is not None
     assert "runs" not in res
 
@@ -285,7 +285,7 @@ def test_first_run_fallback_warns_on_multi_run_station(archive, tmp_path: Path,
 
         a1 = MTH5()
         a1.open_mth5(tmp_path / "multi.h5", "r", locking=False)
-        res = ExtractRun().execute(ctx, a1, run="")
+        res = ExtractRun().execute(ctx, a1, selection="run id", run="")
         matched = res["data"].run_metadata.id
         assert any(matched in r.message and "longest:" in r.message
                    for r in caplog.records)
@@ -295,7 +295,7 @@ def test_first_run_fallback_warns_on_multi_run_station(archive, tmp_path: Path,
                           starts=["2024-01-01T00:00:00"])
         a2 = MTH5()
         a2.open_mth5(tmp_path / "single.h5", "r", locking=False)
-        ExtractRun().execute(ctx, a2, run="")
+        ExtractRun().execute(ctx, a2, selection="run id", run="")
         assert not any("matched the first summary row" in r.message
                        for r in caplog.records)
 
@@ -307,7 +307,7 @@ def test_fast_path_payload_is_real_runts(archive, tmp_path: Path):
     from emptyui_mth5.runs import _resolve_station, _resolve_survey
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    res = ExtractRun().execute(ctx, archive, run="")
+    res = ExtractRun().execute(ctx, archive, selection="run id", run="")
     d = res["data"]
     assert type(d).__name__ == "_CachedRunTS"
     st = _resolve_station(_resolve_survey(archive, ""), "")

@@ -688,14 +688,14 @@ def test_macro_flow_extract_align(tmp_path):
     # slot runs expose ts.run (time-domain extension surface: e.g. NN
     # denoising consumes per-slot series)
     slot = ExtractRun().execute(ctx, a, survey="SYNTH_SURVEY",
-                                station="SYNTH01", run="sr2400_0001")["data"]
+                                station="SYNTH01", selection="run id", run="sr2400_0001")["data"]
     assert slot.dataset.sizes["time"] == 2400  # 1 s @ 2400 Hz
     # continuous streams: the RR workhorse — align crops both to the
     # common overlap (station B starts 300 s later)
     s_a = ExtractRun().execute(ctx, a, survey="SYNTH_SURVEY",
-                               station="SYNTH01", run="sr15_0001")["data"]
+                               station="SYNTH01", selection="run id", run="sr15_0001")["data"]
     s_b = ExtractRun().execute(ctx, b, survey="SYNTH_SURVEY",
-                               station="SYNTH02", run="sr15_0001")["data"]
+                               station="SYNTH02", selection="run id", run="sr15_0001")["data"]
     out = AlignRuns().execute(ctx, s_a, s_b)
     r_a, r_b = out["data1"], out["data2"]
     assert len(r_a.dataset.time) == len(r_b.dataset.time)

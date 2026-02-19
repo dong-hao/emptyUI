@@ -398,7 +398,13 @@ WebSocket messages small and lets the same executor serve batch/CLI use later.
 No internal database. **MTH5 is the server-side container**:
 - A workspace directory **per run** (`ctx.workspace`); intermediates a node
   chooses to persist are written into `<workspace>/workspace.mth5` (see
-  `persist.py`). A persistent `~/.emptyui/workspace/` is a future item.
+  `persist.py`). The persist path uses **one cached open handle per node
+  execution** (§24.8): the per-level open/close is quadratic — every
+  `MTH5.close_mth5()` re-summarizes ALL summary tables (the fc summary
+  recursively walks every persisted FC level; 294 levels ≈ 96 s of pure
+  HDF5 walking). `persist_fc_level(m=...)` accepts the shared handle;
+  `get_workspace_mth5`/`close_workspace_mth5` manage it. A persistent
+  `~/.emptyui/workspace/` is a future item.
 - Nothing reaches the user's disk until they explicitly export/save-as.
 - Benefits: interoperability with the existing CLI ecosystem (any mth5/aurora
   script can read what emptyUI produced) and remote deployments are just "a
@@ -1072,9 +1078,11 @@ keyed by run (off by default).
 
 Extract Run carries two selection modes: **`run id`** (legacy surface — one
 run, cropped by the time bar; empty id falls back to the first run-summary
-row) and **`time range`** — the inclusive selection for burst-mode
+row, warned loudly on multi-run stations) and **`time range`** (the
+default) — the inclusive selection for burst-mode
 instruments: **ALL runs of the station whose period intersects the UTC
-window** are extracted, each cropped to the window overlap (the
+window** are extracted (empty start/end = every run of the station), each
+cropped to the window overlap (the
 time-selector semantic — clamped, never fabricated). A `sample_rates`
 param scopes the families (empty = every family: the staggered burst slots
 plus the continuous stream). The output is a **`ts.runs` run collection**
@@ -1167,18 +1175,20 @@ verification records live in `docs/history/` (§14, §16, §24).
 
 ### 10.1 Compute FC — the STFT chain
 
-emptyUI implements **taper → FFT only** (Hamming default, 50% overlap,
+emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
 `boundary=None`); the remaining aurora steps are deliberately absent:
 
-- **Prewhitening (opt-in)**: `prewhitening="first difference"` applies the
-  time-domain first difference and the exact `÷ j2πf` inverse recoloring
-  (clean-signal FCs preserved to ~1e-4 relative). Ablation verdict (SDG31 vs
-  the official EMTF product): the controlling factor at short periods is
-  **DC/edge leakage suppression** — the current default's entire deficit is
-  concentrated at 7.3–15.1 s; a zero-endpoint taper (hann) or prewhitening
-  closes it; boxcar without prewhitening is catastrophic (~1 decade, all
-  periods). Defaults stay hamming/no-PW pending the persisted-FC convention;
-  the recipe for noise-floor-dominated stations is boxcar + PW at
+- **Prewhitening (default on)**: `prewhitening="first difference"` (the
+  default) applies the time-domain first difference and the exact
+  `÷ j2πf` inverse recoloring (clean-signal FCs preserved to ~1e-4
+  relative). Ablation verdict (SDG31 vs the official EMTF product): the
+  controlling factor at short periods is **DC/edge leakage suppression** —
+  the current default's entire deficit is concentrated at 7.3–15.1 s; a
+  zero-endpoint taper (hann) or prewhitening closes it; boxcar without
+  prewhitening is catastrophic (~1 decade, all periods). Defaults are now
+  **boxcar + first-difference PW** (the dof-maximizing recipe, coherent
+  since PW is on; empty = off keeps the legacy emptyUI behavior) — the
+  recipe for noise-floor-dominated stations is boxcar + PW at
   short-period levels (history §24.3 E1).
 - **Per-level taper schedule**: `window_type` (base) + `window_type_deep` +
   `deep_from_level`. Physically motivated, not tuned: white-ish fluxgate

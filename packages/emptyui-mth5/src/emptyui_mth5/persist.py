@@ -16,10 +16,52 @@ from typing import Any
 #: Name of the workspace archive inside ``ctx.workspace``.
 WORKSPACE_MTH5_NAME = "workspace.mth5"
 
+#: Cached open workspace handles keyed by archive path (§24.8): opening and
+#: closing the workspace PER PERSISTED LEVEL is quadratic — every
+#: ``MTH5.close_mth5()`` re-summarizes ALL summary tables (the fc summary
+#: recursively walks every FC level in the archive — ~96 s when persisting
+#: 294 levels). One handle per node execution, closed once at the end.
+_workspace_handles: dict[str, Any] = {}
+
 
 def workspace_mth5_path(ctx) -> Path:
     """Absolute path of the workspace archive for a run context."""
     return Path(ctx.workspace) / WORKSPACE_MTH5_NAME
+
+
+def get_workspace_mth5(ctx):
+    """A cached, open workspace archive handle (append mode) for ``ctx``.
+
+    The caller must eventually call :func:`close_workspace_mth5` (which
+    flushes and closes; mth5's close re-summarizes its summary tables —
+    once per execution instead of once per persisted level).
+    """
+    key = str(workspace_mth5_path(ctx))
+    m = _workspace_handles.get(key)
+    if m is not None:
+        try:
+            if m.h5_is_write():
+                return m
+        except Exception:  # noqa: BLE001 — stale handle, reopen
+            pass
+        _workspace_handles.pop(key, None)
+    from mth5.mth5 import MTH5
+
+    m = MTH5()
+    m.open_mth5(key, mode="a", locking=False)
+    _workspace_handles[key] = m
+    return m
+
+
+def close_workspace_mth5(ctx) -> None:
+    """Flush and close the cached workspace handle for ``ctx`` (if open)."""
+    key = str(workspace_mth5_path(ctx))
+    m = _workspace_handles.pop(key, None)
+    if m is not None:
+        try:
+            m.close_mth5()
+        except Exception:  # noqa: BLE001 — close is best effort
+            pass
 
 
 def _ensure_survey(m, survey: str):
@@ -55,11 +97,14 @@ def persist_fc_level(
     survey: str = "workspace",
     station: str = "local",
     run: str = "run",
+    m=None,
 ) -> Path:
     """Persist one decimation level's Fourier coefficients to the workspace mth5.
 
     ``fc`` must carry a ``datetime64`` ``time`` coordinate (i.e. an absolute
-    start time), which mth5's ``from_xarray`` requires.
+    start time), which mth5's ``from_xarray`` requires. Pass a cached
+    handle (``get_workspace_mth5``) to persist many levels through one
+    open/close cycle — the per-call open/close is quadratic (§24.8).
     """
     if "datetime64" not in str(fc.time.dtype):
         raise ValueError(
@@ -69,8 +114,10 @@ def persist_fc_level(
     from mth5.mth5 import MTH5
 
     path = workspace_mth5_path(ctx)
-    m = MTH5()
-    m.open_mth5(str(path), mode="a", locking=False)
+    own = m is None
+    if own:
+        m = MTH5()
+        m.open_mth5(str(path), mode="a", locking=False)
     try:
         survey_obj = _ensure_survey(m, survey)
         station_obj = _ensure_station(survey_obj, station)
@@ -86,7 +133,8 @@ def persist_fc_level(
 
         write_fc_geometry(dec_level, dict(fc.attrs))
     finally:
-        m.close_mth5()
+        if own:
+            m.close_mth5()
     return path
 
 

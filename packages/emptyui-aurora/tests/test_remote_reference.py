@@ -153,8 +153,8 @@ def test_bgs_stations_coherent_after_alignment(tmp_path):
                             station_id="NO46", mth5_filename="no46.mth5",
                             save_path=str(tmp_path),
                             channel_nomenclature="lemi12")["mth5"]
-    r1 = ExtractRun().execute(ctx, m1, survey="bgs", station="NX37")["data"]
-    r2 = ExtractRun().execute(ctx, m2, survey="bgs", station="NO46")["data"]
+    r1 = ExtractRun().execute(ctx, m1, selection="run id", survey="bgs", station="NX37")["data"]
+    r2 = ExtractRun().execute(ctx, m2, selection="run id", survey="bgs", station="NO46")["data"]
     out = AlignRuns().execute(ctx, r1, r2)
     a, b = out["data1"], out["data2"]
     assert len(a.dataset.time) == len(b.dataset.time)
@@ -186,12 +186,12 @@ def test_remote_reference_real_data_workflow(tmp_path):
                 "data_path": str(NO46_DIR), "survey_id": "bgs",
                 "station_id": "NO46", "mth5_filename": "no46.mth5",
                 "save_path": str(out_dir), "channel_nomenclature": "lemi12"}),
-            node("x1", "mth5.io.extract_run", {"survey": "bgs", "station": "NO46"}),
+            node("x1", "mth5.io.extract_run", {"selection": "run id", "survey": "bgs", "station": "NO46"}),
             node("l2", "mth5.io.lemi", {
                 "data_path": str(NX37_DIR), "survey_id": "bgs",
                 "station_id": "NX37", "mth5_filename": "nx37.mth5",
                 "save_path": str(out_dir), "channel_nomenclature": "lemi12"}),
-            node("x2", "mth5.io.extract_run", {"survey": "bgs", "station": "NX37"}),
+            node("x2", "mth5.io.extract_run", {"selection": "run id", "survey": "bgs", "station": "NX37"}),
             node("al", "mth5.runs.align", {}),
             node("c1", "aurora.process.compute_fc", {
                 "input_channels": "bx,by", "output_channels": "e1,e2,bz",
