@@ -160,6 +160,10 @@ interface WorkflowState {
   detachEdges: (edgeIds: string[]) => void;
   reconnect: (oldEdge: Edge, connection: Connection) => void;
   addNode: (node: Node<MTNodeData>) => void;
+  /** Shift one node to an absolute flow position (palette placement: the
+   *  card is re-centered after it renders, since its height is unknown
+   *  before the manifest renders the params). */
+  moveNode: (id: string, position: { x: number; y: number }) => void;
   selectNode: (id: string | null) => void;
   updateNodeData: (
     id: string,
@@ -256,6 +260,10 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     }));
   },
   addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
+  moveNode: (id, position) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
+    })),
   selectNode: (id) =>
     // only the properties-panel selection; the RF-native node/edge `selected`
     // flags are maintained through onNodesChange/onEdgesChange (so

@@ -204,10 +204,24 @@ export default function App() {
   }, []);
 
   const handleAdd = (manifest: NodeManifest) => {
+    // §8.1: place the new node at the center of the user's current
+    // viewport — a fixed origin disappears once the user pans/zooms away
+    // from it (screenToFlowPosition accounts for pan and zoom).
+    const inst = rfInstance.current;
+    const id = uniqueNodeId();
+    let position = { x: 80 + Math.random() * 200, y: 80 + Math.random() * 160 };
+    if (inst) {
+      const el = document.querySelector<HTMLElement>(".canvas .react-flow");
+      const rect = el?.getBoundingClientRect();
+      const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+      const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+      const p = inst.screenToFlowPosition({ x: cx, y: cy });
+      position = { x: p.x - 140, y: p.y - 40 };
+    }
     addNode({
-      id: uniqueNodeId(),
+      id,
       type: "mt",
-      position: { x: 80 + Math.random() * 200, y: 80 + Math.random() * 160 },
+      position,
       data: {
         label: manifest.title,
         nodeType: manifest.type,
@@ -223,6 +237,29 @@ export default function App() {
           ? { width: 340, height: 260 }
           : { width: 280, height: "auto" },
     });
+    // second pass: the card's height is unknown before the manifest renders
+    // the params — measure it after it mounts and shift so its CENTER sits
+    // at the viewport center.
+    if (inst) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const el = document.querySelector<HTMLElement>(
+            `.react-flow__node[data-id="${id}"]`);
+          const cr = document.querySelector<HTMLElement>(
+            ".canvas .react-flow")?.getBoundingClientRect();
+          if (!el || !cr) return;
+          const nr = el.getBoundingClientRect();
+          const zoom = inst.getViewport().zoom || 1;
+          const fcen = inst.screenToFlowPosition({
+            x: cr.left + cr.width / 2,
+            y: cr.top + cr.height / 2,
+          });
+          useWorkflow.getState().moveNode(id, {
+            x: fcen.x - nr.width / zoom / 2,
+            y: fcen.y - nr.height / zoom / 2,
+          });
+        }));
+    }
   };
 
   const startRun = async (targets?: string[]) => {

@@ -781,6 +781,10 @@ Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Que
 
 - **GraphCanvas** — React Flow; maps workflow JSON ⇄ RF nodes/edges bidirectionally.
 - **NodePalette** — grouped by `category`, populated from `GET /api/nodes`.
+  New nodes are placed at the **center of the user's current viewport**
+  (`screenToFlowPosition`, two-phase: the card is re-centered after it
+  renders, since its height is unknown before the params mount) — a fixed
+  origin disappears once the user pans/zooms away from it.
 - **Inline node params (default, ComfyUI paradigm)** — parameters render as
   widgets directly on the node body; the right-hand PropertiesPanel shows
   metadata (id, type, version, ports, description, deps) plus Delete. Path
