@@ -1461,7 +1461,11 @@ nodes — no combined plot.
   log-warped). No PT error bars (MVP; noted in the plot label).
 - **Plot Spectrogram (fc)** (`aurora.plot.spectrogram`): input `fc` — power
   = 10·log10|FC|², coefficients reused, no second FFT; `channel` param with
-  inherited-comma-split candidates; `decimation_level` (−1 = deepest); the
+  inherited-comma-split candidates; `decimation_level` indexes the cascade
+  STEP within the selected rate family (0 = the family's native tier —
+  original data; 1..k one decimation deeper each; −1 = the deepest
+  available step; descending tier order reproduces legacy cascade indices
+  exactly); the
   same burst-aware `sample_rate` tier selection (explicit rate wins; the
   title annotates the rate); the legacy ts-based node is hidden but still
   executable.

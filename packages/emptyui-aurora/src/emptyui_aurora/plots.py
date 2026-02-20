@@ -24,14 +24,24 @@ def _resolve_rate_tiers(levels: dict, sample_rate: str):
 
     A merged burst FC database is rate-keyed (`merge_fc_containers` re-keys
     to descending actual sample rates — the cascade indices of mixed-rate
-    families do not correspond). Returns ``(chosen_rate, tier_ids)``:
-    ``sample_rate="auto"`` picks the LOWEST rate present (the continuous
-    stream — the MT-transfer workhorse: 15 Hz Phoenix, 1 Hz LEMI); an
-    explicit value selects the tier at that rate. A single-rate (non-burst)
-    fc keeps every level (the filter is a no-op there).
-    """
-    import numpy as np
+    families do not correspond). Returns ``(family_rate, tier_ids)`` — the
+    tier ids of ONE rate family, native rate first (descending tier rates):
 
+    - ``sample_rate="auto"`` picks the lowest NATIVE rate family present
+      (the continuous stream — the MT-transfer workhorse: 15 Hz Phoenix,
+      1 Hz LEMI). The native families travel on the database's attrs
+      (stamped at compute time); a legacy fc (no attrs) keeps EVERY level
+      — the filter is a no-op there and the descending order reproduces
+      the legacy cascade indices exactly.
+    - an explicit value selects the tier(s) at that rate (the family
+      cascade when the rate is a native family, the single tier when it
+      is a derived one).
+
+    Tier ids are sorted by descending tier rate, so ``decimation_level``
+    indexes the CASCADE STEP within the family: 0 = the family's native
+    tier (no decimation / original data), 1 = one decimation deeper, ...
+    -1 = the deepest available step.
+    """
     by_rate: dict[float, list] = {}
     for lv, ds in levels.items():
         r = round(float(getattr(ds, "attrs", {}).get("sample_rate", 0.0) or 0.0), 9)
@@ -41,48 +51,48 @@ def _resolve_rate_tiers(levels: dict, sample_rate: str):
                          "select a rate tier")
     rates = sorted(by_rate, reverse=True)
     spec = str(sample_rate or "").strip().lower()
-    if spec in ("", "auto"):
-        # 'auto' = the lowest NATIVE rate family (the continuous stream:
-        # 15 Hz Phoenix / 1 Hz LEMI), NOT the deepest cascade tier — the
-        # stream's cascade extends below its native rate. The native
-        # families travel on the database's attrs (stamped at compute
-        # time); without them the fc is legacy — keep EVERY level (the
-        # cascade of a single-rate fc is what users plot, indices = depth).
-        families = None
-        for ds in levels.values():
-            fam = getattr(ds, "attrs", {}).get("family_rates")
-            if fam:
-                try:
-                    fam = sorted(float(x) for x in fam)
-                except (TypeError, ValueError):
-                    fam = None
+    if spec not in ("", "auto"):
+        try:
+            want = round(float(spec), 9)
+        except ValueError:
+            raise ValueError(
+                f"sample_rate {sample_rate!r} is not a number — use a rate in "
+                f"Hz (available: {', '.join(f'{r:g}' for r in rates)}) or "
+                "'auto' for the lowest native rate present") from None
+        hit = next((r for r in rates if r == want), None)
+        if hit is None:
+            closest = min(rates, key=lambda r: abs(r - want) / max(r, 1e-12))
+            if abs(closest - want) / max(closest, 1e-12) < 1e-6:
+                hit = closest
+        if hit is None:
+            raise ValueError(
+                f"fc has no tier at {want:g} Hz (available rates: "
+                f"{', '.join(f'{r:g}' for r in rates)}) — set 'Sample rate' to "
+                "one of them, or 'auto' for the lowest native rate present")
+        return hit, by_rate[hit]
+    families = None
+    for ds in levels.values():
+        fam = getattr(ds, "attrs", {}).get("family_rates")
+        if fam:
+            try:
+                fam = sorted((float(x) for x in fam), reverse=True)
+            except (TypeError, ValueError):
+                fam = None
             if fam:
                 families = fam
                 break
-        if families is None:
-            return min(by_rate), sorted(levels)
-        want_rate = min(families)
+    if families is None:
+        # legacy fc: every level, native rate first (indices = cascade depth)
+        ids = [lv for r in rates for lv in by_rate[r]]
+        return rates[0], ids
+    want_rate = min(families)
+    lower_bound = next((f for f in families if f < want_rate), 0.0)
+    ids = [lv for r in rates if lower_bound < r <= want_rate + 1e-12
+           for lv in by_rate[r]]
+    if not ids:
         hit = min(by_rate, key=lambda r: abs(r - want_rate))
         return hit, by_rate[hit]
-    try:
-        want = round(float(spec), 9)
-    except ValueError:
-        raise ValueError(
-            f"sample_rate {sample_rate!r} is not a number — use a rate in "
-            f"Hz (available: {', '.join(f'{r:g}' for r in rates)}) or "
-            "'auto' for the lowest rate present") from None
-    # exact first, then nearest within a relative tolerance (37.5 vs 37.49)
-    hit = next((r for r in rates if r == want), None)
-    if hit is None:
-        closest = min(rates, key=lambda r: abs(r - want) / max(r, 1e-12))
-        if abs(closest - want) / max(closest, 1e-12) < 1e-6:
-            hit = closest
-    if hit is None:
-        raise ValueError(
-            f"fc has no tier at {want:g} Hz (available rates: "
-            f"{', '.join(f'{r:g}' for r in rates)}) — set 'Sample rate' to "
-            "one of them, or 'auto' for the lowest rate present")
-    return hit, by_rate[hit]
+    return want_rate, ids
 
 
 class PlotCoherency(Node):
@@ -278,13 +288,13 @@ class PlotSpectrogramFC(Node):
                           "channel nomenclature. Suggestions are split "
                           "from the upstream Compute FC channel params."),
         Param("decimation_level", "integer", label="Decimation level",
-              default=-1, min=-1,
-              description="Which decimation level to display: −1 (default) "
-                          "= the deepest level in the connected fc; the "
-                          "upstream decimation count is inherited for "
-                          "orientation. On a merged burst FC database the "
-                          "'Sample rate' param selects the rate family "
-                          "instead (this param applies to single-rate fcs)."),
+              default=0, min=-1,
+              description="Cascade step within the selected rate family: "
+                          "0 (default) = the family's native tier (no "
+                          "decimation / original data), 1..k = one decimation "
+                          "deeper each, −1 = the deepest available step. On "
+                          "a merged burst FC database the 'Sample rate' param "
+                          "selects the rate family first."),
         Param("sample_rate", "string", label="Sample rate", default="auto",
               optional=True, suggest_from="fc",
               placeholder="auto (lowest rate present)",
@@ -309,7 +319,7 @@ class PlotSpectrogramFC(Node):
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
 
     def execute(self, ctx, fc, channel: str = "",
-                decimation_level: int = -1, sample_rate: str = "auto",
+                decimation_level: int = 0, sample_rate: str = "auto",
                 window_samples: int | None = None,
                 decimation_levels: int | None = None) -> dict[str, Any]:
         import matplotlib
@@ -325,25 +335,21 @@ class PlotSpectrogramFC(Node):
         from emptyui_mth5.plotting import apply_style
 
         levels = fc if isinstance(fc, dict) else {0: fc}
-        rate, tiers = _resolve_rate_tiers(levels, sample_rate)
-        if str(sample_rate or "").strip().lower() not in ("", "auto"):
-            # an explicit rate family wins: pick its tier (prefer the
-            # requested decimation level when that tier carries several)
-            tier_ids = sorted(tiers)
-            if int(decimation_level) >= 0 and int(decimation_level) in tier_ids:
-                level = int(decimation_level)
-            else:
-                level = tier_ids[-1]
-        elif decimation_level < 0:
-            level = max(levels)
+        # sample_rate selects the rate FAMILY; decimation_level indexes the
+        # cascade step within it (0 = the family's native tier — original
+        # data; 1..k deeper; -1 = deepest available step)
+        rate, steps = _resolve_rate_tiers(levels, sample_rate)
+        k = int(decimation_level)
+        if k < 0:
+            level = steps[-1]
+        elif k < len(steps):
+            level = steps[k]
         else:
-            level = int(decimation_level)
-            if level not in levels:
-                raise ValueError(
-                    f"fc has no decimation level {level} (available: "
-                    f"{sorted(levels)}) — set 'Decimation level' to one of "
-                    "them, or −1 for the deepest"
-                )
+            raise ValueError(
+                f"fc has no decimation step {k} within the {rate:g} Hz "
+                f"family (available steps: {len(steps)}, rates "
+                f"{[round(float(levels[s].attrs['sample_rate']), 6) for s in steps]}"
+                ") — lower 'Decimation level' or pick another 'Sample rate'")
         ds = _normalize_fc_layout(levels[level])
         names = [str(c) for c in ds.data_vars]
         if str(channel or "").strip():

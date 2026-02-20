@@ -36,7 +36,7 @@ def test_auto_picks_lowest_native_family():
 
     rate, tiers = _resolve_rate_tiers(_container(), "auto")
     assert rate == 15.0  # the stream's native rate, not the deepest tier
-    assert tiers == [4]
+    assert tiers == [4, 5, 6, 7]  # the family's whole cascade, native first
 
 
 def test_auto_without_family_attr_is_legacy_all_levels():
@@ -44,6 +44,7 @@ def test_auto_without_family_attr_is_legacy_all_levels():
 
     rate, tiers = _resolve_rate_tiers(_container(with_families=False), "auto")
     assert tiers == [0, 1, 2, 3, 4, 5, 6, 7]  # the filter is a no-op
+    assert rate == 2400.0  # native rate first — legacy indices reproduced
 
 
 def test_explicit_rate_selects_its_tier():
@@ -53,6 +54,29 @@ def test_explicit_rate_selects_its_tier():
         got, tiers = _resolve_rate_tiers(_container(), spec)
         assert got == rate
         assert len(tiers) == 1
+
+
+def test_spectrogram_step_semantics_burst(tmp_path):
+    """decimation_level indexes the cascade STEP within the selected
+    family: 0 = the family's native tier (original data), 1 = one deeper,
+    -1 = deepest; out-of-range steps reject naming the family's steps."""
+    import logging
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_aurora.plots import PlotSpectrogramFC
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    # auto family (15 Hz): step 0 = the native tier (level 4, <=7.5 Hz)
+    art = PlotSpectrogramFC().execute(
+        ctx, _container(), sample_rate="auto")["plot"]
+    assert art is not None
+    # step 1 = the 3.75 Hz tier
+    art2 = PlotSpectrogramFC().execute(
+        ctx, _container(), sample_rate="auto", decimation_level=1)["plot"]
+    assert art2 is not None
+    with pytest.raises(ValueError, match="decimation step"):
+        PlotSpectrogramFC().execute(
+            ctx, _container(), sample_rate="auto", decimation_level=9)
 
 
 def test_unknown_rate_lists_available():
