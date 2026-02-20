@@ -107,13 +107,16 @@ def test_bandpass_rejects_run_collection(tmp_path):
         raise AssertionError("collection input must be rejected")
 
 
-def test_plot_time_series_rejects_run_collection(tmp_path):
+def test_plot_time_series_degenerate_collection_still_rejected(tmp_path):
+    """Plot Time Series now ACCEPTS collections (Tier 1, backlog #21 —
+    sample-rate family viewing); a degenerate collection (extents without
+    sample rates) still errors with an actionable message."""
     from emptyui_core_nodes.plots import PlotTimeSeriesNode
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     try:
         PlotTimeSeriesNode().execute(ctx, _collection())
     except ValueError as exc:
-        assert "sample-rate" in str(exc)
+        assert "sample rate" in str(exc)
     else:
-        raise AssertionError("collection input must be rejected")
+        raise AssertionError("degenerate collection must be rejected")

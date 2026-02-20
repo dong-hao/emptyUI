@@ -303,9 +303,14 @@ export function MTNode({ id, data, selected }: NodeProps) {
             if (p.suggest_from) {
               const edge = edges.find(
                 (e) => e.target === id && e.targetHandle === p.suggest_from);
-              const rates = edge
-                ? payloads[edge.source]?.[edge.sourceHandle ?? ""]?.rates
+              const sum = edge
+                ? payloads[edge.source]?.[edge.sourceHandle ?? ""]
                 : undefined;
+              // kind "fc": the database's rate tiers; kind "ts.runs": the
+              // distinct sample rates across the collection's runs
+              const rates = sum?.rates ?? (sum?.runs?.length
+                ? Array.from(new Set(sum.runs.map((r) => r.sample_rate)))
+                : undefined);
               if (rates?.length) {
                 const fmt = rates.map((r) => String(r));
                 sel = Array.from(new Set(["auto", ...fmt]));

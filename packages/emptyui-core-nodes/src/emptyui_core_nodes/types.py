@@ -91,6 +91,12 @@ def _iso_start(value) -> str:
 
     if isinstance(value, _dt.datetime):
         return value.isoformat()
+    if isinstance(value, np.datetime64):
+        # numpy datetime64 (e.g. a duck payload's first time coordinate) —
+        # naive stamps are UTC by the archive convention
+        import pandas as pd
+
+        return pd.Timestamp(value).isoformat()
     return ""
 
 

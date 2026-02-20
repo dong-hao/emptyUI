@@ -1440,9 +1440,14 @@ nodes — no combined plot.
   subtitle; `print_params` boolean (default on) toggles the provenance line,
   which is anchored to the measured x-label bottom and word-wrapped to the
   axes width.
-- **Core plots** (`PlotTimeSeries`, `PlotSpectrogram`): datetime x-axis
-  (ConciseDateFormatter; relative-seconds fallback), channel unit hints
-  (mV/km electric, nT magnetic), station/run in title, unit-aware colorbar.
+- **Plot Time Series** (`core.plot.timeseries`): stacked channel plot;
+  accepts a **run collection** (backlog #21 Tier 1) — a `sample_rate` param
+  (default `auto` = the lowest rate present, the continuous stream) picks
+  the family to view, and all runs of that family plot as segments on the
+  shared absolute time axis (gaps stay visible; the time bar crops each
+  run — clamped — runs entirely outside are skipped with one aggregated
+  warning). The suggestion datalist offers the collection's distinct rates
+  after a run (`suggest_from`).
 - **Plot Coherency** (`aurora.plot.coherency`): renders the **per-bin
   statistic** the sort applies (per (bin, window) window-ensemble coherence,
   median across windows, one series per decimation level, guidance band at
@@ -1599,7 +1604,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
 | 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
-| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, ts plots) reject collections loudly. Tier 1 — Plot Time Series: NOT one plot per member (thousands of runs overwhelm); a **sample-rate selection** (24000/2400/150/15 …) picks the family to view — all runs of that family in the collection; **the plot node carries no time range at all**. Tier 2 — element-wise maps (Detrend/Bandpass/Calibrate): apply the single-ts recipe to every member; Detrend trivial; Bandpass/Calibrate **quick-reject when the operation is out of the member's sampling-frequency scope** (e.g. a 50–100 Hz bandpass on 1 Hz data); needs a static-output-tag decision for map nodes (outputs depend on input shape at run time) — these will also need the `populated_when`-analog visibility hint (§4: an output's populated/type hint derived from the input shape) |
+| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§20.1). Tier 2 — element-wise maps (Detrend/Bandpass/Calibrate): apply the single-ts recipe to every member; Detrend trivial; Bandpass/Calibrate **quick-reject when the operation is out of the member's sampling-frequency scope** (e.g. a 50–100 Hz bandpass on 1 Hz data); needs a static-output-tag decision for map nodes (outputs depend on input shape at run time) — these will also need the `populated_when`-analog visibility hint (§4: an output's populated/type hint derived from the input shape) |
 
 ### 12.3 Planned — portable local disk cache (designed, not yet implemented)
 

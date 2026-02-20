@@ -90,7 +90,12 @@ class PlotTimeSeriesNode(Node):
     type = "core.plot.timeseries"
     title = "Plot Time Series"
     tooltip = "Plot the (stacked) channel time series as a PNG figure."
-    description = "Stacked channel time-domain plot."
+    description = (
+        "Stacked channel time-domain plot. Accepts a single time series or "
+        "a run collection: a `sample_rate` param selects the family to view "
+        "(auto = the lowest rate present — the continuous stream, e.g. "
+        "15 Hz Phoenix / 1 Hz LEMI/NIMS), and all runs of that family plot "
+        "as segments on the shared time axis (gaps stay visible).")
     category = "Display"
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)
@@ -101,6 +106,14 @@ class PlotTimeSeriesNode(Node):
                           "Standard names (ex/ey/hx/hy/hz) are mapped through "
                           "the inferred channel nomenclature; matching is "
                           "case-insensitive."),
+        Param("sample_rate", "string", label="Sample rate", default="auto",
+              optional=True, suggest_from="data",
+              placeholder="auto (lowest rate present)",
+              description="On a run collection: which rate family to view "
+                          "(auto = the lowest rate present — the continuous "
+                          "stream, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS; all "
+                          "runs of that family plot as segments). A "
+                          "single-run payload ignores this param."),
         Param("seconds", "number", label="Duration to plot (s)", default=None,
               optional=True),
         Param("start", "string", label="Start (UTC)", default="",
@@ -108,22 +121,66 @@ class PlotTimeSeriesNode(Node):
               placeholder="record start",
               description="Slot start: ISO datetime (UTC, e.g. "
                           "2023-06-01 12:00:00) or relative seconds; empty "
-                          "= record start. Driven by the time bar."),
+                          "= record start. Driven by the time bar. On a run "
+                          "collection the window crops each run (clamped; "
+                          "runs entirely outside are skipped)."),
         Param("end", "string", label="End (UTC)", default="",
               optional=True, time_bar="data",
               placeholder="record end",
               description="Slot end: ISO datetime (UTC) or relative "
                           "seconds; empty = record end. Driven by the "
-                          "time bar."),
+                          "time bar. On a run collection the window crops "
+                          "each run (clamped; runs entirely outside are "
+                          "skipped)."),
     )
 
-    def execute(self, ctx, data, channels: str = "", seconds=None,
-                start: str = "", end: str = "") -> dict[str, Any]:
-        if is_run_collection(data):
+    @staticmethod
+    def _family_members(collection, sample_rate: str):
+        """Select one rate family's members from a run collection (Tier 1,
+        backlog #21): returns ([(payload, extent_row)], chosen_rate, rates)."""
+        extents = list(collection.extents)
+        runs = list(collection.runs)
+        by_rate: dict[float, list[int]] = {}
+        for i, e in enumerate(extents):
+            r = round(float(e.get("sample_rate", 0.0) or 0.0), 9)
+            by_rate.setdefault(r, []).append(i)
+        rates = sorted(by_rate)
+        if not rates or rates[0] <= 0:
             raise ValueError(
-                "received a run collection — per-family viewing (sample-rate "
-                "selection) is planned (M4 backlog): extract a single run to "
-                "plot")
+                "the collection's extents carry no sample rates — cannot "
+                "select a family to view")
+        spec = str(sample_rate or "").strip().lower()
+        if spec in ("", "auto"):
+            hit = rates[0]
+        else:
+            try:
+                want = round(float(spec), 9)
+            except ValueError:
+                raise ValueError(
+                    f"sample_rate {sample_rate!r} is not a number — use a "
+                    f"rate in Hz (available: "
+                    f"{', '.join(f'{r:g}' for r in rates)}) or 'auto' for "
+                    "the lowest rate present") from None
+            hit = next((r for r in rates if r == want), None)
+            if hit is None:
+                closest = min(rates, key=lambda r: abs(r - want) / max(r, 1e-12))
+                if abs(closest - want) / max(closest, 1e-12) < 1e-6:
+                    hit = closest
+            if hit is None:
+                raise ValueError(
+                    f"the collection holds no runs at {want:g} Hz "
+                    f"(available rates: {', '.join(f'{r:g}' for r in rates)})"
+                    " — set 'Sample rate' to one of them, or 'auto'")
+        members = [(runs[i], extents[i])
+                   for i in sorted(by_rate[hit],
+                                   key=lambda j: str(extents[j].get("start", "")))]
+        return members, hit, rates
+
+    def execute(self, ctx, data, channels: str = "", sample_rate: str = "auto",
+                seconds=None, start: str = "", end: str = "") -> dict[str, Any]:
+        if is_run_collection(data):
+            return self._execute_collection(
+                ctx, data, channels, sample_rate, seconds, start, end)
         data = coerce_run(data)
         names = _select_channels(data, channels)
         n0, n1 = _time_window(data, start, end, seconds)
@@ -152,6 +209,90 @@ class PlotTimeSeriesNode(Node):
                     metadata={"Software": "emptyUI"})
         plt.close(fig)
         artifact = ctx.publish_artifact(path, kind="image")
+        return {"plot": artifact}
+
+    def _execute_collection(self, ctx, data, channels: str,
+                            sample_rate: str, seconds, start: str,
+                            end: str) -> dict[str, Any]:
+        """Tier 1 (backlog #21): one rate family per figure — all runs of
+        that family plot as segments on the shared time axis (NOT one plot
+        per member: thousands of runs would overwhelm). The time bar
+        crops each run (clamped; runs entirely outside are skipped)."""
+        members, hit, rates = self._family_members(data, sample_rate)
+        coerced = [coerce_run(payload) for payload, _ in members]
+        # channel spec resolves against the first member (a family's runs
+        # share components); per-member missing channels are skipped with
+        # one aggregated warning
+        names = _select_channels(coerced[0], channels)
+        bounded = bool(str(start).strip() or str(end).strip())
+        segments: list[tuple] = []  # (member_data, x, {name: arr})
+        skipped_outside = 0
+        for mdata in coerced:
+            if bounded:
+                try:
+                    n0, n1 = _time_window(mdata, start, end, seconds)
+                except ValueError:
+                    skipped_outside += 1
+                    continue
+                if n1 <= n0:
+                    skipped_outside += 1
+                    continue
+            else:
+                n0, n1 = _time_window(mdata, start, end, seconds)
+            x, _ = _time_axis(mdata, n0, n1)
+            segments.append((mdata, x, {n: mdata.channels[n][n0:n1]
+                                        for n in names
+                                        if n in mdata.channels}))
+        if skipped_outside:
+            ctx.logger.warning(
+                "%d run(s) of the %g Hz family fall outside the selected "
+                "window — skipped", skipped_outside, hit)
+        if not segments:
+            raise ValueError(
+                f"no {hit:g} Hz run falls within the selected window "
+                f"(the family holds {len(coerced)} run(s)) — clear start/end "
+                "or pick another 'Sample rate'")
+        missing = [n for n in names
+                   if all(n not in seg[2] for seg in segments)]
+        if missing:
+            ctx.logger.warning(
+                "channels %s are missing in every %g Hz run — dropped",
+                missing, hit)
+        names = [n for n in names if n not in missing]
+        if not names:
+            raise ValueError(
+                f"no plottable channel in the {hit:g} Hz runs "
+                f"(spec {channels!r} matched none)")
+
+        fig, axes = plt.subplots(len(names), 1,
+                                 figsize=(10, 1.8 * len(names)),
+                                 sharex=True, squeeze=False)
+        for ax, name in zip(axes[:, 0], names):
+            for mdata, x, chans in segments:
+                ax.plot(x, chans[name], lw=0.6)
+            unit = channel_unit_hint(name)
+            ax.set_ylabel(f"{name} ({unit})" if unit else name)
+        apply_style(fig, axes[:, 0])
+        axes[-1, 0].set_xlabel("Time (UTC)")
+        if segments[0][0].start_datetime:
+            locator = mdates.AutoDateLocator()
+            axes[-1, 0].xaxis.set_major_locator(locator)
+            axes[-1, 0].xaxis.set_major_formatter(
+                mdates.ConciseDateFormatter(locator))
+            fig.autofmt_xdate()
+        station = segments[0][0].station or ""
+        title = " — ".join(
+            p for p in ("Time series", station,
+                        f"{len(segments)} run(s) @ {hit:g} Hz") if p)
+        fig.suptitle(title, fontsize=11, fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
+
+        path = ctx.artifact_path("plot_timeseries", ".png")
+        fig.savefig(path, dpi=DPI, bbox_inches="tight",
+                    metadata={"Software": "emptyUI"})
+        plt.close(fig)
+        artifact = ctx.publish_artifact(path, kind="image")
+        ctx.progress(1.0, f"time series: {len(segments)} run(s) @ {hit:g} Hz")
         return {"plot": artifact}
 
 
