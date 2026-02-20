@@ -34,6 +34,10 @@ export interface ParamSpec {
   /** Time-selector bar binding (DESIGN.md §23.4): input port name whose
    *  payload summary (extent, via `payload` run events) drives the bar. */
   time_bar?: string;
+  /** Select-option suggestions (DESIGN.md §20.1): input port name whose
+   *  payload summary offers the options (e.g. an fc database's sample-rate
+   *  tiers) — the static options are extended after a run. */
+  suggest_from?: string | null;
 }
 
 /** Extent summary of a ts payload, streamed via `payload` run events
@@ -48,7 +52,7 @@ export interface RunExtent {
 }
 
 export interface PayloadSummary {
-  kind?: "ts" | "mth5";
+  kind?: "ts" | "mth5" | "fc";
   start: string | number;
   end: string | number;
   absolute: boolean;
@@ -56,6 +60,9 @@ export interface PayloadSummary {
   channels: string[];
   /** kind "mth5": per-run extents within the archive */
   runs?: RunExtent[];
+  /** kind "fc": the merged database's rate tiers (descending, Hz) —
+   *  offered as select suggestions by the plot nodes */
+  rates?: number[];
 }
 
 /** inherit: input port -> { targetParam: upstreamParam } */

@@ -171,6 +171,33 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _fc_summary(value) -> dict[str, Any] | None:
+    """Lightweight rate-tier summary for an fc payload (DESIGN §20.1).
+
+    A merged burst FC database is rate-keyed (`{tier: Dataset}`); the plot
+    nodes select a tier by its actual sample rate — the summary streams the
+    available rates so the frontend can offer them as select suggestions.
+    Duck-typed: a dict of Datasets (or one Dataset) whose data carry a
+    `frequency` dimension and a `sample_rate` attr.
+    """
+    try:
+        items = (value.items() if isinstance(value, dict)
+                 else [(0, value)])
+        rates = []
+        for _, ds in items:
+            r = float(getattr(ds, "attrs", {}).get("sample_rate", 0.0) or 0.0)
+            if r > 0 and "frequency" in getattr(ds, "dims", {}):
+                rates.append(r)
+        if not rates:
+            return None
+        return {
+            "kind": "fc",
+            "rates": sorted({round(r, 9) for r in rates}, reverse=True),
+        }
+    except Exception:  # noqa: BLE001 - not an fc payload
+        return None
+
+
 class Executor:
     """Executes a workflow against a registry. Emits events via callback."""
 
@@ -537,6 +564,8 @@ class Executor:
                     handle = store.put(port.type, entry.outputs.get(port.name))
                     handles[port.name] = handle.id
                     summary = _ts_summary(entry.outputs.get(port.name))
+                    if summary is None:
+                        summary = _fc_summary(entry.outputs.get(port.name))
                     if summary is not None:
                         emit({"event": "payload", "node": node_id,
                               "port": port.name, "type": port.type,
@@ -649,7 +678,7 @@ class Executor:
                 value_to_handle[id(value)] = handle.id
                 # time-series extent summary for the frontend time selector
                 # (§23.4) — lightweight, duck-typed, emitted per ts output
-                summary = _ts_summary(value)
+                summary = _ts_summary(value) or _fc_summary(value)
                 if summary is not None:
                     emit({"event": "payload", "node": node_id,
                           "port": port.name, "type": port.type,

@@ -422,6 +422,14 @@ class ComputeFC(Node):
         if persist:
             close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
+        # the native rate families travel with the database (§20.1): the
+        # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
+        # (the continuous stream), not the deepest cascade tier — cascade
+        # tiers extend below the stream's native rate. The database is a
+        # plain dict; the attr rides every tier's Dataset attrs (so any
+        # tier lookup finds it).
+        for ds in merged.values():
+            ds.attrs["family_rates"] = sorted(family_rates)
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(
             1.0,
@@ -967,6 +975,14 @@ class BuildFC(Node):
         if persist:
             close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
+        # the native rate families travel with the database (§20.1): the
+        # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
+        # (the continuous stream), not the deepest cascade tier — cascade
+        # tiers extend below the stream's native rate. The database is a
+        # plain dict; the attr rides every tier's Dataset attrs (so any
+        # tier lookup finds it).
+        for ds in merged.values():
+            ds.attrs["family_rates"] = sorted(family_rates)
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(
             1.0,

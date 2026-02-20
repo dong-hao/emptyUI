@@ -296,7 +296,21 @@ export function MTNode({ id, data, selected }: NodeProps) {
         <div className="mt-node-params">
           {params.map((p) => {
             const opts = inheritable.has(p.name) ? inheritedOptions(p.name) : [];
-            const sel = opts.length > 0 ? opts : undefined;
+            // select-option suggestions (§20.1): the suggest_from port's
+            // payload summary extends the static options after a run (e.g.
+            // an fc database's sample-rate tiers)
+            let sel = opts.length > 0 ? opts : undefined;
+            if (p.suggest_from) {
+              const edge = edges.find(
+                (e) => e.target === id && e.targetHandle === p.suggest_from);
+              const rates = edge
+                ? payloads[edge.source]?.[edge.sourceHandle ?? ""]?.rates
+                : undefined;
+              if (rates?.length) {
+                const fmt = rates.map((r) => String(r));
+                sel = Array.from(new Set(["auto", ...fmt]));
+              }
+            }
             return (
               <ParamField
                 key={p.name}

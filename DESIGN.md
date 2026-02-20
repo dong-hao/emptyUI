@@ -836,6 +836,10 @@ to days:
   extent is known only after the upstream node has run once.
 - **`Param.time_bar`** (rendering-only): the input port name(s) whose summary
   drives the frontend time bar for this param pair.
+- **`Param.suggest_from`** (rendering-only, §20.1): the input port name whose
+  payload summary offers select-option suggestions (an fc database's
+  `rates` tiers) — the frontend extends the param's options in an editable
+  datalist after a run; pre-run the free-text placeholder applies.
 - **`TimeBar` widget** (custom, zero deps): horizontal acquisition bar with two
   pointer-driven handles sandwiching the slot, shaded selection, extent tick
   labels, synced bidirectionally with the paired Start/End edit boxes (which
@@ -1442,7 +1446,15 @@ nodes — no combined plot.
 - **Plot Coherency** (`aurora.plot.coherency`): renders the **per-bin
   statistic** the sort applies (per (bin, window) window-ensemble coherence,
   median across windows, one series per decimation level, guidance band at
-  the sort bounds); fc-direct — works without a sort node in the graph.
+  the sort bounds); fc-direct — works without a sort node in the graph. On a
+  **merged burst FC database** a `sample_rate` param selects the rate family
+  (default `"auto"` = the lowest NATIVE family — the continuous stream,
+  e.g. 15 Hz Phoenix / 1 Hz LEMI; a single-rate fc keeps every cascade
+  level) — the families' cascades overlap on one period axis otherwise.
+  The remote's tier is matched by rate, not index (different stations may
+  have different family ladders). The available tiers are streamed in the
+  fc payload summary (`kind: "fc"`, `rates`) and offered as select
+  suggestions (`Param.suggest_from`) after a run.
 - **Plot Phase Tensor** (`mth5.plot.phase_tensor`): Caldwell-style PT
   ellipses vs period colored by skew (Φ = X⁻¹·Y from Z = X + iY; ellipses
   constructed in display space and mapped back — data-space ellipses are
@@ -1450,7 +1462,9 @@ nodes — no combined plot.
 - **Plot Spectrogram (fc)** (`aurora.plot.spectrogram`): input `fc` — power
   = 10·log10|FC|², coefficients reused, no second FFT; `channel` param with
   inherited-comma-split candidates; `decimation_level` (−1 = deepest); the
-  legacy ts-based node is hidden but still executable.
+  same burst-aware `sample_rate` tier selection (explicit rate wins; the
+  title annotates the rate); the legacy ts-based node is hidden but still
+  executable.
 - **Plot Tipper**: `tipper_ylim` param ("auto" | "min,max"), mirroring
   `rho_ylim`.
 

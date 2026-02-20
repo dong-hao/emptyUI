@@ -102,6 +102,11 @@ class Param:
     #: payload summary (extent streamed via `payload` run events) drives the
     #: frontend time bar for this param pair. Rendering-only.
     time_bar: str = ""
+    #: Select-option suggestions (§20.1): the *input port name* whose
+    #: payload summary offers the option list (e.g. an fc database's
+    #: sample-rate tiers streamed via `payload` run events). The frontend
+    #: extends the static options with the summary's values; rendering-only.
+    suggest_from: str = ""
 
     def _cascade_dict(self) -> dict[str, list[list[Any]]] | None:
         if not self.cascade:
@@ -136,6 +141,7 @@ class Param:
             ),
             "split_inherited": self.split_inherited,
             "time_bar": self.time_bar,
+            "suggest_from": self.suggest_from or None,
         }
 
 

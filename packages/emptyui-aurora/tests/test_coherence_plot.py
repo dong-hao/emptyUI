@@ -98,7 +98,7 @@ def test_plot_has_no_banding_params():
 
     declared = {p.name for p in PlotCoherency.params}
     assert declared == {"coherence_min", "coherence_max",
-                        "ensemble_windows", "smooth_bins"}
+                        "ensemble_windows", "smooth_bins", "sample_rate"}
     assert not PlotCoherency().manifest()["inherit"]
     assert not hasattr(PlotCoherency, "inherit") or not getattr(
         PlotCoherency, "inherit", None)
