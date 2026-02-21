@@ -96,15 +96,17 @@ def test_detrend_rejects_run_collection(tmp_path):
 
 
 def test_bandpass_rejects_run_collection(tmp_path):
+    """A no-cutoff bandpass is a passthrough by design; with cutoffs the
+    degenerate member (no channel data) rejects loudly."""
     from emptyui_core_nodes.filters import Bandpass
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     try:
-        Bandpass().execute(ctx, _collection())
+        Bandpass().execute(ctx, _collection(), low_freq=1.0, high_freq=2.0)
     except ValueError as exc:
         assert "run collection" in str(exc)
     else:
-        raise AssertionError("collection input must be rejected")
+        raise AssertionError("degenerate collection must be rejected")
 
 
 def test_plot_time_series_degenerate_collection_still_rejected(tmp_path):

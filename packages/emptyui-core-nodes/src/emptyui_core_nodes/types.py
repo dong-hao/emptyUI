@@ -226,6 +226,23 @@ def is_run_collection(value) -> bool:
         return False
     return (isinstance(extents, list) and hasattr(value, "runs"))
 
+
+def collection_member_ds(member, rid) -> tuple:
+    """A collection member's (dataset, sample_rate, start, filters) — the
+    duck shape the element-wise maps consume (backlog #21 Tier 2).
+
+    Non-interpretable members (a degenerate/corrupt collection) reject
+    loudly with the extraction remedy instead of a raw AttributeError.
+    """
+    if hasattr(member, "dataset") and not isinstance(member, dict):
+        return (member.dataset, float(member.sample_rate),
+                getattr(member, "start", None),
+                getattr(member, "filters", None))
+    raise ValueError(
+        f"received a run collection whose member {rid!r} is not "
+        "interpretable as channel data — extract a single run ('run id' "
+        "mode) to filter a single series")
+
 _log = logging.getLogger("emptyui")
 
 

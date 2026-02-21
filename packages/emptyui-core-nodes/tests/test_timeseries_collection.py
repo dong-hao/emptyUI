@@ -11,6 +11,7 @@ import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_core_nodes.plots import PlotTimeSeriesNode
+from emptyui_core_nodes.types import coerce_run
 
 
 def _collection(rates, starts, comps=("hx", "hy", "ex", "ey")):
@@ -81,3 +82,39 @@ def test_runs_outside_window_only_rejects(tmp_path):
         PlotTimeSeriesNode().execute(
             ctx, coll, channels="hx",
             start="2024-01-02T00:00:00", end="2024-01-02T01:00:00")
+
+
+def test_map_matches_the_single_run_recipe(tmp_path):
+    """Tier 2 parity: mapping Detrend/Bandpass over a collection produces
+    the same values as filtering each run individually."""
+    from emptyui_core_nodes.filters import Bandpass, Detrend
+
+    coll = _collection([15.0, 15.0],
+                       ["2024-01-01T00:00:00", "2024-01-01T05:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    d = Detrend().execute(ctx, coll, method="mean")["data"]
+    b = Bandpass().execute(ctx, d, low_freq=0.1, high_freq=5.0)["filtered"]
+    assert len(b.runs) == 2 and len(b.extents) == 2
+    assert b.runs[0].dataset.attrs.get("mapped_by", "").startswith("core.filter.bandpass")
+    for payload in coll.runs:
+        single = coerce_run(payload)
+        bd = Detrend().execute(ctx, single, method="mean")["data"]
+        bf = Bandpass().execute(ctx, bd, low_freq=0.1, high_freq=5.0)["filtered"]
+        ref = bf.channels["hx"]
+        got = b.runs[0].dataset["hx"].values if payload is coll.runs[0] \
+            else b.runs[1].dataset["hx"].values
+        assert np.allclose(np.asarray(got), np.asarray(ref), atol=1e-12)
+
+
+def test_bandpass_scope_rejects_out_of_scope_members(tmp_path, caplog):
+    """A 50–100 Hz bandpass on 15 Hz members: every member is out of scope
+    → the whole node rejects (a silently empty map would lie downstream)."""
+    import logging
+
+    from emptyui_core_nodes.filters import Bandpass
+
+    coll = _collection([15.0, 15.0],
+                       ["2024-01-01T00:00:00", "2024-01-01T05:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with pytest.raises(ValueError, match="sampling scope"):
+        Bandpass().execute(ctx, coll, low_freq=50.0, high_freq=100.0)

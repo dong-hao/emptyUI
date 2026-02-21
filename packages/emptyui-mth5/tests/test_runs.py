@@ -387,16 +387,18 @@ def test_align_runs_rejects_collections(tmp_path):
         raise AssertionError("collection input must be rejected")
 
 
-def test_calibrate_rejects_collection(tmp_path):
+def test_calibrate_degenerate_collection_still_rejected(tmp_path):
+    """Calibrate maps collections through their own responses (Tier 2);
+    a degenerate collection (non-interpretable member) still rejects."""
     from emptyui_mth5.calibrate import Calibrate
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     try:
         Calibrate().execute(ctx, _coll_stub())
     except ValueError as exc:
-        assert "planned (M4 backlog)" in str(exc)
+        assert "run collection" in str(exc)
     else:
-        raise AssertionError("collection input must be rejected")
+        raise AssertionError("degenerate collection must be rejected")
 
 
 def test_load_mth5_while_loader_handle_held(tmp_path):

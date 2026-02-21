@@ -34,6 +34,54 @@ def apply_crs_cache() -> None:
     _patched = True
 
 
+_rate_patched = False
+
+
+def apply_channel_rate_fix() -> None:
+    """Idempotently replace ``ChannelTS.compute_sample_rate``'s endpoint
+    method with the median of the time diffs (§24.8).
+
+    The endpoint method (``size / (t[-1] - t[0])``) is biased by
+    ``n / (n - 1)``: a 2-second 2400 Hz slot (4800 samples) derives
+    2400.5 → rounds to 2401, which then fails ``RunTS.add_channel``'s
+    sample-rate consistency check during Calibrate. The median of the
+    diffs is unbiased for consistently-quantized axes (pandas date_range
+    rounds ns inconsistently between samples — upstream's own HF path
+    uses the mode for exactly this reason; the median is the robust
+    generalization).
+    """
+    global _rate_patched
+    if _rate_patched:
+        return
+    try:
+        from mt_timeseries import ChannelTS
+    except ImportError:
+        return
+
+    def _median_rate(self):
+        import numpy as np
+
+        try:
+            # force ns BEFORE diffing — np.diff on a pandas DatetimeIndex
+            # can produce a coarser unit (timedelta64[us]) whose int64
+            # values are 1000x off
+            t = np.asarray(self.data_array.coords.indexes["time"],
+                           dtype="datetime64[ns]")
+            dt = np.diff(t).astype("int64")
+        except (TypeError, ValueError, KeyError):
+            return 0.0
+        if dt.size == 0:
+            return 0.0
+        best = int(np.median(dt))
+        if best <= 0:
+            return 0.0
+        sr = 1e9 / best
+        return np.round(sr, 0) if sr >= 1 else np.round(sr, 6)
+
+    ChannelTS.compute_sample_rate = _median_rate
+    _rate_patched = True
+
+
 def ensure_h5_openable(path, log=None) -> None:
     """Detect and clear a stale HDF5 write flag before opening (§24.8).
 

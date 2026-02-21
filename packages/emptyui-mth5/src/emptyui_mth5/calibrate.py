@@ -30,6 +30,16 @@ from .runs import _payload
 _log = logging.getLogger("emptyui")
 
 
+class _MappedCollection:
+    """A calibrated run collection (backlog #21 Tier 2): duck-compatible
+    (runs + extents) — members are the calibrated real RunTS objects, the
+    extent rows are the source collection's (identity is preserved)."""
+
+    def __init__(self, runs, extents):
+        self.runs = list(runs)
+        self.extents = list(extents)
+
+
 def _to_runts(source):
     """Wrap a core TimeSeries as an mt_timeseries RunTS so the response
     removal can be delegated to ``RunTS.calibrate()`` for any ts.run payload.
@@ -53,6 +63,10 @@ def _to_runts(source):
                        start=start_iso or None, sample_rate=float(sample_rate))
         ch.component = name
         ch.channel_metadata.units = _default_unit(name)
+        # ChannelTS derives its rate from the ns-quantized time axis when
+        # data is present (size/(t[-1]-t[0]) drifts: 1/2400 s truncates to
+        # 416666 ns → 2401) — pin the explicit rate (the getter honors it)
+        ch._sample_rate = float(sample_rate)
         pieces.append(ch)
     return RunTS(array_list=pieces)
 
@@ -125,13 +139,40 @@ class Calibrate(Node):
         Param("include_delay", "boolean", label="Include delay", default=False),
     )
 
+    def _map_collection(self, ctx, collection, calibration,
+                        include_decimation: bool, include_delay: bool):
+        """Element-wise calibration (backlog #21 Tier 2): each member is
+        calibrated through ITS OWN response chain (the duck payloads carry
+        the resolved registry — §24.12); the collection shape is preserved
+        (extents rows unchanged — identity is not the recipe's business)."""
+        kwargs = {"include_decimation": include_decimation,
+                  "include_delay": include_delay}
+        members = []
+        for i, p in enumerate(collection.runs):
+            rid = (str(collection.extents[i].get("run", i))
+                   if i < len(collection.extents) else i)
+            # validate the member's shape loudly (a degenerate collection
+            # must not surface as a raw TypeError from _payload)
+            from emptyui_core_nodes.types import collection_member_ds
+
+            collection_member_ds(p, rid)
+            runts = (p if hasattr(p, "calibrate") and not isinstance(p, dict)
+                     else _to_runts(p))
+            members.append(runts.calibrate(**kwargs))
+        ctx.progress(1.0, f"calibrated {len(members)} member(s) via their own responses")
+        return {"data": _MappedCollection(members, collection.extents)}
+
     def execute(self, ctx, data, calibration=None,
                 include_decimation: bool = False,
                 include_delay: bool = False) -> dict[str, Any]:
+        if is_run_collection(data) and calibration is None:
+            return self._map_collection(ctx, data, calibration,
+                                        include_decimation, include_delay)
         if is_run_collection(data):
             raise ValueError(
-                "Calibrate requires a single time series — collection mapping "
-                "is planned (M4 backlog)")
+                "Calibrate on a collection requires each member's own "
+                "responses (leave the 'calibration' input unconnected); "
+                "explicit-filter collection mapping is planned (M4 backlog)")
         kwargs = {"include_decimation": include_decimation,
                   "include_delay": include_delay}
         # Idiomatic mth5 path: the run carries its own channel responses.
