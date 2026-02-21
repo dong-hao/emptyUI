@@ -132,6 +132,14 @@ class PlotCoherency(Node):
               default=0, min=0,
               description="Adjacent-bin pooling of the per-bin statistic — "
                           "match the upstream Coherence Sort setting."),
+        Param("variation", "select", label="Variation band",
+              default="iqr", options=("none", "iqr", "std"),
+              description="The per-window spread behind the plotted median, "
+                          "rendered as a shaded band: 'iqr' (default) = the "
+                          "25–75 percentile of the sliding-ensemble "
+                          "coherences per bin; 'std' = median ± 1 standard "
+                          "deviation; 'none' = the bare median (the old "
+                          "behavior)."),
         Param("sample_rate", "string", label="Sample rate", default="auto",
               optional=True, suggest_from="fc",
               placeholder="auto (lowest rate present)",
@@ -147,7 +155,8 @@ class PlotCoherency(Node):
     def execute(self, ctx, fc, ref_fc=None,
                 coherence_min: float = 0.25, coherence_max: float = 0.98,
                 ensemble_windows: int = 16,
-                smooth_bins: int = 0, sample_rate: str = "auto") -> dict[str, Any]:
+                smooth_bins: int = 0, variation: str = "iqr",
+                sample_rate: str = "auto") -> dict[str, Any]:
         import matplotlib
 
         matplotlib.use("Agg")
@@ -193,6 +202,19 @@ class PlotCoherency(Node):
         ins, outs, _ = _fc_io_channels(sample)
 
         rows: list[dict[str, Any]] = []
+
+        def _band(vals, med):
+            """The per-bin variation band behind the median (variation
+            param): (lo, hi) or (None, None) when degenerate."""
+            vals = vals[np.isfinite(vals)]
+            if vals.size == 0:
+                return None, None
+            if variation == "std":
+                sd = float(np.nanstd(vals))
+                return med - sd, med + sd
+            return (float(np.nanpercentile(vals, 25)),
+                    float(np.nanpercentile(vals, 75)))
+
         for level, lfc in sorted(levels.items()):
             ref = None
             if ref_levels is not None:
@@ -214,14 +236,20 @@ class PlotCoherency(Node):
             for i, fv in enumerate(freq):
                 if not np.isfinite(fv) or fv <= 0.0:
                     continue
+                med_e = (float(np.nanmedian(coh_e[i, :]))
+                         if np.isfinite(coh_e[i, :]).any() else None)
+                med_x = (float(np.nanmedian(coh_x[i, :]))
+                         if ref is not None and np.isfinite(coh_x[i, :]).any()
+                         else None)
+                lo_e, hi_e = _band(coh_e[i, :], med_e) if med_e is not None else (None, None)
+                lo_x, hi_x = _band(coh_x[i, :], med_x) if med_x is not None else (None, None)
                 rows.append({
                     "period": float(1.0 / fv),
                     "decimation_level": int(level),
-                    "coherence_signal": (float(np.nanmedian(coh_e[i, :]))
-                                         if np.isfinite(coh_e[i, :]).any() else None),
-                    "coherence_transfer": (float(np.nanmedian(coh_x[i, :]))
-                                           if ref is not None and
-                                           np.isfinite(coh_x[i, :]).any() else None),
+                    "coherence_signal": med_e,
+                    "coherence_transfer": med_x,
+                    "signal_band": [lo_e, hi_e],
+                    "transfer_band": [lo_x, hi_x],
                 })
 
         if not rows:
@@ -229,13 +257,32 @@ class PlotCoherency(Node):
 
         rows.sort(key=lambda r: r["period"])
         period = np.array([r["period"] for r in rows])
-        sig = np.array([r["coherence_signal"] for r in rows])
-        xfer = np.array([r["coherence_transfer"] for r in rows])
+        sig = np.array([r["coherence_signal"] for r in rows], dtype=float)
+        xfer = np.array([r["coherence_transfer"] for r in rows], dtype=float)
+
+        def _arr(key):
+            lo = np.array([r[key][0] if r[key][0] is not None else np.nan
+                           for r in rows], dtype=float)
+            hi = np.array([r[key][1] if r[key][1] is not None else np.nan
+                           for r in rows], dtype=float)
+            return lo, hi
 
         fig, ax = plt.subplots(figsize=(7, 4), dpi=150)
         apply_style(fig, (ax,))
         ax.axhspan(coherence_min, coherence_max, color="0.85", zorder=0,
                    label=f"sort bounds [{coherence_min:.2f}, {coherence_max:.2f}]")
+        if variation != "none":
+            # per-bin spread behind the median, shaded (the whiskers of
+            # hundreds of dense points would be unreadable)
+            for y, key, color in ((sig, "signal_band", "#1f77b4"),
+                                  (xfer, "transfer_band", "#d62728")):
+                if not np.isfinite(y).any():
+                    continue
+                lo, hi = _arr(key)
+                if not np.isfinite(lo).any() and not np.isfinite(hi).any():
+                    continue
+                ax.fill_between(period, lo, hi, color=color, alpha=0.18,
+                                lw=0, label=f"{variation} band")
         ax.plot(period, sig, "o-", color="#1f77b4", markersize=3,
                 label="signal coherence (E–H)"
                 if ref_fc is None else "signal coherence (E–remote H)")
