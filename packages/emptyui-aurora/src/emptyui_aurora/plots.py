@@ -299,7 +299,7 @@ class PlotCoherency(Node):
         if len(all_rates) > 1:
             title += f" — {rate:g} Hz"
         ax.set_title(title)
-        ax.legend(frameon=True, fontsize=8, loc="lower left")
+        ax.legend(frameon=True, fontsize=8, loc="upper right")
         fig.tight_layout()
 
         path = ctx.artifact_path("coherency", ".png")
