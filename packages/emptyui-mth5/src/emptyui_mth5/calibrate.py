@@ -116,7 +116,7 @@ class Calibrate(Node):
     )
     category = "Processing"
     inputs = (
-        Input("data", "ts.run"),
+        Input("data", "ts.run", collection_ok=True),
         Input("calibration", "calibration", required=False),
     )
     outputs = (Output("data", "ts.run", label="calibrated"),)

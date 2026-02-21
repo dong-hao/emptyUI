@@ -178,8 +178,8 @@ def test_range_mode_extracts_intersecting_runs(tmp_path):
     res = ExtractRun().execute(
         ctx, archive, selection="time range",
         start="2024-01-01 00:01:00", end="2024-01-01 00:03:00")
-    coll = res["runs"]
-    assert res.get("data") is None
+    coll = res["data"]
+    assert res["data"] is not None
     assert [e["run"] for e in coll.extents] == ["r2"]
     e = coll.extents[0]
     assert e["start"] == "2024-01-01T00:02:00+00:00"
@@ -195,7 +195,7 @@ def test_range_mode_inclusive_window_crops(tmp_path):
     res = ExtractRun().execute(
         ctx, archive, selection="time range",
         start="2024-01-01 00:00:10", end="2024-01-01 00:00:20")
-    coll = res["runs"]
+    coll = res["data"]
     assert [e["run"] for e in coll.extents] == ["r1"]
     assert coll.runs[0].dataset.sizes["time"] == 11  # slice endpoints inclusive
 
@@ -226,11 +226,11 @@ def test_range_mode_sample_rates_filter(tmp_path):
     res = ExtractRun().execute(
         ctx, archive, selection="time range", sample_rates="1",
         start="2024-01-01 00:00:00", end="2024-01-01 00:01:00")
-    assert [e["run"] for e in res["runs"].extents] == ["a1"]
+    assert [e["run"] for e in res["data"].extents] == ["a1"]
     res2 = ExtractRun().execute(
         ctx, archive, selection="time range", sample_rates="2",
         start="2024-01-01 00:00:00", end="2024-01-01 00:01:00")
-    assert [e["run"] for e in res2["runs"].extents] == ["b1"]
+    assert [e["run"] for e in res2["data"].extents] == ["b1"]
 
 
 def test_run_id_mode_no_overlap_error(tmp_path):

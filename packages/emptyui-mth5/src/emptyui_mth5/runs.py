@@ -306,11 +306,9 @@ class ExtractRun(Node):
     inputs = (Input("mth5", "mth5"),)
     outputs = (
         Output("data", "ts.run", label="time series",
-               description="populated in 'run id' mode",
-               populated_when=("selection", ("run id",))),
-        Output("runs", "ts.runs", label="run collection",
-               description="populated in 'time range' mode",
-               populated_when=("selection", ("time range",))),
+               description="one run ('run id' mode) or the whole run "
+                           "collection ('time range' mode) — the shape "
+                           "follows the selection"),
     )
     params = (
         Param("selection", "select", label="Selection",
@@ -359,8 +357,11 @@ class ExtractRun(Node):
         survey_obj = _resolve_survey(mth5, survey)
         station_obj = _resolve_station(survey_obj, station)
         if str(selection).strip() == "time range":
-            return self._execute_range(
+            # the single output port carries the collection (value follows
+            # the selection — one-port convention, §4)
+            coll = self._execute_range(
                 ctx, survey_obj, station_obj, sample_rates, start, end)
+            return {"data": coll["runs"]}
         run_obj = _resolve_run(station_obj, run)
         if not str(run).strip():
             # the silent first-row fallback is a burst-archive footgun

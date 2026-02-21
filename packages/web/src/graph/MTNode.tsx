@@ -229,7 +229,25 @@ export function MTNode({ id, data, selected }: NodeProps) {
     if (!pw) return true;
     const sibling = manifest?.params.find((q) => q.name === pw.param);
     const current = d.params[pw.param] ?? sibling?.default ?? "";
-    return pw.values.includes(String(current));
+    return pw.values.map(String).some((v) => v.toLowerCase() === String(current).toLowerCase());
+  };
+
+  // One-port value hint (§4): the port's runtime payload kind (streamed via
+  // `payload` run events) colors the handle — a ts.run-tagged source whose
+  // summary says "ts.runs" renders in the collection color with a suffix.
+  const outputCollection = (o: PortSpec): boolean => {
+    const s = payloads[id]?.[o.name];
+    return s?.kind === "ts.runs";
+  };
+  const outputTitle = (o: PortSpec): string => {
+    const kind = payloads[id]?.[o.name]?.kind;
+    const base = `${o.label ?? o.name}: ${outputCollection(o) ? "ts.runs" : o.type}`;
+    if (!isOutputPopulated(o)) {
+      return `${base} — not populated in the current ${o.populated_when?.param} mode`;
+    }
+    return kind === "ts.runs" && o.type !== "ts.runs"
+      ? `${base} (runtime: collection)`
+      : base;
   };
 
   // Time-selector bars (§23.4): params bound via `time_bar` are grouped by
@@ -384,9 +402,10 @@ export function MTNode({ id, data, selected }: NodeProps) {
                     <>
                       <span
                         className="mt-out-name"
-                        title={`${output.label ?? output.name}: ${output.type}`}
+                        title={outputTitle(output)}
                       >
                         {output.label ?? output.name}
+                        {outputCollection(output) ? " (collection)" : ""}
                       </span>
                       <Handle
                         id={output.name}
@@ -394,14 +413,12 @@ export function MTNode({ id, data, selected }: NodeProps) {
                         position={Position.Right}
                         className="mt-port"
                         style={{
-                          background: portColor(output.type, catalog),
+                          background: outputCollection(output)
+                            ? portColor("ts.runs", catalog)
+                            : portColor(output.type, catalog),
                           opacity: isOutputPopulated(output) ? undefined : 0.25,
                         }}
-                        title={
-                          isOutputPopulated(output)
-                            ? `${output.label ?? output.name}: ${output.type}`
-                            : `${output.label ?? output.name}: ${output.type} — not populated in the current ${output.populated_when?.param} mode`
-                        }
+                        title={outputTitle(output)}
                       />
                     </>
                   )}

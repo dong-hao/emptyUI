@@ -11,6 +11,7 @@ import {
   type EdgeChange,
 } from "@xyflow/react";
 import { useCatalog, portColor } from "./catalog";
+import { useRun, type PayloadMap } from "./run";
 import type { NodeManifest } from "../api/client";
 
 /** RFC-4122 v4 UUID: crypto.randomUUID is secure-context-only (HTTPS or
@@ -124,6 +125,7 @@ export function validateConnection(
   nodes: Node<MTNodeData>[],
   edges: Edge[],
   manifests: NodeManifest[],
+  payloads?: PayloadMap,
 ): boolean {
   if (!connection.source || !connection.target) return false;
   if (connection.source === connection.target) return false; // self-loop
@@ -140,6 +142,15 @@ export function validateConnection(
   const inPort = tgtManifest?.inputs.find((i) => i.name === connection.targetHandle);
   if (!outPort || !inPort) return false; // unknown ports — reject
   if (!portTypesCompatible(outPort.type, inPort.type, inPort.accepts)) return false;
+  // One-port runtime-shape check (§4): when the source port's payload
+  // summary is known (the upstream ran once), a collection may only be
+  // wired into a collection_ok input — recovers wiring-time validation
+  // without dual ports. No summary → the static tags rule.
+  if (payloads && outPort.type === "ts.run" && inPort.type === "ts.run"
+      && !inPort.collection_ok) {
+    const s = payloads[connection.source]?.[connection.sourceHandle ?? ""];
+    if (s?.kind === "ts.runs") return false;
+  }
   if (connectionCreatesCycle(edges, connection.source, connection.target)) return false;
   return true;
 }
@@ -200,7 +211,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     const { catalog } = useCatalog.getState();
     // defense-in-depth: the full connection rule (the live isValidConnection
     // already rejects invalid drags — this catches programmatic adds)
-    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [])) return;
+    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [], useRun.getState().payloads)) return;
 
     const source = nodes.find((n) => n.id === connection.source);
     const srcManifest = catalog?.nodes.find(
@@ -238,7 +249,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     // re-routing an edge endpoint must satisfy the full connection rule
     const { nodes, edges } = get();
     const { catalog } = useCatalog.getState();
-    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [])) return;
+    if (!validateConnection(connection, nodes, edges, catalog?.nodes ?? [], useRun.getState().payloads)) return;
     set((s) => ({
       // one-to-one inputs: rerouting onto an occupied input replaces the
       // old edge (the same rule onConnect enforces — reconnectEdge only
@@ -375,7 +386,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   loadDocument: (nodes, edges, name) =>
     set({
       nodes,
-      edges,
+      edges: migrateEdges(nodes, edges),
       selectedNodeId: null,
       ...(name ? { docName: name } : {}),
     }),
@@ -388,6 +399,25 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       docName: "untitled",
     }),
 }));
+
+/** One-port migration (§4): Extract Run's dual outputs (data + runs) merged
+ *  into a single `data` port whose value follows the selection — edges
+ *  targeting the retired `runs` port remap at load time. */
+export function migrateEdges(
+  nodes: Node<MTNodeData>[],
+  edges: Edge[],
+): Edge[] {
+  const extract = new Set(
+    nodes
+      .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === "mth5.io.extract_run")
+      .map((n) => n.id));
+  if (!extract.size) return edges;
+  return edges.map((e) =>
+    extract.has(e.target) && e.targetHandle === "runs"
+      ? { ...e, targetHandle: "data" }
+      : e,
+  );
+}
 
 /** Serialize the workflow document (DESIGN.md §6 format). */
 export function serializeWorkflow(

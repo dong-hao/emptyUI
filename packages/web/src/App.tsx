@@ -140,6 +140,7 @@ export default function App() {
         state.nodes,
         state.edges,
         catalog?.nodes ?? [],
+        useRun.getState().payloads,
       );
     },
     [catalog],

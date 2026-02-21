@@ -9,6 +9,10 @@ export interface PortSpec {
    *  param holds one of the listed values (Extract Run's dual outputs,
    *  DESIGN.md §4) */
   populated_when?: { param: string; values: string[] } | null;
+  /** one-port convention (§4): this INPUT accepts a run collection
+   *  (ts.runs) arriving on the static port — the wiring check consults
+   *  the source port's runtime payload summary */
+  collection_ok?: boolean;
 }
 
 export interface ParamSpec {
@@ -52,7 +56,7 @@ export interface RunExtent {
 }
 
 export interface PayloadSummary {
-  kind?: "ts" | "mth5" | "fc";
+  kind?: "ts" | "mth5" | "fc" | "ts.runs";
   start: string | number;
   end: string | number;
   absolute: boolean;

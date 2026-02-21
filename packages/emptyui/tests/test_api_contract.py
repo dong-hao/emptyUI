@@ -22,7 +22,7 @@ MANIFEST_KEYS = {
     "hidden", "inputs", "outputs", "params", "deps", "inherit", "models",
 }
 PORT_KEYS = {"name", "type", "description", "label"}
-INPUT_KEYS = PORT_KEYS | {"required", "accepts"}
+INPUT_KEYS = PORT_KEYS | {"required", "accepts", "collection_ok"}
 OUTPUT_KEYS = PORT_KEYS | {"populated_when"}
 PARAM_KEYS = {
     "name", "widget", "label", "default", "optional", "options", "min",
@@ -48,7 +48,7 @@ def _registry() -> Registry:
         hidden = True
         inputs = (
             Input("data", "ts.run", accepts=("ts.run", "any"),
-                  description="in port"),
+                  description="in port", collection_ok=True),
             Input("aux", "any", required=False),
         )
         outputs = (Output("out", "plot", description="figure",
@@ -107,6 +107,9 @@ def test_nodes_catalog_shape(client: TestClient):
     assert by_name["span"]["time_bar"] == "data"
     assert by_name["path"]["path_kind"] == "in"
     assert manifest["inherit"] == {"data": {"survey": "survey"}}
+    # collection_ok (§4 one-port convention): inputs accepting collections
+    assert manifest["inputs"][0]["collection_ok"] is True
+    assert manifest["inputs"][1]["collection_ok"] is False
     # populated_when (§4): output ports dim when their mode is inactive
     assert manifest["outputs"][0]["populated_when"] == {
         "param": "mode", "values": ["a"]}

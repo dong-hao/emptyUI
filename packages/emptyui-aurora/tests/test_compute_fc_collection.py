@@ -42,7 +42,7 @@ def test_collection_route_parity_with_build_fc(tmp_path):
     W = dict(start="2024-01-01 00:00:00", end="2024-01-01 00:02:08")
 
     coll = ExtractRun().execute(
-        ctx, archive, selection="time range", **W)["runs"]
+        ctx, archive, selection="time range", **W)["data"]
     fc_a = ComputeFC().execute(ctx, coll, **KW)["fc"]
 
     fc_b = BuildFC().execute(
@@ -65,19 +65,18 @@ def test_collection_run_id_coords(tmp_path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     coll = ExtractRun().execute(
         ctx, archive, selection="time range",
-        start="2024-01-01 00:00:00", end="2024-01-01 00:02:08")["runs"]
+        start="2024-01-01 00:00:00", end="2024-01-01 00:02:08")["data"]
     fc = ComputeFC().execute(ctx, coll, **KW)["fc"]
     ids = set(str(x) for x in fc[0].run_id.values.tolist())
     assert ids == {"sr2400_0001", "sr2400_0002"}
 
 
-def test_none_input_names_the_runs_output(tmp_path):
-    """Connecting Extract Run's empty 'data' output (time range mode)
-    yields an actionable hint, not a confusing crash."""
+def test_none_input_names_the_remedy(tmp_path):
+    """A None input yields an actionable hint, not a confusing crash."""
     from emptyui_aurora.process import ComputeFC
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    with pytest.raises(ValueError, match="'runs' output"):
+    with pytest.raises(ValueError, match="no time series input"):
         ComputeFC().execute(ctx, None)
 
 

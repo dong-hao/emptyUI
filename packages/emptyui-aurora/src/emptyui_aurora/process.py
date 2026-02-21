@@ -106,7 +106,7 @@ class ComputeFC(Node):
     )
     category = "Processing"
     inputs = (Input("data", "ts.run", label="time series",
-                    accepts=("ts.runs",)),)
+                    accepts=("ts.runs",), collection_ok=True),)
     outputs = (Output("fc", "fc"),)
     params = (
         Param("channel_nomenclature", "select", label="Channel nomenclature",
@@ -237,9 +237,8 @@ class ComputeFC(Node):
                 run: str = "") -> dict[str, Any]:
         if data is None:
             raise ValueError(
-                "no time series input — Extract Run populates its 'runs' "
-                "output (not 'data') in 'time range' mode; connect that "
-                "port instead")
+                "no time series input — check the upstream node ran and the "
+                "edge targets this port")
         # Channel names resolve inside compute_fc_levels (empty fields = auto
         # from nomenclature + data; tipper included when the vertical channel
         # is present, missing outputs dropped with a warning).

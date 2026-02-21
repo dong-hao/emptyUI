@@ -22,6 +22,12 @@ class Input:
     accepts: tuple[str, ...] = ()
     description: str = ""
     label: str = ""
+    #: One-port convention (§4): this input accepts a run collection
+    #: (ts.runs) arriving on the static port — the node dispatches on the
+    #: payload shape. The frontend's wiring check consults the source
+    #: port's runtime payload summary: a collection may only be wired into
+    #: collection_ok inputs. Rendering-only.
+    collection_ok: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -31,6 +37,7 @@ class Input:
             "accepts": list(self.accepts),
             "description": self.description,
             "label": self.label or self.name,
+            "collection_ok": self.collection_ok,
         }
 
 

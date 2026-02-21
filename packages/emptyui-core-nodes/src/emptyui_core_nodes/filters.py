@@ -15,7 +15,7 @@ class Bandpass(Node):
     tooltip = "Zero-phase Butterworth low/high/band-pass filter on all channels."
     description = "Zero-phase Butterworth bandpass (filtfilt) on all channels."
     category = "Processing"
-    inputs = (Input("data", "ts.run", label="time series"),)
+    inputs = (Input("data", "ts.run", label="time series", collection_ok=True),)
     outputs = (Output("filtered", "ts.run", label="filtered time series"),)
     params = (
         Param("low_freq", "number", label="Low cutoff (Hz)", default=None,
@@ -86,7 +86,7 @@ class Detrend(Node):
         "a passthrough."
     )
     category = "Processing"
-    inputs = (Input("data", "ts.run", label="time series"),)
+    inputs = (Input("data", "ts.run", label="time series", collection_ok=True),)
     outputs = (Output("data", "ts.run", label="time series"),)
     params = (
         Param("method", "select", label="Method", default="linear",
