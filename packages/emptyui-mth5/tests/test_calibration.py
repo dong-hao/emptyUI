@@ -48,6 +48,32 @@ def test_build_fap_filters_flat_extension():
     assert filters["e1"].units_in == "milliVolt per kilometer"
 
 
+def test_build_fap_filters_small_phase_table_in_degrees():
+    """Phases pass through as degrees: mt_metadata's constructor applies a
+    max(|phase|) > 6*pi degrees->radians heuristic that silently misreads
+    small-phase tables as radians (a -3 deg phase stayed -3 rad -> -171.9 deg
+    response). The Phoenix ASC path carries the same guard."""
+    rows = {"channels": {
+        "bx": {
+            "frequencies": np.array([0.1, 1.0, 10.0]),
+            "amplitudes": np.array([1.0, 1.0, 1.0]),
+            "phases_deg": np.array([-2.0, -3.0, -5.0]),
+        }
+    }}
+    fap = build_fap_filters(rows, extend_flat=False)["bx"]
+    resp = fap.complex_response(np.array([1.0]))
+    assert np.angle(resp[0]) == pytest.approx(np.deg2rad(-3.0), abs=1e-9)
+    # the real LEMI table (max |phase| > 6 pi) is unaffected
+    real = build_fap_filters(parse_fap(REAL_CHN), extend_flat=False)["bx"]
+    at = 1.0
+    expected = np.interp(
+        np.log(at), np.log(real.frequencies), real.phases,
+    )
+    assert np.angle(real.complex_response(np.array([at]))[0]) == pytest.approx(
+        expected, abs=1e-6
+    )
+
+
 def test_find_calibration_file_prefers_station_pair(tmp_path: Path):
     (tmp_path / "no46.chn").write_text("")
     (tmp_path / "generic.def").write_text("")

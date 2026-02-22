@@ -196,8 +196,13 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
             a = np.concatenate([[a[0]], a])
             p = np.concatenate([[0.0], p])
         unit = (units or {}).get(ch) or _default_unit(ch)
+        # phases are passed in radians: mt_metadata's constructor applies a
+        # max(|phase|) > 6*pi degrees->radians heuristic that silently
+        # misreads small-phase tables (a -2 deg phase would stay -2 rad);
+        # the parsed FAP ARG column is degrees, so convert explicitly
+        # (same guard as the Phoenix ASC path)
         fap = FrequencyResponseTableFilter(
-            frequencies=f, amplitudes=a, phases=p,
+            frequencies=f, amplitudes=a, phases=np.deg2rad(p),
             instrument_type="flux gate magnetometer",
             units_in=unit, units_out=unit,
             gain=1.0, sequence_number=1,

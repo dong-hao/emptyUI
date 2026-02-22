@@ -8,7 +8,7 @@ import numpy as np
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import build_tf
-from emptyui_mth5.tf import ExportTF, _to_standard_coords
+from emptyui_mth5.tf import SI_TO_EDI, ExportTF, ImportTF, _to_standard_coords
 
 
 def _lemi_tf():
@@ -84,8 +84,11 @@ def test_export_edi_includes_errors_and_station_header(tmp_path: Path):
     assert "LAT=" in content and "LON=" in content
     assert "SURVEY=bgs_37" in content
     assert ">ZXX.VAR" in content
-    assert "1.000000e-02" in content  # 0.1**2 -> variance
-    assert "4.000000e-02" in content  # 0.2**2 -> variance
+    # internal TFs are SI; the EDI file stores the SEG convention
+    # ([mV/km]/[nT]) — the impedance (and its error) is scaled on export:
+    # std 0.1 SI -> 0.1 * SI_TO_EDI, variance = std**2
+    assert f"{(0.1 * SI_TO_EDI) ** 2:.6e}" in content
+    assert f"{(0.2 * SI_TO_EDI) ** 2:.6e}" in content
 
 
 def test_to_standard_coords_carries_errors(tmp_path: Path):
@@ -95,3 +98,76 @@ def test_to_standard_coords_carries_errors(tmp_path: Path):
     err = std.impedance_error
     assert np.allclose(err.sel(output="ex", input="hx").values, [0.1, 0.1, 0.1])
     assert np.allclose(err.sel(output="ey", input="hy").values, [0.2, 0.2, 0.2])
+
+
+def test_export_edi_then_raw_read_gives_seg_units(tmp_path: Path):
+    """Export converts SI -> SEG ([mV/km]/[nT]): a raw mt_metadata read of the
+    exported file (verbatim, no conversion) yields the scaled impedance."""
+    from mt_metadata.transfer_functions.core import TF
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = _lemi_tf()
+    out = tmp_path / "lemi_tf.edi"
+    ExportTF().execute(ctx, tf, path=str(out), file_type="edi")
+    raw = TF()
+    raw.read(fn=str(out))
+    raw_z = raw.dataset["transfer_function"].sel(output="ex", input="hx").values
+    si_z = tf.dataset["transfer_function"].sel(output=tf.ex, input=tf.hx).values
+    np.testing.assert_allclose(raw_z, si_z * SI_TO_EDI, rtol=1e-6)
+    # the tipper is dimensionless (hz row) — untouched; here absent (zeros)
+    raw_t = raw.dataset["transfer_function"].sel(output="hz", input="hx").values
+    si_t = tf.dataset["transfer_function"].sel(output=tf.hz, input=tf.hx).values
+    np.testing.assert_allclose(raw_t, si_t, rtol=1e-12, atol=0.0)
+
+
+def test_import_edi_converts_to_si(tmp_path: Path):
+    """Import converts the SEG impedance back to SI so downstream display
+    nodes (rho = |Z|^2/(mu0*w)) see physically consistent values; the
+    tipper row is untouched."""
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf_in = _lemi_tf_with_errors_and_station()
+    out = tmp_path / "roundtrip.edi"
+    ExportTF().execute(ctx, tf_in, path=str(out), file_type="edi")
+    imported = ImportTF().execute(ctx, str(out))["tf"]
+    for got_name, want_name in ((imported.ex, tf_in.ex),
+                                (imported.ey, tf_in.ey)):
+        for inp in (imported.hx, imported.hy):
+            want_inp = tf_in.hy if inp == imported.hy else tf_in.hx
+            got = imported.dataset["transfer_function"].sel(
+                output=got_name, input=inp).values
+            want = tf_in.dataset["transfer_function"].sel(
+                output=want_name, input=want_inp).values
+            np.testing.assert_allclose(got, want, rtol=1e-5)
+    imp_err = imported.dataset["transfer_function_error"]
+    in_err = tf_in.dataset["transfer_function_error"]
+    np.testing.assert_allclose(
+        imp_err.sel(output=imported.ex, input=imported.hx).values,
+        in_err.sel(output=tf_in.ex, input=tf_in.hx).values, rtol=1e-5)
+    # the tipper row (hz) must be untouched by the scaling
+    np.testing.assert_allclose(
+        imported.dataset["transfer_function"].sel(
+            output=imported.hz, input=imported.hx).values,
+        tf_in.dataset["transfer_function"].sel(
+            output=tf_in.hz, input=tf_in.hx).values,
+        rtol=1e-12, atol=0.0)
+
+
+def test_import_official_edi_rho_is_physical(tmp_path: Path):
+    """The bundled official Phoenix EDI imports to SI: apparent resistivity
+    at the shortest period is ~17 ohm-m (SEG-correct), not ~1.1e7 (the
+    verbatim-import bug, SI/SEG mixed up)."""
+
+    edi = (Path(__file__).resolve().parents[3] / "examples" / "data"
+           / "phoenix-mtu-test" / "B0940330_z.edi")
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = ImportTF().execute(ctx, str(edi))["tf"]
+    arr = tf.dataset["transfer_function"]
+    period = arr.coords["period"].values
+    zxy = arr.sel(output=tf.ex, input=tf.hy).values
+    mu0 = 4e-7 * np.pi
+    rho = np.abs(zxy) ** 2 / (mu0 * 2 * np.pi / period)
+    # SEG-correct value at the shortest period is ~17.4 ohm-m; the verbatim
+    # import bug would show 1.1e7 instead
+    assert 10.0 < rho[0] < 30.0, rho[0]
+    assert rho.max() < 1e4, rho.max()

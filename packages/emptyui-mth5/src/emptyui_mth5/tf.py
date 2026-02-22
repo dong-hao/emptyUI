@@ -12,6 +12,46 @@ from emptyui import Input, Node, Output, Param
 
 from .nomenclature import STANDARD_INPUTS, STANDARD_OUTPUTS
 
+MU0 = 4e-7 * np.pi
+
+#: Impedance unit bridge between the file formats (SEG/EMTF convention,
+#: [mV/km]/[nT] — the EDI standard, EMTF XML ``_units_dict``, the Zonge avg
+#: ``0.2|Z|^2/f`` formula and the EMTF j/z-files) and emptyUI's internal
+#: SI convention (E in V/m, H in A/m): E mV/km -> V/m is x1e-6, H nT -> A/m
+#: is x1e-9/mu0. mt_metadata's readers/writers copy impedance values
+#: verbatim (verified: no conversion in edi/xml/avg/j/zmm), so emptyUI
+#: converts at the format boundary — importing EDI values un-stored leaves
+#: apparent resistivity inflated by (1/1.2566e-3)^2 ~= 6.33e5.
+EDI_TO_SI = 1e-6 * MU0 / 1e-9
+SI_TO_EDI = 1.0 / EDI_TO_SI
+
+
+def _scaled_impedance_copy(tf, factor: float):
+    """Return a deep copy of ``tf`` with the impedance block (ex/ey output
+    rows) and its error scaled by ``factor`` — the SI <-> [mV/km]/[nT] unit
+    bridge at the file-format boundary. The tipper (hz row) is dimensionless
+    and untouched. Works on a copy: TF payloads are shared/cached, mutating
+    an input violates the executor's immutability contract.
+    """
+    import copy
+
+    out = copy.deepcopy(tf)
+    arr = out.dataset["transfer_function"]
+    ex, ey = out.ex, out.ey
+    rows = [
+        i for i, c in enumerate(arr.coords["output"].values)
+        if str(c) in (ex, ey)
+    ]
+    if rows:
+        vals = arr.values.copy()
+        vals[:, rows, :] *= factor
+        arr.values = vals
+        if "transfer_function_error" in out.dataset:
+            err = out.dataset["transfer_function_error"].values.copy()
+            err[:, rows, :] *= abs(factor)
+            out.dataset["transfer_function_error"].values = err
+    return out
+
 
 def _to_standard_coords(tf):
     """Return a copy of the TF relabelled to standard coordinates.
@@ -192,6 +232,15 @@ class ImportTF(Node):
         tf = TF()
         tf.read(fn=str(p))
         notes = []
+        # all supported formats store the impedance in the SEG/EMTF
+        # convention ([mV/km]/[nT]) while emptyUI's internal TFs are SI —
+        # mt_metadata copies the values verbatim, so convert here (the
+        # tipper is dimensionless and untouched)
+        tf = _scaled_impedance_copy(tf, EDI_TO_SI)
+        notes.append(
+            "impedance units converted [mV/km]/[nT] -> SI "
+            f"(x{EDI_TO_SI:.6g} on import)"
+        )
         if p.suffix.lower() == ".edi":
             text = p.read_text(errors="replace")
             m = _EDI_SIGNCONVENTION_RE.search(text)
@@ -434,6 +483,10 @@ class ExportTF(Node):
     category = "Data I/O"
     inputs = (Input("tf", "tf"),)
     outputs = ()
+    #: the side effect IS writing the file — never served from the
+    #: structural cache (a hit would report "done (cached)" with no file
+    #: written, §7.1); re-execution is cheap (the tf payload is cached)
+    cacheable = False
     params = (
         Param("path", "file", label="Output path (or basename)", default="", path_kind="out"),
         Param("file_type", "select", label="Format",
@@ -447,6 +500,10 @@ class ExportTF(Node):
             file_type = ext or file_type
             out = base
         export_tf = _to_standard_coords(tf) if file_type == "zmm" else tf
+        # file formats store the impedance in the SEG/EMTF convention
+        # ([mV/km]/[nT]); internal TFs are SI — convert on a copy so the
+        # input payload (shared/cached) is untouched
+        export_tf = _scaled_impedance_copy(export_tf, SI_TO_EDI)
         saved = export_tf.write(
             save_dir=str(out.parent),
             fn_basename=out.name,
