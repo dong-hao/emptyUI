@@ -121,7 +121,7 @@ class PlotCoherency(Node):
               description="Lower reference bound (shaded guidance band) — "
                           "the Coherence Sort default."),
         Param("coherence_max", "number", label="Coherence max",
-              default=0.98, min=0.0, max=1.0,
+              default=1, min=0.0, max=1.0,
               description="Upper reference bound — the Coherence Sort default."),
         Param("ensemble_windows", "integer", label="Ensemble windows",
               default=16, min=1,
@@ -153,7 +153,7 @@ class PlotCoherency(Node):
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
 
     def execute(self, ctx, fc, ref_fc=None,
-                coherence_min: float = 0.25, coherence_max: float = 0.98,
+                coherence_min: float = 0.25, coherence_max: float = 1.0,
                 ensemble_windows: int = 16,
                 smooth_bins: int = 0, variation: str = "iqr",
                 sample_rate: str = "auto") -> dict[str, Any]:

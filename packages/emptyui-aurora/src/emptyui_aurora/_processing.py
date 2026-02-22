@@ -1501,7 +1501,7 @@ def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
 
 
 def coherence_sort_fc(local, ref, input_channels, output_channels,
-                      coherence_min=0.25, coherence_max=0.98, mode="weight",
+                      coherence_min=0.25, coherence_max=1.0, mode="weight",
                       apply_below_period=None,
                       ensemble_windows=16, smooth_bins=0,
                       pairing="intersect", tol_s=0.0):
@@ -1551,7 +1551,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
 
 
 def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
-                       coherence_min=0.25, coherence_max=0.98, mode="weight",
+                       coherence_min=0.25, coherence_max=1.0, mode="weight",
                        apply_below_period=None,
                        ensemble_windows=16, smooth_bins=0,
                        pairing="intersect", tol_s=0.0):

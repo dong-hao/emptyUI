@@ -114,6 +114,15 @@ def persist_fc_level(
             "cannot persist FC without an absolute (datetime64) time axis; the "
             "ts.run source must carry a start time (e.g. an mth5 RunTS)"
         )
+    if int(fc.sizes.get("time", 0)) < 2:
+        # mth5's from_xarray derives the decimation's dt from t[1]-t[0] — a
+        # single-window FC is degenerate (skipped with a warning, not a crash)
+        import logging
+
+        logging.getLogger("emptyui").warning(
+            "FC level %s carries a single window — nothing to persist "
+            "(mth5 needs >= 2 windows for the dt derivation)", decimation_level)
+        return workspace_mth5_path(ctx)
     from mth5.mth5 import MTH5
 
     from ._compat import ensure_h5_openable

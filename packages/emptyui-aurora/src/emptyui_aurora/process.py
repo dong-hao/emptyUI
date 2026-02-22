@@ -140,7 +140,7 @@ class ComputeFC(Node):
         Param("e_dipole_length_m", "number", label="E dipole length (m)", default=None,
               optional=True,
               description="LEMI stores E as mV potential; divide by dipole length to get V/m"),
-        Param("decimation_levels", "integer", label="Decimation levels", default=0,
+        Param("decimation_levels", "integer", label="Decimation levels", default=4,
               min=0,
               description="Number of cascading decimations (0 = none, native rate only)"),
         Param("factor", "integer", label="Decimation factor", default=4, min=2),
@@ -599,7 +599,7 @@ class BuildFC(Node):
                 input_channels: str = "",
                 output_channels: str = "", channel_nomenclature: str = "auto",
                 magnetic_unit: str = "auto", e_dipole_length_m=None,
-                decimation_levels: int = 0, factor: int = 4,
+                decimation_levels: int = 4, factor: int = 4,
                 window_samples: int = 256, overlap: float = 0.5,
                 window_type: str = "boxcar", window_type_deep: str = "",
                 deep_from_level=None, clock_zero: str = "epoch",
@@ -1042,7 +1042,7 @@ class CoherenceSort(Node):
               description="Lower coherence bound (per-window coherence²). "
                           "Windows below are down-weighted/dropped."),
         Param("coherence_max", "number", label="Coherence max",
-              default=0.98, min=0.0, max=1.0,
+              default=1, min=0.0, max=1.0,
               description="Upper coherence bound; coherence ≈ 1 can be an "
                           "overfit/coherent-noise signature."),
         Param("mode", "select", label="Mode",
@@ -1084,7 +1084,7 @@ class CoherenceSort(Node):
     )
 
     def execute(self, ctx, fc, ref_fc=None,
-                coherence_min: float = 0.25, coherence_max: float = 0.98,
+                coherence_min: float = 0.25, coherence_max: float = 1.0,
                 mode: str = "weight",
                 apply_below_period: float = 0.0,
                 ensemble_windows: int = 16,

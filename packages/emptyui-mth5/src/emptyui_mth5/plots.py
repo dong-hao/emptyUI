@@ -39,7 +39,7 @@ class PlotAppResPhase(Node):
                           "external reference figure; 'auto' (default) fits "
                           "whole decades around the data."),
         Param("print_params", "boolean", label="Print parameters on plot",
-              default=True,
+              default=False,
               description="Print the processing-provenance line (run "
                           "comment) under the figure — useful for "
                           "algorithm comparison; untick for production "
@@ -47,7 +47,7 @@ class PlotAppResPhase(Node):
     )
 
     def execute(self, ctx, tf, mode: str = "off-diagonal",
-                rho_ylim: str = "auto", print_params: bool = True) \
+                rho_ylim: str = "auto", print_params: bool = False) \
             -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
@@ -95,7 +95,7 @@ class PlotTipper(Node):
                           "legitimately exceeds 1 (|T| > 1 near 2D/3D "
                           "conductivity contrasts)."),
         Param("print_params", "boolean", label="Print parameters on plot",
-              default=True,
+              default=False,
               description="Print the processing-provenance line (run "
                           "comment) under the figure — useful for "
                           "algorithm comparison; untick for production "
@@ -146,7 +146,7 @@ class PlotPhaseTensor(Node):
     outputs = (Output("plot", "plot"),)
     params = (
         Param("print_params", "boolean", label="Print parameters on plot",
-              default=True,
+              default=False,
               description="Print the processing-provenance line (run "
                           "comment) under the figure — useful for "
                           "algorithm comparison; untick for production "

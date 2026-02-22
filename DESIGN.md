@@ -1290,7 +1290,8 @@ multiple coherence** — the band-free sort:
   ~1/(W−p), empirically immaterial at ens=16). Weights are per (bin, window) —
   finer than per-window scalars and independent of any band table.
 - **Params** (the whole surface): `coherence_min` (0.25), `coherence_max`
-  (0.98 — perfect coherence can be a noise signature: few DOF or coherent
+  (1 — the default upper bound; a tighter bound flags perfect coherence
+  as a noise signature: few DOF or coherent
   noise), `mode` (`weight` default / `drop` / `off`), `apply_below_period`
   (empty = all levels; band-center periods at/above the threshold pass
   unsorted — scope the remedy to the noise-floor head without perturbing the
@@ -1437,7 +1438,7 @@ nodes — no combined plot.
   truth for plot titles AND EDI/XML/ZMM export headers.
 - **Title & provenance**: EMTF/USArray-style
   `<station id><run id> [ LON = …; LAT = … ]` plus a processing-provenance
-  subtitle; `print_params` boolean (default on) toggles the provenance line,
+  subtitle; `print_params` boolean (default off) toggles the provenance line,
   which is anchored to the measured x-label bottom and word-wrapped to the
   axes width.
 - **Plot Time Series** (`core.plot.timeseries`): stacked channel plot;
