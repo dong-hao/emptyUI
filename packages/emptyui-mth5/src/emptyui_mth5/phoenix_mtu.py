@@ -323,7 +323,9 @@ def _slot_schedule(seg_info, table, warnings: list[str]):
     ``L4NS`` seconds at the BEGINNING of every slot (mt_io's tag reference).
     Slot identity is derived from the ACTUAL block timestamps (tag truth)
     with the schedule as the cross-check: per burst family, the slot period
-    is the observed median spacing of consecutive run starts (falling back
+    is the smallest observed spacing of consecutive run starts — the base
+    rhythm even when an interior slot was missed (a median would double
+    every remaining diff and mislabel the grid); falls back
     to ``HSMP`` when a family has a single slot); a disagreement with
     ``HSMP`` is a warning, never a rejection — the block timestamps are the
     truth, and the official IAGA corpus is known to stagger TS3/TS4 against
@@ -363,13 +365,20 @@ def _slot_schedule(seg_info, table, warnings: list[str]):
         diffs = np.diff(starts) if starts.size > 1 else np.array([])
         period = hsmp
         if diffs.size:
-            median = float(np.median(diffs))
-            if hsmp > 0 and abs(median - hsmp) > max(2.0, 0.05 * hsmp):
+            # robust slot-period estimate: the SMALLEST observed spacing,
+            # not the median — a receiver that missed an interior slot
+            # doubles every remaining diff, and a median over [600, 1200]
+            # is 900 s (neither the period nor the grid); the minimum is
+            # the base slot rhythm whenever at least one pair of
+            # consecutive slots was both recorded (a staggered/irregular
+            # schedule's own cross-check below still reports it)
+            smallest = float(np.min(diffs))
+            if hsmp > 0 and abs(smallest - hsmp) > max(2.0, 0.05 * hsmp):
                 warnings.append(
                     f"TBL HSMP says {hsmp:g} s but the observed {rate:g} Hz "
-                    f"slot spacing is {median:g} s — using the observed "
+                    f"slot spacing is {smallest:g} s — using the observed "
                     "spacing (actual block timestamps are the truth)")
-                period = median
+                period = smallest
         elif hsmp <= 0:
             period = 0.0
         anchor = starts[0]

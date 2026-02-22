@@ -543,3 +543,22 @@ def test_pairing_frequency_grid_stays_strict():
         estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
                     estimator_engine="RME_RR", remote_reference=True,
                     ref_fc=ref2, pairing="strict")
+
+
+def test_remote_pairing_skipped_for_ols(caplog):
+    """A connected ref_fc with an estimator that never reads it must not
+    row-reduce the local fc as a side effect of wiring: the local fc is
+    estimated from ALL its windows (the pairing is an RME_RR concern)."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _paired_pair_fcs(extra_ref=2)  # mismatched grids on purpose
+    kw = {"estimator_engine": "Least Squares", "remote_reference": False,
+          "ref_fc": ref}
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        _, Z_ref, _ = estimate_tf(fc, ("hx", "hy"), ("ex", "ey"), **kw)
+    assert any("does not use it" in r.message for r in caplog.records)
+    _, Z_plain, _ = estimate_tf(fc, ("hx", "hy"), ("ex", "ey"),
+                                estimator_engine="Least Squares")
+    np.testing.assert_allclose(Z_ref, Z_plain, rtol=1e-9)

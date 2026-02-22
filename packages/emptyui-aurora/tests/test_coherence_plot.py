@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
+from _synthetic import synthetic_runts, synthetic_source
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import (
@@ -33,7 +33,6 @@ def test_plot_matches_coherence_sort_numerically(tmp_path):
     the sort uses)."""
     levels = _levels()
     from emptyui_aurora._processing import (
-        _normalize_fc_layout,
         _per_bin_coherence,
     )
     from emptyui_aurora.process import CoherenceSort
@@ -121,3 +120,27 @@ def test_no_usable_bins_raises(tmp_path):
     with pytest.raises(ValueError):
         PlotCoherency().execute(
             RunContext(workspace=tmp_path, store=DataStore()), remote)
+
+
+def test_plot_coherency_two_fc_pairs_remote_grid(tmp_path):
+    """The two-FC statistic applies to PAIRED windows — the remote fc is
+    validated + paired exactly like Coherence Sort (shared helper): a
+    different frequency grid crashes with an actionable error (not a raw
+    broadcast error), and a same-grid shorter remote is trimmed to the
+    matched windows instead of silently mixing windows."""
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+    from emptyui_aurora.plots import PlotCoherency
+
+    levels = _levels(13)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    # (1) different frequency grid: actionable error, not einsum broadcast
+    ref_bad = {lv: ds.isel(frequency=slice(0, ds.sizes["frequency"] - 1))
+               for lv, ds in levels.items()}
+    with pytest.raises(ValueError, match="different frequency grid"):
+        PlotCoherency().execute(ctx, levels, ref_fc=ref_bad)
+    # (2) same grids, fewer windows: intersect-trimmed, renders
+    ref_fewer = {lv: ds.isel(time=slice(0, ds.sizes["time"] - 2))
+                 for lv, ds in levels.items()}
+    res = PlotCoherency().execute(ctx, levels, ref_fc=ref_fewer)
+    assert res["plot"]["path"].endswith(".png")

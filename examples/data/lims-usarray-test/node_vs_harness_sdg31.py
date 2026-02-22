@@ -71,7 +71,7 @@ def build_workflow(band_centers: str) -> Workflow:
                                  "mode": "r"}),
             WorkflowNode(id="extract_local", type="mth5.io.extract_run",
                          params={"survey": "4P", "station": "SDG31",
-                                 "run": "b"}),
+                                 "selection": "run id", "run": "b"}),
             WorkflowNode(id="merge_remote", type="mth5.runs.merge",
                          params={"survey": "4P", "station": "SDH28",
                                  "runs": "b,c", "new_run_id": "bc"}),

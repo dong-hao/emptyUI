@@ -1067,13 +1067,16 @@ def _pair_remote_times(local_t, ref_t, tol_s):
         else:
             tol_ns = tol
         # candidate pairs: each local's nearest ref (within tol), greedy
-        # assignment closest-diff-first, one-to-one
+        # assignment closest-diff-first, one-to-one. NB: no int() cast —
+        # relative-second axes are float64 and truncating to int produced
+        # false pairs (100.2 vs 101.8 paired at tol=1.0) and failed exact
+        # matches for sub-second grids
         pos = np.searchsorted(ri, li)
         cand = []
         for k, p in enumerate(pos):
             for j in (p - 1, p):
                 if 0 <= j < ri.size:
-                    d = abs(int(li[k]) - int(ri[j]))
+                    d = abs(li[k] - ri[j])
                     if d <= tol_ns:
                         cand.append((d, k, j))
         cand.sort()
@@ -1363,11 +1366,28 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
     R = _stack(ref, ins) if ref is not None else None  # transfer target
     F, W = E.shape[1], E.shape[2]
 
+    # window-level validity from the ORIGINAL samples — computed BEFORE any
+    # pooling: pooled arrays are 0-filled where invalid (so a NaN bin cannot
+    # poison its neighbors), and the validity mask must survive pooling
+    ok_e = np.all(np.isfinite(E), axis=0) & np.all(np.isfinite(Hp), axis=0)
+    ok_x = (np.all(np.isfinite(Hl), axis=0)
+            & (np.all(np.isfinite(R), axis=0) if R is not None else ok_e))
+
     if smooth_bins > 0:
         def pool(a):  # sum over +-k adjacent bins (bin axis = 1)
-            out = np.zeros_like(a)
+            # edge-clamped (no wraparound: the first bins' ensemble must not
+            # include the last/Nyquist bins) and NaN-aware: a NaN bin (the
+            # DC bin after first-difference recoloring) poisons its
+            # neighbors when pooled raw — the whole bin ensemble became
+            # NaN -> weight 0 and the adjacent bins silently vanished from
+            # the sort. Pooled sums of the VALID samples only (the
+            # coherence is a ratio — scale-equivariant, no count needed).
+            az = np.where(np.isfinite(a), a, 0)
+            out = np.zeros_like(az)
             for k in range(-smooth_bins, smooth_bins + 1):
-                out += np.roll(a, k, axis=1)
+                b_lo, b_hi = max(0, -k), min(F, F - k)
+                if b_hi > b_lo:
+                    out[:, b_lo:b_hi, :] += az[:, b_lo + k:b_hi + k, :]
             return out
         E, Hl, Hp = pool(E), pool(Hl), pool(Hp)
         Rp = pool(R) if R is not None else None
@@ -1376,7 +1396,7 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
 
     w0 = max(0, int(ensemble_windows))
 
-    def _min_coh(Y, X):
+    def _min_coh(Y, X, ok):
         """Per (bin, window) multiple coherence squared of Y's outputs on
         X's inputs over the sliding ensemble; adjusted-R2; min across
         outputs."""
@@ -1384,8 +1404,6 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
         pad_c = np.zeros((F, 1, n_in, n_in), dtype=complex)
         pad_he = np.zeros((F, 1, n_in, Y.shape[0]), dtype=complex)
         pad_oo = np.zeros((F, 1, Y.shape[0]), dtype=complex)
-        ok = (np.all(np.isfinite(X), axis=0)
-              & np.all(np.isfinite(Y), axis=0))            # (F, W)
         Xz = np.where(ok[None], X, 0)
         Yz = np.where(ok[None], Y, 0)
         cnt = np.cumsum(np.concatenate(
@@ -1421,8 +1439,8 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
         coh[~ok] = 0.0
         return coh.min(axis=2)  # (F, W)
 
-    coh_e = _min_coh(E, Hp)
-    coh_x = np.full((F, W), 1.0) if Rp is None else _min_coh(Hl, Rp)
+    coh_e = _min_coh(E, Hp, ok_e)
+    coh_x = np.full((F, W), 1.0) if Rp is None else _min_coh(Hl, Rp, ok_x)
     return coh_e, coh_x
 
 
@@ -1652,11 +1670,21 @@ def estimate_tf(
     fc = fc.isel(frequency=ok)
 
     if ref_fc is not None:
-        ref_fc = _normalize_fc_layout(ref_fc)
-        ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
-        fc, ref_fc = _pair_remote_fc(fc, ref_fc, pairing=pairing,
-                                     tol_s=pair_tolerance_s)
-        _warn_remote_gaps(fc, ref_fc)
+        if engine != "RME_RR":
+            # pairing row-reduces BOTH sides — doing it for an estimator
+            # that never reads the reference silently dropped local rows
+            # (the estimate was computed on fewer windows than asked for,
+            # as a side effect of wiring a port)
+            _log.warning(
+                "remote-reference fc connected but the estimator (%s) does "
+                "not use it — estimating from the local fc only (remote "
+                "reference requires the robust RME_RR engine)", engine)
+        else:
+            ref_fc = _normalize_fc_layout(ref_fc)
+            ref_fc = ref_fc.isel(frequency=ref_fc["frequency"].values > 0)
+            fc, ref_fc = _pair_remote_fc(fc, ref_fc, pairing=pairing,
+                                         tol_s=pair_tolerance_s)
+            _warn_remote_gaps(fc, ref_fc)
 
     # Realistic, octave-aligned period bands for this decimation level
     # (DESIGN.md §14.9: band_style selects the uniform log2-grid partition

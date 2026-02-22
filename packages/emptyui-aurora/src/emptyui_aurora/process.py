@@ -224,9 +224,9 @@ class ComputeFC(Node):
                 output_channels: str = "", channel_nomenclature: str = "auto",
                 magnetic_unit: str = "auto",
                 e_dipole_length_m=None,
-                decimation_levels: int = 0, factor: int = 4,
-                window_samples: int = 256,
-                overlap: float = 0.5, window_type: str = "boxcar",
+                decimation_levels: int = 4, factor: int = 4,
+                window_samples: int = 256, overlap: float = 0.5,
+                window_type: str = "boxcar",
                 window_type_deep: str = "", deep_from_level=None,
                 clock_zero: str = "",
                 prewhitening: str = "first difference",
@@ -513,7 +513,7 @@ class BuildFC(Node):
               default=0.0, optional=True, min=0,
               description="0 = take from the run metadata when present"),
         Param("decimation_levels", "integer", label="Decimation levels",
-              default=0, min=0,
+              default=4, min=0,
               description="Deepest decimation level: 0 = native rate only; "
                           "on a mixed-rate burst archive each family's "
                           "cascade is trimmed to stop at the next family's "
@@ -865,14 +865,29 @@ class BuildFC(Node):
                 start = members[0][3]
             else:
                 # union of channels across members: the 'saturated' aux
-                # mask exists only on runs with flagged samples — pad the
-                # others with zeros (no saturation there) instead of
-                # silently dropping the mask or crashing on concat
+                # QC mask exists only on runs with flagged samples — pad
+                # the others with zeros (no saturation there) instead of
+                # silently dropping the mask or crashing on concat. A run
+                # missing a REAL channel is dropped from the span with a
+                # loud warning: fabricating an all-zero series would
+                # silently corrupt the estimate (merge_fc_containers
+                # drops such channels per run the same way)
                 keys = list(members[0][1])
                 for mv in members[1:]:
                     for name in mv[1]:
                         if name not in keys:
                             keys.append(name)
+                aux = {"saturated"}
+                real_missing = [
+                    n for n in keys
+                    if n not in aux and any(n not in mv[1] for mv in members)]
+                if real_missing:
+                    ctx.logger.warning(
+                        "span %s: run(s) lack channel(s) %s — dropped from "
+                        "the cascaded span (fabricating zeros would corrupt "
+                        "the estimate; process the runs separately or fix "
+                        "the ingestion)", span_id, real_missing)
+                    keys = [n for n in keys if n not in real_missing]
                 data_vars = {}
                 for name in keys:
                     parts = []
@@ -1288,9 +1303,7 @@ class SelectRuns(Node):
                     r["down"], r["threshold"], r["prior"])
         # conservative guard: a window from a NEIGHBOR session that overlaps
         # a rejected one picked up its samples through the decimation
-        # cascade — drop it too. Start-time attribution already puts right
-        # straddlers in the rejected session; only left neighbors need the
-        # extra cut (one window duration wide).
+        # cascade — drop it too (one window duration wide).
         dur = None
         try:
             dur = (float(sample.attrs["num_samples_window"])

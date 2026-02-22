@@ -309,3 +309,36 @@ def test_per_bin_scope_leaves_tail_untouched():
     if tail.any():
         np.testing.assert_array_equal(out["hx"].values[tail],
                                       fc["hx"].values[tail])
+
+
+def test_per_bin_coherence_smooth_bins_nan_aware():
+    """smooth_bins pooling is NaN-aware and edge-clamped: the DC bin is NaN
+    after first-difference recoloring — raw (np.roll) pooling poisoned its
+    +-neighbors (the whole bin ensemble became NaN -> weight 0 and the
+    adjacent bins silently vanished from the sort), and the wraparound
+    pooled DC with Nyquist."""
+    import xarray as xr
+    from emptyui_aurora._processing import _per_bin_coherence
+
+    F, W, I, O = 8, 20, 2, 1
+    rng = np.random.default_rng(1)
+    E = (rng.standard_normal((O, F, W)) + 1j * rng.standard_normal((O, F, W)))
+    H = (rng.standard_normal((I, F, W)) + 1j * rng.standard_normal((I, F, W)))
+    E[:, 0, :] = np.nan  # the DC bin — recoloring undefined there
+    freq = np.arange(F, dtype=float)
+    t = np.arange(W)
+
+    def ds(EA, HA):
+        data = {c: (("frequency", "time"), HA[i])
+                for i, c in enumerate(["hx", "hy"])}
+        data["ex"] = (("frequency", "time"), EA[0])
+        return xr.Dataset(data, coords={"frequency": freq, "time": t})
+
+    coh_e, _ = _per_bin_coherence(ds(E, H), None, ["hx", "hy"], ["ex"],
+                                  ensemble_windows=4, smooth_bins=1)
+    # bins adjacent to the NaN DC bin (1) and the edge bin (F-1) must score
+    # real coherence — the raw pooling zeroed both exactly
+    assert coh_e[1].max() > 0.01, coh_e[1]
+    assert coh_e[F - 1].max() > 0.01, coh_e[F - 1]
+    # the NaN DC bin itself has no data — exactly 0
+    assert (coh_e[0] == 0).all()

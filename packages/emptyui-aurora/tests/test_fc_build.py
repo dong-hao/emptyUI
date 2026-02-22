@@ -20,8 +20,8 @@ def _two_run_archive(tmp_path: Path):
     import warnings
 
     warnings.filterwarnings("ignore")
-    from mth5.mth5 import MTH5
     from mt_timeseries import ChannelTS, RunTS
+    from mth5.mth5 import MTH5
 
     rng = np.random.default_rng(1)
 
@@ -137,8 +137,8 @@ def _two_family_archive(tmp_path: Path):
     import warnings
 
     warnings.filterwarnings("ignore")
-    from mth5.mth5 import MTH5
     from mt_timeseries import ChannelTS, RunTS
+    from mth5.mth5 import MTH5
 
     rng = np.random.default_rng(3)
 
@@ -224,9 +224,11 @@ def test_build_fc_carries_run_id_coordinate(tmp_path):
 
 
 def _multi_run_archive(tmp_path: Path, n: int = 4, contiguous: bool = True,
-                       noisy_idx: int | None = None):
-    """n runs of 32 s at 1 Hz, back to back (or gapped); optionally one run
-    carries a large in-band sine on the electric channels."""
+                       noisy_idx: int | None = None,
+                       run_samples: int | None = None):
+    """n runs of 32 s at 1 Hz (``run_samples`` samples each when given),
+    back to back (or gapped); optionally one run carries a large in-band
+    sine on the electric channels."""
     import warnings
 
     warnings.filterwarnings("ignore")
@@ -239,18 +241,19 @@ def _multi_run_archive(tmp_path: Path, n: int = 4, contiguous: bool = True,
     m.open_mth5(str(path), "w")
     sg = m.add_survey("4P")
     stg = sg.stations_group.add_station("SDX")
+    n_smp = run_samples if run_samples is not None else 32
     for i in range(n):
         start_s = i * 32 if contiguous else i * 96
         start = np.datetime64("2024-01-01T00:00:00") + np.timedelta64(
             start_s, "s")
         chs = []
         for comp in ("hx", "hy"):
-            c = ChannelTS("magnetic", data=rng.standard_normal(32),
+            c = ChannelTS("magnetic", data=rng.standard_normal(n_smp),
                           start=str(start), sample_rate=1.0)
             c.component = comp
             chs.append(c)
         for comp in ("ex", "ey"):
-            x = rng.standard_normal(32)
+            x = rng.standard_normal(n_smp)
             if i == noisy_idx:
                 # broadband inflated noise (the plant signature): the
                 # median-over-bins scorer must catch it, unlike a single
@@ -441,8 +444,10 @@ def test_build_fc_session_labels(tmp_path):
 def test_build_fc_session_selection_feeds_select_runs(tmp_path):
     """The session labels make run-level QC work on ordinary (non-burst)
     archives: Select Runs scores and drops per session."""
-    from emptyui_aurora.process import CoherenceSort  # noqa: F401
-    from emptyui_aurora.process import SelectRuns
+    from emptyui_aurora.process import (
+        CoherenceSort,  # noqa: F401
+        SelectRuns,
+    )
 
     archive = _two_run_archive(tmp_path)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
@@ -466,11 +471,10 @@ def test_compute_fc_stamps_run_id(tmp_path):
     """The classic single-run flow (Extract -> Compute FC) carries the
     per-window 'run_id' coordinate too — session QC works without routing
     through Build FC (whole runs = all-or-nothing QC)."""
-    from mt_timeseries import ChannelTS, RunTS
-
     from emptyui.context import RunContext
     from emptyui.store import DataStore
     from emptyui_aurora.process import ComputeFC
+    from mt_timeseries import ChannelTS, RunTS
 
     rng = np.random.default_rng(7)
     chs = []
@@ -489,3 +493,84 @@ def test_compute_fc_stamps_run_id(tmp_path):
     sample = res["fc"][sorted(res["fc"])[0]]
     assert "run_id" in sample.coords
     assert set(np.asarray(sample["run_id"].values)) == {"b"}
+
+
+def test_build_fc_default_decimation_levels(tmp_path):
+    """The 2dfa4ea flip (Compute FC 4 decimation levels) flipped Build FC's
+    execute signature but left its Param at 0 — the frontend seeds Param
+    defaults, so a fresh Build FC node computed native-rate-only cascades
+    and the per-family decimation trim was inert. Param and signature must
+    agree, and a fresh default node yields 4 levels."""
+    import inspect
+
+    from emptyui_aurora.process import BuildFC
+
+    param = next(p for p in BuildFC().manifest()["params"]
+                 if p["name"] == "decimation_levels")
+    assert param["default"] == 4
+    sig = inspect.signature(BuildFC.execute).parameters["decimation_levels"]
+    assert sig.default == 4
+
+    # end-to-end: a fresh default node (no params) produces 4 levels
+    # (the deepest level needs > window samples after 3 decimations)
+    archive = _multi_run_archive(tmp_path, n=1, contiguous=True,
+                                 run_samples=256 * 256)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = BuildFC().execute(ctx, archive, input_channels="hx,hy",
+                            output_channels="ex,ey",
+                            regroup_contiguous=False)
+    assert sorted(res["fc"]) == [0, 1, 2, 3]
+    archive.close_mth5()
+
+
+def test_build_fc_span_does_not_fabricate_missing_channels(tmp_path, caplog):
+    """Span assembly pads ONLY the QC aux mask: a run missing a REAL channel
+    is dropped from the cascaded span with a loud warning — the
+    union-of-channels padding applied to every channel and fabricated
+    all-zero series silently corrupted the tipper."""
+    import logging
+
+    from mt_timeseries import ChannelTS, RunTS
+    from mth5.mth5 import MTH5
+
+    path = tmp_path / "missing_ch.h5"
+    m = MTH5()
+    m.open_mth5(str(path), "w")
+    sg = m.add_survey("4P")
+    stg = sg.stations_group.add_station("SDX")
+    rng = np.random.default_rng(11)
+    for i in range(2):
+        start = np.datetime64("2024-01-01T00:00:00") + np.timedelta64(
+            i * 32, "s")
+        chs = []
+        for comp in ("hx", "hy"):
+            c = ChannelTS("magnetic", data=rng.standard_normal(32),
+                          start=str(start), sample_rate=1.0)
+            c.component = comp
+            chs.append(c)
+        for comp in ("ex", "ey", "bz") if i == 0 else ("ex", "ey"):
+            c = ChannelTS(
+                "magnetic" if comp == "bz" else "electric",
+                data=rng.standard_normal(32), start=str(start),
+                sample_rate=1.0)
+            c.component = comp
+            chs.append(c)
+        runts = RunTS(array_list=chs)
+        runts.run_metadata.id = f"sr2400_{i + 1:04d}"
+        rg = stg.add_run(runts.run_metadata.id)
+        rg.from_runts(runts)
+    stg.write_metadata()
+    sg.update_metadata()
+    m.close_mth5()
+    archive = MTH5()
+    archive.open_mth5(str(path), "r")
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        res = BuildFC().execute(
+            ctx, archive, input_channels="hx,hy", output_channels="",
+            decimation_levels=0, window_samples=16, overlap=0.5,
+            window_type="boxcar", regroup_contiguous=True)
+    assert "bz" not in res["fc"][0].data_vars
+    assert any("bz" in r.message for r in caplog.records)
+    archive.close_mth5()

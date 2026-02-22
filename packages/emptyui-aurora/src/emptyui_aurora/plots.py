@@ -14,6 +14,7 @@ from emptyui import Input, Node, Output, Param
 
 from ._processing import (
     _normalize_fc_layout,
+    _pair_remote_fc,
     _per_bin_coherence,
 )
 from .process import _fc_io_channels
@@ -226,8 +227,15 @@ class PlotCoherency(Node):
                         f"(has {sorted(ref_levels)}) — compute both stations' "
                         "FCs with the same decimation/window settings"
                     )
-                ref = _normalize_fc_layout(ref)
-            lfc = _normalize_fc_layout(lfc)
+                lfc = _normalize_fc_layout(lfc)
+                # the two-FC statistic applies to PAIRED windows — validate
+                # + pair exactly like Coherence Sort does (shared helper):
+                # unpaired grids either crash with a raw broadcast error or
+                # silently compute the transfer coherence over mismatched
+                # windows
+                lfc, ref = _pair_remote_fc(
+                    lfc, _normalize_fc_layout(ref),
+                    pairing="intersect", tol_s=0.0, level=level)
             # the exact statistic the sort applies (shared helper, §20.1)
             coh_e, coh_x = _per_bin_coherence(
                 lfc, ref, ins, outs, ensemble_windows=ensemble_windows,

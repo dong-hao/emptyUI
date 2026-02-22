@@ -120,7 +120,8 @@ def load_calibrated(reg, ctx, station, run):
     m = reg.get("mth5.io.load").execute(
         ctx, path=str(DATA_DIR / f"4P_{station}.h5"), mode="r")["mth5"]
     data = reg.get("mth5.io.extract_run").execute(
-        ctx, m, survey="4P", station=station, run=run)["data"]
+        ctx, m, survey="4P", station=station, run=run,
+        selection="run id")["data"]
     return reg.get("mth5.calibrate").execute(ctx, data)["data"]
 
 
