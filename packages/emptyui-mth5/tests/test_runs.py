@@ -332,9 +332,8 @@ def test_load_uses_uniform_locking_policy(tmp_path, monkeypatch):
 
     multi_run_archive(tmp_path / "lk.h5", rids=["r1"],
                       starts=["2024-01-01T00:00:00"])
-    from mth5 import mth5 as m5
-
     from emptyui_mth5.io import LoadMth5
+    from mth5 import mth5 as m5
 
     captured = {}
     orig = m5.MTH5.open_mth5
@@ -458,3 +457,107 @@ def test_save_mth5_overwrites_existing_dest_with_warning(tmp_path):
     SaveMth5().execute(ctx, m, path=str(dest))
     assert dest.read_bytes()[:4] == (tmp_path / "src.h5").read_bytes()[:4]
     m.close_mth5()
+
+
+def test_save_mth5_same_file_spelled_differently_closes_in_place(tmp_path):
+    """The same-file check must be path-normalization-proof (§7.1): a
+    relative spelling of the archive's own path used to take the Save-As
+    branch, unlink the live archive, and crash — the file was GONE."""
+    from _archive import multi_run_archive
+    from emptyui_mth5.io import SaveMth5
+
+    src = tmp_path / "src.h5"
+    m = multi_run_archive(src, rids=["r1"], starts=["2024-01-01T00:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    import os
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        SaveMth5().execute(ctx, m, path="./src.h5")  # same file, relative
+    finally:
+        os.chdir(old_cwd)
+    # the archive survived (close-in-place, not Save-As)
+    assert src.exists()
+    m.close_mth5()
+
+
+def test_save_mth5_failed_copy_preserves_destination(tmp_path, monkeypatch):
+    """Save As onto an existing destination must not destroy it when the
+    copy fails (temp file + os.replace, §7.1 degrade-never-destroy)."""
+    import shutil
+
+    from _archive import multi_run_archive
+    from emptyui_mth5.io import SaveMth5
+
+    m = multi_run_archive(tmp_path / "src.h5", rids=["r1"],
+                          starts=["2024-01-01T00:00:00"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    dest = tmp_path / "copy.h5"
+    dest.write_bytes(b"precious user archive")
+
+    def broken_copy2(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "copy2", broken_copy2)
+    try:
+        SaveMth5().execute(ctx, m, path=str(dest))
+    except OSError as exc:
+        assert "No space left" in str(exc)
+    else:
+        raise AssertionError("the failed copy should surface")
+    assert dest.read_bytes() == b"precious user archive"
+    m.close_mth5()
+
+
+def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
+    """The stale-flag recovery must not h5clear an archive THIS process
+    holds open for write (loader outputs live for the server lifetime):
+    the pre-check raises with the remedy instead of clearing under a live
+    writer (§9.3; cross-process staleness is unchanged — the registry dies
+    with the process, so a crashed server's flag is still auto-cleared)."""
+    import subprocess
+
+    import h5py
+    from emptyui_mth5._compat import (
+        ensure_h5_openable,
+        is_write_open_in_process,
+        register_write_open,
+        release_write_open,
+    )
+
+    p = tmp_path / "live.h5"
+    with h5py.File(p, "w", locking=False):
+        pass
+    register_write_open(p)
+    try:
+        assert is_write_open_in_process(p)
+        # force the "already open" error path: the file is fine, so simulate
+        # the flag by patching the probe to raise
+        import h5py as _h5
+
+        def busy_file(*args, **kwargs):
+            raise OSError("file is already open for write (may use h5clear)")
+
+        monkeypatch.setattr(_h5, "File", busy_file)
+        try:
+            ensure_h5_openable(p, log=None)
+        except OSError as exc:
+            assert "currently open" in str(exc)
+            assert "h5clear is refused" in str(exc)
+        else:
+            raise AssertionError("a live writer must refuse, not clear")
+    finally:
+        release_write_open(p)
+    assert not is_write_open_in_process(p)
+    # released: the pre-check passes (the file opens cleanly)
+    ensure_h5_openable(p, log=None)
+    # and the stale-flag path (no in-process holder) still clears when
+    # h5clear is available
+    def busy_file2(*args, **kwargs):
+        raise OSError("file is already open for write (may use h5clear)")
+
+    monkeypatch.setattr(h5py, "File", busy_file2)
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
+    ensure_h5_openable(p, log=None)  # cleared via the mocked h5clear

@@ -14,10 +14,72 @@ from __future__ import annotations
 import functools
 import logging
 import shutil
+from pathlib import Path
 
 _log = logging.getLogger("emptyui")
 
 _patched = False
+
+#: In-process registry of archives emptyUI holds open FOR WRITE (loader
+#: outputs — server-lifetime handles — and the workspace persistence layer's
+#: per-node handles). ``ensure_h5_openable`` consults it: a "already open"
+#: failure on a tracked path is a live writer, not a stale flag. The
+#: registry is process-local state: it dies with the process, so after a
+#: crash the flag is genuinely stale and the recovery path clears it.
+_open_write_paths: set[str] = set()
+_open_paths_lock = None
+
+
+def _paths_lock():
+    global _open_paths_lock
+    if _open_paths_lock is None:
+        import threading
+
+        _open_paths_lock = threading.Lock()
+    return _open_paths_lock
+
+
+def _path_key(path) -> str:
+    try:
+        return str(Path(path).resolve())
+    except OSError:
+        return str(path)
+
+
+def register_write_open(path) -> None:
+    """Record that this process holds ``path`` open for write."""
+    with _paths_lock():
+        _open_write_paths.add(_path_key(path))
+
+
+def release_write_open(path) -> None:
+    """Record that this process no longer holds ``path`` open for write."""
+    with _paths_lock():
+        _open_write_paths.discard(_path_key(path))
+
+
+def is_write_open_in_process(path) -> bool:
+    with _paths_lock():
+        return _path_key(path) in _open_write_paths
+
+
+def close_archive_payload(value, log=None) -> bool:
+    """Close an open MTH5 payload and release its write-open registry entry.
+
+    Used by Save MTH5's close-in-place branch and the executor's
+    failed/cancelled-run cleanup. Returns False when the value is not an
+    open-archive payload (duck: has ``close_mth5``)."""
+    close = getattr(value, "close_mth5", None)
+    if close is None or not callable(close):
+        return False
+    fn = getattr(value, "filename", None)
+    try:
+        close()
+    finally:
+        if fn:
+            release_write_open(fn)
+    (log or _log).debug("closed MTH5 archive %s", fn)
+    return True
 
 
 def apply_crs_cache() -> None:
@@ -93,10 +155,13 @@ def ensure_h5_openable(path, log=None) -> None:
     the last write transaction completed) and return; without it, raise
     the original error plus the remedy.
 
-    NB: this cannot distinguish a stale flag from a LIVE in-process writer
-    — but emptyUI's loaders close their write phase before returning
-    handles, so a flagged archive in practice means the previous server
-    was interrupted.
+    A path emptyUI itself holds open for write (loader outputs live for the
+    server lifetime, the workspace persistence layer) is tracked in-process
+    (:func:`register_write_open`): the failure is a live writer, not a
+    stale flag — clearing under it can corrupt the archive, so this raises
+    with the remedy instead. The registry dies with the process: after a
+    crash the flag is genuinely stale and the next instance's recovery
+    clears it (the documented interrupted-server case, unchanged).
     """
     import os
     import subprocess
@@ -110,6 +175,14 @@ def ensure_h5_openable(path, log=None) -> None:
     except OSError as exc:
         if "already open" not in str(exc):
             raise  # not the consistency flag — report the real error
+        if is_write_open_in_process(path):
+            raise OSError(
+                f"{exc} — the archive is currently open for write by THIS "
+                "server (a loader output or the workspace persistence "
+                "layer; handles live for the server lifetime). Save MTH5 "
+                "closes it, or restart the server; h5clear is refused "
+                "while a live writer holds the file"
+            ) from exc
         h5clear = shutil.which("h5clear")
         if h5clear is None:
             raise OSError(

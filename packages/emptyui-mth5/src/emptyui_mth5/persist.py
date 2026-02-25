@@ -52,6 +52,9 @@ def get_workspace_mth5(ctx):
     ensure_h5_openable(key)
     m = MTH5()
     m.open_mth5(key, mode="a", locking=False)
+    from ._compat import register_write_open
+
+    register_write_open(key)
     _workspace_handles[key] = m
     return m
 
@@ -65,6 +68,10 @@ def close_workspace_mth5(ctx) -> None:
             m.close_mth5()
         except Exception:  # noqa: BLE001 — close is best effort
             pass
+        finally:
+            from ._compat import release_write_open
+
+            release_write_open(key)
 
 
 def _ensure_survey(m, survey: str):
@@ -131,8 +138,11 @@ def persist_fc_level(
     ensure_h5_openable(str(path))
     own = m is None
     if own:
+        from ._compat import register_write_open, release_write_open
+
         m = MTH5()
         m.open_mth5(str(path), mode="a", locking=False)
+        register_write_open(path)
     try:
         survey_obj = _ensure_survey(m, survey)
         station_obj = _ensure_station(survey_obj, station)
@@ -150,6 +160,7 @@ def persist_fc_level(
     finally:
         if own:
             m.close_mth5()
+            release_write_open(path)
     return path
 
 

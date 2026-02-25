@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import threading
@@ -237,6 +238,32 @@ class Executor:
             seen.add(nid)
             stack.extend(parents[nid])
         return seen
+
+    @staticmethod
+    def _sweep_run_payloads(store, outputs_by_node, cache, logger) -> None:
+        """Failed/cancelled-run hygiene: close open MTH5 payloads the run
+        left in its store (§9.3 stale-flag hygiene — an interrupted run must
+        not leave a live writer holding a user archive).
+
+        Cached payloads are shared with later runs (§7.1) — only identities
+        NOT in any cache entry may be closed, so the sweep never poisons the
+        cache. Best effort: a failure here must never mask the run's error.
+        """
+        cached = {id(v) for v in (cache.cached_values() if cache else [])}
+        for handles in outputs_by_node.values():
+            for hid in handles.values():
+                try:
+                    value = store.get(hid).value
+                except KeyError:
+                    continue
+                close = getattr(value, "close_mth5", None)
+                if close is None or id(value) in cached:
+                    continue
+                try:
+                    close()
+                except Exception as exc:  # noqa: BLE001 — best effort
+                    logger.warning(
+                        "run cleanup: closing an open archive failed: %s", exc)
 
     @staticmethod
     def _value_signature(
@@ -552,51 +579,72 @@ class Executor:
 
             # cache hit: reuse the previous run's outputs and artifacts —
             # unless a recorded artifact file has disappeared, in which case
-            # the node is re-executed (never serve a half-restored result)
-            entry = cache.get(keys[node_id]) if cache is not None else None
+            # the node is re-executed (never serve a half-restored result).
+            # Non-cacheable nodes (save/export — the side effect IS writing
+            # the file) never hit: the file must be (re-)written this run.
+            entry = cache.get(keys[node_id]) if (
+                cache is not None and manifest.cacheable) else None
             if entry is not None and any(
                 not Path(rec["src"]).exists() for rec in entry.artifacts
             ):
                 entry = None
             if entry is not None:
-                handles: dict[str, str] = {}
-                for port in manifest.outputs:
-                    handle = store.put(port.type, entry.outputs.get(port.name))
-                    handles[port.name] = handle.id
-                    summary = _ts_summary(entry.outputs.get(port.name))
-                    if summary is None:
-                        summary = _fc_summary(entry.outputs.get(port.name))
-                    if summary is not None:
-                        emit({"event": "payload", "node": node_id,
-                              "port": port.name, "type": port.type,
-                              "summary": summary})
-                outputs_by_node[node_id] = handles
-                for rec in entry.artifacts:
-                    dest = self._artifact_dest(rec, node_id, workspace)
-                    if dest is not None:
-                        # a run can restore into the original run's workspace
-                        # (same-workspace partial re-runs) — skip then
-                        if not (dest.exists()
-                                and os.path.samefile(rec["src"], dest)):
-                            shutil.copyfile(rec["src"], dest)
-                        event_path = str(dest)
-                    else:
-                        # headless/CLI run without a workspace: skip the
-                        # file copy (no CWD side effect) — the artifact
-                        # event resolves to the cache entry's own file
-                        event_path = rec["src"]
-                    artifact_id = f"a{uuid4().hex[:8]}"
+                try:
+                    handles: dict[str, str] = {}
+                    for port in manifest.outputs:
+                        handle = store.put(port.type, entry.outputs.get(port.name))
+                        handles[port.name] = handle.id
+                        summary = (_ts_summary(entry.outputs.get(port.name))
+                                   or _fc_summary(entry.outputs.get(port.name)))
+                        if summary is not None:
+                            emit({"event": "payload", "node": node_id,
+                                  "port": port.name, "type": port.type,
+                                  "summary": summary})
+                    outputs_by_node[node_id] = handles
+                    for rec in entry.artifacts:
+                        dest = self._artifact_dest(rec, node_id, workspace)
+                        if dest is not None:
+                            # a run can restore into the original run's
+                            # workspace (same-workspace partial re-runs) —
+                            # skip then
+                            if not (dest.exists()
+                                    and os.path.samefile(rec["src"], dest)):
+                                shutil.copyfile(rec["src"], dest)
+                            event_path = str(dest)
+                        else:
+                            # headless/CLI run without a workspace: skip the
+                            # file copy (no CWD side effect) — the artifact
+                            # event resolves to the cache entry's own file
+                            event_path = rec["src"]
+                        artifact_id = f"a{uuid4().hex[:8]}"
+                        emit(
+                            {
+                                "event": "artifact",
+                                "node": node_id,
+                                "id": artifact_id,
+                                "kind": rec["kind"],
+                                "path": event_path,
+                                "handle": handles.get(rec["port"], ""),
+                                "url": f"/api/artifacts/{artifact_id}/preview",
+                            }
+                        )
+                except Exception as exc:
+                    # restore/summary failures must surface as the node's
+                    # error, never as a raw crash escaping the run (a closed
+                    # cached payload would otherwise leave the node
+                    # "running" forever — §7.1 failure contract)
                     emit(
                         {
-                            "event": "artifact",
+                            "event": "node_status",
                             "node": node_id,
-                            "id": artifact_id,
-                            "kind": rec["kind"],
-                            "path": event_path,
-                            "handle": handles.get(rec["port"], ""),
-                            "url": f"/api/artifacts/{artifact_id}/preview",
+                            "status": "error",
+                            "error": str(exc),
                         }
                     )
+                    emit({"event": "run_finished", "status": "failed"})
+                    self._sweep_run_payloads(store, outputs_by_node, cache,
+                                             logging.getLogger("emptyui"))
+                    raise ExecutionError(node_id, exc) from exc
                 emit(
                     {
                         "event": "node_status",
@@ -667,22 +715,41 @@ class Executor:
                     }
                 )
                 emit({"event": "run_finished", "status": "failed"})
+                self._sweep_run_payloads(store, outputs_by_node, cache,
+                                         logging.getLogger("emptyui"))
                 raise ExecutionError(node_id, exc) from exc
 
             handles: dict[str, str] = {}
             value_to_handle: dict[int, str] = {}
-            for port in manifest.outputs:
-                value = (result or {}).get(port.name)
-                handle = store.put(port.type, value)
-                handles[port.name] = handle.id
-                value_to_handle[id(value)] = handle.id
-                # time-series extent summary for the frontend time selector
-                # (§23.4) — lightweight, duck-typed, emitted per ts output
-                summary = _ts_summary(value) or _fc_summary(value)
-                if summary is not None:
-                    emit({"event": "payload", "node": node_id,
-                          "port": port.name, "type": port.type,
-                          "summary": summary})
+            try:
+                for port in manifest.outputs:
+                    value = (result or {}).get(port.name)
+                    handle = store.put(port.type, value)
+                    handles[port.name] = handle.id
+                    value_to_handle[id(value)] = handle.id
+                    # time-series extent summary for the frontend time selector
+                    # (§23.4) — lightweight, duck-typed, emitted per ts output
+                    summary = _ts_summary(value) or _fc_summary(value)
+                    if summary is not None:
+                        emit({"event": "payload", "node": node_id,
+                              "port": port.name, "type": port.type,
+                              "summary": summary})
+            except Exception as exc:
+                # output materialization/summary failures surface as the
+                # node's error, never as a raw crash escaping the run (the
+                # node_status "running" would otherwise stick forever)
+                emit(
+                    {
+                        "event": "node_status",
+                        "node": node_id,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+                emit({"event": "run_finished", "status": "failed"})
+                self._sweep_run_payloads(store, outputs_by_node, cache,
+                                         logging.getLogger("emptyui"))
+                raise ExecutionError(node_id, exc) from exc
             outputs_by_node[node_id] = handles
 
             for artifact in ctx.published:
@@ -701,8 +768,9 @@ class Executor:
             emit({"event": "node_status", "node": node_id, "status": "done"})
 
             # success ⇒ cacheable: record outputs + artifact summaries so a
-            # later run with the same structural signature can skip the node
-            if cache is not None:
+            # later run with the same structural signature can skip the node.
+            # Non-cacheable nodes (save/export) re-execute every run.
+            if cache is not None and manifest.cacheable:
                 cache.put(
                     keys[node_id],
                     CacheEntry(
@@ -714,11 +782,26 @@ class Executor:
                     ),
                 )
 
+            # input-invalidating nodes (e.g. Save MTH5 closing the open
+            # archive in place, §9.3): the direct-input producers' cache
+            # entries now hold a poisoned payload (a closed archive handle)
+            # — evict them so later structurally-identical runs re-execute
+            # the producers instead of serving the closed handle (§7.1
+            # immutability contract). Derived payloads are unaffected (their
+            # data was materialized eagerly), so only the direct producers
+            # need eviction.
+            if manifest.invalidates_inputs and cache is not None:
+                for edge in workflow.edges:
+                    if edge.target == node_id:
+                        cache.drop(keys[edge.source])
+
             # Cancellation is polled between nodes — including after the last
             # one, so cancelling a run that is mid-way through its final node
             # still reports "cancelled" instead of "completed".
             if cancel_event.is_set():
                 emit({"event": "run_finished", "status": "cancelled"})
+                self._sweep_run_payloads(store, outputs_by_node, cache,
+                                         logging.getLogger("emptyui"))
                 summary = {"status": "cancelled",
                            "outputs": outputs_by_node}
                 if include_store:

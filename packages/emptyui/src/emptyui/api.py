@@ -214,6 +214,19 @@ class Node:
     #: "<…>", "url": "https://…", "license": "CC-BY-4.0"}``.
     models: ClassVar[list[dict[str, str]]] = []
 
+    #: Whether structural cache hits may skip this node's execution (DESIGN
+    #: §7.1). Save/export nodes are ``False``: their side effect IS writing
+    #: the file — a cache hit that skips it reports "done (cached)" while the
+    #: file is never (re-)written (and a deleted destination stays gone).
+    #: Cheap to re-run: the inputs come from the cache either way.
+    cacheable: ClassVar[bool] = True
+
+    #: The node closes/mutates its inputs (e.g. Save MTH5 closing the open
+    #: archive in place). After it executes, the executor evicts the cache
+    #: entries of the direct-input producers — the poisoned payload must not
+    #: be served to later structurally-identical runs (§7.1 immutability).
+    invalidates_inputs: ClassVar[bool] = False
+
     #: subclasses override; signature: execute(ctx, **inputs_and_params)
     execute: Callable[..., dict[str, Any]]
 
@@ -233,6 +246,8 @@ class Node:
             "params": [p.to_dict() for p in self.params],
             "deps": list(self.deps),
             "inherit": {k: dict(v) for k, v in self.inherit.items()},
+            "cacheable": self.cacheable,
+            "invalidates_inputs": self.invalidates_inputs,
             # models declared but not bundled (plugin guide §"Models")
             "models": [dict(m) for m in self.models],
         }

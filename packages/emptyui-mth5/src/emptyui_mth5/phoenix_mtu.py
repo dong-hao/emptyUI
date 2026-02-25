@@ -793,6 +793,9 @@ class LoadPhoenixMtu(Node):
 
         archive = MTH5()
         archive.open_mth5(res["path"], mode="a", locking=False)
+        from ._compat import register_write_open
+
+        register_write_open(res["path"])
         ctx.progress(
             1.0,
             f"loaded MTU-5A -> {Path(res['path']).name}: "

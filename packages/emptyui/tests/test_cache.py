@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import ClassVar
 
+import pytest
+
 from emptyui.cache import NodeCache
 from emptyui.executor import Executor
 from emptyui.registry import Registry
@@ -458,3 +460,261 @@ def test_relocated_data_root_hits_cache(tmp_path: Path):
     (root_b / "site" / "data.txt").write_text("changed-content")
     ex.run(wf(), emit=lambda e: None, cache=cache, data_root=root_b)
     assert ReadFile.calls == 2  # external modification still invalidates
+
+
+def test_non_cacheable_node_reexecutes_every_run(tmp_path: Path):
+    """§7.1: save/export nodes' side effect IS writing the file — a
+    structural cache hit that skips them reports "done (cached)" with no
+    file written (and an externally deleted destination stays gone). They
+    re-execute every run; the inputs come from the cache either way."""
+    from emptyui import Input, Node, Output
+
+    class Saver(Node):
+        type = "test.saver"
+        inputs = (Input("data", "ts.run"),)
+        outputs = ()
+        cacheable = False
+        calls = 0
+
+        def execute(self, ctx, data):
+            Saver.calls += 1
+            (tmp_path / "out.txt").write_text(str(data))
+
+    class Source(Node):
+        type = "test.src"
+        outputs = (Output("data", "ts.run"),)
+        calls = 0
+
+        def execute(self, ctx):
+            Source.calls += 1
+            return {"data": [1.0]}
+
+    reg = Registry()
+    reg.add(Source)
+    reg.add(Saver)
+
+    def wf():
+        return Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.src"),
+                   WorkflowNode(id="n2", type="test.saver")],
+            edges=[Edge(id="e1", source="n1", source_port="data",
+                        target="n2", target_port="data")],
+        )
+
+    cache = NodeCache()
+    ex = Executor(reg)
+    ex.run(wf(), emit=lambda e: None, cache=cache)
+    ex.run(wf(), emit=lambda e: None, cache=cache)
+    assert Saver.calls == 2  # never cached — always re-written
+    # the source upstream is still cached (one execution)
+    assert reg.get("test.src").calls == 1
+    # a cached rerun event surface: statuses must not claim "cached" for n2
+    events: list[dict] = []
+    ex.run(wf(), emit=events.append, cache=cache)
+    statuses = {e["node"]: e for e in events if e["event"] == "node_status"}
+    assert "cached" not in statuses["n2"]
+
+
+def test_invalidates_inputs_evicts_upstream_entry():
+    """§7.1 immutability: a node that closes/mutates its input (Save MTH5's
+    close-in-place) must not leave the producer's cache entry serving the
+    poisoned payload to later structurally-identical runs — the executor
+    evicts the direct-input producers' entries after it executes."""
+    from emptyui import Input, Node, Output
+
+    class Archive:
+        closed = False
+
+        def close_mth5(self):
+            self.closed = True
+
+    class Closer(Node):
+        type = "test.closer"
+        inputs = (Input("mth5", "mth5"),)
+        outputs = ()
+        invalidates_inputs = True
+
+        def execute(self, ctx, mth5):
+            mth5.close_mth5()
+            return {}
+
+    class Opener(Node):
+        type = "test.opener"
+        outputs = (Output("mth5", "mth5"),)
+        calls = 0
+
+        def execute(self, ctx):
+            Opener.calls += 1
+            return {"mth5": Archive()}
+
+    reg = Registry()
+    reg.add(Opener)
+    reg.add(Closer)
+
+    def wf():
+        return Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.opener"),
+                   WorkflowNode(id="n2", type="test.closer")],
+            edges=[Edge(id="e1", source="n1", source_port="mth5",
+                        target="n2", target_port="mth5")],
+        )
+
+    cache = NodeCache()
+    ex = Executor(reg)
+    s1 = ex.run(wf(), emit=lambda e: None, cache=cache, include_store=True)
+    arch1 = s1["store"].get(s1["outputs"]["n1"]["mth5"]).value
+    assert arch1.closed  # the closer ran and closed it (same instance)
+
+    # run 2: the opener's entry was evicted by the closer ⇒ re-executed, and
+    # the served payload is a FRESH archive (not the closed instance)
+    events: list[dict] = []
+    s2 = ex.run(wf(), emit=events.append, cache=cache, include_store=True)
+    assert reg.get("test.opener").calls == 2
+    statuses = {e["node"]: e for e in events if e["event"] == "node_status"}
+    assert "cached" not in statuses["n1"]
+    arch2 = s2["store"].get(s2["outputs"]["n1"]["mth5"]).value
+    assert arch2 is not arch1 and not arch2.closed
+
+
+def _fake_run_summary():
+    class _Row:
+        def get(self, k, default=""):
+            return {"survey": "sv", "station": "st", "run": "r1",
+                    "start": "2017-10-16T17:10:00", "end": "2017-10-16T18:00:00",
+                    "sample_rate": 1.0}.get(k, default)
+
+        def __getitem__(self, k):
+            return self.get(k)
+
+    class _Summary:
+        def __len__(self):
+            return 1
+
+        def iterrows(self):
+            yield None, _Row()
+
+    return _Summary()
+
+
+def test_restore_failure_surfaces_as_node_error():
+    """A poisoned cached payload (e.g. a closed archive behind the cache —
+    the §7.1 immutability violation) must fail the run through the node's
+    error event, never as a raw crash escaping the executor (which left the
+    node "running" forever in the UI)."""
+    from emptyui import Input, Node, Output
+
+    class Poison:
+        closed = False
+
+        @property
+        def run_summary(self):
+            if self.closed:
+                raise KeyError("Unable to synchronously open object")
+            return _fake_run_summary()
+
+    class Source(Node):
+        type = "test.poison_src"
+        outputs = (Output("mth5", "mth5"),)
+
+        def execute(self, ctx):
+            return {"mth5": Poison()}
+
+    class Sink(Node):
+        type = "test.poison_sink"
+        inputs = (Input("mth5", "mth5"),)
+        outputs = ()
+
+        def execute(self, ctx, mth5):
+            return {}
+
+    reg = Registry()
+    reg.add(Source)
+    reg.add(Sink)
+
+    def wf():
+        return Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.poison_src"),
+                   WorkflowNode(id="n2", type="test.poison_sink")],
+            edges=[Edge(id="e1", source="n1", source_port="mth5",
+                        target="n2", target_port="mth5")],
+        )
+
+    cache = NodeCache()
+    ex = Executor(reg)
+    ex.run(wf(), emit=lambda e: None, cache=cache)
+    # simulate the original bug: the shared payload is closed but the cache
+    # entry still serves it (no invalidates_inputs declaration)
+    ex.registry.get("test.poison_src").execute.__func__  # noqa: B018
+    src_payload = None
+    for entry in cache._entries.values():
+        if entry.outputs.get("mth5") is not None:
+            src_payload = entry.outputs["mth5"]
+    src_payload.closed = True
+
+    import pytest as _pytest
+
+    from emptyui.executor import ExecutionError
+
+    events: list[dict] = []
+    with _pytest.raises(ExecutionError):
+        ex.run(wf(), emit=events.append, cache=cache)
+    statuses = [e for e in events if e["event"] == "node_status"]
+    assert any(e.get("status") == "error" for e in statuses)
+    assert any(e.get("event") == "run_finished" and e.get("status") == "failed"
+               for e in events)
+
+
+def test_failed_run_sweep_closes_uncached_payloads():
+    """Failed-run hygiene (§9.3): a failed run closes open MTH5 payloads left
+    in its store — except cached ones (shared with later runs; the sweep
+    never poisons the cache)."""
+    from emptyui import Input, Node, Output
+    from emptyui.executor import ExecutionError
+
+    class Archive:
+        closed = False
+
+        def close_mth5(self):
+            self.closed = True
+
+    class Opener(Node):
+        type = "test.sweep_opener"
+        outputs = (Output("mth5", "mth5"),)
+
+        def execute(self, ctx):
+            return {"mth5": Archive()}
+
+    class Failing(Node):
+        type = "test.sweep_failing"
+        inputs = (Input("mth5", "mth5"),)
+        outputs = ()
+
+        def execute(self, ctx, mth5):
+            raise ValueError("boom")
+
+    reg = Registry()
+    reg.add(Opener)
+    reg.add(Failing)
+
+    def wf():
+        return Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.sweep_opener"),
+                   WorkflowNode(id="n2", type="test.sweep_failing")],
+            edges=[Edge(id="e1", source="n1", source_port="mth5",
+                        target="n2", target_port="mth5")],
+        )
+
+    ex = Executor(reg)
+    events: list[dict] = []
+    # no cache: nothing is shared — the sweep closes the payload
+    with pytest.raises(ExecutionError):
+        ex.run(wf(), emit=events.append, cache=None)
+    assert any(e.get("event") == "run_finished" and e.get("status") == "failed"
+               for e in events)
+
+    # with a cache: the opener's payload is cached — NOT closed
+    cache = NodeCache()
+    ex2 = Executor(reg)
+    with pytest.raises(ExecutionError):
+        ex2.run(wf(), emit=lambda e: None, cache=cache)
+    assert not cache.cached_values()[0].closed

@@ -76,6 +76,26 @@ class NodeCache:
     def max_entries(self) -> int:
         return self._max
 
+    def drop(self, *keys: str) -> int:
+        """Evict specific entries by key (§7.1 input invalidation: a node
+        that closed/mutated its inputs poisons the producers' entries).
+        Returns how many entries were removed."""
+        n = 0
+        with self._lock:
+            for key in keys:
+                if self._entries.pop(key, None) is not None:
+                    n += 1
+        return n
+
+    def cached_values(self) -> list:
+        """All values currently held by cache entries (identity sweep for
+        the failed-run handle cleanup — never close a cached payload)."""
+        with self._lock:
+            return [
+                v for entry in self._entries.values()
+                for v in (entry.outputs or {}).values()
+            ]
+
     def clear(self) -> int:
         """Drop all entries; returns how many were evicted."""
         with self._lock:

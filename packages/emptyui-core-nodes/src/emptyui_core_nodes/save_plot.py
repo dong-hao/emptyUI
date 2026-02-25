@@ -29,7 +29,7 @@ class SavePlotNode(Node):
     params = (
         Param("name_prefix", "string", label="Name prefix", default="plot"),
         Param("output_dir", "directory", label="Output directory",
-              default="examples/output"),
+              default="examples/output", path_kind="out"),
         Param("file_format", "select", label="Format",
               options=SUPPORTED_FORMATS, default="png"),
     )

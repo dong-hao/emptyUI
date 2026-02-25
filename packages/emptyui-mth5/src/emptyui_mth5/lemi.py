@@ -144,6 +144,9 @@ class LoadLemi(Node):
 
         archive = MTH5()
         archive.open_mth5(str(target), mode="a", locking=False)
+        from ._compat import register_write_open
+
+        register_write_open(target)
         ctx.progress(1.0, f"loaded LEMI -> {target.name}")
         return {"mth5": archive}
 
