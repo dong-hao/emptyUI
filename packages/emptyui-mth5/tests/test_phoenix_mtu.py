@@ -654,6 +654,28 @@ def test_slot_schedule_hsmp_mismatch_warns(tmp_path):
     assert any("HSMP says 5 s" in w for w in res["warnings"])
 
 
+def test_slot_schedule_survives_missed_interior_slot(tmp_path):
+    """A receiver that missed an interior slot must not corrupt the slot
+    grid: the slot period is the SMALLEST observed spacing (a median over
+    [600, 1200] s is 900 s — neither the period nor the grid), and the
+    0-based indices anchored at the first observed start still recover the
+    physical slot positions (slot 2 is simply absent)."""
+    _write_tbl(tmp_path / "SYNTH01.TBL")  # defaults: HSMP=600, L3NS=1
+    _write_ts(tmp_path / "SYNTH01.TS3", 2400,
+              [(datetime(2009, 12, 16, 7, 55, 0), 1),
+               (datetime(2009, 12, 16, 8, 5, 0), 1),
+               (datetime(2009, 12, 16, 8, 25, 0), 1)],  # 08:15 missed
+              seed=6)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    df = res["slot_schedule"]
+    t3 = df[df["sample_rate"] == 2400.0]
+    assert list(t3["slot_index"]) == [0.0, 1.0, 3.0]
+    assert list(t3["slot_start"]) == [
+        "2009-12-16T07:55:00+00:00", "2009-12-16T08:05:00+00:00",
+        "2009-12-16T08:25:00+00:00"]
+    # no HSMP mismatch warning (the base rhythm still matches HSMP=600)
+
+
 # --- macro flow: Load -> Extract Run -> Align -> Compute FC --------------
 
 def _two_station_corpora(base: Path) -> tuple[Path, Path]:
