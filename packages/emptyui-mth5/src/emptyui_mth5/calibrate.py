@@ -16,16 +16,20 @@ series edges):
 from __future__ import annotations
 
 import logging
-
-from emptyui_core_nodes.types import is_run_collection
 from typing import Any
 
 import numpy as np
 from emptyui import Input, Node, Output, Param
+from emptyui_core_nodes.types import (
+    _iso_start,
+    channel_calibration,
+    collection_member_ds,
+    is_run_collection,
+)
 
 from .calibration import _default_unit, attach_filters
 from .nomenclature import is_electric_name, is_magnetic_name
-from .runs import _payload
+from .runs import _CachedRunTS, _payload
 
 _log = logging.getLogger("emptyui")
 
@@ -40,6 +44,27 @@ class _MappedCollection:
         self.extents = list(extents)
 
 
+def _member_runts(member, rid: str):
+    """Wrap a collection member as a real RunTS WITHOUT losing its response
+    chain or true start (§24.12): the duck payload's dataset carries the
+    per-channel applied-filter refs and units, and the member's ``.filters``
+    registry resolves them — the same wiring Extract Run's ``_wrap_runts``
+    produces. The old ChannelTS rebuild (``_to_runts``) dropped both: empty
+    chains made ``RunTS.calibrate`` a silent identity, and probing
+    ``start_datetime`` (absent on the duck payload, which carries ``.start``)
+    re-anchored the member at the mt_timeseries default 1980 epoch while the
+    collection extents claimed the real UTC window.
+    """
+
+    ds, sample_rate, _start, filters = collection_member_ds(member, rid)
+    runts = _CachedRunTS(
+        ds.copy(),
+        run_metadata={"id": rid, "sample_rate": float(sample_rate)},
+    )
+    runts.filters = dict(filters or {})
+    return runts
+
+
 def _to_runts(source):
     """Wrap a core TimeSeries as an mt_timeseries RunTS so the response
     removal can be delegated to ``RunTS.calibrate()`` for any ts.run payload.
@@ -48,13 +73,17 @@ def _to_runts(source):
     absolute time) cannot be represented in a RunTS — the wrapped run starts
     at the mt_timeseries default epoch, i.e. "no absolute time" downstream.
     """
-    from emptyui_core_nodes.types import _iso_start
     from mt_timeseries import ChannelTS
     from mth5.timeseries import RunTS
 
     channels, sample_rate = _payload(source)
+    # the payload's true start: ISO strings carry ``start_datetime``, duck
+    # payloads (Extract Run) carry ``.start`` (datetime64) — probing only
+    # ``start_datetime`` silently re-anchored the wrapped run at the
+    # mt_timeseries default 1980 epoch (§24.12)
     start_dt = getattr(source, "start_datetime", "") or ""
-    start_iso = _iso_start(start_dt) if start_dt else ""
+    start_iso = (start_dt if start_dt
+                 else _iso_start(getattr(source, "start", None)))
     pieces = []
     for name, arr in channels.items():
         ctype = ("electric" if is_electric_name(name)
@@ -142,9 +171,12 @@ class Calibrate(Node):
     def _map_collection(self, ctx, collection, calibration,
                         include_decimation: bool, include_delay: bool):
         """Element-wise calibration (backlog #21 Tier 2): each member is
-        calibrated through ITS OWN response chain (the duck payloads carry
-        the resolved registry — §24.12); the collection shape is preserved
-        (extents rows unchanged — identity is not the recipe's business)."""
+        calibrated through ITS OWN response chain — the duck payloads carry
+        the per-channel applied-filter refs + the resolved registry, and the
+        dataset-passthrough wrapper keeps both (§24.12). The collection
+        shape is preserved (extents rows unchanged — identity is not the
+        recipe's business). Explicit-filter collection mapping is M4
+        backlog."""
         kwargs = {"include_decimation": include_decimation,
                   "include_delay": include_delay}
         members = []
@@ -153,11 +185,15 @@ class Calibrate(Node):
                    if i < len(collection.extents) else i)
             # validate the member's shape loudly (a degenerate collection
             # must not surface as a raw TypeError from _payload)
-            from emptyui_core_nodes.types import collection_member_ds
-
             collection_member_ds(p, rid)
             runts = (p if hasattr(p, "calibrate") and not isinstance(p, dict)
-                     else _to_runts(p))
+                     else _member_runts(p, rid))
+            if not channel_calibration(runts):
+                _log.warning(
+                    "collection member '%s' carries no instrument response "
+                    "— passing through uncalibrated (connect the run's own "
+                    "archived responses or a 'Load Calibration' node)",
+                    rid)
             members.append(runts.calibrate(**kwargs))
         ctx.progress(1.0, f"calibrated {len(members)} member(s) via their own responses")
         return {"data": _MappedCollection(members, collection.extents)}

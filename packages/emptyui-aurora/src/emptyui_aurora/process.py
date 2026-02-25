@@ -967,14 +967,23 @@ class BuildFC(Node):
                     ([0.0], np.cumsum(lens)[:-1])) / sample_rate
                 for level, fc in levels.items():
                     t = np.asarray(fc["time"].values)
+                    # the fc time coordinate is the scipy window CENTER
+                    # (t = step·k + nperseg/2/fs); attribution must follow
+                    # the window START (§10.4: a straddling window follows
+                    # the session its start falls in) — shift the center
+                    # back by half a window of THIS level
+                    half_win = (float(fc.attrs.get("num_samples_window", 0))
+                                / 2.0
+                                / float(fc.attrs.get("sample_rate", 0)
+                                        or sample_rate))
                     if np.issubdtype(t.dtype, np.datetime64):
                         t0 = members[0][3]
                         if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
                             t0 = t0.tz_convert("UTC").tz_localize(None)
                         t0 = np.asarray(t0, dtype="datetime64[ns]")
-                        off = ((t - t0) / np.timedelta64(1, "s")).astype(float)
+                        off = ((t - t0) / np.timedelta64(1, "s")).astype(float) - half_win
                     else:
-                        off = t.astype(float)
+                        off = t.astype(float) - half_win
                     k = np.minimum(
                         np.searchsorted(bnds[1:], off, side="right"),
                         len(span) - 1)
@@ -1303,18 +1312,24 @@ class SelectRuns(Node):
                     r["down"], r["threshold"], r["prior"])
         # conservative guard: a window from a NEIGHBOR session that overlaps
         # a rejected one picked up its samples through the decimation
-        # cascade — drop it too (one window duration wide).
-        dur = None
-        try:
-            dur = (float(sample.attrs["num_samples_window"])
-                   / float(sample.attrs["sample_rate"]))
-        except (KeyError, TypeError, ZeroDivisionError):
-            dur = None
+        # cascade — drop it too. Start-time attribution (§10.4) already puts
+        # right straddlers in the rejected session; only left neighbors need
+        # the extra cut: windows whose START lies within one window duration
+        # before the rejected session's first window start. The duration is
+        # per level — deep levels have longer windows and pick up
+        # correspondingly more rejected-session samples (a single shallow
+        # level's duration under-covers the cascade).
         n_extra = 0
         out = {}
         for lv, ds in levels.items():
             runs_arr = np.asarray(ds["run_id"].values)
             mask = np.isin(runs_arr, list(kept))
+            dur = None
+            try:
+                dur = (float(ds.attrs["num_samples_window"])
+                       / float(ds.attrs["sample_rate"]))
+            except (KeyError, TypeError, ZeroDivisionError):
+                dur = None
             if dropped_ids and dur:
                 times = np.asarray(ds["time"].values)
                 dt = np.issubdtype(times.dtype, np.datetime64)

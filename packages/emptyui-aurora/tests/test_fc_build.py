@@ -341,13 +341,52 @@ def test_build_fc_select_runs_drops_overlap_neighbors(tmp_path):
     out = res["fc"][0]
     runs = np.asarray(out["run_id"].values)
     times = np.asarray(out["time"].values).astype("datetime64[ns]")
-    # run 0003 starts at t=64 s; its windows start >= 64. Run 0002 spans
-    # [32, 64): windows start at 32/40/48/56 — the one at 56 overlaps 0003
+    # the fc time coordinate is the window CENTER; attribution follows the
+    # window START (§10.4). Runs are 32 s: run 0003 spans [64, 96) — windows
+    # starting there have centers 72/80/.... Run 0002 spans [32, 64): its
+    # windows' starts are 32/40/48/56 (centers 40/48/56/64) — the one
+    # starting at 56 overlaps 0003 and the conservative guard drops it.
     t0 = np.datetime64("2024-01-01T00:00:00", "ns")
     rel = (times - t0) / np.timedelta64(1, "s")
     m2 = runs == "sr2400_0002"
-    assert rel[m2].max() <= 48.0
-    assert m2.sum() == 3  # 32/40/48 survive; 56 dropped
+    assert rel[m2].max() <= 56.0
+    assert m2.sum() == 3  # starts 32/40/48 survive; start 56 dropped
+    # no surviving window sits between run 0002's last kept center (56) and
+    # run 0003's first center (72) — the start-56 window was guard-dropped,
+    # the start-64 window is 0002's (center 64, dropped by the guard)
+    assert ((rel > 56.0) & (rel < 72.0)).sum() == 0
+    archive.close_mth5()
+
+
+def test_build_fc_select_runs_start_attribution(tmp_path):
+    """Attribution follows the window START (§10.4): a window whose START
+    falls inside a rejected session is dropped even when its CENTER lies in
+    the kept session — the center-based attribution leaked one window per
+    session boundary into the kept session (the overlap guard only cuts
+    left neighbors)."""
+    from emptyui_aurora.process import SelectRuns
+
+    # 36-s runs put the boundary OFF the 8-s window grid: the window
+    # starting at 32 s (inside the rejected run 0001 [0, 36)) is centered
+    # at 40 s (inside kept run 0002 [36, 72))
+    archive = _multi_run_archive(tmp_path, n=2, contiguous=True,
+                                 noisy_idx=0, run_samples=36)
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = BuildFC().execute(
+        ctx, archive, input_channels="hx,hy", output_channels="ex,ey",
+        decimation_levels=0, window_samples=16, overlap=0.5,
+        window_type="boxcar", regroup_contiguous=True)["fc"]
+    res = SelectRuns().execute(ctx, fc, deviation_max=2.0,
+                               dead_max=1e9, use_prior=False)
+    out = res["fc"][0]
+    runs = np.asarray(out["run_id"].values)
+    times = np.asarray(out["time"].values).astype("datetime64[ns]")
+    t0 = np.datetime64("2024-01-01T00:00:00", "ns")
+    rel = (times - t0) / np.timedelta64(1, "s")
+    m2 = runs == "sr2400_0002"
+    # run 0002's surviving windows start at 40/48/... (centers 48/56/...)
+    # — the center-40 window (start 32, inside the rejected run) is gone
+    assert rel[m2].min() >= 48.0
     archive.close_mth5()
 
 

@@ -83,6 +83,61 @@ def test_calibrate_mth5_runts_path(test12rr_path: Path, tmp_path: Path):
     assert set(out.channels) == set(runts.channels)
 
 
+def test_calibrate_collection_applies_own_responses(tmp_path: Path):
+    """Collection members are calibrated through their OWN response chain and
+    keep their true start (H2/§24.12): the old ChannelTS rebuild dropped the
+    per-channel applied-filter refs + registry — calibration was a silent
+    identity — and probed ``start_datetime`` (absent on the duck payload),
+    re-anchoring members at the mt_timeseries default 1980 epoch while the
+    collection extents claimed the real UTC window.
+
+    Tolerance note: mt_timeseries' DC-bin convention (see the explicit-filter
+    test above); 3% covers it.
+    """
+    import warnings
+    from types import SimpleNamespace
+
+    import xarray as xr
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    warnings.filterwarnings("ignore")
+
+    sr = 8.0
+    n = 1024
+    t = np.arange(n) / sr
+    x = 3.0 * np.sin(2 * np.pi * 1.0 * t)
+    start = np.datetime64("2017-10-16T17:10:00", "ns")
+    time_axis = start + (np.arange(n) * int(1e9 / 8)).astype("timedelta64[ns]")
+    fap = CoefficientFilter(gain=2.0, units_in="mV/km", units_out="mV/km")
+    fap.name = "resp_ex"
+    ds = xr.Dataset({
+        "ex": xr.DataArray(
+            x, dims=("time",), coords={"time": time_axis},
+            attrs={"type": "electric", "units": "mV/km", "sample_rate": sr,
+                   "filters": [{"applied_filter": {"name": "resp_ex",
+                                                   "applied": True}}]}),
+    })
+    member = SimpleNamespace(dataset=ds, sample_rate=sr, start=start,
+                             filters={"resp_ex": fap})
+    from emptyui_mth5.runs import RunCollection
+
+    coll = RunCollection(runs=[member], extents=[{
+        "survey": "svy", "station": "st", "run": "r1",
+        "start": "2017-10-16T17:10:00+00:00",
+        "end": "2017-10-16T17:12:08+00:00", "sample_rate": 8.0}])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = Calibrate().execute(ctx, coll)["data"]
+    from emptyui_core_nodes.types import is_run_collection
+
+    assert is_run_collection(out)
+    got = out.runs[0].ex.ts
+    np.testing.assert_allclose(got, x / 2.0, rtol=0.03, atol=0.03)
+    # the true start survived (no 1980 re-anchor)
+    assert str(out.runs[0].start).startswith("2017-10-16T17:10:00")
+    # extents are the source's (identity is preserved)
+    assert out.extents == coll.extents
+
+
 def test_calibrate_stamps_nomenclature_default_units(tmp_path: Path):
     """Integration for the _default_unit fix: a core TimeSeries with
     standard names gets hx → nanoTesla (so ComputeFC's nT→A/m conversion
