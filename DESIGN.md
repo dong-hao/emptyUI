@@ -333,7 +333,11 @@ to interpret names:
   sensible defaults.
 - **Exporters**: EDI/XML/AVG standardize on write; the ZMM writer in mt_metadata
   1.0.10 assumes standard names, so `ExportTF` relabels to a standard-coords
-  copy for `zmm` output.
+  copy for `zmm` output. All supported file formats store the impedance in the
+  SEG/EMTF convention ([mV/km]/[nT]) while internal TFs are SI (E in V/m,
+  H in A/m) — mt_metadata's readers/writers copy impedance values verbatim, so
+  `Import TF`/`Export TF` convert the impedance block (and its error; the
+  tipper is dimensionless) at the format boundary.
 
 ### Merging multiple runs into one TF estimate
 
@@ -673,11 +677,27 @@ One file = one reproducible pipeline.
   and misses the cache (recompute, the safe direction); only mtime-preserving
   moves stay hits), so externally modified input files invalidate. On a cache
   hit the executor re-registers outputs and
-  **copies artifact files into the new run's workspace** (renamed for the
-  restoring node); vanished artifact files re-execute the node. Cached nodes
+  **copies artifact files into the new run's workspace**; vanished artifact
+  files re-execute the node. Cached nodes
   emit `node_status` with `"cached": true`. **Immutability contract**
   (ComfyUI model): nodes must be functional — never mutate inputs or previously
   returned outputs. `DELETE /api/cache` drops all entries.
+  Two node-declared opt-outs keep side-effecting/terminal nodes correct:
+  `cacheable = False` (Save MTH5, Export TF — the side effect IS writing the
+  file; a hit would report "done (cached)" with nothing written; the node
+  re-executes every run, inputs still cached) and `invalidates_inputs = True`
+  (Save MTH5's close-in-place closes the shared input archive — the executor
+  evicts the direct-input producers' entries so later runs re-open the
+  archive instead of serving the closed handle). Save As writes through a
+  temp file + `os.replace` and the same-file check is normalization-proof.
+- **Failed-run hygiene**: a failed/cancelled run closes the open MTH5
+  payloads it left in its store — except payloads still served by the cache
+  (never poison the cache); best effort, never masks the run's error. This
+  keeps the §9.3 stale-flag recovery truthful: the in-process write-open
+  registry (loader outputs, workspace persistence handles) dies with the
+  process, so after a crash the flag is genuinely stale and auto-clearable;
+  while a live writer holds an archive, `ensure_h5_openable` refuses
+  `h5clear` and names the remedy.
 - **Partial runs**: `POST /api/runs` accepts `targets: [node_id, …]` —
   "execute to here" runs the targets plus their ancestral closure; other nodes
   emit no events. Unknown targets rejected with 422. The web UI exposes
