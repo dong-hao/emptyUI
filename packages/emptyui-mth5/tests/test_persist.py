@@ -171,3 +171,31 @@ def test_runts_context_agreeing_params_pass_through():
         "workspace", "local", "sr1_0001")
     assert runts_context(_WithRunMd("sr1_0001")) == (
         "workspace", "local", "sr1_0001")
+
+
+def test_runts_context_ignores_default_ids(caplog):
+    """mt_metadata's DEFAULT id ('0') means 'unset' — payload truth does not
+    include unset defaults: a payload built via RunTS(array_list=...)
+    (default ids) must not override real user params (the fc/TF identity
+    used to become survey='0', station='0', run='0')."""
+    import logging
+    import warnings
+
+    import numpy as np
+    from mt_timeseries import ChannelTS, RunTS
+
+    warnings.filterwarnings("ignore")
+    n = 64
+    chs = []
+    for comp in ("hx", "hy"):
+        c = ChannelTS("magnetic", data=np.zeros(n),
+                      start="2024-01-01T00:00:00", sample_rate=1.0)
+        c.component = comp
+        chs.append(c)
+    runts = RunTS(array_list=chs)  # default metadata: ids == "0"
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        survey, station, run = runts_context(runts, survey="4P",
+                                             station="SDX", run="r1")
+    assert (survey, station, run) == ("4P", "SDX", "r1")
+    # and no spurious disagreement warnings
+    assert not any("disagrees" in r.message for r in caplog.records)

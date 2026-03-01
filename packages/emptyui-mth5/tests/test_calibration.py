@@ -145,3 +145,75 @@ def test_default_unit_by_nomenclature():
     # auxiliary/unknown channels have no meaningful default — never a guess
     assert _default_unit("temperature") == ""
     assert _default_unit("") == ""
+
+
+def test_attach_filters_preserves_existing_chains():
+    """attach_filters stamps unity only on channels WITHOUT a response:
+    a channel carrying a real archived chain (e.g. a fast-path Extract
+    payload's hx referencing the ASC box+coil chain) must keep it — the
+    old unconditional loop replaced it with cal_<ch>_unity, silently
+    dropping the instrument response from all downstream FC/TF math."""
+    import warnings
+    from types import SimpleNamespace
+
+    import numpy as np
+    import xarray as xr
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    warnings.filterwarnings("ignore")
+
+    archived = CoefficientFilter(gain=3.0, units_in="nanoTesla",
+                                 units_out="nanoTesla")
+    archived.name = "archived_hx"
+    t = np.arange(64) / 8.0
+    run = SimpleNamespace(
+        dataset=xr.Dataset({
+            "ex": xr.DataArray(t, dims=("time",), attrs={"units": "mV/km"}),
+            "hx": xr.DataArray(t, dims=("time",),
+                               attrs={"units": "nanoTesla",
+                                      "filters": [{"applied_filter": {
+                                          "name": "archived_hx",
+                                          "applied": True}}]}),
+        }),
+        filters={"archived_hx": archived},
+    )
+    out = attach_filters(run, {"ex": CoefficientFilter(gain=1.0)},
+                         strict=False)
+    # ex got the explicit filter; hx kept its archived chain
+    refs = out.dataset["hx"].attrs["filters"]
+    assert refs[0]["applied_filter"]["name"] == "archived_hx"
+    assert out.filters["archived_hx"] is archived
+
+
+def test_attach_filters_invalidates_cached_channels():
+    """attach_filters re-stamps the dataset attrs in place — a _CachedRunTS
+    whose channel cache already resolved the response chain at first access
+    must drop the cache, else a later-attached filter is silently ignored
+    (the executor serves the same instance across runs/param edits)."""
+    import warnings
+
+    import numpy as np
+    import xarray as xr
+    from emptyui_mth5.runs import _CachedRunTS
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    warnings.filterwarnings("ignore")
+
+    t = np.arange(1024) / 8.0
+    x = np.sin(2 * np.pi * 1.0 * t)
+    t_axis = (np.datetime64("2024-01-01T00:00:00", "ns")
+              + (np.arange(1024) * 125_000_000).astype("timedelta64[ns]"))
+    ds = xr.Dataset({"hx": xr.DataArray(
+        x, dims=("time",), coords={"time": t_axis},
+        attrs={"type": "magnetic", "units": "nT"})})
+    runts = _CachedRunTS(ds)
+    _ = runts.hx.ts  # populate the channel cache (first access)
+    fresh = CoefficientFilter(gain=2.0, units_in="nT", units_out="nT")
+    fresh.name = "fresh_hx"
+    attach_filters(runts, {"hx": fresh})
+    # the cached channel was invalidated: the newly attached filter wins
+    # (pre-fix the stale chain won and the gain was NOT divided out).
+    # Tolerance covers mt_timeseries' DC-bin convention (see test_calibrate)
+    cal = runts.calibrate()
+    np.testing.assert_allclose(
+        np.asarray(cal.hx.ts), x / 2.0, rtol=0.03, atol=0.03)

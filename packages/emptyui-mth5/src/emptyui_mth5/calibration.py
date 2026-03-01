@@ -326,6 +326,11 @@ def attach_filters(run, filters, strict: bool = True) -> object:
     for ch in run.dataset.data_vars:
         if ch in filters:
             continue
+        if run.dataset[ch].attrs.get("filters"):
+            # the channel already carries a real archived response chain —
+            # never replace it with unity (the response would be silently
+            # dropped from all downstream FC/TF math)
+            continue
         unit = run.dataset[ch].attrs.get("units") or _default_unit(ch)
         unity = CoefficientFilter(gain=1.0, units_in=unit, units_out=unit)
         unity.name = f"cal_{ch}_unity"
@@ -333,6 +338,14 @@ def attach_filters(run, filters, strict: bool = True) -> object:
         run.dataset[ch].attrs["filters"] = [
             {"applied_filter": {"name": unity.name, "applied": True}}]
     run.filters = run_filters
+    try:
+        clear = getattr(run, "clear_channel_cache", None)
+    except Exception:  # noqa: BLE001 — mt_timeseries raises NameError
+        clear = None
+    if callable(clear):
+        # invalidate cached ChannelTS objects: their response chains were
+        # resolved at first access — the newly attached filters must win
+        clear()
     return run
 
 

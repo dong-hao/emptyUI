@@ -896,7 +896,10 @@ byte records and the ingestion research history are preserved in
   `run.filters` + per-channel `attrs["filters"]` in the AppliedFilter format
   that survives an MTH5 round trip; channels without a filter get a unity
   coefficient filter so `RunTS.calibrate()` passes temperature channels
-  warning-free), `find_calibration_file` (auto-pickup, station-pair files
+  warning-free; channels that already carry a real archived response chain
+  are never replaced by unity — the instrument response would otherwise be
+  silently dropped from all downstream FC/TF math), `find_calibration_file`
+  (auto-pickup, station-pair files
   preferred), `load_calibration` (dispatch by extension).
 - **Below-table policy**: flat clamp (first-row modulus, zero phase, extended
   to 0.001·f_min) — log-extrapolation was worse.

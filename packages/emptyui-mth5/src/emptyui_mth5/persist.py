@@ -249,6 +249,11 @@ def runts_context(data, survey: str = "", station: str = "", run: str = "",
             (run, "run_metadata", "run", "run")):
         payload_id = _meta_id(getattr(data, meta_obj, None)) or _payload_field(
             data, plain_name)
+        if str(payload_id) == "0":
+            # mt_metadata's DEFAULT id means "unset" (the plot layer
+            # already excludes rid == "0") — payload truth does not
+            # include unset defaults; the param (or fallback) wins
+            payload_id = ""
         if param_value and payload_id and str(param_value) != str(payload_id):
             if logger is not None:
                 logger.warning(

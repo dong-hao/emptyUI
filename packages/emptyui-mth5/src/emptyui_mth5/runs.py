@@ -146,6 +146,16 @@ class _CachedRunTS(RunTS):
             return cache[name]
         return super().__getattr__(name)
 
+    def clear_channel_cache(self) -> None:
+        """Drop the cached per-channel ChannelTS objects (§24.8).
+
+        ``attach_filters`` re-stamps a channel's dataset attrs (the
+        applied-filter refs) in place; a cached ChannelTS resolved its
+        response chain at first access — without this the stale chain wins
+        and a later-attached filter is silently ignored (the executor's
+        cache serves the same instance across runs/param edits)."""
+        self.__dict__.pop("_channel_cache", None)
+
 
 def _group_id(group_obj) -> str:
     """The group's id from its HDF5 path (cheap) — ``group_obj.metadata``
