@@ -85,13 +85,19 @@ def _to_runts(source):
     start_iso = (start_dt if start_dt
                  else _iso_start(getattr(source, "start", None)))
     pieces = []
+    src_units = getattr(source, "units", {}) or {}
     for name, arr in channels.items():
         ctype = ("electric" if is_electric_name(name)
                  else "magnetic" if is_magnetic_name(name) else "auxiliary")
         ch = ChannelTS(ctype, data=np.asarray(arr, dtype=float),
                        start=start_iso or None, sample_rate=float(sample_rate))
         ch.component = name
-        ch.channel_metadata.units = _default_unit(name)
+        # preserve the payload's actual unit when it carries one (§10.5:
+        # "explicit A/m → leave") — the nomenclature default is only a
+        # fallback; re-stamping a stamped H (A/m) payload nanoTesla fired
+        # Compute FC's nT→A/m conversion a second time
+        src_unit = src_units.get(name)
+        ch.channel_metadata.units = src_unit or _default_unit(name)
         # ChannelTS derives its rate from the ns-quantized time axis when
         # data is present (size/(t[-1]-t[0]) drifts: 1/2400 s truncates to
         # 416666 ns → 2401) — pin the explicit rate (the getter honors it)

@@ -159,3 +159,24 @@ def test_calibrate_stamps_nomenclature_default_units(tmp_path: Path):
     # RunTS.calibrate validates metadata: "" normalizes to "unknown" —
     # auxiliary channels are not mis-stamped with an electric/magnetic unit
     assert out.temperature.channel_metadata.units == "unknown"
+
+
+def test_to_runts_preserves_stamped_units(tmp_path):
+    """_to_runts preserves the payload's actual units (§10.5: "explicit
+    A/m → leave") — the nomenclature default is a fallback, not an
+    override: re-stamping a stamped-H (A/m) payload nanoTesla fired
+    Compute FC's nT→A/m conversion a second time (Z off by mu0*1e9)."""
+    from emptyui_mth5.calibrate import _to_runts
+
+    ts = TimeSeries(channels={"ex": np.ones(64), "hx": np.ones(64)},
+                    sample_rate=8.0, units={"ex": "mV/km", "hx": "A/m"})
+    runts = _to_runts(ts)
+    # mt_metadata canonicalizes the abbreviation
+    assert runts.hx.channel_metadata.units == "Ampere per meter"
+    assert runts.ex.channel_metadata.units == "milliVolt per kilometer"
+    # fallback for unitless sources stays (the synthetic-fixture path)
+    ts2 = TimeSeries(channels={"ex": np.ones(64), "hx": np.ones(64)},
+                     sample_rate=8.0)
+    runts2 = _to_runts(ts2)
+    assert runts2.hx.channel_metadata.units == "nanoTesla"
+    assert runts2.ex.channel_metadata.units == "milliVolt per kilometer"
