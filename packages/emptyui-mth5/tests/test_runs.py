@@ -561,3 +561,38 @@ def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
     ensure_h5_openable(p, log=None)  # cleared via the mocked h5clear
+
+
+def test_split_merge_roundtrip_carries_survey(tmp_path):
+    """Split → Merge rebuilds the survey identity (§3): mt_timeseries
+    merges the channels' station/run ids but never the survey — a merged
+    output used to persist survey "0" (compounded by runts_context's
+    default-id rule). Split's outputs now carry the survey so Merge can
+    rebuild it."""
+    import numpy as np
+    from mt_timeseries import ChannelTS, RunTS
+
+    from emptyui_mth5.runs import MergeChannels, SplitChannels
+
+    ch_list = []
+    for comp in ("bx", "by", "bz", "e1", "e2"):
+        typ = "magnetic" if comp[0] in ("b", "h") else "electric"
+        c = ChannelTS(typ)
+        c.channel_metadata.units = "nT" if typ == "magnetic" else "mV/km"
+        c.sample_rate = 1.0
+        c.ts = np.arange(64, dtype=float)
+        c.component = comp
+        ch_list.append(c)
+    runts = RunTS(array_list=ch_list, station_metadata={"id": "SDX"},
+                  run_metadata={"id": "r1"}, survey_metadata={"id": "4P"})
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    split = SplitChannels().execute(ctx, runts)
+    merged = MergeChannels().execute(
+        ctx, ex=split["ex"], ey=split["ey"], hx=split["hx"], hy=split["hy"],
+        hz=split["hz"])["data"]
+    # the survey identity survives (the fix); NB station/run do NOT travel
+    # through channel objects in this mt_timeseries version — the
+    # ChannelTS-from-DataArray construction resets them to the defaults.
+    # That gap is handled at the identity layer: runts_context ignores the
+    # default "0" ids, so the params/fallback win (test_persist.py).
+    assert merged.survey_metadata.id == "4P"

@@ -11,8 +11,11 @@ import numpy as np
 import pandas as pd
 from emptyui import Input, Node, Output, Param
 from emptyui_core_nodes._timewindow import resolve_window_s
-from emptyui_core_nodes.types import is_run_collection
-from emptyui_core_nodes.types import is_unknown_start, warn_placeholder_start
+from emptyui_core_nodes.types import (
+    is_run_collection,
+    is_unknown_start,
+    warn_placeholder_start,
+)
 from mt_timeseries import RunTS
 
 from .nomenclature import (
@@ -272,7 +275,7 @@ def _range_bounds(start: str, end: str):
     return lo, hi
 
 
-from .phoenix_mtu import _window_bounds  # noqa: E402  (local import cycle)
+from .phoenix_mtu import _window_bounds
 
 
 def _largest_runs_hint(summary, limit: int = 3) -> str:
@@ -634,12 +637,22 @@ def _get_channel(data, name: str):
     a core TimeSeries channel. Uses exact-name lookup only — never getattr on
     a component that is absent (mt_timeseries raises NameError)."""
     if hasattr(data, "dataset") and not isinstance(data, dict):
-        return getattr(data, name)
-    from mt_metadata.timeseries.filters import ChannelResponse
-    from mt_metadata.timeseries.filtered import AppliedFilter
-    from mt_timeseries import ChannelTS
-
+        ch = getattr(data, name)
+        # carry the survey identity: mt_timeseries' RunTS.__getattr__ copies
+        # run/station metadata but never the survey, so a Split→Merge round
+        # trip persisted survey "0" (§3)
+        try:
+            if str(getattr(ch.survey_metadata, "id", "") or "") in ("", "0"):
+                sid = getattr(data, "survey_metadata", None)
+                if sid is not None:
+                    ch.survey_metadata = sid
+        except Exception:  # noqa: BLE001 — identity only, never blocks
+            pass
+        return ch
     from emptyui_core_nodes.types import channel_calibration
+    from mt_metadata.timeseries.filtered import AppliedFilter
+    from mt_metadata.timeseries.filters import ChannelResponse
+    from mt_timeseries import ChannelTS
 
     arr = _payload(data)[0][name]
     ch = ChannelTS("electric" if is_electric_name(name) else "magnetic",
@@ -692,7 +705,19 @@ class MergeChannels(Node):
         channels = [c for c in (ex, ey, hx, hy, hz) if c is not None]
         if not channels:
             raise ValueError("at least one channel required")
-        runts = RunTS(array_list=channels)
+        # mt_timeseries merges the channels' station/run ids but never the
+        # survey — carry it explicitly when a channel carries one (the Split
+        # outputs do, §3)
+        survey_md = None
+        for c in channels:
+            sid = getattr(c, "survey_metadata", None)
+            if sid is not None and str(getattr(sid, "id", "") or "") not in ("", "0"):
+                survey_md = sid
+                break
+        if survey_md is not None:
+            runts = RunTS(array_list=channels, survey_metadata=survey_md)
+        else:
+            runts = RunTS(array_list=channels)
         if str(start).strip() or str(end).strip():
             # time-selector window (§23.4): crop the merged run; all
             # channels share the run's time base
@@ -806,12 +831,11 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
     display/filter nodes via ``coerce_run`` — accept them. The absolute start
     is stamped so downstream FC time grids are identical for both runs.
     """
-    from mt_metadata.timeseries.filters import ChannelResponse
+    from emptyui_core_nodes.types import channel_calibration
     from mt_metadata.timeseries.filtered import AppliedFilter
+    from mt_metadata.timeseries.filters import ChannelResponse
     from mt_timeseries import ChannelTS
     from mth5.timeseries import RunTS
-
-    from emptyui_core_nodes.types import channel_calibration
 
     units = _channel_units_from(source)
     calibration = channel_calibration(source)
