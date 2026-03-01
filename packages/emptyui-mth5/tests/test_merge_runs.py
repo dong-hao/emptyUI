@@ -4,9 +4,8 @@ test_errors.py."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -229,3 +228,41 @@ def test_merge_node_dedups_duplicate_run_ids(test12rr_path, tmp_path, caplog):
         assert any("more than once" in r.message for r in caplog.records)
     finally:
         m.close_mth5()
+
+
+def test_merge_runts_pads_disagreeing_aux_mask():
+    """The auto-generated 'saturated' QC mask exists only on runs with
+    flagged samples — merging masked + unmasked sessions (the documented
+    E1b remedy) must pad the missing members with zeros instead of
+    hard-failing on QC metadata (§3's consistency check misfires on it)."""
+    import numpy as np
+    from mt_timeseries import ChannelTS, RunTS
+
+    def runts(saturated, start_s=0):
+        sr, n = 6.0, 12
+        t = np.arange(n) / sr
+        stamp = f"2024-01-01T00:00:{start_s:02d}"
+        chs = []
+        for comp in ("bx", "by"):
+            c = ChannelTS("magnetic", data=np.sin(2 * np.pi * 1 * t),
+                          start=stamp, sample_rate=sr)
+            c.component = comp
+            chs.append(c)
+        for comp in ("e1", "e2"):
+            c = ChannelTS("electric", data=t.copy(), start=stamp,
+                          sample_rate=sr)
+            c.component = comp
+            chs.append(c)
+        if saturated:
+            c = ChannelTS("auxiliary", data=np.zeros(n), start=stamp,
+                          sample_rate=sr)
+            c.component = "saturated"
+            chs.append(c)
+        return RunTS(array_list=chs)
+
+    merged = merge_runts(
+        [runts(True, 0), runts(False, 2), runts(True, 4)], new_run_id="m")
+    # the zero-padded members carry the mask too (merged QC stays usable)
+    assert "saturated" in merged.dataset.data_vars
+    assert not np.any(np.asarray(merged.saturated.ts) > 0)
+    assert "merged_source_runs" in merged.dataset.attrs

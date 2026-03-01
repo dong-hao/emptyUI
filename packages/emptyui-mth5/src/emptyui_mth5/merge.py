@@ -61,13 +61,20 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
 
     comp_sets = [_rt_channels(rt) for rt in run_ts_list]
     union = set.union(*comp_sets)
+    # the 'saturated' aux QC mask exists only on runs with flagged samples
+    # (§24.12) — a station's sessions split into masked and unmasked runs,
+    # and merging them (the documented E1b remedy: "merge the remote
+    # station's runs first") must not hard-fail on QC metadata: pad the
+    # missing members with zeros (no saturation there)
+    aux = {"saturated"}
     for rt, comps in zip(run_ts_list, comp_sets):
-        missing = sorted(union - comps)
+        missing = sorted((union - comps) - aux)
         if missing:
             raise ValueError(
                 f"cannot merge run '{_rt_id(rt)}': it lacks channel(s) "
                 f"{missing} that the other runs carry — all runs of one "
                 "station must share the channel components (§3)")
+    run_ts_list = [_pad_aux(rt, union & aux) for rt in run_ts_list]
     # §3: OVERLAPPING acquisitions cannot be combined — RunTS.merge's
     # index combination fails on non-monotonic global time indexes (the
     # overlap would also be interpolated over, fabricating samples).
@@ -125,6 +132,32 @@ def _rt_id(rt):
         return str(rt.run_metadata.id)
     except Exception:  # noqa: BLE001 — duck-typed payloads
         return "<unnamed>"
+
+
+def _pad_aux(rt, aux_comps):
+    """A copy of ``rt`` with all-zero QC aux channels for the ones it lacks
+    (physically correct: no flagged samples there) so a mixed
+    masked/unmasked merge can proceed; returns ``rt`` unchanged otherwise."""
+    if not aux_comps:
+        return rt
+    import xarray as xr
+    from mt_timeseries import RunTS
+
+    missing = [c for c in aux_comps if c not in rt.dataset.data_vars]
+    if not missing:
+        return rt
+    ds = rt.dataset.copy()
+    sample = next(iter(rt.dataset.data_vars.values()))
+    for c in missing:
+        ds[c] = xr.zeros_like(sample)
+        ds[c].attrs["type"] = "auxiliary"
+        ds[c].attrs["units"] = "1"
+    out = RunTS(ds)
+    for attr in ("run_metadata", "station_metadata", "survey_metadata"):
+        md = getattr(rt, attr, None)
+        if md is not None:
+            setattr(out, attr, md.copy() if hasattr(md, "copy") else md)
+    return out
 
 
 def _rt_span(rt):
