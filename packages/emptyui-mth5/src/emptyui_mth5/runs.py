@@ -56,7 +56,6 @@ def read_run_channels(run_obj):
     payload (``SimpleNamespace(dataset=..., sample_rate=..., start=...,
     filters=...)``).
     """
-    import xarray as xr
 
     data_vars = {}
     sample_rate = 0.0
@@ -73,6 +72,23 @@ def read_run_channels(run_obj):
         raise ValueError(
             f"run '{run_obj.metadata.id}' carries no sample_rate in "
             "its channel metadata — cannot build FCs")
+    # time-base cross-check: a channel whose time period contradicts the
+    # run's (e.g. a pre-fix artifact whose channel axes anchor on the TBL
+    # STIM placeholder while the run carries the tag truth) silently mixes
+    # time bases — warn loudly; re-ingest with the current reader
+    run_tp = getattr(getattr(run_obj, "metadata", None), "time_period", None)
+    if run_tp is not None:
+        run_start = str(getattr(run_tp, "start", "") or "")
+        for name, da in data_vars.items():
+            ch_start = str(getattr(da, "attrs", {}).get(
+                "time_period.start", "") or "")
+            if ch_start and run_start and ch_start[:19] != run_start[:19]:
+                _log.warning(
+                    "run '%s': channel '%s' time_period.start (%s) "
+                    "contradicts the run's (%s) — the archive mixes time "
+                    "bases (a stale pre-fix artifact?); re-ingest with the "
+                    "current reader",
+                    run_obj.metadata.id, name, ch_start, run_start)
     return data_vars, sample_rate, start
 
 
