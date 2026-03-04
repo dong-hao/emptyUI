@@ -335,11 +335,15 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     const internal = get().edges.filter((e) => ids.has(e.source) && ids.has(e.target));
     set({
       clipboard: {
+        // deep-copy params (DESIGN.md §8 "deep-copied params"): a shallow
+        // spread shares nested arrays/objects (output_channels lists, save
+        // paths) — editing a copy would mutate the original and every
+        // earlier paste
         nodes: selected.map((n) => ({
           ...n,
           selected: false,
           position: { ...n.position },
-          data: { ...n.data, params: { ...n.data.params } },
+          data: { ...n.data, params: structuredClone(n.data.params) },
         })),
         edges: internal.map((e) => ({ ...e, selected: false })),
         pasteCount: 0,
@@ -360,7 +364,10 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
         ...n,
         id,
         position: { x: n.position.x + dx, y: n.position.y + dy },
-        data: { ...n.data, params: { ...n.data.params } },
+        // clone again per paste: the clipboard snapshot is reused, so the
+        // pasted nodes must not share param objects with it (or with each
+        // other across repeated pastes)
+        data: { ...n.data, params: structuredClone(n.data.params) },
       };
     });
     const newEdges = clip.edges.map((e) => ({
