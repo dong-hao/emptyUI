@@ -31,6 +31,13 @@ interface RunState {
   /** Events that arrived while runId was still null (between run creation
    *  and setRunId) — flushed by setRunId, dropped by reset. Capped. */
   pending: Record<string, unknown>[];
+  /** Refcount of POST /runs requests in flight (M-F2): runStatus is still
+   *  "idle" until setRunId, so Run/Run-to-here/New gate on this instead —
+   *  two concurrent posts would otherwise race setRunId (last-resolved
+   *  wins, the other run orphaned). */
+  startingCount: number;
+  beginStart: () => void;
+  endStart: () => void;
   setRunId: (id: string | null) => void;
   handleEvent: (event: Record<string, unknown>) => void;
   reset: () => void;
@@ -108,6 +115,10 @@ export const useRun = create<RunState>((set) => ({
               ...s.artifacts,
               {
                 id,
+                // M-F5: the server's `url` is root-absolute and ignores a
+                // sub-path mount (root_path) — derive the URL client-side
+                // via api.artifactUrl(artifact.id) where it is consumed;
+                // the raw value is kept only for debugging parity
                 url: event.url as string,
                 nodeId: event.node as string,
                 kind: event.kind as string,
@@ -135,6 +146,15 @@ export const useRun = create<RunState>((set) => ({
         break;
     }
   },
+  // startingCount survives: it tracks in-flight POSTs, not run identity —
+  // zeroing it here would un-gate the buttons while a POST is still pending
   reset: () =>
-    set({ runId: null, runStatus: "idle", nodeStates: {}, artifacts: [], payloads: {}, pending: [] }),
+    set({
+      runId: null,
+      runStatus: "idle",
+      nodeStates: {},
+      artifacts: [],
+      payloads: {},
+      pending: [],
+    }),
 }));

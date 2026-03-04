@@ -16,8 +16,13 @@ export function PropertiesPanel({
   const catalog = useCatalog((s) => s.catalog);
   const nodes = useWorkflow((s) => s.nodes);
   const selectedNodeId = useWorkflow((s) => s.selectedNodeId);
-  // starting a second run while one is active orphans the first run's UI
-  const runActive = ["queued", "running"].includes(useRun((s) => s.runStatus));
+  // starting a second run while one is active orphans the first run's UI;
+  // startingCount also gates the POST in-flight window (runStatus is still
+  // "idle" until setRunId resolves — M-F2). NB: both subscriptions must be
+  // called unconditionally (hooks) — an `||` short-circuit crashed React.
+  const runStatus = useRun((s) => s.runStatus);
+  const startingCount = useRun((s) => s.startingCount);
+  const runActive = ["queued", "running"].includes(runStatus) || startingCount > 0;
 
   const node = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const manifest = node

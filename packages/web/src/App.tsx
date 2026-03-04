@@ -35,6 +35,7 @@ export default function App() {
   const setCatalog = useCatalog((s) => s.setCatalog);
   const catalog = useCatalog((s) => s.catalog);
   const runStatus = useRun((s) => s.runStatus);
+  const startingCount = useRun((s) => s.startingCount);
   const docName = useWorkflow((s) => s.docName);
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -264,6 +265,12 @@ export default function App() {
   };
 
   const startRun = async (targets?: string[]) => {
+    const run = useRun.getState();
+    // M-F2: gate re-entry across the POST in-flight window — runStatus is
+    // still "idle" until setRunId resolves, so a second click would start a
+    // concurrent run (last-resolved wins, the other orphaned)
+    if (run.startingCount > 0) return;
+    run.beginStart();
     try {
       stopPolling();
       setMessage(null);
@@ -337,6 +344,8 @@ export default function App() {
       }, 700);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      useRun.getState().endStart();
     }
   };
 
@@ -367,6 +376,11 @@ export default function App() {
     try {
       const doc = JSON.parse(await file.text());
       const { nodes: loaded, edges: loadedEdges, name } = deserializeWorkflow(doc);
+      // mirror handleNew (§8): a document load is a new working context —
+      // the previous run's chips/artifacts/extents must not bleed into it
+      // (and its poll timer must not keep streaming foreign events)
+      stopPolling();
+      useRun.getState().reset();
       useWorkflow.getState().loadDocument(loaded, loadedEdges, name);
       if (!catalog?.nodes?.length) loadedBeforeCatalog.current = true;
       setMessage(null);
@@ -389,7 +403,15 @@ export default function App() {
     <div className="app">
       <header className="toolbar">
         <strong>emptyUI</strong>
-        <button onClick={handleRun} disabled={runStatus === "running" || nodes.length === 0}>
+        <button
+          onClick={handleRun}
+          disabled={
+            runStatus === "running" ||
+            runStatus === "queued" ||
+            startingCount > 0 ||
+            nodes.length === 0
+          }
+        >
           ▶ Run
         </button>
         <button
@@ -401,7 +423,11 @@ export default function App() {
         </button>
         <button
           onClick={handleNew}
-          disabled={runStatus === "running" || runStatus === "queued"}
+          disabled={
+            runStatus === "running" ||
+            runStatus === "queued" ||
+            startingCount > 0
+          }
           title="Start a new (empty) workflow"
         >
           New
