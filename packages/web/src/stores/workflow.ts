@@ -400,21 +400,29 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     }),
 }));
 
+/** Extract Run node ids — the one-port migration's source set (§4). */
+function extractRunIds(nodes: Node<MTNodeData>[]): Set<string> {
+  return new Set(
+    nodes
+      .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === "mth5.io.extract_run")
+      .map((n) => n.id));
+}
+
 /** One-port migration (§4): Extract Run's dual outputs (data + runs) merged
  *  into a single `data` port whose value follows the selection — edges
- *  targeting the retired `runs` port remap at load time. */
+ *  sourced from the retired `runs` port remap at load time. NB the retired
+ *  port was an OUTPUT of Extract Run, so the edge carries it on the SOURCE
+ *  end (matching `targetHandle` silently left every legacy edge unmigrated;
+ *  they were then pruned as stale on the next catalog arrival). */
 export function migrateEdges(
   nodes: Node<MTNodeData>[],
   edges: Edge[],
 ): Edge[] {
-  const extract = new Set(
-    nodes
-      .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === "mth5.io.extract_run")
-      .map((n) => n.id));
+  const extract = extractRunIds(nodes);
   if (!extract.size) return edges;
   return edges.map((e) =>
-    extract.has(e.target) && e.targetHandle === "runs"
-      ? { ...e, targetHandle: "data" }
+    extract.has(e.source) && e.sourceHandle === "runs"
+      ? { ...e, sourceHandle: "data" }
       : e,
   );
 }
@@ -493,7 +501,19 @@ export function deserializeWorkflow(
   const nodeIds = new Set(nodes.map((n) => n.id));
   const manifestOfType = (type: string) =>
     catalog?.nodes.find((m) => m.type === type);
-  const edges: Edge[] = pruneStaleEdges(doc.edges, nodes, manifestOfType)
+  // migrate BEFORE pruning (§4): the legacy `runs` port is no longer
+  // declared by the manifest, so an unmigrated edge is pruned as stale
+  // before the migration can remap it (pruneStaleEdges runs first
+  // otherwise)
+  const extract = extractRunIds(nodes);
+  const migrated = extract.size
+    ? doc.edges.map((e) =>
+        extract.has(e.source) && e.source_port === "runs"
+          ? { ...e, source_port: "data" }
+          : e,
+      )
+    : doc.edges;
+  const edges: Edge[] = pruneStaleEdges(migrated, nodes, manifestOfType)
     .map((e) => {
       // re-derive edge color from the source port type
       const src = nodes.find((n) => n.id === e.source)!;
