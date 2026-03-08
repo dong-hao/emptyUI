@@ -364,6 +364,52 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
   await expect(bar).toBeVisible(); // never crossed → slot stays valid
 });
 
+test("Extract Run offers the collection's sample rates as select suggestions (§20.1)", async ({
+  page,
+}) => {
+  const H5 = path.resolve(
+    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+  );
+  await page.goto("/");
+  await addNode(page, "Load MTH5");
+  await addNode(page, "Extract Run");
+  await addNode(page, "Plot Time Series");
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+  await placeNode(page, "Plot Time Series", 1050, 150);
+  await placeNode(page, "Extract Run", 600, 150);
+  await placeNode(page, "Load MTH5", 150, 150);
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+
+  await node(page, "Load MTH5").locator(".path-field input").fill(H5);
+  await node(page, "Load MTH5").locator(".path-field input").press("Enter");
+  await connect(page, { node: "Load MTH5", port: "mth5: mth5" }, {
+    node: "Extract Run",
+    port: "mth5: mth5",
+  });
+  await connect(page, { node: "Extract Run", port: "time series: ts.run" }, {
+    node: "Plot Time Series",
+    port: "time series: ts.run",
+  });
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 120_000,
+  });
+
+  // The sample_rate param's datalist gains the collection's distinct rates
+  // once the payload extent arrives — "auto" first, then the rates (§20.1).
+  // NB: a <datalist> is display:none by spec — assert on its options.
+  const datalist = node(page, "Plot Time Series").locator("datalist");
+  await expect(datalist).toHaveCount(1, { timeout: 15_000 });
+  const opts = await datalist.locator("option").evaluateAll(
+    (os) => os.map((o) => o.getAttribute("value") ?? ""),
+  );
+  expect(opts[0]).toBe("auto");
+  expect(opts).toContain("1"); // 4P/SDG31 is all-1 Hz
+});
+
 test("time selector bar on Extract Run shows the archive run extent (GMT)", async ({
   page,
 }) => {
@@ -387,6 +433,20 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
     port: "mth5: mth5",
   });
 
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.completed")).toBeVisible({
+    timeout: 120_000,
+  });
+
+  // Default 'time range' mode: the bar shows the UNION extent over every
+  // run of the station (§23.4 — the collection's full coverage). Switch to
+  // 'run id' mode so the bar shows one run's extent (the assertions below
+  // are tuned to run "a", the first run); rerun so the payload event
+  // reflects the new selection.
+  const selection = node(page, "Extract Run")
+    .locator(".param-field", { hasText: "Selection" })
+    .locator("select");
+  await selection.selectOption("run id");
   await page.getByRole("button", { name: "▶ Run" }).click();
   await expect(page.locator(".run-status.completed")).toBeVisible({
     timeout: 120_000,

@@ -318,6 +318,12 @@ export function MTNode({ id, data, selected }: NodeProps) {
             // payload summary extends the static options after a run (e.g.
             // an fc database's sample-rate tiers)
             let sel = opts.length > 0 ? opts : undefined;
+            // select-option suggestions (§20.1): the suggest_from port's
+            // payload summary EXTENDS the options after a run (e.g. an fc
+            // database's sample-rate tiers) — union of static ∪ inherited ∪
+            // suggested, "auto" first. The old replacement semantics
+            // orphaned an inherited/static choice (e.g. a channel name
+            // resolved from the upstream chain vanished once rates arrived).
             if (p.suggest_from) {
               const edge = edges.find(
                 (e) => e.target === id && e.targetHandle === p.suggest_from);
@@ -330,8 +336,12 @@ export function MTNode({ id, data, selected }: NodeProps) {
                 ? Array.from(new Set(sum.runs.map((r) => r.sample_rate)))
                 : undefined);
               if (rates?.length) {
-                const fmt = rates.map((r) => String(r));
-                sel = Array.from(new Set(["auto", ...fmt]));
+                sel = Array.from(new Set([
+                  "auto",
+                  ...(p.options ?? []).map(String),
+                  ...(opts ?? []),
+                  ...rates.map((r) => String(r)),
+                ]));
               }
             }
             return (
