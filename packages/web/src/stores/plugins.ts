@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { api, type PluginInfo } from "../api/client";
+import { queryClient } from "../api/queryClient";
 import { useCatalog } from "./catalog";
+import { useWorkflow } from "./workflow";
 
 interface PluginsState {
   plugins: PluginInfo[];
@@ -34,7 +36,17 @@ export const usePlugins = create<PluginsState>((set) => ({
       const plugins = await api.setPlugin(name, enabled);
       set({ plugins });
       // catalog-driven palette: refetch so the toggle takes effect live
-      useCatalog.getState().setCatalog(await api.nodes());
+      const catalog = await api.nodes();
+      useCatalog.getState().setCatalog(catalog);
+      // reconcile the query cache: an in-flight/focus refetch resolving
+      // AFTER this point carries a pre-toggle /nodes snapshot and would
+      // overwrite the fresh catalog (resurrecting a just-disabled plugin's
+      // nodes) — publish the fresh truth as the query's data
+      queryClient.setQueryData(["nodes"], catalog);
+      // the catalog swap must prune edges referencing now-removed nodes
+      // or ports (a disabled plugin's nodes vanish from the palette but
+      // their edges would linger as silently broken wiring)
+      useWorkflow.getState().revalidateEdges();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
       throw e;
