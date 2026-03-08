@@ -51,6 +51,10 @@ export const useRun = create<RunState>((set) => ({
   artifacts: [],
   payloads: {},
   pending: [],
+  startingCount: 0,
+  beginStart: () => set((s) => ({ startingCount: s.startingCount + 1 })),
+  endStart: () =>
+    set((s) => ({ startingCount: Math.max(0, s.startingCount - 1) })),
   setRunId: (id) => {
     set({
       runId: id,

@@ -467,7 +467,10 @@ function PreviewBody({ nodeId }: { nodeId: string }) {
       <div className="mt-preview">
         {artifact ? (
           <>
-            <img src={artifact.url} alt={`preview ${artifact.id}`} />
+            {/* M-F5: derive the URL client-side — the server's event url is
+                root-absolute and ignores a sub-path mount (root_path),
+                404-ing the <img>/table fetch under e.g. /tools/emptyui/ */}
+            <img src={api.artifactUrl(artifact.id)} alt={`preview ${artifact.id}`} />
             <a
               className="mt-download"
               href={api.artifactUrl(artifact.id)}
@@ -526,9 +529,9 @@ function TableBody({ nodeId }: { nodeId: string }) {
     setRows(null);
     setErr(null);
     if (!artifact) return;
-    fetch(artifact.url)
+    fetch(api.artifactUrl(artifact.id))
       .then((r) => {
-        if (!r.ok) throw new Error(`fetch ${artifact.url}: ${r.status}`);
+        if (!r.ok) throw new Error(`fetch artifact ${artifact.id}: ${r.status}`);
         return r.json();
       })
       .then((data) => {

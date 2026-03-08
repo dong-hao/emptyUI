@@ -22,10 +22,19 @@ export interface TimeExtent {
   absolute: boolean;
 }
 
-/** "2023-06-01T12:00:00" (param) → epoch seconds (UTC). null = unparsable */
+/** "2023-06-01T12:00:00" (param) → epoch seconds (UTC). null = unparsable.
+ *  Offset-aware (M-F7): a trailing Z or an explicit ±HH:MM[:SS] offset is
+ *  kept verbatim — appending Z unconditionally turned "…+00:00" into
+ *  "…+00:00Z" → NaN → the bar vanished for offset-aware extents. */
 export function parseIsoGmt(value: string): number | null {
-  const t = Date.parse(`${value.trim().replace(" ", "T")}Z`);
-  return Number.isNaN(t) ? null : t / 1000;
+  const t = value.trim().replace(" ", "T");
+  const withZone = /(?:Z|z|[+-]\d{2}:?\d{2})$/.test(t)
+    ? t
+    : /T/.test(t)
+      ? `${t}Z`
+      : `${t}T00:00:00Z`;
+  const ms = Date.parse(withZone);
+  return Number.isNaN(ms) ? null : ms / 1000;
 }
 
 /** epoch seconds → "YYYY-MM-DD HH:MM:SS" (UTC) */
@@ -49,6 +58,10 @@ function parseBound(
   if (extent.absolute) {
     const t = parseIsoGmt(text);
     if (t !== null) return t;
+    // M-F7 degrade: unparsable text renders the handle at the track edge
+    // (clamped by frac()) instead of vanishing the whole bar — the box
+    // keeps its draft so the user can fix the entry
+    return which === "start" ? extent.startSec : extent.endSec;
   }
   const rel = Number(text);
   // bare numbers are RELATIVE SECONDS on both sides (the server's
