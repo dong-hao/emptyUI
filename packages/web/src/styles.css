@@ -186,6 +186,18 @@ button.danger:disabled {
   border-radius: 3px;
 }
 
+/* multi-line code widget (M-F8): same chrome as the input fields */
+.param-field textarea.code-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.25rem;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
 .param-field input[type="checkbox"] {
   flex: 0 0 auto;
   width: auto;

@@ -69,6 +69,21 @@ function CommitInput({
       if (!Number.isFinite(n)) return NaN; // invalid intermediate → revert
       return widget === "integer" ? Math.round(n) : n;
     }
+    if (widget === "list") {
+      // M-F8: a list param's value is an ARRAY — the old string fallback
+      // committed a raw string into the workflow (type corruption).
+      // JSON-aware with comma fallback: valid JSON arrays round-trip with
+      // typing (numbers stay numbers); hand-typed "a, b" still works.
+      const t = raw.trim();
+      if (t === "") return [];
+      try {
+        const v: unknown = JSON.parse(t);
+        if (Array.isArray(v)) return v;
+      } catch {
+        // fall through to the comma heuristic
+      }
+      return t.split(",").map((s) => s.trim()).filter(Boolean);
+    }
     return raw;
   };
 
@@ -100,6 +115,56 @@ function CommitInput({
         } else if (e.key === "Escape") {
           cancel();
           (e.target as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={commit}
+    />
+  );
+}
+
+/** Multi-line code editor (M-F8): same draft/commit semantics as
+ *  CommitInput, but Enter inserts a newline (commit on blur or Ctrl/Cmd+
+ *  Enter; Escape reverts). The old fallback rendered code as a bare
+ *  single-line input — newlines in a snippet were destroyed. */
+function CodeInput({
+  value,
+  onCommit,
+  disabled,
+  placeholder,
+}: {
+  value: unknown;
+  onCommit: (v: unknown) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const [draft, setDraftState] = useState<string | null>(null);
+  const draftRef = useRef<string | null>(null);
+  const setDraft = (v: string | null) => {
+    draftRef.current = v;
+    setDraftState(v);
+  };
+  const current = value === null || value === undefined ? "" : String(value);
+  const commit = () => {
+    const d = draftRef.current;
+    if (d === null) return;
+    setDraft(null);
+    if (d !== current) onCommit(d);
+  };
+  return (
+    <textarea
+      className="code-input"
+      value={draft !== null ? draft : current}
+      disabled={disabled}
+      placeholder={placeholder}
+      rows={Math.min(12, Math.max(2, current.split("\n").length))}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          setDraft(null);
+          e.currentTarget.blur();
+        } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          commit();
+          e.currentTarget.blur();
         }
       }}
       onBlur={commit}
@@ -230,6 +295,29 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
               />
             )}
           </span>
+        );
+        break;
+      case "code":
+        field = (
+          <CodeInput
+            value={value}
+            onCommit={set}
+            disabled={disabled}
+            placeholder={param.placeholder}
+          />
+        );
+        break;
+      case "list":
+        // M-F8: single-line editor with JSON-aware/array coercion (the
+        // generic string fallback committed a raw string into an array param)
+        field = (
+          <CommitInput
+            value={value}
+            onCommit={set}
+            widget="list"
+            disabled={disabled}
+            placeholder={param.placeholder ?? "item, item, …"}
+          />
         );
         break;
       default:
