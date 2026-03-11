@@ -96,6 +96,17 @@ class Registry:
     def get(self, node_type: str) -> Node | None:
         return self._nodes.get(node_type)
 
+    def table(self) -> dict[str, Node]:
+        """A consistent snapshot of the node table (M-C5): fetch ONCE and
+        read from the reference — :meth:`rebuild` builds into a scratch
+        registry and REPLACES this dict, never mutates it in place, so a
+        single fetch is a consistent snapshot even if a toggle lands
+        mid-snapshot. Per-key ``get()`` calls are not: each read may land
+        on a different table across the swap (a torn snapshot mixing
+        old/new manifests, letting a just-disabled plugin execute).
+        Returns a shallow copy: ``add`` mutates the live dict in place."""
+        return dict(self._nodes)
+
     def types(self) -> list[str]:
         return sorted(self._nodes)
 
@@ -244,7 +255,21 @@ def discover_plugins(
             # this must not mutate (or crash on type collisions with) the
             # live table — the nodes are popped below either way
             scratch = Registry()
-            register(scratch)
+            # same degradation as the enabled path: a disabled plugin that
+            # crashes register() must not kill discovery (it would take
+            # down startup AND make every toggle 500 — the scratch table
+            # is a different registry, but its import side effects are not)
+            try:
+                register(scratch)
+            except Exception as exc:  # noqa: BLE001 — degrade, never crash startup
+                logger.warning(
+                    "disabled plugin '%s' registration failed and was "
+                    "skipped: %s: %s", ep.name, type(exc).__name__, exc)
+                infos.append(PluginInfo(
+                    name=ep.name, version=_plugin_version(ep), bundled=False,
+                    node_types=[], enabled=False,
+                    error=f"{type(exc).__name__}: {exc}"))
+                continue
             node_types = sorted(scratch._nodes)
         info = PluginInfo(
             name=ep.name,

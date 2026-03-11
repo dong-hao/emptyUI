@@ -303,8 +303,26 @@ def create_app(
             if info.bundled:
                 # bundled plugins are always on — the toggle is a no-op
                 return {"name": name, "enabled": True, "plugins": registry.plugins()}
+            # M-C3: rebuild BEFORE persisting — a failed rebuild (e.g. a
+            # duplicate-type contract violation on re-enable) must not
+            # leave the settings file claiming an enable state the live
+            # registry doesn't have; rebuild swaps atomically, so a raise
+            # leaves the live table untouched. The rebuild set keeps the
+            # env baseline (§5.1: a UI toggle cannot enable a
+            # platform-disabled plugin).
+            disabled_after = plugin_store.effective_disabled(env_plugin_baseline)
+            if disable or name in env_plugin_baseline:
+                disabled_after.add(name)
+            else:
+                disabled_after.discard(name)
+            try:
+                registry.rebuild(disabled_after)
+            except ValueError as exc:
+                # a contract violation on re-enable (duplicate node type):
+                # a clean 409 beats a raw 500 — the registry stays on its
+                # old tables and the settings file is untouched (M-C3)
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             plugin_store.set_disabled(name, disable)
-            registry.rebuild(plugin_store.effective_disabled(env_plugin_baseline))
             if disable:
                 # disabled nodes' cached results are unreachable — drop them
                 node_cache.clear()
