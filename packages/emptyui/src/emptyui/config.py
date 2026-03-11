@@ -69,6 +69,13 @@ class Settings:
             max_concurrent_runs = int(raw_max_runs) if raw_max_runs else None
         except ValueError as exc:
             raise ValueError("EMPTYUI_MAX_CONCURRENT_RUNS must be an integer") from exc
+        if max_concurrent_runs is not None and max_concurrent_runs < 0:
+            # L-C10: a negative bound would clamp to... nothing — the
+            # executor treats only None as "unlimited", so a negative int
+            # silently behaves as an unlimited permit pool
+            raise ValueError(
+                "EMPTYUI_MAX_CONCURRENT_RUNS must be >= 0 "
+                "(0 or empty = unlimited)")
 
         raw_disabled = os.environ.get("EMPTYUI_DISABLED_PLUGINS", "").strip()
         disabled_plugins = (
@@ -79,6 +86,17 @@ class Settings:
         raw_settings = os.environ.get("EMPTYUI_SETTINGS_PATH", "").strip()
         settings_path = Path(raw_settings).expanduser() if raw_settings else None
         raw_base = os.environ.get("EMPTYUI_BASE_PATH", "").strip()
+        if raw_base and (
+            not raw_base.startswith("/")
+            or raw_base.endswith("/")
+            or "//" in raw_base
+        ):
+            # L-C10: a malformed mount breaks asset/API URL derivation
+            # subtly (the frontend derives its API base from the document
+            # URL) — reject it at startup instead
+            raise ValueError(
+                "EMPTYUI_BASE_PATH must look like '/tools/emptyui' "
+                "(leading '/', no trailing slash, no double slashes)")
         return cls(
             data_root=Path(data_root).expanduser() if data_root else None,
             serve_dist=serve_dist or None,

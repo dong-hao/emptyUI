@@ -17,6 +17,7 @@ confinement/serving semantics and change only via env + restart (§22).
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -126,21 +127,26 @@ class SettingsStore:
                 pass
             raise
 
-    def disabled(self) -> set[str]:
-        """Plugin names currently disabled (memory state)."""
-        return set(self._disabled)
-
     def set_disabled(self, name: str, disabled: bool) -> None:
         """Toggle one plugin (UI-driven changes only).
 
         Persists to the settings file when a path is configured; otherwise
-        the change stays in memory for the process lifetime.
+        the change stays in memory for the process lifetime. A failed save
+        rolls the memory state back (L-C8): the file must never disagree
+        with the live state.
         """
         if disabled:
             self._disabled.add(name)
         else:
             self._disabled.discard(name)
-        self.save()
+        try:
+            self.save()
+        except OSError:
+            if disabled:
+                self._disabled.discard(name)
+            else:
+                self._disabled.add(name)
+            raise
 
     def effective_disabled(self, env_baseline: set[str]) -> set[str]:
         """Environment baseline wins at startup (§5.1): a plugin disabled by
@@ -156,9 +162,19 @@ class SettingsStore:
         return dict(getattr(self, "_settings", {}))
 
     def set_settings(self, values: dict[str, object]) -> None:
-        """Merge UI-edited settings and persist (when a path is configured)."""
+        """Merge UI-edited settings and persist (when a path is configured).
+
+        A failed save rolls the merge back (L-C8): memory must not claim a
+        value the file never received (the caller surfaces the error; the
+        effective knobs stay consistent with disk).
+        """
+        prev = dict(self._settings)
         self._settings.update(values)
-        self.save()
+        try:
+            self.save()
+        except OSError:
+            self._settings = prev
+            raise
 
     def validate_live_values(self, values: dict[str, object]) -> dict[str, object]:
         """Validate a PUT payload against the LIVE_KNOBS whitelist.
@@ -188,9 +204,24 @@ class SettingsStore:
                 raise ValueError(  # noqa: TRY004
                     f"setting '{key}' expects a number (or null)")
             value = float(value)
+            # NaN slips through the `< 0` check (comparisons are False),
+            # poisoning `runtime` (TTL never expires) and writing invalid
+            # strict JSON; ±inf explodes `round()` with OverflowError on
+            # int knobs (a 500 instead of 422) — reject all non-finites
+            if not math.isfinite(value):
+                raise ValueError(f"setting '{key}' must be finite")
             if value < 0:
                 raise ValueError(f"setting '{key}' must be >= 0")
-            out[key] = round(value) if vtype is int else value
+            if vtype is int:
+                # L-C11: silently rounding 256.7 → 257 (with banker's
+                # rounding on top: 2.5 → 2!) misrepresents the user's
+                # input — an int knob demands an integer
+                if not float(value).is_integer():
+                    raise ValueError(
+                        f"setting '{key}' expects an integer (got {value!r})")
+                out[key] = round(value)
+            else:
+                out[key] = value
         return out
 
 
