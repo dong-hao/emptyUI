@@ -64,14 +64,20 @@ test("settings dialog: live knobs editable, deployment rows read-only", async ({
   const dialog = page.locator(".settings-dialog");
   await expect(dialog).toBeVisible();
 
-  // Server & retention: the cache-size knob is editable and applies live
+  // Server & retention: the cache-size knob is editable and applies live.
+  // The value must MOVE relative to whatever the (possibly warm, reused)
+  // server already holds — filling a value equal to the current one is not
+  // dirty and the Save button stays disabled.
   const cacheRow = dialog.locator("tr", { hasText: "cache max entries" });
   const input = cacheRow.locator("input[type=number]");
   await expect(input).toBeEnabled();
-  await input.fill("77");
+  const current = await input.inputValue();
+  await input.fill(String((parseInt(current, 10) || 0) + 1));
   await dialog.locator("button", { hasText: "Save" }).click();
   // after save the server view reflects the edit (input value + ui source)
-  await expect(cacheRow.locator("input")).toHaveValue("77");
+  await expect(cacheRow.locator("input")).toHaveValue(
+    String((parseInt(current, 10) || 0) + 1),
+  );
   await expect(cacheRow).toContainText("ui");
 
   // Deployment rows are read-only code values (no inputs)
