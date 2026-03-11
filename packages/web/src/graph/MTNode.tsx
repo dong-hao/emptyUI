@@ -34,13 +34,19 @@ function toExtent(
     // matching runs (the whole coverage the range mode extracts), not the
     // first run's slice
     if (String(params.selection ?? "").trim() === "time range") {
-      const starts = pick.map((r) => parseIsoGmt(String(r.start)));
-      const ends = pick.map((r) => parseIsoGmt(String(r.end)));
-      if (starts.some((s) => s === null) || ends.some((s) => s === null)) {
+      // M-F7 degrade: skip unparsable extents rather than vanishing the
+      // bar — the union covers whatever parses; null only when nothing does
+      const starts = pick
+        .map((r) => parseIsoGmt(String(r.start)))
+        .filter((n): n is number => n !== null);
+      const ends = pick
+        .map((r) => parseIsoGmt(String(r.end)))
+        .filter((n): n is number => n !== null);
+      if (starts.length === 0 || ends.length === 0) {
         return null;
       }
-      const startSec = Math.min(...(starts as number[]));
-      const endSec = Math.max(...(ends as number[]));
+      const startSec = Math.min(...starts);
+      const endSec = Math.max(...ends);
       return endSec > startSec
         ? { startSec, endSec, absolute: true }
         : null;
