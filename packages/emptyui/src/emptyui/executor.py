@@ -36,6 +36,15 @@ class ExecutionError(Exception):
         super().__init__(f"node '{node_id}' failed: {original}")
 
 
+def _as_float(value: Any) -> float:
+    """Degrading float coercion — 0.0 for non-numeric/None (M-C4: the
+    summarizer must never crash the run; the bar merely goes unusable)."""
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _ts_summary(value: Any) -> dict[str, Any] | None:
     """Lightweight extent summary for a time-series payload (DESIGN §23.4).
 
@@ -65,7 +74,9 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                 "run": str(row.get("run", "")),
                 "start": str(row.get("start", ""))[:19],
                 "end": str(row.get("end", ""))[:19],
-                "sample_rate": float(row.get("sample_rate", 0.0) or 0.0),
+                # non-numeric sample_rate degrades to 0.0 (an unusable bar
+                # is better than crashing the run — M-C4)
+                "sample_rate": _as_float(row.get("sample_rate", 0.0)),
             })
         return {"kind": "mth5", "runs": runs}
     # run collection (Extract Run 'time range' mode): union bounds on top,
@@ -82,11 +93,18 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
             "run": str(e.get("run", "")),
             "start": str(e.get("start", ""))[:19],
             "end": str(e.get("end", ""))[:19],
-            "sample_rate": float(e.get("sample_rate", 0.0) or 0.0),
+            "sample_rate": _as_float(e.get("sample_rate", 0.0)),
         } for e in extents]
+        bounds = [s for s in starts if s]
+        if not bounds:
+            # all extents carry empty starts — no interpretable union
+            # (M-C4: min() on an empty generator crashed the run outside
+            # the try); emit the per-member runs only — the frontend
+            # renders no top-level bar and degrades gracefully
+            return {"kind": "ts.runs", "runs": runs}
         return {
             "kind": "ts.runs",
-            "start": min(s for s in starts if s),
+            "start": min(bounds),
             "end": max(e for e in ends if e),
             "absolute": True,
             "runs": runs,
@@ -240,6 +258,41 @@ class Executor:
         return seen
 
     @staticmethod
+    def invalidate_workspace_cache(cache, workspace, logger) -> int:
+        """TTL-GC support (M-C8): drop cache entries whose cached payloads
+        hold open files inside ``workspace`` — the GC is about to rmtree
+        it, and a cache hit on such an entry would restore a payload whose
+        backing file is gone (reads/writes land on unlinked inodes; Save
+        As from it silently produces nothing on disk).
+
+        Open handles are deliberately NOT closed here: a concurrent run may
+        hold the same shared payload instance (immutability contract, §7.1)
+        and reads on the unlinked inode keep succeeding until the last
+        reference drops. Dropping the entry forces the next run to
+        re-execute the producing node into its own fresh workspace.
+        Returns how many entries were dropped."""
+        if cache is None or not workspace:
+            return 0
+        try:
+            ws = str(Path(workspace).resolve())
+        except OSError:
+            ws = str(workspace)
+        if not ws:
+            return 0
+
+        def _refers(value: Any) -> bool:
+            fn = getattr(value, "filename", None)
+            if not fn:
+                return False
+            try:
+                p = str(Path(fn).resolve())
+            except OSError:
+                p = str(fn)
+            return p == ws or p.startswith(ws + os.sep)
+
+        return cache.drop_referencing(_refers)
+
+    @staticmethod
     def _sweep_run_payloads(store, outputs_by_node, cache, logger) -> None:
         """Failed/cancelled-run hygiene: close open MTH5 payloads the run
         left in its store (§9.3 stale-flag hygiene — an interrupted run must
@@ -297,6 +350,14 @@ class Executor:
         invalidated the cache.
         """
         if not isinstance(value, str) or widget not in ("file", "directory"):
+            return value
+        if path_kind == "out":
+            # L-C3: an output path is a DESTINATION, not an input — its
+            # stat at key time says nothing about what the node will
+            # write, and an empty out-path stat()s the server CWD
+            # (Path("") == Path(".")): a spurious cross-run
+            # invalidation trigger on every CWD-affecting event (§17.2
+            # resolves out-paths per-run into the workspace anyway)
             return value
         p = Path(value).expanduser()
         if path_kind == "in" and data_root is not None and not p.is_absolute():
@@ -442,6 +503,17 @@ class Executor:
                     f"param '{param.name}': '{value}' is not a number"
                 ) from None
             return round(f) if widget == "integer" else f
+        if widget == "boolean" and isinstance(value, str):
+            # L-C1: a JSON workflow can carry "false" as a STRING (older
+            # documents, free-text editing) — the raw string reaches node
+            # code truthy ('false' is truthy!). Empty string = unchecked.
+            s = value.strip().lower()
+            if s in ("true", "1", "yes", "on"):
+                return True
+            if s in ("false", "0", "no", "off", ""):
+                return False
+            raise ValueError(
+                f"param '{param.name}': '{value}' is not a boolean")
         if widget == "select" and isinstance(value, str):
             opts = getattr(param, "options", ()) or ()
             if opts and all(
@@ -492,6 +564,19 @@ class Executor:
             unknown = sorted(set(targets) - known)
             if unknown:
                 raise ValueError(f"unknown target node(s): {unknown}")
+        by_id = {n.id: n for n in workflow.nodes}
+        # malformed edges (M-C10): an edge referencing a missing node id
+        # would surface as a raw KeyError from _topo_order/_node_key (a
+        # crash without the node-failure contract) — name it instead
+        for e in workflow.edges:
+            for endpoint in (e.source, e.target):
+                if endpoint not in by_id:
+                    raise ExecutionError(
+                        endpoint,
+                        ValueError(
+                            f"edge '{getattr(e, 'id', '?')}' references "
+                            f"unknown node '{endpoint}'"),
+                    )
         store = DataStore()
         started = time.monotonic()
         if workspace is not None:
@@ -500,7 +585,6 @@ class Executor:
         emit({"event": "run_started"})
         outputs_by_node: dict[str, dict[str, str]] = {}
         order = self._topo_order(workflow)
-        by_id = {n.id: n for n in workflow.nodes}
         if len(order) != len(by_id):
             # direct executor.run callers may skip validate_workflow; a cycle
             # (incl. a self-loop) must fail loudly, not silently skip nodes
@@ -516,9 +600,12 @@ class Executor:
         # Snapshot the manifests this run needs at start (DESIGN.md §5.1):
         # a plugin enable/disable toggle mid-run must not yank a node out of
         # an executing workflow — the run completes under the manifests it
-        # started with (rebuild swaps the node table atomically, so this
-        # snapshot is internally consistent even if a toggle overlaps it).
-        manifests = {nid: self.registry.get(by_id[nid].type) for nid in order}
+        # started with. NB the whole TABLE is fetched once (M-C5): per-node
+        # registry.get() calls are not a snapshot — each read may land on a
+        # different table across a concurrent rebuild's swap, mixing
+        # old/new manifests (a just-disabled plugin could execute).
+        table = self.registry.table()
+        manifests = {nid: table.get(by_id[nid].type) for nid in order}
         unknown = sorted(nid for nid, m in manifests.items() if m is None)
         if unknown:
             # direct executor.run callers may skip validate_workflow; also

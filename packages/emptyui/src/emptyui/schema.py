@@ -59,6 +59,15 @@ def validate_workflow(workflow: Workflow, registry) -> None:
     Raises :class:`ValidationError_` listing all problems found.
     """
     errors: list[str] = []
+    # document envelope (M-C2/L-C2, DESIGN.md §6): the frontend validates
+    # format/version at load time, but the executor is a public API — a
+    # foreign or future document must be rejected here too (a silent
+    # best-effort parse would run half-understood workflows)
+    if workflow.format != "emptyui/workflow":
+        errors.append(
+            f"not an emptyUI workflow document (format: {workflow.format!r})")
+    if workflow.version != 1:
+        errors.append(f"unsupported workflow version: {workflow.version}")
     from emptyui.api import port_type_compatible
 
     by_id = {}

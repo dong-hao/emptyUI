@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import shutil
 import tempfile
 import threading
@@ -22,6 +23,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 import emptyui
 from emptyui.cache import NodeCache
+
+logger = logging.getLogger("emptyui.server")
 from emptyui.config import Settings
 from emptyui.executor import Executor
 from emptyui.registry import Registry, build_default_registry
@@ -241,6 +244,17 @@ def create_app(
                         if artifact.get("run_id") == run_id:
                             artifacts.pop(artifact_id, None)
         for _run_id, workspace in expired:
+            # M-C8: cached payloads holding open files inside the doomed
+            # workspace are invalidated FIRST (the rmtree would otherwise
+            # leave a cache hit restoring a payload whose backing file is
+            # gone — reads/writes on unlinked inodes). Handles stay open
+            # (a concurrent run may share them); the dropped entries force
+            # fresh re-execution on the next run.
+            try:
+                Executor.invalidate_workspace_cache(node_cache, workspace, logger)
+            except Exception:  # GC hygiene must never mask the reclaim
+                logger.exception(
+                    "workspace cache invalidation failed for %s", workspace)
             shutil.rmtree(workspace, ignore_errors=True)
         return len(expired)
 

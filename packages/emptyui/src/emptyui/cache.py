@@ -87,6 +87,20 @@ class NodeCache:
                     n += 1
         return n
 
+    def drop_referencing(self, predicate) -> int:
+        """Evict every entry where at least one output value satisfies
+        ``predicate(value)`` (M-C8: the TTL GC drops entries whose cached
+        payloads hold open files inside a workspace it is about to
+        reclaim). Returns how many entries were removed."""
+        with self._lock:
+            doomed = [
+                key for key, entry in self._entries.items()
+                if any(predicate(v) for v in (entry.outputs or {}).values())
+            ]
+            for key in doomed:
+                self._entries.pop(key, None)
+            return len(doomed)
+
     def cached_values(self) -> list:
         """All values currently held by cache entries (identity sweep for
         the failed-run handle cleanup — never close a cached payload)."""
