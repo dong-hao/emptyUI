@@ -6,7 +6,7 @@ Serialization to the MTH5-backed workspace arrives with M2.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -15,7 +15,6 @@ class Handle:
     id: str
     type: str  # port type tag, e.g. "ts.run"
     value: Any = None
-    meta: dict[str, Any] = field(default_factory=dict)
 
 
 class DataStore:
@@ -25,9 +24,9 @@ class DataStore:
         self._handles: dict[str, Handle] = {}
         self._counter = 0
 
-    def put(self, type: str, value: Any, meta: dict[str, Any] | None = None) -> Handle:
+    def put(self, type: str, value: Any) -> Handle:
         self._counter += 1
-        handle = Handle(id=f"h{self._counter}", type=type, value=value, meta=meta or {})
+        handle = Handle(id=f"h{self._counter}", type=type, value=value)
         self._handles[handle.id] = handle
         return handle
 
@@ -35,7 +34,3 @@ class DataStore:
         if handle_id not in self._handles:
             raise KeyError(f"unknown handle: {handle_id}")
         return self._handles[handle_id]
-
-    def clear(self) -> None:
-        self._handles.clear()
-        self._counter = 0

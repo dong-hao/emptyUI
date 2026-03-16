@@ -72,10 +72,6 @@ class NodeCache:
                 evicted += 1
         return evicted
 
-    @property
-    def max_entries(self) -> int:
-        return self._max
-
     def drop(self, *keys: str) -> int:
         """Evict specific entries by key (§7.1 input invalidation: a node
         that closed/mutated its inputs poisons the producers' entries).

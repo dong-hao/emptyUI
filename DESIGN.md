@@ -567,7 +567,18 @@ Rules that keep the ecosystem healthy:
   (numpy/matplotlib-level deps).
 - Each plugin declares its heavy deps as pip extras.
 - Node types are namespaced by convention: `core.<domain>.<name>` for the
-  bundled plugin, `<org>.<domain>.<name>` for external plugins.
+  bundled plugin, `<org>.<domain>.<name>` for external plugins. The registry
+  does not enforce the namespace today — it is a review-time gate; installing
+  a plugin is an act of trust equal to `pip install` itself (L-C14).
+- **Trust model (L-C14)**: a plugin's code runs with the server process's full
+  privileges. The executor's guarantees are CONTRACTS, not sandboxing: nodes
+  must be functional (never mutate inputs or previously returned outputs —
+  §8.1), `Node` instances are shared across runs (instance attributes become
+  cross-run state — keep per-run state in `ctx`), and `ctx.publish_artifact`
+  may write into the current run's workspace. Anything beyond that
+  (filesystem access, network, subprocesses) is the plugin's own business and
+  the user's own risk; the settings dialog's plugin list is therefore the
+  natural place to audit what is installed.
 - **Open, namespaced port types**: plugins may introduce new types but must
   namespace them and declare UI metadata via the node's `port_types` ClassVar;
   reusing core tags is strongly preferred, and consumers duck-type documented
@@ -652,9 +663,9 @@ One file = one reproducible pipeline.
 - `position` is UI-only → headless/batch execution ignores it cleanly.
 - Executor validates against current manifests at load time with actionable
   messages. Saved workflows carrying params a node no longer declares are
-  processed unchanged (only manifest params are resolved), but each stale param
-  emits a node-level progress note — stale surfaces degrade loudly, never
-  silently.
+  processed unchanged (only manifest params are resolved); one node-level
+  progress note lists all stale params per node — stale surfaces degrade
+  loudly, never silently.
 
 ---
 
@@ -1540,11 +1551,12 @@ achieved by construction (one process per user/team).
   directory holding long-lived, relocatable state — the `.emptyui-cache/` disk
   cache. `EMPTYUI_PROJECT_DIR` designates it (unset → disk cache disabled).
 
-Local development keeps unrestricted behavior (data root defaults to
-cwd); confinement activates only in remote mode. Manifests mark path-kind
-params as `in`/`out` so a single resolver confines inputs to the data root and
-forces outputs into the workspace (outputs normalize + validate identically —
-`../` escapes are rejected).
+Local development keeps unrestricted behavior (no data root — the
+whole filesystem is browsable and addressable; the files browser merely
+STARTS at the process cwd); confinement activates only in remote mode.
+Manifests mark path-kind params as `in`/`out` so a single resolver confines
+inputs to the data root and forces outputs into the workspace (outputs
+normalize + validate identically — `../` escapes are rejected).
 
 ### 11.3 Serving, mounting, proxies
 

@@ -152,11 +152,16 @@ class Param:
         }
 
 
-def first_sentence(text: str, limit: int = 140) -> str:
+#: Tooltip hard cap (DESIGN.md §4) — a sentence with no terminator stops here.
+_TOOLTIP_CAP = 140
+
+
+def first_sentence(text: str) -> str:
     """First sentence of a description (tooltip fallback, DESIGN.md §4).
 
     Whitespace-normalized, cut at the first sentence terminator; a sentence
-    with no terminator is hard-capped at ``limit`` chars.
+    with no terminator is hard-capped at :data:`_TOOLTIP_CAP` chars. (The
+    ``limit`` parameter was never used by a caller — dead parameter.)
     """
     text = " ".join((text or "").split())
     if not text:
@@ -165,7 +170,10 @@ def first_sentence(text: str, limit: int = 140) -> str:
         i = text.find(sep)
         if i > 0:
             return text[: i + 1]
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return (
+        text if len(text) <= _TOOLTIP_CAP
+        else text[: _TOOLTIP_CAP - 1] + "…"
+    )
 
 
 class Node:
