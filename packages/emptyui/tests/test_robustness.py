@@ -5,6 +5,8 @@ uncovered by the pre-existing suite.
 """
 
 import json
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -318,3 +320,87 @@ def test_out_path_signature_has_no_cwd_stat(tmp_path, monkeypatch):
 # --- L-C5/L-C6/L-C9: artifact endpoints --------------------------------------
 
 
+def test_artifact_endpoints_via_run(tmp_path):
+    """404 with remedy on a vanished file (not 500), sandbox + nosniff
+    headers, table media follows the file, download keeps the stem."""
+    from emptyui import Node
+
+    class Table(Node):
+        type = "art.table"
+        outputs = ()
+
+        def execute(self, ctx):
+            p = Path(ctx.workspace or ".") / "report.csv"
+            p.write_text("a,b\n1,2\n")
+            ctx.publish_artifact(path=p, kind="table")
+            return {}
+
+    reg = Registry()
+    reg.add(Table)
+    client = TestClient(create_app(reg))
+    run_id = client.post(
+        "/api/runs",
+        json={"workflow": {"nodes": [{"id": "n1", "type": "art.table"}],
+                           "edges": []}},
+    ).json()["run_id"]
+    for _ in range(250):
+        detail = client.get(f"/api/runs/{run_id}").json()
+        if detail["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.02)
+    assert detail["status"] == "completed"
+    arts = [e for e in detail["events"] if e["event"] == "artifact"]
+    assert arts, detail["events"]
+    aid = arts[0]["id"]
+    path = Path(arts[0]["path"])
+
+    r = client.get(f"/api/artifacts/{aid}/preview")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")  # L-C9
+    assert r.headers["x-content-type-options"] == "nosniff"  # L-C6
+    assert r.headers["content-security-policy"] == "sandbox"
+    d = client.get(f"/api/artifacts/{aid}")
+    assert d.headers.get("content-disposition", "").startswith("attachment")
+    assert "report.csv" in d.headers["content-disposition"]  # L-C9 stem
+
+    # L-C5: the file vanishing (retention) must 404 with the remedy
+    path.unlink()
+    r = client.get(f"/api/artifacts/{aid}/preview")
+    assert r.status_code == 404
+    assert "rerun" in r.json()["detail"]
+
+
+# --- L-C7: per-run event cap --------------------------------------------------
+
+
+def test_events_capped_per_run():
+    """With retention off, a chatty node must not accumulate unbounded
+    per-run event history."""
+    from emptyui import Node
+
+    class Chatty(Node):
+        type = "cap.chatty"
+        outputs = ()
+
+        def execute(self, ctx):
+            for i in range(6000):
+                ctx.progress(i / 6000.0, f"step {i}")
+            return {}
+
+    reg = Registry()
+    reg.add(Chatty)
+    client = TestClient(create_app(reg))
+    run_id = client.post(
+        "/api/runs",
+        json={"workflow": {"nodes": [{"id": "n1", "type": "cap.chatty"}],
+                           "edges": []}},
+    ).json()["run_id"]
+    for _ in range(500):
+        detail = client.get(f"/api/runs/{run_id}").json()
+        if detail["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.02)
+    assert detail["status"] == "completed"
+    assert len(detail["events"]) <= 5000
+    # the terminal events survive the cap (run_finished is the tail)
+    assert detail["events"][-1]["event"] == "run_finished"

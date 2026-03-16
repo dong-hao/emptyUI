@@ -90,9 +90,19 @@ def _artifact_media(kind: str, path: str) -> tuple[str, str]:
     if kind == "image" or suffix in _IMAGE_MEDIA:
         return _IMAGE_MEDIA.get(suffix, "image/png"), suffix or ".png"
     if kind == "table" or suffix == ".json":
+        # L-C9: a table artifact's media type follows its file — a .csv
+        # table is not JSON
+        if suffix == ".csv":
+            return "text/csv", suffix
+        if suffix == ".tsv":
+            return "text/tab-separated-values", suffix
         return "application/json", ".json"
     return "application/octet-stream", suffix or ".bin"
 
+
+#: L-C7: per-run event history cap (memory hygiene when retention is off;
+#: late-joining pollers replay the surviving tail)
+_MAX_EVENTS_PER_RUN = 5000
 
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 
@@ -501,6 +511,13 @@ def create_app(
                 if info is None:
                     return
                 info["events"].append(event)
+                # L-C7: cap events per run — a long-running node emitting
+                # progress with retention off would otherwise accumulate
+                # unbounded (per-run memory growth). The newest tail wins;
+                # late-joining pollers replay whatever remains (the
+                # frontend dedupes by content, so replays stay safe).
+                if len(info["events"]) > _MAX_EVENTS_PER_RUN:
+                    del info["events"][:len(info["events"]) - _MAX_EVENTS_PER_RUN]
                 if event["event"] == "run_started":
                     if info["summary"].get("status") == "queued":
                         info["summary"]["status"] = "running"
@@ -625,26 +642,46 @@ def create_app(
             pass
         return {"path": str(p), "parent": str(p.parent), "entries": dirs + files}
 
-    @app.get("/api/artifacts/{artifact_id}/preview")
-    def artifact_preview(artifact_id: str) -> FileResponse:
+    def _artifact_response(artifact_id: str, download: bool) -> FileResponse:
         info = artifacts.get(artifact_id)
         if info is None:
             raise HTTPException(status_code=404, detail="unknown artifact")
-        media, _ext = _artifact_media(info["kind"], info["path"])
-        return FileResponse(info["path"], media_type=media)
+        path = Path(info["path"])
+        if not path.exists():
+            # L-C5: a reclaimed workspace (TTL retention) removes artifact
+            # files — a FileResponse open() would 500; 404 with the remedy
+            raise HTTPException(
+                status_code=404,
+                detail="artifact file no longer exists (its run's workspace "
+                       "was reclaimed by retention) — rerun the producing "
+                       "node to regenerate it")
+        media, ext = _artifact_media(info["kind"], info["path"])
+        headers = {
+            # L-C6: served artifacts must never execute in the app origin —
+            # sandbox the content and defeat MIME sniffing (an SVG artifact
+            # is active content)
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        }
+        if download:
+            # L-C9: keep the producing file's name (stem + extension) — the
+            # bare artifact id erased any hint of what the file is
+            return FileResponse(
+                info["path"],
+                media_type=media,
+                filename=path.name or f"{artifact_id}{ext}",
+                headers=headers,
+            )
+        return FileResponse(info["path"], media_type=media, headers=headers)
+
+    @app.get("/api/artifacts/{artifact_id}/preview")
+    def artifact_preview(artifact_id: str) -> FileResponse:
+        return _artifact_response(artifact_id, download=False)
 
     @app.get("/api/artifacts/{artifact_id}")
     def artifact_download(artifact_id: str) -> FileResponse:
         """Full artifact download (Content-Disposition: attachment)."""
-        info = artifacts.get(artifact_id)
-        if info is None:
-            raise HTTPException(status_code=404, detail="unknown artifact")
-        media, ext = _artifact_media(info["kind"], info["path"])
-        return FileResponse(
-            info["path"],
-            media_type=media,
-            filename=f"{artifact_id}{ext}",
-        )
+        return _artifact_response(artifact_id, download=True)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
