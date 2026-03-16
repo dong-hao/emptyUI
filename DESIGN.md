@@ -884,8 +884,14 @@ to days:
   selection the bar shows the union extent over all runs — the whole
   coverage the mode extracts), Align Runs (one
   pair over the aligned overlap — identical-interval outputs), Merge Channels
-  (crop of the merged run). Extract Run / Align Runs bounds clamp into the run
-  extent; extent-unknown → passthrough with warning. Merge Runs is
+  extent; extent-unknown → passthrough with warning. A bounded window missing
+  the resolved run entirely is rejected with an actionable message naming the
+  matched run (the clamp would extract a useless 0-sample slot; §24.12 L-M3
+  keeps this one hard reject deliberately). Boundary convention (L-M10,
+  deliberate): Extract Run's ISO crop is END-INCLUSIVE (`xarray.sel(slice)`)
+  while the windowed processors (Align Runs / Build FC) use half-open
+  `[t0, t1)` arithmetic — parity holds for fully-contained windows; the
+  boundary sample differs by convention. Merge Runs is
   deliberately skipped: its per-run windows live in the selection table rows,
   not in a node-param pair.
 

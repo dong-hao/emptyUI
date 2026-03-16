@@ -121,17 +121,22 @@ def resolve_filter_registry(survey_obj, data_vars) -> dict:
 def _slice_window(data_vars: dict, lo, hi) -> dict:
     """Slice every channel's time axis to ``[lo, hi]`` (inclusive) when the
     run carries an absolute time axis; naive/aware bounds are reconciled
-    against the archive's axis (the archive convention is UTC)."""
+    against the archive's axis (the archive convention is UTC). Either
+    bound may be None (L-M2: an end-only or start-only bound crops one
+    side — xarray's slice accepts the open end)."""
     sample = next(iter(data_vars.values()))
     t_arr = np.asarray(sample["time"].values)
     if not np.issubdtype(t_arr.dtype, np.datetime64):
         return data_vars
     idx = pd.DatetimeIndex(t_arr)
     if idx.tz is None:  # naive archive, aware bounds
-        blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
+        blo = lo.tz_localize(None) if lo is not None else None
+        bhi = hi.tz_localize(None) if hi is not None else None
     else:  # aware archive: localize naive bounds
-        blo = lo.tz_localize("UTC") if lo.tzinfo is None else lo
-        bhi = hi.tz_localize("UTC") if hi.tzinfo is None else hi
+        blo = lo.tz_localize("UTC") if (lo is not None and lo.tzinfo is None) else lo
+        bhi = hi.tz_localize("UTC") if (hi is not None and hi.tzinfo is None) else hi
+    if blo is None and bhi is None:
+        return data_vars
     return {
         name: da.sel(time=slice(blo, bhi))
         for name, da in data_vars.items()}
@@ -363,16 +368,21 @@ class ExtractRun(Node):
         Param("start", "string", label="Start (UTC)", default="", optional=True,
               time_bar="mth5", placeholder="run start",
               description="Slot start: ISO datetime (UTC, e.g. "
-                          "2023-06-01 12:00:00) or seconds into the run; "
-                          "empty = run start. Driven by the time bar. In "
-                          "'time range' mode this selects the window: all "
-                          "runs intersecting it are extracted."),
+                          "2023-06-01 12:00:00) or seconds; empty = run "
+                          "start. Driven by the time bar. Bare numbers are "
+                          "MODE-RELATIVE (L-M1): 'run id' = seconds into "
+                          "the run; 'time range' = epoch seconds (the bar "
+                          "writes ISO in both — bare numbers come from "
+                          "manual entry). In 'time range' mode this "
+                          "selects the window: all runs intersecting it "
+                          "are extracted."),
         Param("end", "string", label="End (UTC)", default="", optional=True,
               time_bar="mth5", placeholder="run end",
-              description="Slot end: ISO datetime (UTC) or seconds into "
-                          "the run; empty = run end. Driven by the time "
-                          "bar. In 'time range' mode this selects the "
-                          "window."),
+              description="Slot end: ISO datetime (UTC) or seconds; empty "
+                          "= run end. Driven by the time bar. Bare numbers "
+                          "are mode-relative: 'run id' = seconds into the "
+                          "run; 'time range' = epoch seconds. In 'time "
+                          "range' mode this selects the window."),
     )
     inherit: ClassVar[dict[str, dict[str, str]]] = {
         "mth5": {"survey": "survey_id", "station": "station_id",
@@ -462,7 +472,11 @@ class ExtractRun(Node):
                 start_dt = ext0 + pd.Timedelta(seconds=s0)
                 end_dt = ext0 + pd.Timedelta(seconds=s1)
         data_vars, sample_rate, _start = read_run_channels(run_obj)
-        if start_dt is not None:
+        # L-M2: crop when EITHER bound is set — the old start-only guard
+        # silently dropped an end-only bound in the no-extent fallback
+        # (the normal path clamps an empty start to the run start; the
+        # fallback must match)
+        if start_dt is not None or end_dt is not None:
             data_vars = _slice_window(data_vars, start_dt, end_dt)
         registry = resolve_filter_registry(survey_obj, data_vars)
         runts = _wrap_runts(run_obj, station_obj, survey_obj, data_vars,

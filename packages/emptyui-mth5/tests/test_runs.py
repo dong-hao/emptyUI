@@ -570,9 +570,8 @@ def test_split_merge_roundtrip_carries_survey(tmp_path):
     default-id rule). Split's outputs now carry the survey so Merge can
     rebuild it."""
     import numpy as np
-    from mt_timeseries import ChannelTS, RunTS
-
     from emptyui_mth5.runs import MergeChannels, SplitChannels
+    from mt_timeseries import ChannelTS, RunTS
 
     ch_list = []
     for comp in ("bx", "by", "bz", "e1", "e2"):
@@ -596,3 +595,25 @@ def test_split_merge_roundtrip_carries_survey(tmp_path):
     # That gap is handled at the identity layer: runts_context ignores the
     # default "0" ids, so the params/fallback win (test_persist.py).
     assert merged.survey_metadata.id == "4P"
+
+
+def test_slice_window_handles_open_bounds():
+    """L-M2: an end-only or start-only bound crops ONE side (the old
+    start-only guard silently dropped an end-only bound in the no-extent
+    fallback); both-None returns unchanged."""
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    from emptyui_mth5.runs import _slice_window
+
+    t = pd.date_range("2024-01-01", periods=8, freq="s")
+    da = xr.DataArray(np.arange(8.0), coords={"time": t}, dims=("time",))
+    data_vars = {"ex": da}
+
+    end_only = _slice_window(data_vars, None, pd.Timestamp("2024-01-01 00:00:04", tz="UTC"))
+    assert end_only["ex"].sizes["time"] == 5  # through the 4th second
+
+    start_only = _slice_window(data_vars, pd.Timestamp("2024-01-01 00:00:05", tz="UTC"), None)
+    assert start_only["ex"].sizes["time"] == 3
+
+    assert _slice_window(data_vars, None, None) is data_vars
