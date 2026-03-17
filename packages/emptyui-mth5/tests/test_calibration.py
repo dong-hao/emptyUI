@@ -40,10 +40,12 @@ def test_build_fap_filters_flat_extension():
     fap = filters["bx"]
     assert fap.name == "cal_bx"
     assert fap.units_in == "nanoTesla" and fap.units_out == "nanoTesla"
-    assert fap.frequencies.size == 13
-    # flat clamp: the padded low-frequency point repeats the first row
-    assert fap.amplitudes[0] == pytest.approx(fap.amplitudes[1])
-    assert fap.phases[0] == 0.0
+    # two pad rows (L-M7): the second zeroes the below-pad extrapolation
+    # slope so the phase stays flat below the pad point
+    assert fap.frequencies.size == 14
+    # flat clamp: the padded low-frequency points repeat the first row
+    assert fap.amplitudes[0] == pytest.approx(fap.amplitudes[2])
+    assert fap.phases[0] == 0.0 and fap.phases[1] == 0.0
     # electric channels use mV/km (canonical mt_metadata name)
     assert filters["e1"].units_in == "milliVolt per kilometer"
 
@@ -217,3 +219,25 @@ def test_attach_filters_invalidates_cached_channels():
     cal = runts.calibrate()
     np.testing.assert_allclose(
         np.asarray(cal.hx.ts), x / 2.0, rtol=0.03, atol=0.03)
+
+
+def test_fap_flat_extension_phase_flat_below_pad():
+    """L-M7: the flat extension pads TWO identical rows — mt_metadata's
+    extrapolation below the lowest table point follows the lowest
+    interval's slope, so a single pad row ramped the phase below the pad
+    point (flat in modulus, ramping in phase); two rows zero that slope."""
+    from emptyui_mth5.calibration import build_fap_filters
+
+    rows = {"channels": {"hx": {
+        "frequencies": np.array([1.0, 10.0, 100.0]),
+        "amplitudes": np.array([1000.0, 990.0, 980.0]),
+        "phases_deg": np.array([-2.0, -2.0, -1.5]),
+    }}}
+    fap = build_fap_filters(rows)["hx"]
+    q = fap.complex_response(np.array([1e-6, 1e-5, 1e-4]))
+    phase = np.rad2deg(np.angle(q))
+    assert np.allclose(phase, 0.0, atol=1e-6)  # truly flat below the pad
+    assert np.allclose(np.abs(q), 1000.0, rtol=1e-9)
+    # between the pad point and the measured range the ramp still applies
+    q2 = fap.complex_response(np.array([1.0]))
+    assert abs(np.rad2deg(np.angle(q2))[0] + 2.0) < 0.01

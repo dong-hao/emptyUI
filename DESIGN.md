@@ -941,8 +941,9 @@ convention puts the response on the channel metadata
 (`AppliedFilter(name, applied, stage)` → `/Survey/Filters`, typed filter
 objects: ZPK / FAP / coefficient / time delay / FIR, evaluated as
 `complex_response(f)`), which the ts.run payloads already carry. Applied-flag
-semantics prevent double-calibration: only filters with `applied=False` are
-removed; a prior time-domain `Calibrate` flips the flags, so both routes coexist
+semantics prevent double-calibration: only filters with `applied=True` are
+removed (divided out — the response IS part of the recorded data); a prior
+time-domain `Calibrate` flips the flags to `False`, so both routes coexist
 (the time-domain Calibrate node remains for the classical route and explicit
 control). The FC records the applied calibration in its attrs
 (`calibration_applied`, e.g. `"hx=box+coil; ex=box"`).

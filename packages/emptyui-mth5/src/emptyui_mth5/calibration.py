@@ -177,9 +177,13 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
     ``rows`` is the :func:`parse_fap` result. ``extend_flat`` (default) pads
     the table down to 0.001·f_min with the first row's modulus and zero
     phase — below the measured range the response is treated as constant
-    (log-extrapolation was found to be worse, DESIGN §16.1). ``units`` may
-    override the per-channel units (default: nanoTesla / mV·km by channel
-    prefix).
+    (log-extrapolation was found to be worse, DESIGN §16.1). TWO pad rows:
+    mt_metadata's extrapolation below the lowest table point follows the
+    lowest interval's slope — a single pad row made the phase ramp below
+    the pad point (flat in modulus, ramping in phase, L-M7); a second
+    identical row zeroes that slope so the below-pad response is truly
+    flat. ``units`` may override the per-channel units (default:
+    nanoTesla / mV·km by channel prefix).
     """
     from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
 
@@ -192,9 +196,9 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
             table["phases_deg"],
         )
         if extend_flat:
-            f = np.concatenate([[f[0] / 1e3], f])
-            a = np.concatenate([[a[0]], a])
-            p = np.concatenate([[0.0], p])
+            f = np.concatenate([[f[0] / 1e4, f[0] / 1e3], f])
+            a = np.concatenate([[a[0], a[0]], a])
+            p = np.concatenate([[0.0, 0.0], p])
         unit = (units or {}).get(ch) or _default_unit(ch)
         # phases are passed in radians: mt_metadata's constructor applies a
         # max(|phase|) > 6*pi degrees->radians heuristic that silently
