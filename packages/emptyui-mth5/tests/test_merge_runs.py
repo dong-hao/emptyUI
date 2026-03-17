@@ -266,3 +266,39 @@ def test_merge_runts_pads_disagreeing_aux_mask():
     assert "saturated" in merged.dataset.data_vars
     assert not np.any(np.asarray(merged.saturated.ts) > 0)
     assert "merged_source_runs" in merged.dataset.attrs
+
+
+def test_merge_runts_mixed_naive_aware_spans():
+    """L-M4: a naive stamp (digitized record) merging against an aware one
+    must not raise a raw TypeError on the span comparison — both normalize
+    to UTC (the archive convention)."""
+    r1 = _synthetic_runts(start="2024-01-01T00:00:00", n=64)
+    r1.run_metadata.id = "b"
+    r2 = _synthetic_runts(start="2024-01-01T00:01:04", n=64)
+    r2.run_metadata.id = "c"
+    # strip the tz from r1's time axis (naive)
+    r1.dataset = r1.dataset.assign_coords(
+        time=np.asarray(r1.dataset["time"].values).astype("datetime64[ns]"))
+    merged = merge_runts([r1, r2], new_run_id="bc")
+    assert merged.dataset.sizes["time"] == 128
+
+
+def test_merge_runts_chained_provenance_flattens():
+    """L-M4: merge(merge(a, b), c) must keep the ORIGINAL run identities —
+    the old overwrite recorded the inner merge's new run id (and dropped
+    the inner gap list)."""
+    r1 = _synthetic_runts(start="2024-01-01T00:00:00", n=64)
+    r1.run_metadata.id = "a"
+    r2 = _synthetic_runts(start="2024-01-01T00:02:08", n=64)  # 64 s gap
+    r2.run_metadata.id = "b"
+    inner = merge_runts([r1, r2], new_run_id="ab")
+    assert inner.dataset.attrs["merged_source_runs"] == ["a", "b"]
+    r3 = _synthetic_runts(start="2024-01-01T00:04:16", n=64)  # 64 s gap
+    r3.run_metadata.id = "c"
+    merged = merge_runts([inner, r3], new_run_id="abc")
+    attrs = merged.dataset.attrs
+    assert attrs["merged_source_runs"] == ["a", "b", "c"]
+    assert attrs["merged_gap_intervals"] == [
+        ["2024-01-01T00:01:04", "2024-01-01T00:02:08"],
+        ["2024-01-01T00:03:12", "2024-01-01T00:04:16"],
+    ]
