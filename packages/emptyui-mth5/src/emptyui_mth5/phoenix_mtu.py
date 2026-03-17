@@ -134,15 +134,35 @@ class Segment:
 
 def _group_segments(
     blocks: Iterator[tuple[_BlockTag, np.ndarray]],
+    path: Path | None = None,
 ) -> list[Segment]:
     """Regroup blocks into maximal contiguous runs: a block continues the
-    current segment iff its start equals the segment's exclusive end."""
+    current segment when its start lies within one block step AFTER the
+    segment's exclusive end.
+
+    Exact-equality grouping is impossible for SUB-SECOND blocks (L-M6):
+    the tag carries whole seconds only, so a fractional step's next tag is
+    quantized away from the previous end. The one-step tolerance still
+    separates a real multi-block gap from tag rounding; the price is that
+    a SINGLE-block gap (or a sub-step overlap) is indistinguishable from
+    tag rounding when the step is sub-second — the tags cannot carry
+    sub-second offsets at all. Blocks arriving OUT OF ORDER (start before
+    the current segment's end minus a step) fragment the record into
+    per-block segments silently — sample order IS tag order, so
+    re-sorting would reorder the data; warn loudly instead.
+    """
     segs: list[Segment] = []
     cur: Segment | None = None
     for tag, samples in blocks:
         step = pd.to_timedelta(tag.n_scan / tag.rate, unit="s")
         end = tag.start + step
-        if cur is not None and tag.start == cur.end:
+        if cur is not None and tag.start < cur.end - step:
+            _log.warning(
+                "%s: blocks out of order (tag %s precedes the running "
+                "segment's end %s) — the record fragments per block; "
+                "check the acquisition/ingest order",
+                path or "TSn", tag.start, cur.end)
+        if cur is not None and (cur.end - step) <= tag.start <= cur.end + step:
             cur.end, cur.n_blocks = end, cur.n_blocks + 1
             cur.chunks.append(samples)
             cur.saturated.append(tag.saturated)
@@ -243,7 +263,10 @@ def _apply_tbl_calibration(
     comp: str, x: np.ndarray, table,
 ) -> tuple[np.ndarray, str]:
     """Multiply the TBL scalar calibration into the counts (§24.8 decision
-    (c): calibration at ingest; filter/FAP handling is later work)."""
+    (c): calibration at ingest — scalar AND FAP shape response, applied
+    together: the chains ride the channel metadata with ``applied=True``
+    (aurora semantics — the recorded data already carries them, and a
+    downstream Calibrate removes them before Compute FC)."""
     if comp in ("ex", "ey"):
         scale = table.ex_calibration if comp == "ex" else table.ey_calibration
         return x * scale, "mV/km"
@@ -520,7 +543,7 @@ def read_phoenix_mtu(
             statuses.add(tag.clock_status)
             max_clock_error = max(max_clock_error, abs(tag.clock_error_s))
             n_saturated += tag.saturated
-        segs = _group_segments(iter(blocks))
+        segs = _group_segments(iter(blocks), path)
         # schedule cross-check (loose): slot lengths vs the TBL schedule;
         # window-cropped edge segments are exempt (they legitimately span
         # less than the slot length)
@@ -536,10 +559,16 @@ def read_phoenix_mtu(
                     # a window-cropped segment LIES INSIDE the window (the
                     # block filter drops whole blocks, so the first retained
                     # block's tag is >= but not necessarily == the bound) —
-                    # exact-equality checks false-alarmed on those
+                    # exact-equality checks false-alarmed on those. The
+                    # bound itself is second-quantized in the tags: a
+                    # FRACTIONAL-second window's edge segment may start up
+                    # to one slot BEFORE the bound (the block containing
+                    # the bound started earlier) — bound the exemption by
+                    # the slot length (L-M5)
+                    tol = pd.Timedelta(seconds=expected_len or 0)
                     inside_window = (
-                        (win_start is None or seg.start >= win_start)
-                        and (win_end is None or seg.end <= win_end))
+                        (win_start is None or seg.start >= win_start - tol)
+                        and (win_end is None or seg.end <= win_end + tol))
                     if (win_start is not None or win_end is not None) and inside_window:
                         continue  # window crop, not a schedule anomaly
                     warnings.append(

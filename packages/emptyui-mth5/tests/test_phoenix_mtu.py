@@ -15,7 +15,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-
 from emptyui_mth5.phoenix_mtu import (
     _block_tag,
     _group_segments,
@@ -66,8 +65,7 @@ def _write_tbl(path: Path, **overrides) -> None:
     }
     tags.update(overrides)
     with open(path, "wb") as fid:
-        for tag, value in tags.items():
-            fid.write(_tbl_value(tag, value))
+        fid.writelines(_tbl_value(tag, value) for tag, value in tags.items())
 
 
 def _ts_block(start: datetime, rate: int, n_scan: int, n_ch: int, *,
@@ -141,7 +139,6 @@ def test_block_tag_decode(tmp_path):
     layout verified byte-level on the official recording, §24.8)."""
     import pandas as pd
 
-    from emptyui_mth5.phoenix_mtu import _block_tag
 
     rng = np.random.default_rng(0)
     t = datetime(2009, 12, 16, 8, 5, 0)
@@ -453,8 +450,8 @@ def test_read_phoenix_mtu_asc_calibration(tmp_path):
     assert not any("_CLB" in w for w in res["warnings"])
     assert sum("coil calibration" in w for w in res["warnings"]) == 2
 
-    from mth5.mth5 import MTH5
     from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
+    from mth5.mth5 import MTH5
 
     with MTH5() as m:
         m.open_mth5(res["path"], "r")
@@ -522,17 +519,15 @@ def test_read_phoenix_mtu_saturated_mask(tmp_path):
     aligned to the block times; clean recordings write no mask."""
     from datetime import timedelta
 
-    from mth5.mth5 import MTH5
-
     from emptyui_mth5.runs import _resolve_station, _resolve_survey
+    from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
     t5 = datetime(2009, 12, 16, 7, 46, 52)
     rng = np.random.default_rng(9)
     with open(tmp_path / "SYNTH01.TS5", "wb") as fid:
-        for k in range(4):
-            fid.write(_ts_block(t5 + timedelta(seconds=k), 15, 15, 5,
-                                saturated=1 if k == 1 else 0, rng=rng))
+        fid.writelines(_ts_block(t5 + timedelta(seconds=k), 15, 15, 5,
+                                saturated=1 if k == 1 else 0, rng=rng) for k in range(4))
     res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path)
     assert res["runs"] == [("sr15_0001", 15.0, 60)]
 
@@ -557,9 +552,8 @@ def test_read_phoenix_mtu_saturated_mask(tmp_path):
 
 def test_read_phoenix_mtu_clean_no_mask(tmp_path):
     """A recording with no saturated blocks writes no auxiliary channel."""
-    from mth5.mth5 import MTH5
-
     from emptyui_mth5.runs import _resolve_station, _resolve_survey
+    from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
     t5 = datetime(2009, 12, 16, 7, 46, 52)
@@ -576,9 +570,8 @@ def test_read_phoenix_mtu_stream_split(tmp_path):
     """§24.13: stream_session_hours cuts a long continuous run into
     fixed-length sessions on block boundaries, with tag-truth periods and
     continued run numbering."""
-    from mth5.mth5 import MTH5
-
     from emptyui_mth5.runs import _resolve_station, _resolve_survey
+    from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
     t5 = datetime(2009, 12, 16, 7, 46, 52)
@@ -695,9 +688,9 @@ def test_macro_flow_extract_align(tmp_path):
     Run (per slot run OR the continuous stream) -> Align Runs crops two
     stations to their common overlap — the classic single-rate RR flow on
     burst archives."""
-    from emptyui_aurora._processing import compute_fc
     from emptyui.context import RunContext
     from emptyui.store import DataStore
+    from emptyui_aurora._processing import compute_fc
     from emptyui_mth5.phoenix_mtu import LoadPhoenixMtu
     from emptyui_mth5.runs import AlignRuns, ExtractRun
 
@@ -764,3 +757,56 @@ def test_session_by_slot_falls_back_without_hsmp(tmp_path):
     # 10 one-second blocks at a 1.44-s session target -> one block each
     assert [r[0] for r in res["runs"]] == [f"sr15_{k:04d}"
                                            for k in range(1, 11)]
+
+
+def test_read_phoenix_mtu_fractional_window_no_false_alarm(tmp_path):
+    """L-M5: a FRACTIONAL-second window's edge crop must not false-alarm
+    the schedule cross-check — a block whose tag precedes the bound is
+    retained and its end spills past the bound by up to one slot; the
+    exemption is bounded by the slot length."""
+    _write_tbl(tmp_path / "SYNTH01.TBL")
+    rng = np.random.default_rng(13)
+    t4 = datetime(2009, 12, 16, 7, 50, 0)
+    with open(tmp_path / "SYNTH01.TS4", "wb") as fid:
+        for k in range(16):  # one 16-s slot (L4NS = 16)
+            fid.write(_ts_block(t4 + _second_delta(k), 150, 150, 5, rng=rng))
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
+                           start="2009-12-16 07:49:00",
+                           end="2009-12-16 07:50:10.5")
+    assert not any("TBL schedule" in w for w in res["warnings"])
+
+
+def test_group_segments_subsecond_tolerance_and_out_of_order(tmp_path, caplog):
+    """L-M6: the tag carries whole seconds only, so a sub-second block
+    step's next tag is quantized — grouping must tolerate one step of
+    quantization; blocks arriving out of order fragment with a loud
+    warning (sample order IS tag order — never re-sorted)."""
+    from emptyui_mth5.phoenix_mtu import _BlockTag, _group_segments
+
+    def tag(y, mo, d, h, mi, s, rate=2400, n_scan=1200):
+        return _BlockTag(
+            start=pd.Timestamp(datetime(y, mo, d, h, mi, s), tz="UTC"),
+            rate=rate, n_scan=n_scan, n_ch=5, clock_status=4,
+            clock_error_s=0.0, saturated=False)
+
+    # step 0.5 s, round-quantized tags: :00, :01, :01, :02 — one segment
+    blocks = [
+        (tag(2024, 1, 1, 0, 0, 0), np.zeros((5, 1200), dtype="i4")),
+        (tag(2024, 1, 1, 0, 0, 1), np.zeros((5, 1200), dtype="i4")),
+        (tag(2024, 1, 1, 0, 0, 1), np.zeros((5, 1200), dtype="i4")),
+        (tag(2024, 1, 1, 0, 0, 2), np.zeros((5, 1200), dtype="i4")),
+    ]
+    segs = _group_segments(iter(blocks))
+    assert len(segs) == 1
+    assert segs[0].n_blocks == 4
+
+    # out of order: the tag precedes the running segment's end - step
+    import logging as _logging
+    blocks2 = [
+        (tag(2024, 1, 1, 0, 0, 10), np.zeros((5, 1200), dtype="i4")),
+        (tag(2024, 1, 1, 0, 0, 3), np.zeros((5, 1200), dtype="i4")),
+    ]
+    with caplog.at_level(_logging.WARNING, logger="emptyui"):
+        segs2 = _group_segments(iter(blocks2))
+    assert len(segs2) == 2  # fragmented (per block)
+    assert any("out of order" in r.message for r in caplog.records)

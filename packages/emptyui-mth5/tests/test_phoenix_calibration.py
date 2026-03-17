@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from emptyui_mth5.phoenix_calibration import (
     CLC_PLACEHOLDER_CHANNEL,
     PHOENIX_CHANNEL_NUMBERS,
