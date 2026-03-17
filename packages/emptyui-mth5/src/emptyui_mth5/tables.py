@@ -82,6 +82,10 @@ class ViewTF(Node):
         def _rho_phase(out, inp):
             z = Z.sel(output=out, input=inp).values.astype(complex)
             rho = (np.abs(z) ** 2) / (MU0 * omega)
+            # L-M8: the table deliberately shows the RAW ±180° phase
+            # (provenance: what was estimated) — the AppRes plot folds the
+            # off-diagonal phase to 0-90° for its half-height panel
+            # (display-only, DESIGN §15)
             phase = np.angle(z, deg=True)
             return rho, phase
 

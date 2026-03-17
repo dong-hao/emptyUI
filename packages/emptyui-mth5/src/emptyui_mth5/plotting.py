@@ -285,6 +285,10 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
             continue
         rho_all.append(rho[ok])
         if mode == "off-diagonal":
+            # L-M8 display convention: the plot FOLDS the off-diagonal
+            # phase to 0-90° (the half-height panel, DESIGN §15) — the
+            # ViewTF table deliberately shows the RAW ±180° values
+            # (provenance: what was estimated); the fold is display-only
             phase_all.append(_fold_phase_deg(phase)[ok])
         else:
             phase_all.append(phase[ok])
@@ -293,6 +297,13 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
     if rho_ylim is not None:
         y_min, y_max = float(rho_ylim[0]), float(rho_ylim[1])
     else:
+        if not rho_all:
+            # L-M9: every panel's data was all-NaN (a broken/uncalibrated
+            # TF) — np.concatenate([]) crashed with a raw ValueError; fail
+            # with the actionable message the tipper plot's guard uses
+            raise ValueError(
+                "transfer function's impedance data is all NaN — cannot "
+                "plot; check the calibration/decimation of the source FC")
         y_min, y_max = _decade_limits(np.concatenate(rho_all))
     # Off-diagonal phase spans 0-90° -> half-height panel; diagonal spans
     # the full signed range -> full-height panel (DESIGN.md §15).

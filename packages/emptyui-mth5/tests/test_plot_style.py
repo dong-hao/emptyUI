@@ -407,3 +407,17 @@ def test_notes_below_xlabel(tmp_path: Path):
         assert note_bb.y1 <= xlabel_bb.y0 + 0.6
     finally:
         plt.close(fig)
+
+
+def test_plot_impedance_response_all_nan_impedance(tmp_path):
+    """L-M9: all-NaN impedance must fail with the actionable message (the
+    tipper plot's guard pattern), not a raw concatenate crash."""
+    periods = np.array([2.0, 4.0, 8.0, 16.0])
+    Z = np.full((4, 3, 2), np.nan + 0j, dtype=complex)
+    tf = build_tf(
+        periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+        channel_nomenclature="lemi12", survey_id="bgs", station_id="NO46",
+        run_id="sr1_0001",
+    )
+    with pytest.raises(ValueError, match="all NaN"):
+        plotting.plot_impedance_response(tf, "off-diagonal", tmp_path / "fig.png")
