@@ -77,3 +77,15 @@ def test_cross_level_claims_keep_all_pieces():
 
 
 
+# --- L-A12: one-to-one pairing (no remote reuse) ------------------------------
+
+
+def test_pair_remote_times_dedupes_duplicate_local_times():
+    t = np.array([0, 1, 2], dtype="datetime64[s]")
+    li = np.array([t[0], t[0], t[1]])  # duplicated start
+    ri = np.array([t[0], t[1], t[2]])
+    li_idx, ri_idx = _pair_remote_times(li, ri, 0.0)
+    assert len(set(ri_idx)) == len(ri_idx)  # bijection: no remote reuse
+    assert li_idx.tolist() == [0, 2]        # the first duplicate wins
+
+

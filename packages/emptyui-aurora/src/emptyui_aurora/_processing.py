@@ -1075,7 +1075,16 @@ def _pair_remote_times(local_t, ref_t, tol_s):
     ok = pos < rs.size
     idx = np.clip(pos, 0, max(rs.size - 1, 0))
     ok &= rs[idx] == li
-    return (np.nonzero(ok)[0], order[pos[ok]])
+    # L-A12: several local rows with the SAME window time (possible in
+    # merged databases) would all map onto the same remote row — reusing
+    # one remote window double-counts its information; keep the first
+    li_out, ri_out = [], []
+    for k, j in zip(np.nonzero(ok)[0], order[pos[ok]]):
+        if j in ri_out:
+            continue
+        li_out.append(k)
+        ri_out.append(j)
+    return (np.asarray(li_out, dtype=int), np.asarray(ri_out, dtype=int))
 
 
 def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
