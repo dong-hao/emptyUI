@@ -1960,12 +1960,14 @@ def _resolve_cross_level_claims(out, levels):
     are NOT related by the cascade factor (150/15 = 10) — their level spans
     overlap and the same periods would be estimated twice with slightly
     different band centers (the duplicate/overlapping long-period points).
-    The same deepest-wins rule ``merge_tf_levels`` applies, applied here at
+    The same     deepest-wins rule ``merge_tf_levels`` applies, applied here at
     the SOURCE so the sort diagnostics and the estimate share one table: a
     period is estimated by the deepest (lowest-rate) level that covers it;
-    shallower levels' bands are clipped to the unclaimed remainder (a band
-    straddling a claim keeps only its unclaimed part; fully-claimed bands
-    are dropped)."""
+    shallower levels' bands are clipped to the unclaimed remainder. A band
+    straddling a claim can leave SEVERAL unclaimed pieces — every piece is
+    kept as its own band (each with its own geometric-mean center): the old
+    keep-only-the-center-piece rule turned the other pieces into permanent
+    coverage holes estimated by nobody (L-A8)."""
     def rate_of(lv):
         return float(levels[lv].attrs.get("sample_rate", np.inf))
 
@@ -1991,10 +1993,12 @@ def _resolve_cross_level_claims(out, levels):
                     break
             if not seg:
                 continue  # fully claimed by deeper levels
-            center = 1.0 / np.sqrt(f_hi * f_lo)
-            piece = (min(seg, key=lambda p: abs(0.5 * (p[0] + p[1]) - center))
-                     if len(seg) > 1 else seg[0])
-            kept.append((1.0 / piece[0], 1.0 / piece[1]))
+            # L-A8: EVERY unclaimed piece becomes its own band (its own
+            # geometric-mean center) — keeping only the piece closest to
+            # the original band center left the other pieces as permanent
+            # coverage holes between deeper claims
+            for piece in sorted(seg, key=lambda p: p[0]):
+                kept.append((1.0 / piece[0], 1.0 / piece[1]))
             # claim this band's span (merged with touching claims)
             new = (t_lo, t_hi)
             merged_claims, pending = [], new
