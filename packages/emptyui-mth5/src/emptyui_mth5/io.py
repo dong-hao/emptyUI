@@ -22,12 +22,22 @@ class LoadMth5(Node):
     params = (
         Param("path", "file", label="MTH5 file path", path_kind="in"),
         Param("mode", "select", label="Mode",
-              options=("r", "r+", "a", "w"), default="r"),
+              # L-M12: 'w' is gone — open_mth5(mode="w") TRUNCATES an
+              # existing archive silently (data loss with one misclick);
+              # 'r+'/'a' cover every legitimate use
+              options=("r", "r+", "a"), default="r"),
     )
 
     def execute(self, ctx, path: str, mode: str = "r") -> dict[str, Any]:
         from mth5 import mth5
 
+        if str(mode).strip() == "w":
+            # L-M12: dropped from the select — a legacy document carrying it
+            # must fail loudly (open_mth5("w") TRUNCATES the archive:
+            # silent data loss), not silently truncate
+            raise ValueError(
+                "Load MTH5 mode 'w' is not supported — it would TRUNCATE "
+                "an existing archive; use 'a' (read/write) or 'r+'")
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(f"MTH5 not found: {p}")

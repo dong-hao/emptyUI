@@ -24,6 +24,7 @@ from emptyui_mth5.calibration import (
     parse_json_calibration,
 )
 from emptyui_mth5.fc import SpectraToFCGroup
+from emptyui_mth5.io import LoadMth5
 from emptyui_mth5.persist import persist_fc_level
 from emptyui_mth5.plots import PlotTipper
 from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
@@ -252,3 +253,25 @@ def test_plot_tipper_requires_tipper(tmp_path: Path):
     assert not tf.has_tipper()
     with pytest.raises(ValueError, match="no tipper"):
         PlotTipper().execute(_ctx(tmp_path), tf)
+
+
+def test_load_mth5_mode_w_rejected(tmp_path: Path):
+    """L-M12: mode 'w' (silently truncating) is gone from the select; a
+    legacy document carrying it fails loudly instead of truncating."""
+    from mth5.mth5 import MTH5
+
+    path = tmp_path / "a.h5"
+    m = MTH5()
+    m.open_mth5(str(path), "w")
+    m.add_survey("4P")
+    m.close_mth5()
+
+    node = LoadMth5()
+    ctx = RunContext(workspace=None, store=DataStore())
+    with pytest.raises(ValueError, match="TRUNCATE"):
+        node.execute(ctx, path=str(path), mode="w")
+    # the archive survives the refused call
+    m2 = MTH5()
+    m2.open_mth5(str(path), "r", locking=False)
+    assert "4P" in m2.surveys_group.groups_list
+    m2.close_mth5()
