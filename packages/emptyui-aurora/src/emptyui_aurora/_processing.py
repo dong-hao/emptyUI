@@ -9,7 +9,6 @@ RME / remote-reference RME_RR, all aurora-backed via :func:`_solve_band`).
 from __future__ import annotations
 
 import logging
-from itertools import pairwise
 
 import numpy as np
 import pandas as pd
@@ -1018,26 +1017,6 @@ def _normalize_fc_layout(fc):
     return fc
 
 
-def _check_remote_grid(ref_freq, local_freq, ref_time, local_time):
-    """Shared remote-reference FC grid validation (coherence sort + estimate).
-
-    RME_RR pairs local/remote samples by row, so the FCs must share identical
-    frequency and window (time) grids — the runs have to be cropped to their
-    common acquisition overlap (Align Runs) before computing FCs.
-    """
-    if not np.array_equal(ref_freq, local_freq):
-        raise ValueError(
-            "remote-reference fc has a different frequency grid than the "
-            "local fc — compute both with the same window settings"
-        )
-    if not np.array_equal(ref_time, local_time):
-        raise ValueError(
-            "remote-reference fc has a different time grid than the local "
-            "fc — the runs are not aligned; crop both to their common "
-            "acquisition overlap (Align Runs) before computing FCs"
-        )
-
-
 def _time_key(t):
     """Comparable int64 key for a window-time array (datetime64 -> ns epoch,
     float seconds as-is)."""
@@ -1344,9 +1323,11 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
     would penalize isolated clean windows), optionally pooled over
     +-smooth_bins adjacent bins first (a FIXED smoothing scale - deliberately
     not the estimate's band table; restores dof at deep levels).
-    Adjusted-R2 correction removes the p/(W-1) high bias of sample
-    coherence (the 16.2 C2 bias, exact here since the ensemble count is
-    known).
+    Adjusted-R2 correction (L-A11 — the implemented identity, not the
+    textbook intercept form): ``r2_adj = (r2·(W_seg−1) − (n_in−1)) /
+    (W_seg−n_in)`` — the df-corrected form whose null expectation is
+    1/(W_seg−n_in) (a small floor at short ensembles; the clip to [0, 1]
+    absorbs it).
 
     Returns ``(coh_e, coh_x)`` - (n_bin, n_win) arrays: coh2 of each output
     on the predicted-H ensemble (remote H when ``ref`` is given), minimum
@@ -1818,10 +1799,11 @@ def _container_geometry(levels):
     """Common per-level geometry of a multi-level fc container, or ``None``
     when it cannot be derived (missing attrs, non-constant window). Returns
     a list (shallow→deep) of dicts with ``fs`` (level sample rate), ``df``
-    (bin spacing), ``f_ceil`` (Fs/4) and ``f_floor`` (window/4) plus the
-    cascade ``factor`` (None for non-uniform rate steps — burst archives
-    mix rate families whose ratios are not the cascade factor; the
-    template still applies per level through each level's own df)."""
+    (bin spacing), ``f_ceil`` (Fs/4) and ``f_floor`` (window/4); the
+    template applies per level through each level's own df (L-A6: the
+    cascade ``factor`` field was deleted — levels sort ascending by id,
+    so the pairwise rate ratio computed r/s = 1/cascade could never reach
+    the >= 2 gate; the field had no consumers)."""
     items = sorted(levels.items())
     infos = []
     window = None
@@ -1841,16 +1823,8 @@ def _container_geometry(levels):
             return None
         infos.append({"fs": fs, "df": fs / n,
                       "f_ceil": fs / 4.0, "f_floor": 4.0 * fs / n})
-    factor = None
-    rates = [i["fs"] for i in infos]
-    if len(rates) > 1:
-        ratios = [r / s for r, s in pairwise(rates)]
-        if (all(abs(r - round(r)) < 1e-6 for r in ratios)
-                and len({round(r) for r in ratios}) == 1
-                and round(ratios[0]) >= 2):
-            factor = int(round(ratios[0]))
     return {"levels": [lv for lv, _ in items], "infos": infos,
-            "factor": factor, "window": window}
+            "window": window}
 
 
 #: Reference band template in window-128 native bins (DESIGN.md §14.9):

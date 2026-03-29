@@ -31,9 +31,10 @@ def _resolve_rate_tiers(levels: dict, sample_rate: str):
     - ``sample_rate="auto"`` picks the lowest NATIVE rate family present
       (the continuous stream — the MT-transfer workhorse: 15 Hz Phoenix,
       1 Hz LEMI). The native families travel on the database's attrs
-      (stamped at compute time); a legacy fc (no attrs) keeps EVERY level
-      — the filter is a no-op there and the descending order reproduces
-      the legacy cascade indices exactly.
+      (stamped at compute time); an fc WITHOUT sample_rate attrs RAISES
+      (the docstring's "no-op for legacy fcs" path was unreachable —
+      the code requires the metadata to build the rate map at all,
+      L-A7).
     - an explicit value selects the tier(s) at that rate (the family
       cascade when the rate is a native family, the single tier when it
       is a derived one).

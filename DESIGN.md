@@ -1237,8 +1237,12 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
 
 - **Prewhitening (default on)**: `prewhitening="first difference"` (the
   default) applies the time-domain first difference and the exact
-  `÷ j2πf` inverse recoloring (clean-signal FCs preserved to ~1e-4
-  relative). Ablation verdict (SDG31 vs the official EMTF product): the
+  first-difference inverse `÷ (1 − e^{−j2πfΔt})` recoloring (clean-signal
+  FCs preserved; the DC bin is NaN — recoloring is undefined there.
+  History: aurora's idealized `j2πf` recoloring does not exactly invert its
+  central-difference operator and leaves a low-frequency amplitude bias —
+  the exact inverse filter is used instead). Ablation verdict (SDG31 vs
+  the official EMTF product): the
   controlling factor at short periods is **DC/edge leakage suppression** —
   the current default's entire deficit is concentrated at 7.3–15.1 s; a
   zero-endpoint taper (hann) or prewhitening closes it; boxcar without

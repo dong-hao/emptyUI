@@ -598,7 +598,11 @@ def test_l2u_claims_leave_aligned_cascades_unchanged():
         levels[lv] = _burst_container()[0].assign_attrs(
             sample_rate=fs)
     g = _container_geometry(levels)
-    assert g is not None and g["factor"] == 4  # uniform cascade detected
+    # L-A6: the cascade `factor` field was deleted (levels sort ascending
+    # by id so the r/s ratio could never reach the >= 2 gate, and no
+    # consumer existed) — the geometry derives per-level df, which is all
+    # the template needs
+    assert g is not None and "factor" not in g
     tbl = _l2u_band_table(levels, min_bins_per_band=0)
     # the template survives on every level (no bands claimed away)
     counts = {len(v) for v in tbl.values()}
