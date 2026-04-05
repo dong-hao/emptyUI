@@ -135,3 +135,59 @@ def test_magnetic_only_fc_rejected():
         SelectRuns().execute(None, {0: ds})
 
 
+# --- L-A4: the documented "0 = dipole from run metadata" promise --------------
+
+
+def test_build_fc_dipole_from_run_metadata(tmp_path):
+    """When e_dipole_length_m is 0/empty, the E dipole length is taken from
+    the run's electric channel metadata (mt_metadata Electric.dipole_length)
+    — the documented-but-unimplemented promise."""
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from mt_metadata.timeseries import Electric, Run as RunMD
+    from mt_timeseries import ChannelTS, RunTS
+    from mth5.mth5 import MTH5
+
+    rng = np.random.default_rng(1)
+    chs = []
+    for comp in ("hx", "hy", "ex", "ey"):
+        cls = "magnetic" if comp.startswith("h") else "electric"
+        c = ChannelTS(cls, data=rng.standard_normal(64), start="2024-01-01",
+                      sample_rate=1.0)
+        c.component = comp
+        if cls == "electric":
+            emd = Electric()
+            emd.dipole_length = 100.0
+            c.channel_metadata = emd
+        chs.append(c)
+    runts = RunTS(array_list=chs)
+    runts.run_metadata = RunMD()
+    runts.run_metadata.id = "a"
+
+    path = tmp_path / "dip.h5"
+    m = MTH5()
+    m.open_mth5(str(path), "w")
+    sg = m.add_survey("4P")
+    stg = sg.stations_group.add_station("SDX")
+    rg = stg.add_run("a")
+    rg.from_runts(runts)
+    stg.write_metadata()
+    sg.update_metadata()
+    m.close_mth5()
+    archive = MTH5()
+    archive.open_mth5(str(path), "r", locking=False)
+
+    from emptyui_aurora.process import BuildFC
+    from emptyui.context import RunContext
+    from emptyui.store import DataStore
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    fc = BuildFC().execute(
+        ctx, archive, runs="a",
+        decimation_levels=0, factor=4, window_samples=16, overlap=0.5,
+        window_type="boxcar", clock_zero="epoch", persist=False,
+        e_dipole_length_m=0.0)["fc"]
+    # the lookup found the metadata length (the archive convention is m)
+    assert fc and all(
+        float(lv.attrs["e_dipole_length_m"]) > 0 for lv in fc.values())

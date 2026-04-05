@@ -687,6 +687,34 @@ class BuildFC(Node):
                            summary["sample_rate"].astype(float)))
         family_rates = sorted({rate_of[r] for r in wanted})
         dipole = e_dipole_length_m or None
+        if dipole is None:
+            # L-A4: honor the documented promise — take the E dipole length
+            # from the run's electric channel metadata when present
+            # (emptyUI-built archives carry none; externally-built archives
+            # with proper metadata get the correct mV -> V/m scaling)
+            for rid in wanted:
+                dl = 0.0
+                try:
+                    r_obj = _resolve_run(station_obj, rid)
+                except ValueError:
+                    continue
+                for comp in r_obj.groups_list:
+                    if not comp.startswith("e"):
+                        continue
+                    try:
+                        dl = float(
+                            r_obj.get_channel(comp).metadata.dipole_length
+                            or 0.0)
+                    except (AttributeError, TypeError, ValueError):
+                        dl = 0.0
+                    if dl > 0:
+                        break
+                if dl > 0:
+                    dipole = dl
+                    ctx.logger.info(
+                        "Build FC: E dipole length %.6g m from run '%s' "
+                        "channel metadata", dl, rid)
+                    break
         containers = []
         # fast per-run data path (shared with Extract Run 'time range'):
         # reading channels via to_xarray and wrapping in a duck payload
