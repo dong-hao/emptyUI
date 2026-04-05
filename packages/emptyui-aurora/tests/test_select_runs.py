@@ -118,3 +118,33 @@ def test_select_runs_band_miss_raises(ctx):
     with pytest.raises(ValueError, match="reference band"):
         SelectRuns().execute(ctx, _payload(), period_min=100.0,
                              period_max=200.0, use_prior=False)
+
+
+def test_select_runs_unscored_run_passes_through(ctx, caplog):
+    """L-A3: a run with NO finite in-band score has no evidence of badness
+    — it passes through (the old inf-vs-threshold comparison silently
+    DROPPED it); the table row records the unscored pass-through."""
+    # a run whose windows are all-NaN in every channel: medians are NaN
+    # everywhere -> unscored
+    ds = _ds_for_run("nan_run", 1.0, "2024-01-01T12:00:00")
+    for c in ("hx", "hy", "ex", "ey"):
+        ds[c] = ds[c].where(False)
+    payload = {0: xr_concat_nan_run(ds)}
+    res = SelectRuns().execute(ctx, payload, deviation_max=2.0,
+                               use_prior=False)
+    out = res["fc"][0]
+    kept = set(np.unique(out["run_id"].values).astype(str))
+    assert "nan_run" in kept
+    import json
+
+    rows = json.loads(Path(res["table"]["path"]).read_text())
+    row = next((r for r in rows if r["run_id"] == "nan_run"), None)
+    assert row is not None and row["dropped"] is False
+    assert any("unscored" in r.message
+               for r in caplog.records)
+
+
+def xr_concat_nan_run(ds):
+    import xarray as xr
+    return xr.concat([_ds_for_run("clean_0", 1.0, "2024-01-01T00:00:00"), ds],
+                     dim="time")

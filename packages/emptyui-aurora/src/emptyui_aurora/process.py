@@ -1285,17 +1285,27 @@ class SelectRuns(Node):
         for rid in sorted(per_run_up):
             up_d = [x for x in per_run_up[rid] if np.isfinite(x)]
             dn_d = [x for x in per_run_down[rid] if np.isfinite(x)]
+            # L-A3: a run with NO finite score (every level's in-band
+            # medians NaN — e.g. all its windows coherence-dropped) has no
+            # evidence of badness — pass it through per the contract; the
+            # old inf-vs-threshold comparison silently DROPPED it
+            unscored = not up_d and not dn_d
             up = float(np.median(up_d)) if up_d else float("inf")
             dn = float(np.median(dn_d)) if dn_d else float("inf")
             pf = _diurnal_prior_factor(run_start.get(rid, 0), use_prior,
                                        prior_max, local_utc_offset,
                                        absolute_time=absolute_time)
             thr = deviation_max / pf
-            dropped = up > thr or dn > dead_max
+            dropped = (up > thr or dn > dead_max) and not unscored
             rows.append({"run_id": rid, "n_levels": len(per_run_up[rid]),
                          "deviation": max(up, dn), "up": up, "down": dn,
                          "prior": float(pf),
                          "threshold": float(thr), "dropped": bool(dropped)})
+            if unscored:
+                ctx.logger.warning(
+                    "Select Runs: run '%s' has no finite in-band score "
+                    "(all its windows dropped or NaN) — passed through "
+                    "unscored", rid)
         # kept = every run in the payload minus the explicitly dropped ones:
         # runs without in-band bins (e.g. a rate family whose cascade never
         # reaches the reference band) are not scored and must pass through
