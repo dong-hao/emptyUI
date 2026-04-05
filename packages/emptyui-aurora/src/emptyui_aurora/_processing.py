@@ -879,6 +879,22 @@ def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
     nperseg = max(8, int(num_samples))
     noverlap = int(nperseg * overlap)
     win = _window(window_type)
+    # L-A9: heterogeneous channel lengths (the row-indexed LEMI pathology)
+    # produce different window counts per channel — the fc Dataset build
+    # cannot align them; crop every processed channel to the common minimum
+    # with a loud warning (never mutate the input dict — immutability §7.1)
+    used = list(input_channels) + list(output_channels)
+    lens = {c: len(channels[c]) for c in used if c in channels}
+    if len(set(lens.values())) > 1:
+        n_min = min(lens.values())
+        _log.warning(
+            "Compute FC: channels of unequal length (%s) — cropped to the "
+            "shortest (%d samples) so the window grids align",
+            sorted(lens.values()), n_min)
+        channels = dict(channels)
+        for c, n in lens.items():
+            if n > n_min:
+                channels[c] = np.asarray(channels[c], dtype=float)[:n_min]
     f = t = None
     fc_vars = {}
     for comp in input_channels + output_channels:
@@ -957,6 +973,13 @@ def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
         if not names:
             continue
         resp = resp.astype(complex)
+        # L-A9: an all-zero response (a broken/padded calibration table)
+        # would divide every FC by zero (inf/nan garbage downstream); the
+        # DC-only guard below misses it because max(|resp[1:]|) is 0
+        if not np.any(np.abs(resp) > 0):
+            raise ValueError(
+                f"calibration response for '{comp}' is all zero — the "
+                "filter table is broken (check the calibration file/chain)")
         # Aurora treats a DC calibration response of exactly 0 as "undefined
         # at DC" (divisor 1, DC column NaN). Induction-coil tables padded
         # with the linear-in-f low-frequency extension extrapolate to ~0 at
@@ -1346,6 +1369,15 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
     """
     import numpy as np
 
+    # L-A9: a ref fc lacking an input channel raised a raw KeyError inside
+    # the stack — name the channel(s) and the remedy
+    if ref is not None:
+        missing = [c for c in ins if c not in ref.data_vars]
+        if missing:
+            raise ValueError(
+                f"remote fc lacks input channel(s) {missing} — compute it "
+                "with the same input_channels as the local fc")
+
     def _stack(ds, names):
         return np.stack([np.asarray(ds[c].values, dtype=complex)
                          for c in names], axis=0)  # (n, F, W)
@@ -1516,6 +1548,10 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     """EMTF-style per-frequency coherence sort of one decimation level's FC
     (DESIGN §16.2, §24.9).
 
+    L-A9: ``ensemble_windows`` < 1 degenerates the sliding ensemble to the
+    window itself — the adjusted-R² then zeroes every weight (the whole
+    sort silently rejects everything); reject with an actionable message.
+
     Returns ``(local_out, ref_out, rows)`` — copies of the FCs with the
     per-(bin, window) coherence weights applied (``weight``: multiplied by
     √w; ``drop``: excluded samples set to NaN), plus per-bin diagnostic
@@ -1535,6 +1571,14 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     the per-bin flip (§24.6): no consumer ever weighted with it after the
     default flip, and its banding parameters duplicated the estimator's.
     """
+    if int(ensemble_windows) < 1:
+        # L-A9: ensemble_windows=0 degenerates the sliding ensemble to the
+        # window itself — the adjusted-R² then zeroes EVERY weight (the
+        # sort silently rejects everything); reject at the API level
+        raise ValueError(
+            f"ensemble_windows must be >= 1 — got {ensemble_windows!r} "
+            "(the sliding ensemble would degenerate to the window itself, "
+            "zeroing every coherence weight)")
     local = _normalize_fc_layout(local)
     ref = _normalize_fc_layout(ref) if ref is not None else None
     if ref is not None:
@@ -1707,6 +1751,14 @@ def estimate_tf(
         H = []  # inputs  -> [n, n_in]
         E = []  # outputs -> [n, n_out]
         R = []  # reference inputs -> [n, n_in]
+        # L-A9: a ref fc lacking an input channel raised a raw KeyError —
+        # name the channel and the remedy
+        if engine == "RME_RR" and ref_fc is not None:
+            missing = [ic for ic in input_channels if ic not in ref_fc.data_vars]
+            if missing:
+                raise ValueError(
+                    f"remote fc lacks input channel(s) {missing} — compute "
+                    "it with the same input_channels as the local fc")
         for f_idx in band_bins:
             H.append(np.stack([fc[ic].values[f_idx, :] for ic in input_channels], axis=-1))
             E.append(np.stack([fc[oc].values[f_idx, :] for oc in output_channels], axis=-1))
@@ -1905,6 +1957,24 @@ def _l2u_band_table(levels, min_bins_per_band=20.0, t_short=None):
     out = {}
     for lv, fc in sorted(levels.items()):
         n_windows = int(fc.sizes.get("time", 0))
+        if n_windows:
+            # L-A9: count USABLE windows — a coherence-sort drop NaN'd the
+            # dead windows and they must not count toward the starvation
+            # threshold (the pre-pairing trim remains unknowable here: the
+            # per-level pairing happens inside estimate_tf)
+            first = next(iter(fc.data_vars.values()))
+            arr = np.asarray(first.values)
+            if arr.ndim == 2:
+                # reduce across BINS (the non-window axis): layout is
+                # (frequency, time) or (time, frequency)
+                bin_axis = 0 if arr.shape[1] == n_windows else 1
+                usable = int(np.any(np.isfinite(arr), axis=bin_axis).sum())
+                if usable < n_windows:
+                    _log.warning(
+                        "band table: level %d counts %d usable window(s) "
+                        "of %d (the rest are coherence-dropped)", lv,
+                        usable, n_windows)
+                n_windows = usable
         if n_windows <= 0 or len(template) <= 2:
             out[lv] = _l2u_intervals(lv, template, geom)
             continue

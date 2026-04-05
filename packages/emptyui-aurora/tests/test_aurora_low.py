@@ -89,3 +89,49 @@ def test_pair_remote_times_dedupes_duplicate_local_times():
     assert li_idx.tolist() == [0, 2]        # the first duplicate wins
 
 
+# --- L-A9: actionable errors ---------------------------------------------------
+
+
+def test_coherence_sort_rejects_zero_ensemble():
+    local = _fake_level(1.0)
+    with pytest.raises(ValueError, match="ensemble_windows must be >= 1"):
+        coherence_sort_fc(local, None, ["hx", "hy"], ["ex", "ey"],
+                          ensemble_windows=0)
+
+
+def test_all_zero_calibration_response_raises(tmp_path):
+    """An all-zero calibration response divides every FC by zero (inf
+    garbage); it raises with the remedy instead. The DC-only guard missed
+    it because max(|resp[1:]|) is 0."""
+    from emptyui_aurora._processing import _calibrate_stft_vars
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    cf = CoefficientFilter(gain=0.0)  # all-zero response
+    f = np.array([1.0, 2.0])
+    fc_vars = {"hx": (("frequency", "time"),
+                      np.ones((2, 3), dtype=complex))}
+    with pytest.raises(ValueError, match="all zero"):
+        _calibrate_stft_vars(fc_vars, f, {"hx": [(cf, True)]}, "test")
+
+
+def test_ref_fc_missing_channel_named():
+    """A ref fc lacking an input channel raised a raw KeyError — the error
+    names the channel(s) and the remedy."""
+    local = _fake_level(1.0)
+    ref = _fake_level(1.0)
+    ref = ref.drop_vars(["hx"])
+    with pytest.raises(ValueError, match="'hx'"):
+        coherence_sort_fc(local, ref, ["hx", "hy"], ["ex", "ey"])
+
+
+def test_magnetic_only_fc_rejected():
+    """A magnetic-only fc (no electric outputs) raised a raw numpy stack
+    error — the remedy names the channels."""
+    from emptyui_aurora.process import SelectRuns
+
+    ds = _fake_level(1.0).drop_vars(["ex", "ey"])
+    ds = ds.assign_coords(run_id=("time", np.full(ds.sizes["time"], "a")))
+    with pytest.raises(ValueError, match="output"):
+        SelectRuns().execute(None, {0: ds})
+
+

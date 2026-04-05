@@ -1229,6 +1229,13 @@ class SelectRuns(Node):
                 "Select Runs needs an fc payload with a per-window "
                 "'run_id' coordinate — rebuild it with Build FC")
         ins, outs, _ = _fc_io_channels(sample)
+        # L-A9: a magnetic-only fc (no electric outputs — or vice versa)
+        # raised a raw numpy stack error; name the channels
+        if not ins or not outs:
+            raise ValueError(
+                "Select Runs needs an fc with both input (horizontal "
+                f"magnetic) and output channels — got inputs={ins}, "
+                f"outputs={outs}; rebuild it with Build FC")
         absolute_time = np.issubdtype(
             np.asarray(sample["time"].values).dtype, np.datetime64)
         if use_prior and not absolute_time:
@@ -1449,6 +1456,13 @@ class ResidualSort(Node):
                 "Residual Sort needs an fc payload with a per-window "
                 "'run_id' coordinate — rebuild it with Build FC")
         ins, outs, _ = _fc_io_channels(sample)
+        # L-A9: a magnetic-only fc (no electric outputs — or vice versa)
+        # raised a raw numpy stack error; name the channels
+        if not ins or not outs:
+            raise ValueError(
+                "Residual Sort needs an fc with both input (horizontal "
+                f"magnetic) and output channels — got inputs={ins}, "
+                f"outputs={outs}; rebuild it with Build FC")
         absolute_time = np.issubdtype(
             np.asarray(sample["time"].values).dtype, np.datetime64)
 
@@ -1842,6 +1856,12 @@ class MergeTFLevels(Node):
     params = ()
 
     def execute(self, ctx, tf_levels) -> dict[str, Any]:
+        if not isinstance(tf_levels, dict) or not tf_levels:
+            # L-A9: an empty dict raised a raw StopIteration from
+            # next(iter(...)) — name the remedy
+            raise ValueError(
+                "Merge TF Levels received no per-level TFs — connect "
+                "Estimate TF's 'tf levels' output")
         first = next(iter(tf_levels.values()))
         ins = list(first["input_channels"])
         outs = list(first["output_channels"])
