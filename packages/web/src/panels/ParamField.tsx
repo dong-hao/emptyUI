@@ -217,7 +217,11 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         field = (
           <input
             type="checkbox"
-            checked={Boolean(value)}
+            // L-F4 (§8.1): string/number values round-trip through JSON and
+            // text inputs — "false"/0 must not render as checked
+            checked={
+              value === true || value === "true" || value === 1 || value === "1"
+            }
             disabled={disabled}
             onChange={(e) => set(e.target.checked)}
           />
