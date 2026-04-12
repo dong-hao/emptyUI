@@ -218,7 +218,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       (m) => m.type === (source?.data as MTNodeData | undefined)?.nodeType,
     );
     const outPort = srcManifest?.outputs.find((o) => o.name === connection.sourceHandle);
-    const color = portColor(outPort?.type ?? "any");
+    const color = portColor(outPort?.type ?? "any", catalog);
     set((s) => {
       // one-to-one inputs: a new edge to an occupied input replaces the old one
       const without = s.edges.filter(
@@ -434,6 +434,61 @@ export function migrateEdges(
   );
 }
 
+/** Wiring-rule enforcement for LOADED documents (L-F1, defense-in-depth):
+ *  deserializeWorkflow previously bypassed every connection rule. One edge
+ *  per input is ENFORCED (the last edge wins, matching onConnect's
+ *  replace-on-connect behavior) with a warning per dropped duplicate;
+ *  cycle/type violations only WARN (the server re-validates before every
+ *  run — silently pruning a legacy doc's edge would lose wiring with no
+ *  recourse). */
+function enforceWiringRules<E extends { id: string; source: string; source_port: string; target: string; target_port: string }>(
+  candidates: E[],
+  nodes: Node<MTNodeData>[],
+  manifestOfType: (type: string) => NodeManifest | undefined,
+): E[] {
+  const seen = new Set<string>();
+  const cleaned: E[] = [];
+  for (const e of [...candidates].reverse()) {
+    const key = `${e.target}::${e.target_port}`;
+    if (seen.has(key)) {
+      console.warn(
+        `wiring: duplicate edge into input '${e.target_port}' of node `
+        + `'${e.target}' dropped (one edge per input, §3; the last edge wins)`);
+      continue;
+    }
+    seen.add(key);
+    cleaned.push(e);
+  }
+  cleaned.reverse();
+  const nodeOf = (id: string) => nodes.find((n) => n.id === id);
+  for (const e of cleaned) {
+    const src = nodeOf(e.source);
+    const tgt = nodeOf(e.target);
+    if (!src || !tgt) continue;
+    const srcManifest = manifestOfType(src.data.nodeType);
+    const tgtManifest = manifestOfType(tgt.data.nodeType);
+    const srcType =
+      srcManifest?.outputs.find((o) => o.name === e.source_port)?.type;
+    const tgtSpec = tgtManifest?.inputs.find((i) => i.name === e.target_port);
+    if (srcType !== undefined && tgtSpec !== undefined &&
+        !portTypesCompatible(srcType, tgtSpec.type, tgtSpec.accepts)) {
+      console.warn(
+        `wiring: edge '${e.id}' connects ${srcType} -> ${tgtSpec.type} `
+        + `(input '${e.target_port}' of '${e.target}') — incompatible port `
+        + "types; the server will reject it at run time");
+    }
+    if (connectionCreatesCycle(
+        cleaned.filter((c) => c !== e) as unknown as Edge[],
+        e.source, e.target)) {
+      console.warn(
+        `wiring: edge '${e.id}' (${e.source} -> ${e.target}) closes a `
+        + "directed cycle — the executor will fail at run time");
+    }
+  }
+  return cleaned;
+}
+
+
 /** Serialize the workflow document (DESIGN.md §6 format). */
 export function serializeWorkflow(
   nodes: Node<MTNodeData>[],
@@ -520,9 +575,12 @@ export function deserializeWorkflow(
           : e,
       )
     : doc.edges;
-  const edges: Edge[] = pruneStaleEdges(migrated, nodes, manifestOfType)
-    .map((e) => {
-      // re-derive edge color from the source port type
+  const edges: Edge[] = enforceWiringRules(
+    pruneStaleEdges(migrated, nodes, manifestOfType), nodes, manifestOfType,
+  ).map((e) => {
+      // re-derive edge color from the source port type (L-F2: the catalog
+      // carries plugin-declared port colors — the fallback table alone
+      // ignored them)
       const src = nodes.find((n) => n.id === e.source)!;
       const manifest = manifestOfType(src.data.nodeType);
       const portType =
@@ -533,7 +591,7 @@ export function deserializeWorkflow(
         sourceHandle: e.source_port,
         target: e.target,
         targetHandle: e.target_port,
-        style: { stroke: portColor(portType), strokeWidth: 2.5 },
+        style: { stroke: portColor(portType, catalog), strokeWidth: 2.5 },
         data: { portType },
       };
     });
