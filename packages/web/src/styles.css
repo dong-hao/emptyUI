@@ -549,6 +549,19 @@ button.primary {
   flex: 1;
 }
 
+/* L-F3 (§8.1): WS outage badge — visible only while not online */
+.socket-badge {
+  font-size: 0.8em;
+  padding: 0.1rem 0.5rem;
+  border-radius: 8px;
+  background: #fde68a;
+  color: #713f12;
+}
+.socket-badge.offline {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
 .run-status {
   font-size: 0.8em;
   padding: 0.1rem 0.5rem;

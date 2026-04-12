@@ -12,7 +12,7 @@ import type { Connection, Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api/client";
-import { ensureSocket } from "./api/ws";
+import { ensureSocket, useSocketState } from "./api/ws";
 import { useCatalog } from "./stores/catalog";
 import { nodeTypes } from "./graph/MTNode";
 import { NodePalette } from "./panels/NodePalette";
@@ -36,6 +36,9 @@ export default function App() {
   const catalog = useCatalog((s) => s.catalog);
   const runStatus = useRun((s) => s.runStatus);
   const startingCount = useRun((s) => s.startingCount);
+  // L-F3 (§8.1): surface WS outages loudly — the badge appears when the
+  // socket drops (reconnect attempts up to the cap, then a hard stop)
+  const socketStatus = useSocketState((s) => s.status);
   const docName = useWorkflow((s) => s.docName);
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -403,6 +406,21 @@ export default function App() {
     <div className="app">
       <header className="toolbar">
         <strong>emptyUI</strong>
+        {socketStatus !== "online" && (
+          <span
+            className={`socket-badge ${socketStatus}`}
+            role="status"
+            title={
+              socketStatus === "reconnecting"
+                ? "Reconnecting to the server…"
+                : "Server unreachable — reconnect gave up. Reload the page to retry."
+            }
+          >
+            {socketStatus === "reconnecting"
+              ? "reconnecting…"
+              : "offline"}
+          </span>
+        )}
         <button
           onClick={handleRun}
           disabled={
