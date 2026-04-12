@@ -256,13 +256,16 @@ def compute_fc(
 ):
     """Windowed STFT -> fc xarray Dataset (dims frequency x time).
 
+    ``window_length_s`` is the window length in SECONDS (the node surface
+    speaks samples — ``compute_fc_levels(num_samples_window=...)`` is the
+    authoritative multi-level route; L-A5 documents the distinction).
+
     The input is assumed to be already detrended (use the Detrend node to
     remove the DC/absolute-field baseline first — fluxgate magnetometers
     report a huge DC offset that would otherwise swamp the autopower and drive
     Z -> 0).
 
-    ``magnetic_unit``: "auto" (default) derives the mode from the channel
-    nomenclature / actual channel names — "b" (fluxgate gives absolute B,
+    ``magnetic_unit``: "auto" (default) derives the mode from the channel    nomenclature / actual channel names — "b" (fluxgate gives absolute B,
     converted B->H by dividing by μ0) or "h" (coil sensors — mth5 archives
     coil data in nT too, so they are converted to A/m as well; only data
     whose units explicitly say A/m, or unit-less synthetic payloads, are
@@ -302,6 +305,13 @@ def compute_fc(
             f"unknown prewhitening {prewhitening!r} (supported: "
             "'first difference' or '' for off)"
         )
+    # L-A5: mirror compute_fc_levels' guard (review item B13) — the
+    # single-level API had none, so overlap >= 1 reached scipy.stft as
+    # noverlap >= nperseg and crashed mid-node
+    if not (0.0 <= float(overlap) < 1.0):
+        raise ValueError(
+            f"overlap must be in [0, 1) — got {overlap!r} "
+            "(0 = adjacent windows, 0.99 = near-total overlap)")
 
     channels, sample_rate, start_s, src_start = to_channels(value, check_finite=False)
     if start_datetime is None:

@@ -327,9 +327,7 @@ class PlotSpectrogramFC(Node):
         "coefficients (10·log10|FC|² — no second FFT). The decimation level "
         "to display is selected per level id (−1 = deepest available); the "
         "channel resolves from the fc (standard names map via the "
-        "nomenclature; empty = first electric channel). The upstream "
-        "Compute FC's window length and channel lists are inherited "
-        "(window/decimation annotation; channels offered as suggestions)."
+        "nomenclature; empty = first electric channel)."
     )
     category = "Display"
     inputs = (Input("fc", "fc"),)
@@ -359,25 +357,18 @@ class PlotSpectrogramFC(Node):
                           "the continuous stream, e.g. 15 Hz Phoenix / 1 Hz "
                           "LEMI). The connected fc's tiers are offered as "
                           "suggestions after a run."),
-        Param("window_samples", "integer", label="Window (samples)",
-              default=None, optional=True,
-              description="Display only — inherited from Compute FC; the "
-                          "authoritative value is the fc's own metadata."),
-        Param("decimation_levels", "integer", label="Decimation levels (upstream)",
-              default=None, optional=True,
-              description="Display only — inherited from Compute FC."),
     )
+    # L-A10: the former display-only window_samples/decimation_levels
+    # params were deleted — declared + inherited but never read (the
+    # figure's annotation reads the fc's own authoritative attrs)
     inherit: ClassVar[dict[str, dict[str, str]]] = {
-        "fc": {"channel": "output_channels",
-               "window_samples": "window_samples",
-               "decimation_levels": "decimation_levels"},
+        "fc": {"channel": "output_channels"},
     }
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
 
     def execute(self, ctx, fc, channel: str = "",
                 decimation_level: int = 0, sample_rate: str = "auto",
-                window_samples: int | None = None,
-                decimation_levels: int | None = None) -> dict[str, Any]:
+                ) -> dict[str, Any]:
         import matplotlib
 
         matplotlib.use("Agg")

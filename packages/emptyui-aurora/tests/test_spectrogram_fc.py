@@ -84,8 +84,11 @@ def test_spectrogram_manifest_inherits_from_compute_fc():
     m = PlotSpectrogramFC().manifest()
     inherit = m["inherit"]["fc"]
     assert inherit["channel"] == "output_channels"
-    assert inherit["window_samples"] == "window_samples"
-    assert inherit["decimation_levels"] == "decimation_levels"
+    # L-A10: the display-only window_samples/decimation_levels params were
+    # deleted (declared + inherited but never read — the annotation reads
+    # the fc's own attrs)
+    assert "window_samples" not in inherit
+    assert "decimation_levels" not in inherit
     # upstream params exist on ComputeFC
     cf_params = {p["name"] for p in ComputeFC().manifest()["params"]}
     assert {"window_samples", "decimation_levels", "output_channels"} <= cf_params
