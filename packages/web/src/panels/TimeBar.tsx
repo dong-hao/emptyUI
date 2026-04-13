@@ -13,6 +13,8 @@
  * (bare seconds display), mirroring the `payload` run-event summary.
  */
 
+import { useEffect, useRef } from "react";
+
 const MIN_GAP_S = 2.0; // > 1 s at second resolution
 
 export interface TimeExtent {
@@ -85,9 +87,24 @@ interface TimeBarProps {
 export function TimeBar({ extent, startValue, endValue, onChange }: TimeBarProps) {
   const start = parseBound(startValue, extent, "start");
   const end = parseBound(endValue, extent, "end");
-  if (start === null || end === null || end <= start) return null;
+  // L-F5 (§8.1): the window-level drag listeners survive an unmount that
+  // happens mid-drag (node removed / extent swapped) — track the active
+  // cleanup and run it when the component goes away
+  const cleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => { cleanupRef.current?.(); }, []);
+  if (start === null || end === null) return null;
 
   const span = extent.endSec - extent.startSec;
+  // shared clamp: keep the bound inside the extent and on its own side of
+  // the other handle (mirrors the server-side selection clamps)
+  const clampTarget = (which: "start" | "end", t: number) => {
+    const other = which === "start" ? end : start;
+    if (span > MIN_GAP_S) {
+      if (which === "start") t = Math.min(t, other - MIN_GAP_S);
+      else t = Math.max(t, other + MIN_GAP_S);
+    }
+    return Math.min(extent.endSec, Math.max(extent.startSec, t));
+  };
   // display clamp: a box value outside the extent draws at the track edge
   // (the server clamps the actual selection with a warning)
   const frac = (t: number) =>
@@ -101,17 +118,7 @@ export function TimeBar({ extent, startValue, endValue, onChange }: TimeBarProps
     const move = (ev: PointerEvent) => {
       const rect = track.getBoundingClientRect();
       const f = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-      const other = which === "start" ? end : start;
-      let t = extent.startSec + f * span;
-      // no-cross clamp only when the extent can actually provide the slot —
-      // in extents shorter than MIN_GAP_S it would push the handle outside
-      // the record (the extent clamp below then wins and the slot shrinks
-      // below the server's minimum anyway)
-      if (span > MIN_GAP_S) {
-        if (which === "start") t = Math.min(t, other - MIN_GAP_S);
-        else t = Math.max(t, other + MIN_GAP_S);
-      }
-      t = Math.min(extent.endSec, Math.max(extent.startSec, t));
+      const t = clampTarget(which, extent.startSec + f * span);
       onChange(which, fmtBound(t, extent));
     };
     const up = () => {
@@ -120,27 +127,53 @@ export function TimeBar({ extent, startValue, endValue, onChange }: TimeBarProps
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    cleanupRef.current = up;
+  };
+
+  // L-F11 (§8.1): keyboard-operable handles (arrows nudge the bound by
+  // 60 s, Shift+arrows by 1 h) + slider semantics for AT users
+  const keyStep = (which: "start" | "end") =>
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const dir =
+        e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      const cur = which === "start" ? start : end;
+      const t = clampTarget(which, cur + dir * (e.shiftKey ? 3600 : 60));
+      if (t !== cur) onChange(which, fmtBound(t, extent));
+    };
+
+  const handle = (which: "start" | "end") => {
+    const cur = which === "start" ? start : end;
+    return {
+      className: "time-bar-handle",
+      style: { left: `calc(${frac(cur)}% - 3px)` },
+      title: `${which} ${fmtBound(cur, extent)}`,
+      onPointerDown: drag(which),
+      role: "slider" as const,
+      tabIndex: 0,
+      "aria-label": `selection ${which}`,
+      "aria-valuemin": extent.startSec,
+      "aria-valuemax": extent.endSec,
+      "aria-valuenow": cur,
+      onKeyDown: keyStep(which),
+    };
   };
 
   return (
     <div className="time-bar nodrag nopan">
       <div className="time-bar-track">
+        {/* L-F5 (§8.1): crossing box values degrade (rect spans the sorted
+            pair, each handle keeps its own position) instead of vanishing */}
         <div
           className="time-bar-sel"
-          style={{ left: `${frac(start)}%`, width: `${frac(end) - frac(start)}%` }}
+          style={{
+            left: `${frac(Math.min(start, end))}%`,
+            width: `${frac(Math.max(start, end)) - frac(Math.min(start, end))}%`,
+          }}
         />
-        <div
-          className="time-bar-handle"
-          style={{ left: `calc(${frac(start)}% - 3px)` }}
-          title={`start ${fmtBound(start, extent)}`}
-          onPointerDown={drag("start")}
-        />
-        <div
-          className="time-bar-handle"
-          style={{ left: `calc(${frac(end)}% - 3px)` }}
-          title={`end ${fmtBound(end, extent)}`}
-          onPointerDown={drag("end")}
-        />
+        <div {...handle("start")} />
+        <div {...handle("end")} />
       </div>
       <div className="time-bar-ticks">
         <span>{fmtBound(extent.startSec, extent)}</span>
