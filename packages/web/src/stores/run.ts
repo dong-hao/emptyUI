@@ -89,7 +89,11 @@ export const useRun = create<RunState>((set) => ({
           runStatus: s.runStatus === "idle" ? "running" : s.runStatus,
           nodeStates: {
             ...s.nodeStates,
+            // L-F8: MERGE with the prior state — a node_status replacing the
+            // object dropped the progress/msg a node_progress event had
+            // already streamed (the progress bar snapped away mid-run)
             [event.node as string]: {
+              ...s.nodeStates[event.node as string],
               status: event.status as NodeRunState["status"],
               error: event.error as string | undefined,
               cached: event.cached === true ? true : undefined,
