@@ -459,7 +459,12 @@ export default function App() {
           type="file"
           accept=".json,application/json"
           hidden
-          onChange={(e) => e.target.files?.[0] && handleLoad(e.target.files[0])}
+          onChange={(e) => {
+            // L-F6: reset so re-picking the SAME file (after edits) fires
+            // again — the browser keeps the selection otherwise
+            if (e.target.files?.[0]) handleLoad(e.target.files[0]);
+            e.target.value = "";
+          }}
         />
         <button onClick={() => setShowSettings(true)} title="Enable/disable plugins">
           ⚙ Settings
