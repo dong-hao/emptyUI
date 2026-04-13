@@ -109,6 +109,9 @@ export function MTNode({ id, data, selected }: NodeProps) {
   const manifest = catalog?.nodes.find((m) => m.type === data.nodeType);
   const d = data as MTNodeData;
   const runState = useRun((s) => s.nodeStates[id]);
+  // L-F10: full arrays are needed for the chain-walking inheritance walk
+  // (edges don't mutate during node drags, so this is not the hot path);
+  // the hot per-render work — the per-param walk — is memoized below.
   const nodes = useWorkflow((s) => s.nodes);
   const edges = useWorkflow((s) => s.edges);
 
@@ -124,20 +127,23 @@ export function MTNode({ id, data, selected }: NodeProps) {
     () => makeInheritContext(catalog?.nodes, nodes, edges),
     [catalog, nodes, edges],
   );
-  const inheritedOptions = (paramName: string): string[] => {
-    const spec = params.find((p) => p.name === paramName);
-    let opts = resolveInherited(inheritCtx, id, paramName);
-    if (spec?.split_inherited) {
-      // comma-separated upstream lists (e.g. Compute FC output_channels
-      // "e1,e2,bz") become individual combobox choices
-      opts = opts.flatMap((o) => o.split(",").map((s) => s.trim()).filter(Boolean));
-    }
-    return opts;
-  };
-
-  // Only params the node declares as inheritable may auto-fill / become a
-  // dropdown; everything else (root defaults, radio/select config) stays manual.
+  // L-F10: ONE walk per graph change (not per render per param) — the
+  // inherited candidates for every declared param, memoized together.
   const inheritable = useMemo(() => inheritableParams(manifest), [manifest]);
+  const inheritedByParam = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const p of params) {
+      if (!inheritable.has(p.name)) continue;
+      let opts = resolveInherited(inheritCtx, id, p.name);
+      if (p.split_inherited) {
+        // comma-separated upstream lists (e.g. Compute FC output_channels
+        // "e1,e2,bz") become individual combobox choices
+        opts = opts.flatMap((o) => o.split(",").map((s) => s.trim()).filter(Boolean));
+      }
+      m[p.name] = opts;
+    }
+    return m;
+  }, [inheritCtx, inheritable, params, id]);
 
   const setParam = (name: string, value: unknown) => {
     const state = useWorkflow.getState();
@@ -259,6 +265,8 @@ export function MTNode({ id, data, selected }: NodeProps) {
   // Time-selector bars (§23.4): params bound via `time_bar` are grouped by
   // their input port (start/end pair per port) and rendered as a draggable
   // acquisition bar once the upstream run streamed the payload extent.
+  // (The full map is needed: barExtent/suggest_from read CONNECTED
+  // SOURCES' payloads — payload events are per-run, not per-frame.)
   const payloads = useRun((s) => s.payloads);
   const barGroups = useMemo(() => {
     const groups: { port: string; startP: ParamSpec; endP?: ParamSpec }[] = [];
@@ -319,10 +327,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
       {params.length > 0 && (
         <div className="mt-node-params">
           {params.map((p) => {
-            const opts = inheritable.has(p.name) ? inheritedOptions(p.name) : [];
-            // select-option suggestions (§20.1): the suggest_from port's
-            // payload summary extends the static options after a run (e.g.
-            // an fc database's sample-rate tiers)
+            const opts = inheritedByParam[p.name] ?? [];
             let sel = opts.length > 0 ? opts : undefined;
             // select-option suggestions (§20.1): the suggest_from port's
             // payload summary EXTENDS the options after a run (e.g. an fc
@@ -354,7 +359,14 @@ export function MTNode({ id, data, selected }: NodeProps) {
               <ParamField
                 key={p.name}
                 param={p}
-                value={d.params[p.name] ?? p.default ?? ""}
+                // L-F9 (§8.1): a param explicitly set (even cleared to null)
+                // renders its actual value; only a never-set param falls
+                // back to the manifest default
+                value={
+                  Object.prototype.hasOwnProperty.call(d.params, p.name)
+                    ? (d.params[p.name] ?? "")
+                    : (p.default ?? "")
+                }
                 onChange={(v) => setParam(p.name, v)}
                 compact
                 instanceId={id}
