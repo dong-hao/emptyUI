@@ -232,8 +232,8 @@ def _multi_run_archive(tmp_path: Path, n: int = 4, contiguous: bool = True,
     import warnings
 
     warnings.filterwarnings("ignore")
-    from mth5.mth5 import MTH5
     from mt_timeseries import ChannelTS, RunTS
+    from mth5.mth5 import MTH5
 
     rng = np.random.default_rng(7)
     path = tmp_path / "multi.h5"
@@ -422,6 +422,30 @@ def test_clock_zero_in_the_future_warns(caplog):
             start_datetime="2024-01-01T00:00:00")
     assert any("AFTER the record start" in rec.message for rec in caplog.records)
     assert 0 in levels
+
+
+def test_fc_time_coord_is_naive_utc():
+    """Regression: Compute FC's time coord must be NAIVE UTC (the repo-wide
+    convention). A real mth5 RunTS start carries a UTC offset — the built
+    coord was a tz-aware DatetimeIndex whose xarray ``.values`` exposes an
+    OBJECT array of ``datetime.datetime``: remote-reference pairing's
+    ``_time_key`` fell into its float branch and crashed the estimate
+    ('float() argument must be a string or a real number'), and every
+    ``np.issubdtype(dtype, datetime64)`` check downstream took the wrong
+    branch. The ``start_datetime`` attr keeps the offset for provenance."""
+    import pandas as pd
+    from emptyui_aurora._processing import compute_fc_levels
+    from test_magnetic_units import _field, _runts
+
+    r = _runts(*_field(np.random.default_rng(3), n=512, sr=8.0))
+    r.start = pd.Timestamp("2024-01-01T00:00:00+00:00")
+    r.start_datetime = "2024-01-01T00:00:00+00:00"
+    levels = compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
+                               num_decimations=0, num_samples_window=64,
+                               overlap=0.5, window_type="boxcar")
+    t = levels[0]["time"].values
+    assert np.issubdtype(t.dtype, np.datetime64)  # not object-of-datetimes
+    assert levels[0].attrs["start_datetime"] == "2024-01-01T00:00:00+00:00"
 
 
 def test_build_fc_window_selection(tmp_path):

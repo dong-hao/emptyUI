@@ -528,6 +528,28 @@ def test_pairing_intersect_tolerance_recovers(caplog):
     assert not any("kept" in r.message for r in caplog.records)  # all paired
 
 
+def test_pairing_tz_aware_time_coords():
+    """Regression (§9.3): a real mth5 RunTS start carries a UTC offset — the
+    built fc time coord was a tz-AWARE DatetimeIndex, whose xarray
+    ``.values`` exposes OBJECT arrays of ``datetime.datetime``;
+    ``_time_key`` then fell into its float branch and crashed the whole
+    estimate ('float() argument must be a string or a real number'). Two
+    layers fixed: Compute FC emits naive-UTC coords (repo-wide convention)
+    and ``_time_key`` normalizes object arrays (aware fcs from other
+    producers, e.g. persisted mth5 FC databases)."""
+    from emptyui_aurora._processing import estimate_tf
+
+    fc, ref = _paired_pair_fcs(extra_ref=2)
+    fc = fc.assign_coords(
+        time=("time", pd.DatetimeIndex(fc["time"].values).tz_localize("UTC")))
+    ref = ref.assign_coords(
+        time=("time", pd.DatetimeIndex(ref["time"].values).tz_localize("UTC")))
+    _periods, Z, _err = estimate_tf(
+        fc, ("hx", "hy"), ("ex", "ey"), estimator_engine="RME_RR",
+        remote_reference=True, ref_fc=ref)
+    assert np.all(np.isfinite(Z))
+
+
 def test_pairing_frequency_grid_stays_strict():
     """A window-settings (frequency) mismatch refuses in BOTH modes — the
     official SSMT2000 semantics (inconsistent duty cycles refuse to work)."""

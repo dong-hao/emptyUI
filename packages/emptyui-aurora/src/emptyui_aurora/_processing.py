@@ -375,7 +375,12 @@ def compute_fc(
     time_coord = t + off
     start_iso = ""
     if start_ts is not None:
-        time_coord = start_ts + pd.to_timedelta(t + off, unit="s")
+        dt_idx = start_ts + pd.to_timedelta(t + off, unit="s")
+        # repo-wide convention: naive stamps are UTC — a tz-aware coord makes
+        # xarray's .values an OBJECT array of datetime.datetime, breaking
+        # every np.datetime64 dtype check downstream (remote-reference
+        # pairing crashed on exactly this)
+        time_coord = dt_idx.tz_localize(None) if dt_idx.tz is not None else dt_idx
         start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
 
     fc = xr.Dataset(
@@ -571,7 +576,10 @@ def compute_fc_levels(
         cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
         start_iso = ""
         if start_ts is not None:
-            time_coord = start_ts + pd.to_timedelta(t + off, unit="s")
+            dt_idx = start_ts + pd.to_timedelta(t + off, unit="s")
+            # naive UTC (repo-wide convention) — see compute_fc's note
+            time_coord = (dt_idx.tz_localize(None)
+                          if dt_idx.tz is not None else dt_idx)
             start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
         else:
             time_coord = t + off  # off = the payload's relative start
@@ -1056,6 +1064,18 @@ def _time_key(t):
     t = np.asarray(t)
     if np.issubdtype(t.dtype, np.datetime64):
         return t.astype("datetime64[ns]").astype(np.int64)
+    if t.dtype == object:
+        # tz-aware fc time coords (the RunTS start carries a UTC offset, so
+        # the built coord is a tz-aware DatetimeIndex) expose ``.values`` as
+        # object arrays of ``datetime.datetime`` — astype(np.float64) on
+        # those raises "float() argument must be a string or a real number".
+        # Normalize to UTC epoch ns (naive = UTC, the repo-wide convention).
+        idx = pd.DatetimeIndex(t)
+        if idx.tz is None:
+            idx = idx.tz_localize("UTC")
+        else:
+            idx = idx.tz_convert("UTC")
+        return idx.tz_localize(None).astype("int64")
     return t.astype(np.float64)
 
 
@@ -1207,10 +1227,14 @@ def _warn_remote_gaps(local_fc, ref_fc) -> None:
     if not gaps:
         return
     t = np.asarray(local_fc["time"].values)
-    if not np.issubdtype(t.dtype, np.datetime64):
+    if not (np.issubdtype(t.dtype, np.datetime64) or t.dtype == object):
         return  # relative time axes: gap intervals are not interpretable
-    import pandas as pd
-
+    try:
+        # tz-aware coords (xarray stores pandas tz-aware indexes) expose
+        # object arrays of datetime.datetime — DatetimeIndex handles both
+        t_idx = pd.DatetimeIndex(t)
+    except (ValueError, TypeError):
+        return  # object values that are not datetimes
     # naive stamps are assumed UTC (the repo-wide convention); the recorded
     # intervals may be naive while the fc time axis is tz-aware (or vice
     # versa) — normalize both before comparing
