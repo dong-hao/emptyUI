@@ -35,9 +35,24 @@ export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
     };
   }, [path]);
 
+  // L-F11 (§8.1): Esc closes the dialog
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Select ${kind}`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-head">
           <strong>Select {kind}</strong>
           <span className="muted modal-path">{path || "…"}</span>

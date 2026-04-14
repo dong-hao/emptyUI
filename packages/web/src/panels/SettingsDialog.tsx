@@ -56,6 +56,14 @@ export function SettingsDialog({ onClose }: Props) {
   const { plugins, loading, error, load, toggle } = usePlugins();
   const [view, setView] = useState<SettingsView | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  // L-F11 (§8.1): Esc closes the dialog
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -106,7 +114,13 @@ export function SettingsDialog({ onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal settings-dialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-head">
           <strong>Settings</strong>
           <button onClick={onClose}>✕</button>

@@ -37,6 +37,7 @@ function CommitInput({
   min,
   max,
   step,
+  ariaLabel,
 }: {
   value: unknown;
   onCommit: (v: unknown) => void;
@@ -48,6 +49,8 @@ function CommitInput({
   min?: number | string;
   max?: number | string;
   step?: number | string;
+  /** L-F11 (§8.1): compact-node inputs have no <label> element */
+  ariaLabel?: string;
 }) {
   const [draft, setDraftState] = useState<string | null>(null);
   // mirror ref: the blur/keydown handlers must see the CURRENT draft even
@@ -104,15 +107,20 @@ function CommitInput({
       value={editing ? draft : current}
       disabled={disabled}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       min={min}
       max={max}
       step={step}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
+        // L-F11 (§8.1): don't let commit/revert keys bubble into dialog
+        // Esc-to-close handlers (FileBrowser/Settings)
         if (e.key === "Enter") {
+          e.stopPropagation();
           commit();
           (e.target as HTMLInputElement).blur();
         } else if (e.key === "Escape") {
+          e.stopPropagation();
           cancel();
           (e.target as HTMLInputElement).blur();
         }
@@ -332,6 +340,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
             widget={param.widget}
             disabled={disabled}
             placeholder={param.placeholder}
+            ariaLabel={param.label ?? param.name}
           />
         );
     }
