@@ -181,6 +181,10 @@ interface WorkflowState {
     patch: Partial<MTNodeData> | ((d: MTNodeData) => Partial<MTNodeData>),
   ) => void;
   deleteSelected: () => void;
+  /** Remove one node and its incident edges (L-F12, §8.1): the
+   *  properties-panel "Delete node" acts on its own target, not the
+   *  whole multi-selection. */
+  deleteNode: (id: string) => void;
   /** Re-run stale-edge pruning when the catalog arrives after a load
    *  (with an empty catalog every manifest check passes vacuously —
    *  edges referencing renamed/removed ports would survive). */
@@ -189,7 +193,12 @@ interface WorkflowState {
   copySelection: () => void;
   pasteSelection: () => void;
   duplicateSelection: () => void;
-  loadDocument: (nodes: Node<MTNodeData>[], edges: Edge[], name?: string) => void;
+  loadDocument: (
+    nodes: Node<MTNodeData>[], edges: Edge[], name?: string, created?: string,
+  ) => void;
+  /** The document's original creation stamp (L-F12, DESIGN §6): carried
+   *  through load so a save writes the original date, not today. */
+  docCreated: string | undefined;
   /** Start a fresh document (toolbar "New", §8.1): empty canvas, default
    *  name — the run state is reset by the caller. */
   newWorkflow: () => void;
@@ -202,6 +211,9 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   selectedNodeId: null,
   clipboard: null,
   docName: "untitled",
+  /** the document's original creation stamp (L-F12: preserved across saves,
+   *  not re-stamped per save) */
+  docCreated: undefined as string | undefined,
   onNodesChange: (changes) =>
     set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
   onEdgesChange: (changes) =>
@@ -306,6 +318,12 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
         selectedNodeId: null,
       };
     }),
+  deleteNode: (id) =>
+    set((s) => ({
+      nodes: s.nodes.filter((n) => n.id !== id),
+      edges: s.edges.filter((e) => e.source !== id && e.target !== id),
+      selectedNodeId: s.selectedNodeId === id ? null : s.selectedNodeId,
+    })),
   revalidateEdges: () => {
     const { nodes, edges } = get();
     const { catalog } = useCatalog.getState();
@@ -390,12 +408,13 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     get().copySelection();
     get().pasteSelection();
   },
-  loadDocument: (nodes, edges, name) =>
+  loadDocument: (nodes, edges, name, created) =>
     set({
       nodes,
       edges: migrateEdges(nodes, edges),
       selectedNodeId: null,
       ...(name ? { docName: name } : {}),
+      docCreated: created,
     }),
   newWorkflow: () =>
     set({
@@ -500,7 +519,7 @@ export function serializeWorkflow(
     version: 1,
     meta: {
       name: name ?? useWorkflow.getState().docName ?? "untitled",
-      created: new Date().toISOString(),
+      created: useWorkflow.getState().docCreated ?? new Date().toISOString(),
     },
     nodes: nodes.map((n) => ({
       id: n.id,
@@ -528,11 +547,11 @@ export function deserializeWorkflow(
   doc: {
     format?: string;
     version?: number;
-    meta?: { name?: string };
+    meta?: { name?: string; created?: string };
     nodes: { id: string; type: string; params?: Record<string, unknown>; position?: { x: number; y: number } }[];
     edges: { id: string; source: string; source_port: string; target: string; target_port: string }[];
   },
-): { nodes: Node<MTNodeData>[]; edges: Edge[]; name: string } {
+): { nodes: Node<MTNodeData>[]; edges: Edge[]; name: string; created?: string } {
   if (doc?.format !== "emptyui/workflow") {
     throw new Error(
       "not an emptyUI workflow document (missing format: 'emptyui/workflow')",
@@ -595,5 +614,15 @@ export function deserializeWorkflow(
         data: { portType },
       };
     });
-  return { nodes, edges, name: doc.meta?.name || "untitled" };
+  return {
+    nodes,
+    edges,
+    name: doc.meta?.name || "untitled",
+    created: doc.meta?.created,
+  } satisfies {
+    nodes: Node<MTNodeData>[];
+    edges: Edge[];
+    name: string;
+    created?: string;
+  };
 }

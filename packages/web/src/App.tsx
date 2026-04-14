@@ -285,8 +285,10 @@ export default function App() {
         return !!m && (m.outputs.length === 0 || m.category === "Display");
       });
       if (!hasOutputNode) {
+        // L-F12 (§8.1): don't enumerate concrete node names (they vary by
+        // catalog) — describe the property the check looks for
         setNotice(
-          "No Display or output node (Plot / Preview / Save) — add one to see results.",
+          "Run results won't be visible — add a Display node or another terminal node (one with no outputs).",
         );
       } else {
         setNotice(null);
@@ -378,13 +380,14 @@ export default function App() {
   const handleLoad = async (file: File) => {
     try {
       const doc = JSON.parse(await file.text());
-      const { nodes: loaded, edges: loadedEdges, name } = deserializeWorkflow(doc);
+      const { nodes: loaded, edges: loadedEdges, name, created } =
+        deserializeWorkflow(doc);
       // mirror handleNew (§8): a document load is a new working context —
       // the previous run's chips/artifacts/extents must not bleed into it
       // (and its poll timer must not keep streaming foreign events)
       stopPolling();
       useRun.getState().reset();
-      useWorkflow.getState().loadDocument(loaded, loadedEdges, name);
+      useWorkflow.getState().loadDocument(loaded, loadedEdges, name, created);
       if (!catalog?.nodes?.length) loadedBeforeCatalog.current = true;
       setMessage(null);
     } catch (e) {

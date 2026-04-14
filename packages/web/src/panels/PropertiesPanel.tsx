@@ -107,7 +107,12 @@ export function PropertiesPanel({
         </button>
       )}
 
-      <button className="danger" onClick={() => useWorkflow.getState().deleteSelected()}>
+      {/* L-F12 (§8.1): delete the node this panel shows, not the whole
+          RF multi-selection */}
+      <button
+        className="danger"
+        onClick={() => useWorkflow.getState().deleteNode(node.id)}
+      >
         Delete node
       </button>
     </aside>
