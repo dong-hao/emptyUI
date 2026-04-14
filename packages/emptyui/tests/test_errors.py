@@ -234,6 +234,56 @@ def test_execution_error_surfaced():
     assert raised
 
 
+def test_runts_payload_does_not_mask_node_error():
+    """The failed-run sweep's duck-check for ``close_mth5`` must survive a
+    payload whose __getattr__ converts a missing attribute into NameError
+    (mt_timeseries' RunTS does exactly that): getattr(value, name, None)
+    raises NameError there, escaping the sweep and MASKING the node's real
+    error — a two-station remote-reference run surfaced as
+    "RunTS has no attribute close_mth5" instead of its actual failure."""
+    from emptyui import Input, Node, Output
+
+    class FakeRunTS:
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                return
+            raise NameError(f"RunTS has no attribute {name}")
+
+    class TsSource(Node):
+        type = "test.ts_source_runts"
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx):
+            return {"data": FakeRunTS()}
+
+    class TsBoom(Node):
+        type = "test.ts_boom"
+        inputs = (Input("data", "ts.run"),)
+        outputs = (Output("data", "ts.run"),)
+
+        def execute(self, ctx, data):
+            raise ValueError("the real error")
+
+    reg = _registry()
+    reg.add(TsSource)
+    reg.add(TsBoom)
+    wf = Workflow(
+        nodes=[
+            WorkflowNode(id="n1", type="test.ts_source_runts"),
+            WorkflowNode(id="n2", type="test.ts_boom"),
+        ],
+        edges=[Edge(id="e1", source="n1", source_port="data",
+                    target="n2", target_port="data")],
+    )
+    events = []
+    with pytest.raises(ExecutionError, match="the real error"):
+        Executor(reg).run(wf, emit=events.append)
+    failed = [e for e in events
+              if e["event"] == "node_status" and e.get("node") == "n2"]
+    assert failed[-1]["status"] == "error"
+    assert "the real error" in failed[-1]["error"]
+
+
 def test_execution_cancelled_before_start():
     ev = threading.Event()
     ev.set()

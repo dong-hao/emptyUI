@@ -69,7 +69,12 @@ def close_archive_payload(value, log=None) -> bool:
     Used by Save MTH5's close-in-place branch and the executor's
     failed/cancelled-run cleanup. Returns False when the value is not an
     open-archive payload (duck: has ``close_mth5``)."""
-    close = getattr(value, "close_mth5", None)
+    try:
+        close = getattr(value, "close_mth5", None)
+    except Exception:  # noqa: BLE001 — mt_timeseries converts a missing-
+        # attribute AttributeError into NameError, defeating getattr's
+        # default; a non-archive payload (RunTS) is simply not this
+        return False
     if close is None or not callable(close):
         return False
     fn = getattr(value, "filename", None)

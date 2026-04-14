@@ -309,7 +309,14 @@ class Executor:
                     value = store.get(hid).value
                 except KeyError:
                     continue
-                close = getattr(value, "close_mth5", None)
+                try:
+                    close = getattr(value, "close_mth5", None)
+                except Exception:  # noqa: BLE001, S112 — best effort: a
+                    # mt_timeseries converts a missing-attribute AttributeError
+                    # into NameError — which defeats getattr's default; a
+                    # non-archive payload (RunTS) must simply be skipped (the
+                    # NameError otherwise escapes and MASKS the run's error)
+                    continue
                 if close is None or id(value) in cached:
                     continue
                 try:
