@@ -499,12 +499,19 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
   Complements `cascade` (which *sets* values; `enabled_when` *gates* editing).
   Rendering-only — the executor never enforces it (nodes validate their own
   params).
-- **`populated_when`** (per **output port**): the port-analog of
+- **`populated_when`** (per **port**, output or input): the port-analog of
   `enabled_when` — the port is populated only when the named sibling param
-  holds one of the listed values (Extract Run's dual outputs: `data` in
-  `run id` mode, `runs` in `time range` mode). Rendering-only: the UI dims
-  ports that will not be populated; the executor stores unpopulated outputs
-  as None.
+  holds one of the listed values. Rendering-only: the UI dims ports that
+  will not be populated; the executor stores unpopulated outputs as None.
+  Currently **dormant** (no manifest declares it): Extract Run's former
+  dual outputs (`data` in `run id` mode, `runs` in `time range` mode) were
+  collapsed into the single collection-carrying `data` output — collections
+  ride the same `ts.run` port kind, so the dimming has no user. Kept for
+  the ComfyUI-style use case: a node taking several mutually exclusive
+  input types but only one at a time (e.g. object detection — a SEGM *or*
+  SAM detector input, the sibling param selects which) dims the inputs the
+  current mode does not take; input-port dimming is a small deliberate
+  extension of the same frontend check when a manifest needs it.
 - **`inherit`** (per node): `{input_port: {target_param: upstream_param}}`. When
   an upstream node is connected, those params render as dropdowns populated from
   the upstream node's params and auto-fill if empty. Same-name inheritance is an
