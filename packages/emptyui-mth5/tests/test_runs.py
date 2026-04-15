@@ -4,7 +4,10 @@ test_errors.py."""
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pandas as pd
+import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_mth5.runs import (
@@ -373,17 +376,199 @@ def test_split_channels_rejects_collection(tmp_path):
         raise AssertionError("collection input must be rejected")
 
 
-def test_align_runs_rejects_collections(tmp_path):
-    from emptyui_mth5.runs import AlignRuns
+def _coll_member(sample_rate: float, start: str, n: int, seed: int = 0):
+    """A duck collection member (the Extract Run 'time range' shape):
+    SimpleNamespace(dataset, sample_rate, start) with a real time axis."""
+    import numpy as np
+    import xarray as xr
 
+    rng = np.random.default_rng(seed)
+    t = pd.date_range(start, periods=n,
+                      freq=pd.Timedelta(seconds=1.0 / sample_rate))
+    return SimpleNamespace(
+        dataset=xr.Dataset(
+            {"bx": ("time", rng.standard_normal(n)),
+             "by": ("time", rng.standard_normal(n)),
+             "ex": ("time", rng.standard_normal(n)),
+             "ey": ("time", rng.standard_normal(n))},
+            coords={"time": t},
+        ),
+        sample_rate=sample_rate,
+        start=t[0],
+    )
+
+
+def _naive(ts):
+    """Normalize a stamp for comparison (aware/naive mix in pandas; MTime
+    objects need str())."""
+    t = pd.Timestamp(str(ts))
+    return t.tz_convert("UTC").tz_localize(None) if t.tzinfo is not None else t
+
+
+def _assert_extent(row, member):
+    """The extent row reflects the member's actual cropped span."""
+    t = member.dataset["time"].values
+    assert _naive(row["start"]) == _naive(t[0])
+    assert _naive(row["end"]) >= _naive(t[-1])
+
+
+def _coll_row(sample_rate: float, start: str, n: int, seed: int = 0,
+              station: str = "", run: str = ""):
+    """(member, extent row) with CONSISTENT stamps: the extent row mirrors
+    the member's actual dataset span (inclusive last sample)."""
+    m = _coll_member(sample_rate, start, n, seed)
+    t = m.dataset["time"].values
+    row = {"survey": "S", "station": station, "run": run,
+           "start": pd.Timestamp(t[0]).isoformat(),
+           "end": pd.Timestamp(t[-1]).isoformat(),
+           "sample_rate": sample_rate}
+    return m, row
+
+
+def _coll(rows, station):
+    from emptyui_mth5.runs import RunCollection
+
+    return RunCollection(runs=[m for m, _ in rows],
+                         extents=[e for _, e in rows])
+
+
+def test_align_runs_collections_member_crop(tmp_path):
+    """Collection inputs (Extract Run 'time range' payloads) align
+    member-wise: every member is cropped to the common overlap of the two
+    collections' union spans, extent rows are updated, and the output kind
+    is preserved (collections in -> collections out).
+
+    Spans in seconds (8 Hz): a1 [0, 9.875], a2 [10, 19.875], b1 [5, 24.875]
+    -> common overlap [5, 19.875]."""
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 80, station="A", run="a1")
+    a2, e2 = _coll_row(8.0, "2024-01-01T00:00:10", 80, seed=1, station="A",
+                       run="a2")
+    b1, eb = _coll_row(8.0, "2024-01-01T00:00:05", 160, seed=2, station="B",
+                       run="b1")
+    coll_a = RunCollection(runs=[a1, a2], extents=[e1, e2])
+    coll_b = RunCollection(runs=[b1], extents=[eb])
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    try:
-        AlignRuns().execute(ctx, _coll_stub(), _coll_stub())
-    except ValueError as exc:
-        assert "time series 1 is a run collection" in str(exc)
-        assert "pairing='intersect'" in str(exc)
-    else:
-        raise AssertionError("collection input must be rejected")
+    out = AlignRuns().execute(ctx, coll_a, coll_b)
+    oa, ob = out["data1"], out["data2"]
+    assert isinstance(oa, RunCollection) and isinstance(ob, RunCollection)
+    # A: a1 cropped to [5, 9.875] s, a2 cropped to [10, 19.875] s — both kept
+    assert [e["run"] for e in oa.extents] == ["a1", "a2"]
+    assert _naive(oa.extents[0]["start"]) == pd.Timestamp("2024-01-01T00:00:05")
+    assert _naive(oa.extents[0]["end"]) == pd.Timestamp("2024-01-01T00:00:09.875")
+    assert _naive(oa.extents[1]["start"]) == pd.Timestamp("2024-01-01T00:00:10")
+    for e, m in zip(oa.extents, oa.runs):
+        _assert_extent(e, m)
+    # B: b1 cropped to the same overlap [5, 19.875] s
+    assert [e["run"] for e in ob.extents] == ["b1"]
+    assert _naive(ob.extents[0]["start"]) == _naive(oa.extents[0]["start"])
+    assert _naive(ob.extents[0]["end"]) == _naive(oa.extents[1]["end"])
+
+
+def test_align_runs_collections_drop_outside_members(tmp_path, caplog):
+    """Members entirely outside the common overlap are DROPPED with a named
+    warning (they cannot contribute pairable FC windows)."""
+    import logging
+
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 80, station="A", run="a1")
+    a2, e2 = _coll_row(8.0, "2024-01-01T00:00:10", 80, seed=1, station="A",
+                       run="a2")
+    b1, eb = _coll_row(8.0, "2024-01-01T00:00:10", 80, seed=2, station="B",
+                       run="b1")
+    coll_a = RunCollection(runs=[a1, a2], extents=[e1, e2])
+    coll_b = RunCollection(runs=[b1], extents=[eb])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        out = AlignRuns().execute(ctx, coll_a, coll_b)
+    oa, ob = out["data1"], out["data2"]
+    # a1 lies entirely before the overlap -> dropped from A; a2 kept
+    assert [e["run"] for e in oa.extents] == ["a2"]
+    assert [e["run"] for e in ob.extents] == ["b1"]
+    assert any("dropping input 1 run 'a1'" in r.message and
+               "outside the common overlap" in r.message
+               for r in caplog.records)
+
+
+def test_align_runs_collections_no_overlap_error(tmp_path):
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 80, station="A", run="a1")
+    b1, eb = _coll_row(8.0, "2024-01-01T00:01:00", 80, seed=2, station="B",
+                       run="b1")
+    coll_a = RunCollection(runs=[a1], extents=[e1])
+    coll_b = RunCollection(runs=[b1], extents=[eb])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with pytest.raises(ValueError, match="do not overlap"):
+        AlignRuns().execute(ctx, coll_a, coll_b)
+
+
+def test_align_runs_collections_window_params(tmp_path):
+    """The time-selector window (§23.4) narrows the overlap member-wise."""
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 160, station="A", run="a1")
+    b1, eb = _coll_row(8.0, "2024-01-01T00:00:00", 160, seed=2, station="B",
+                       run="b1")
+    coll_a = RunCollection(runs=[a1], extents=[e1])
+    coll_b = RunCollection(runs=[b1], extents=[eb])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = AlignRuns().execute(ctx, coll_a, coll_b,
+                              start="5", end="10")
+    oa, ob = out["data1"], out["data2"]
+    assert _naive(oa.extents[0]["start"]) == pd.Timestamp("2024-01-01T00:00:05")
+    assert _naive(oa.extents[0]["end"]) == pd.Timestamp("2024-01-01T00:00:10")
+    assert _naive(ob.extents[0]["start"]) == _naive(oa.extents[0]["start"])
+    assert _naive(ob.extents[0]["end"]) == _naive(oa.extents[0]["end"])
+
+
+def test_align_runs_single_x_collection(tmp_path):
+    """Mixed wiring: the single side stays a single RunTS output, the
+    collection side stays a collection — both cropped to the common overlap
+    (the single acts as a 1-member collection internally)."""
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    single = _coll_member(8.0, "2024-01-01T00:00:02", 80)  # [2, 11.875] s
+    b1, eb = _coll_row(8.0, "2024-01-01T00:00:05", 80, seed=2, station="B",
+                       run="b1")
+    coll_b = RunCollection(runs=[b1], extents=[eb])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = AlignRuns().execute(ctx, single, coll_b)
+    oa, ob = out["data1"], out["data2"]
+    # single side: a RunTS cropped to the overlap [5, 12) s (the single's
+    # span end is exclusive: start + n/sr)
+    from mt_timeseries import RunTS
+    assert isinstance(oa, RunTS)
+    assert _naive(str(oa.start)) == pd.Timestamp("2024-01-01T00:00:05")
+    # collection side cropped to the same overlap
+    assert isinstance(ob, RunCollection)
+    assert _naive(ob.extents[0]["start"]) == _naive(oa.start)
+    assert _naive(ob.extents[0]["end"]) == pd.Timestamp("2024-01-01T00:00:12")
+    assert len(oa.dataset.data_vars["bx"].values) == 7 * 8
+
+
+def test_align_runs_collections_rate_mismatch_warns(tmp_path, caplog):
+    """Differing rate SETS across the two collections warn (alignment is
+    rate-agnostic; the FC pairing refuses real mismatches downstream)."""
+    import logging
+
+    from emptyui_mth5.runs import AlignRuns, RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 80, station="A", run="a1")
+    b1, eb = _coll_row(16.0, "2024-01-01T00:00:00", 160, seed=2, station="B",
+                       run="b1")
+    coll_a = RunCollection(runs=[a1], extents=[e1])
+    coll_b = RunCollection(runs=[b1], extents=[eb])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        out = AlignRuns().execute(ctx, coll_a, coll_b)
+    assert any("different sample-rate sets" in r.message
+               for r in caplog.records)
+    # the alignment still proceeds (crop is rate-agnostic)
+    assert len(out["data1"].extents) == 1
+    assert len(out["data2"].extents) == 1
 
 
 def test_calibrate_degenerate_collection_still_rejected(tmp_path):

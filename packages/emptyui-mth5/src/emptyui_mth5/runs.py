@@ -921,12 +921,18 @@ class AlignRuns(Node):
     description = (
         "Crop two time series to their common acquisition overlap so their "
         "Fourier coefficients can be paired — the first step of remote-"
-        "reference processing. Both runs must share the same sample rate "
-        "(aurora hard-errors on mixed rates). The overlap is computed from "
-        "absolute start/end times (GPS); when no absolute times are available "
-        "the relative offsets are used with a warning. Both outputs are "
-        "normalized to an mth5 RunTS over the identical interval — run "
-        "Compute FC on both with identical window/decimation settings."
+        "reference processing. Run collections (Extract Run 'time range' "
+        "mode) are aligned member-wise: every member of both sides is "
+        "cropped to the common overlap of the two collections' union spans, "
+        "members entirely outside are dropped with a warning, and extent "
+        "rows are updated to the cropped spans. Both runs must share the "
+        "same sample rate (aurora hard-errors on mixed rates; collections "
+        "are warned — the FC pairing refuses real mismatches). The overlap "
+        "is computed from absolute start/end times (GPS); when no absolute "
+        "times are available the relative offsets are used with a warning "
+        "(single runs only). Both outputs are normalized to an mth5 RunTS "
+        "over the identical interval — run Compute FC on both with "
+        "identical window/decimation settings."
     )
     category = "Processing"
     inputs = (
@@ -953,13 +959,12 @@ class AlignRuns(Node):
 
     def execute(self, ctx, data1, data2, start: str = "",
                 end: str = "") -> dict[str, Any]:
-        for name, value in (("time series 1", data1), ("time series 2", data2)):
-            if is_run_collection(value):
-                raise ValueError(
-                    f"{name} is a run collection — Align Runs works on single "
-                    "time series: burst-mode remote reference pairs at the FC "
-                    "level (Estimate TF pairing='intersect'), not in the time "
-                    "domain; extract single runs to align")
+        # §9.3: Extract Run 'time range' mode emits run collections (Compute
+        # FC / Calibrate consume them member-wise) — Align Runs crops BOTH
+        # sides to their common overlap member-wise (a single run acts as a
+        # 1-member collection; its output kind is preserved).
+        if is_run_collection(data1) or is_run_collection(data2):
+            return _align_collections(ctx, data1, data2, start, end)
         ch1, sr1, a1, r1 = _run_time_info(data1)
         ch2, sr2, a2, r2 = _run_time_info(data2)
         if abs(sr1 - sr2) > 1e-9 * max(sr1, sr2, 1.0):
@@ -1065,6 +1070,207 @@ class AlignRuns(Node):
             f"aligned runs: {n_common} samples ({n_common / sr:.1f} s) overlap",
         )
         return {"data1": out1, "data2": out2}
+
+
+def _member_id(member, ext) -> str:
+    """Identity for a collection member in warnings (the extent row's run id,
+    else the payload type)."""
+    if ext and str(ext.get("run", "")).strip():
+        return str(ext["run"])
+    return type(member).__name__
+
+
+def _member_span(member, ext):
+    """(start, end) aware-UTC Timestamps for a collection member.
+
+    The member's own dataset time axis is the truth; the extents row
+    (Extract Run's identity/extent stamp) is the fallback. Returns
+    ``(None, None)`` when neither carries an absolute axis (relative axes
+    cannot be cropped to an absolute overlap).
+    """
+    import numpy as np
+
+    ds = getattr(member, "dataset", None)
+    if ds is not None and not isinstance(ds, dict):
+        try:
+            t = np.asarray(ds["time"].values)
+            # datetime64, or the object array a tz-aware index exposes
+            if (np.issubdtype(t.dtype, np.datetime64) or t.dtype == object) \
+                    and t.size:
+                idx = pd.DatetimeIndex(t)
+                return _utc(idx[0]), _utc(idx[-1])
+        except (TypeError, ValueError, KeyError):  # degenerate, fall through
+            pass
+    if ext:
+        try:
+            s = pd.Timestamp(str(ext.get("start", "")))
+            e = pd.Timestamp(str(ext.get("end", "")))
+            if not pd.isna(s) and not pd.isna(e):
+                return _utc(s), _utc(e)
+        except (TypeError, ValueError):
+            pass
+    return None, None
+
+
+def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
+    """Collection-aware alignment (§9.3): crop both sides to their common
+    overlap member-wise.
+
+    Extract Run's 'time range' mode emits run collections (Compute FC /
+    Calibrate consume them member-wise); Align Runs crops every member of
+    both sides to the common overlap of the two collections' union spans.
+    Members entirely outside the overlap are DROPPED with a named warning
+    (they cannot contribute pairable FC windows); partially-overlapping
+    members are cropped and their extent rows updated, so the time bars
+    and downstream summaries stay truthful. A single run acts as a
+    1-member collection whose output kind is preserved as a single RunTS.
+
+    Sample rates are WARNED about (a burst collection legitimately carries
+    mixed rates) — the FC pairing refuses real mismatches with its own
+    actionable error. Absolute spans are required: relative-offset
+    alignment is only defined for the single-run path.
+    """
+    sides = []
+    for tag, value in (("time series 1", data1), ("time series 2", data2)):
+        if is_run_collection(value):
+            members = list(value.runs)
+            extents = list(value.extents)
+            if not members:
+                raise ValueError(
+                    f"{tag} is an empty run collection — Extract Run's "
+                    "'time range' selection matched no runs")
+            rows = [(m, extents[i] if i < len(extents) else None)
+                    for i, m in enumerate(members)]
+            sides.append(("collection", tag,
+                          [(m, e) + _member_span(m, e) for m, e in rows]))
+        else:
+            # single run: span from _run_time_info (handles a core
+            # TimeSeries' start_datetime, which _member_span cannot)
+            ch, sr, a, _r = _run_time_info(value)
+            n = max((len(v) for v in ch.values()), default=0)
+            if n < 1:
+                raise ValueError(f"{tag} has no samples")
+            e = (a + pd.Timedelta(seconds=n / sr)) if a is not None else None
+            sides.append(("single", tag, [(value, None, a, e)]))
+
+    def _rates(rows):
+        out = set()
+        for m, _e, _s, _e2 in rows:
+            try:
+                r = float(_payload(m)[1])
+            except Exception:  # noqa: BLE001, S112 — degenerate member, skip
+                continue
+            if r > 0:
+                out.add(round(r, 9))
+        return out
+
+    ra, rb = _rates(sides[0][2]), _rates(sides[1][2])
+    if ra and rb and ra != rb:
+        ctx.logger.warning(
+            "align: the two inputs carry different sample-rate sets (%s vs "
+            "%s Hz) — remote-reference pairing needs identical sampling; "
+            "the FC pairing will refuse mismatched frequency grids",
+            ", ".join(f"{r:g}" for r in sorted(ra)),
+            ", ".join(f"{r:g}" for r in sorted(rb)))
+
+    def _bounds(rows):
+        spans = [(s, e) for _m, _e, s, e in rows if s is not None]
+        if not spans:
+            return None
+        return min(s for s, _e in spans), max(e for _s, e in spans)
+
+    ba, bb = _bounds(sides[0][2]), _bounds(sides[1][2])
+    if ba is None or bb is None:
+        missing = sides[0][1] if ba is None else sides[1][1]
+        raise ValueError(
+            f"{missing} carries no absolute time span — Align Runs on run "
+            "collections needs the archive start/end times (Extract Run "
+            "stamps them); relative-offset alignment is only defined for "
+            "the single-run path")
+    t0 = max(ba[0], bb[0])
+    t1 = min(ba[1], bb[1])
+    if t1 <= t0:
+        raise ValueError(
+            f"the two inputs do not overlap: [{ba[0]:%Y-%m-%d %H:%M}, "
+            f"{ba[1]:%Y-%m-%d %H:%M}] vs [{bb[0]:%Y-%m-%d %H:%M}, "
+            f"{bb[1]:%Y-%m-%d %H:%M}] — check the stations' coverage")
+
+    # §23.4 window params narrow the overlap (both outputs identical)
+    if str(start).strip() or str(end).strip():
+        s0, s1 = resolve_window_s(
+            start, end, rec_len=(t1 - t0).total_seconds(),
+            start_datetime=t0.isoformat(), what="time slot")
+        w0 = t0 + pd.Timedelta(seconds=s0)
+        w1 = t0 + pd.Timedelta(seconds=s1)
+    else:
+        w0, w1 = t0, t1
+
+    out = {}
+    for idx, (kind, _tag, rows) in enumerate(sides, 1):
+        members, extents = [], []
+        n_before = n_after = 0
+        for m, ext, s, e in rows:
+            if s is None or e is None:
+                ctx.logger.warning(
+                    "align: dropping input %d run '%s' — no absolute time "
+                    "span (cannot crop to the overlap)", idx,
+                    _member_id(m, ext))
+                continue
+            lo, hi = max(w0, s), min(w1, e)
+            if hi <= lo:
+                ctx.logger.warning(
+                    "align: dropping input %d run '%s' — outside the "
+                    "common overlap [%s, %s]", idx, _member_id(m, ext),
+                    t0.isoformat(), t1.isoformat())
+                continue
+            ch, sr, abs_start, _rel = _run_time_info(m)
+            if abs_start is None:
+                ctx.logger.warning(
+                    "align: dropping input %d run '%s' — its payload "
+                    "carries no absolute start (placeholder epoch?)",
+                    idx, _member_id(m, ext))
+                continue
+            i0 = max(0, round((lo - abs_start).total_seconds() * sr))
+            n = max(0, round((hi - lo).total_seconds() * sr))
+            n_avail = max((len(v) for v in ch.values()), default=0)
+            n = max(0, min(n, n_avail - i0))
+            if n < 1:
+                ctx.logger.warning(
+                    "align: dropping input %d run '%s' — degenerate after "
+                    "the overlap crop", idx, _member_id(m, ext))
+                continue
+            run_out = _crop_to_runts(m, ch, sr, i0, n, lo.isoformat())
+            _carry_merge_provenance(m, run_out)
+            members.append(run_out)
+            new_ext = dict(ext or {})
+            new_ext["start"] = lo.isoformat()
+            new_ext["end"] = (lo + pd.Timedelta(seconds=n / sr)).isoformat()
+            new_ext["sample_rate"] = float(sr)
+            extents.append(new_ext)
+            n_before += n_avail
+            n_after += n
+        if not members:
+            raise ValueError(
+                f"no runs of input {idx} fall within the common overlap "
+                f"[{t0:%Y-%m-%d %H:%M}, {t1:%Y-%m-%d %H:%M}] — nothing to "
+                "align")
+        if n_before and n_after < 0.9 * n_before:
+            ctx.logger.warning(
+                "alignment discards %.0f%% of input %d (%d of %d samples; "
+                "runs outside the overlap are dropped) — for remote "
+                "reference, restrict both stations to the same window "
+                "(Build FC start/end) or extract matching time ranges",
+                100 * (1 - n_after / n_before), idx, n_after, n_before)
+        if kind == "single":
+            out[f"data{idx}"] = members[0]
+        else:
+            out[f"data{idx}"] = RunCollection(runs=members, extents=extents)
+
+    ctx.progress(
+        1.0,
+        f"aligned runs: [{t0:%Y-%m-%d %H:%M}, {t1:%Y-%m-%d %H:%M}] overlap "
+        f"({(t1 - t0).total_seconds():.1f} s)")
+    return out
 
 
 def _merge_gap_attrs(payload):

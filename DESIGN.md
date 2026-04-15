@@ -288,10 +288,18 @@ The aurora processing run is split at the Fourier-coefficient boundary:
   gaps inside the local span, the pairing warns (§3, M4 #2).
 - **`Align Runs` node (`mth5.runs.align`)** — two `ts.run` inputs → two `ts.run`
   outputs, both normalized to an mth5 `RunTS` cropped to their **common
-  acquisition overlap**. Required for remote reference: same sample rate
-  (aurora hard-errors on mixed rates) and identical time grids. Overlap is
+  acquisition overlap**. Run **collections** (Extract Run 'time range' mode,
+  the Compute FC / Calibrate convention) are aligned member-wise: every
+  member of both sides is cropped to the common overlap of the two
+  collections' union spans, members entirely outside are dropped with a
+  named warning, and extent rows are updated to the cropped spans (a
+  single run acts as a 1-member collection whose output kind is
+  preserved). Required for remote reference: same sample rate (aurora
+  hard-errors on mixed rates; collections are WARNED — the FC pairing
+  refuses real mismatches). Overlap is
   computed from absolute start/end times (GPS) when available, with a warning
-  fallback to relative offsets. The remote station may be **magnetic-only**
+  fallback to relative offsets (single runs only; collections require
+  absolute spans). The remote station may be **magnetic-only**
   (bx,by). The node also computes inter-station horizontal-magnetic coherence
   (64–1024 s band) and **warns when it is weak** — a clock offset or un-filled
   data gap silently degrades remote reference (LEMI readers index by row, not
