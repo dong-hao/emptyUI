@@ -277,3 +277,26 @@ test("Ctrl+D duplicates a node and Delete-key removes the duplicate", async ({ p
   await page.keyboard.press("Delete");
   await expect(page.locator(".mt-node")).toHaveCount(1);
 });
+
+test("New asks for confirmation and clears the canvas on accept", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Load CSV", exact: true }).click();
+  await expect(page.locator(".mt-node", { hasText: "Load CSV" })).toHaveCount(1);
+
+  // Dismissing the confirm keeps the workflow.
+  let keepIt = false;
+  page.once("dialog", (d) => {
+    keepIt = true;
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "New" }).click();
+  expect(keepIt, "the confirm dialog fired").toBe(true);
+  await expect(page.locator(".mt-node", { hasText: "Load CSV" })).toHaveCount(1);
+
+  // Accepting clears the canvas (and the doc name resets).
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "New" }).click();
+  await expect(page.locator(".mt-node")).toHaveCount(0);
+});
