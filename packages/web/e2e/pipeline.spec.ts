@@ -480,3 +480,60 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
     timeout: 120_000,
   });
 });
+
+test("a node error is shown as copyable text in the properties panel", async ({
+  page,
+}) => {
+  // Deterministic node error: Extract Run with a nonexistent run id.
+  const H5 = path.resolve(
+    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+  );
+  await page.goto("/");
+  await addNode(page, "Load MTH5");
+  await addNode(page, "Extract Run");
+  await placeNode(page, "Extract Run", 600, 150);
+  await placeNode(page, "Load MTH5", 150, 150);
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+
+  await node(page, "Load MTH5").locator(".path-field input").fill(H5);
+  await node(page, "Load MTH5").locator(".path-field input").press("Enter");
+  await connect(page, { node: "Load MTH5", port: "mth5: mth5" }, {
+    node: "Extract Run",
+    port: "mth5: mth5",
+  });
+
+  // Force a deterministic node error: switch to 'run id' mode and pick a
+  // nonexistent run (the Run id param is enabled in that mode only).
+  const selection = node(page, "Extract Run")
+    .locator(".param-field", { hasText: "Selection" })
+    .locator("select");
+  await selection.selectOption("run id");
+  const runBox = node(page, "Extract Run")
+    .locator(".param-field", { hasText: "Run id" })
+    .locator("input");
+  await runBox.fill("no_such_run");
+  await runBox.press("Enter");
+
+  await page.getByRole("button", { name: "▶ Run" }).click();
+  await expect(page.locator(".run-status.failed")).toBeVisible({
+    timeout: 120_000,
+  });
+
+  // The node card shows an ellipsized badge; the panel must show the full,
+  // copyable text. Select the failing node.
+  await node(page, "Extract Run").click();
+  const block = page.locator(".properties .node-error");
+  await expect(block).toBeVisible();
+  const text = await block.locator(".node-error-text").textContent();
+  expect(text).toContain("run");
+  expect(text!.toLowerCase()).toContain("not");
+
+  // Copy affordance: the button acknowledges (clipboard content itself is
+  // not asserted — the ZeroTier http origin has no secure-context
+  // clipboard; the execCommand fallback path is what runs there). Grant
+  // the clipboard so the primary path is deterministic in headless.
+  await page.context().grantPermissions(["clipboard-write", "clipboard-read"]);
+  await block.locator("button", { hasText: "copy" }).click();
+  await expect(block.locator("button")).toHaveText(/copied/);
+});

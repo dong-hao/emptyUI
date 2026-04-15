@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow } from "../stores/workflow";
@@ -22,12 +23,56 @@ export function PropertiesPanel({
   // called unconditionally (hooks) — an `||` short-circuit crashed React.
   const runStatus = useRun((s) => s.runStatus);
   const startingCount = useRun((s) => s.startingCount);
+  // the selected node's run state (§8.1 good-to-have): errors surface in
+  // the panel as copyable text — the node card only shows an ellipsized
+  // badge the user cannot read out
+  const nodeState = useRun((s) =>
+    selectedNodeId ? s.nodeStates[selectedNodeId] : undefined,
+  );
   const runActive = ["queued", "running"].includes(runStatus) || startingCount > 0;
 
   const node = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const manifest = node
     ? catalog?.nodes.find((m) => m.type === node.data.nodeType)
     : undefined;
+
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+
+  const copyError = () => {
+    const text = nodeState?.error ?? "";
+    if (!text) return;
+    const done = () => {
+      setCopied(true);
+      window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), 2000);
+    };
+    // navigator.clipboard exists only on secure contexts — the ZeroTier
+    // http origin (e.g. 10.0.10.15:7860) is NOT one; fall back to
+    // execCommand with a temporary textarea (and again when the
+    // clipboard promise rejects, e.g. headless permission denials)
+    const fallbackCopy = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        done();
+      } catch {
+        // final fallback: the text itself stays user-selectable
+      }
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
+  };
 
   if (!node || !manifest)
     return (
@@ -63,6 +108,17 @@ export function PropertiesPanel({
           </tr>
         </tbody>
       </table>
+      {nodeState?.status === "error" && nodeState.error && (
+        <div className="node-error">
+          <div className="node-error-head">
+            <strong>error</strong>
+            <button onClick={copyError} title="Copy the error message">
+              {copied ? "copied ✓" : "copy"}
+            </button>
+          </div>
+          <pre className="node-error-text">{nodeState.error}</pre>
+        </div>
+      )}
       <p className="muted">{manifest.description}</p>
       {manifest.deps.length > 0 && (
         <p className="muted">deps: {manifest.deps.join(", ")}</p>

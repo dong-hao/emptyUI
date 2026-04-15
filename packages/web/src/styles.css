@@ -525,6 +525,37 @@ button.primary {
   cursor: help;
 }
 
+/* §8.1 good-to-have: the selected node's error, copyable in the panel
+   (the node card only shows an ellipsized badge) */
+.node-error {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border: 1px solid #e6b0aa;
+  border-radius: 6px;
+  background: #fdf0ef;
+}
+.node-error-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #c0392b;
+}
+.node-error-head button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.node-error-text {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
 /* result reused from the cross-run cache (§7) */
 .mt-cached {
   font-size: 0.6rem;
