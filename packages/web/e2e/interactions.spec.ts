@@ -113,6 +113,61 @@ test("drag a connected handle to the pane unlinks it (ComfyUI gesture)", async (
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 });
 
+test("a plain click on a connected handle does NOT unlink (hair-trigger guard)", async ({ page }) => {
+  // L-F12: the unlink fired on down+up with no pointer movement — a stray
+  // click on a connected input silently detached the edge. ComfyUI parity:
+  // the link must visibly follow the cursor before it detaches.
+  await page.goto("/");
+  await addSpreadNodes(page, 2);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  const inp = await page
+    .locator(".mt-node")
+    .nth(1)
+    .locator('.mt-port[data-handlepos="left"]')
+    .first()
+    .boundingBox();
+  // down + up at the same spot (a click, not a drag)
+  await page.mouse.move(inp.x + inp.width / 2, inp.y + inp.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+});
+
+test("a plain click on an edge endpoint does NOT delete the edge (hair-trigger guard)", async ({ page }) => {
+  // The edge-endpoint reconnect gesture had the same trigger class: a
+  // click on the endpoint anchor (no movement) deleted the edge. RF renders
+  // the anchors as transparent circles (.react-flow__edgeupdater-*); node
+  // content can cover them, so the synthetic mousedown dispatch from the
+  // endpoint-drag test is reused here.
+  await page.goto("/");
+  await addSpreadNodes(page, 2);
+  await dragPortToPort(page, 0, "right", 1, "left");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+
+  const pt = await page.evaluate(() => {
+    const c = document.querySelector(".react-flow__edgeupdater-target");
+    const r = c.getBoundingClientRect();
+    const x = r.x + r.width / 2;
+    const y = r.y + r.height / 2;
+    c.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+    return { x, y };
+  });
+  // up at the SAME spot (a click, not a drag)
+  await page.mouse.move(pt.x, pt.y);
+  await page.mouse.up();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+});
+
 test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-routes", async ({ page }) => {
   await page.goto("/");
   await addSpreadNodes(page, 3);

@@ -156,9 +156,17 @@ export default function App() {
   //    them when no valid new connection was made. Input handles hold one
   //    edge (one-to-one rule); an output handle with several edges is left
   //    alone (ambiguous — use click+Delete or edge-endpoint drag instead).
-  const connectStartRef = useRef<{ edgeIds: string[] } | null>(null);
+  const connectStartRef = useRef<{ edgeIds: string[]; x: number; y: number } | null>(null);
+  // onConnect* passes DOM events; onReconnect* passes React synthetic
+  // MouseEvents — both carry clientX/clientY, touch events carry touches
+  const pointerPos = (
+    event: MouseEvent | TouchEvent | React.MouseEvent<Element>,
+  ) =>
+    "touches" in event
+      ? { x: event.touches[0]?.clientX ?? 0, y: event.touches[0]?.clientY ?? 0 }
+      : { x: event.clientX, y: event.clientY };
   const handleConnectStart = useCallback(
-    (_event: unknown, { nodeId, handleId, handleType }: {
+    (event: MouseEvent | TouchEvent, { nodeId, handleId, handleType }: {
       nodeId: string | null;
       handleId: string | null;
       handleType: "source" | "target" | null;
@@ -174,7 +182,10 @@ export default function App() {
           : e.source === nodeId && e.sourceHandle === handleId,
       );
       if (onHandle.length === 1) {
-        connectStartRef.current = { edgeIds: onHandle.map((e) => e.id) };
+        connectStartRef.current = {
+          edgeIds: onHandle.map((e) => e.id),
+          ...pointerPos(event),
+        };
       } else {
         connectStartRef.current = null;
       }
@@ -182,10 +193,16 @@ export default function App() {
     [],
   );
   const handleConnectEnd = useCallback(
-    (_event: unknown, state: { isValid: boolean | null }) => {
+    (event: MouseEvent | TouchEvent, state: { isValid: boolean | null }) => {
       const started = connectStartRef.current;
       connectStartRef.current = null;
       if (!started || state?.isValid === true) return;
+      // hair-trigger guard (L-F12): a plain CLICK on a connected handle
+      // (down+up, no movement) must not unlink — only a real drag that
+      // ends without a valid new connection detaches (ComfyUI parity:
+      // the link visibly follows the cursor before it detaches)
+      const p = pointerPos(event);
+      if (Math.hypot(p.x - started.x, p.y - started.y) < 6) return;
       // drag ended without a valid connection -> unlink (dropping the link
       // on an invalid target also detaches, matching ComfyUI)
       useWorkflow.getState().detachEdges(started.edgeIds);
@@ -197,16 +214,30 @@ export default function App() {
   //    handle to re-route, drop on the pane to delete (RF "delete edge on
   //    drop" + reconnectEdge pattern).
   const reconnectSuccessful = useRef(false);
+  const reconnectStartRef = useRef<{ x: number; y: number } | null>(null);
   const handleReconnect = useCallback((oldEdge: Edge, newConnection: Connection) => {
     reconnectSuccessful.current = true;
     useWorkflow.getState().reconnect(oldEdge, newConnection);
   }, []);
-  const handleReconnectStart = useCallback(() => {
+  const handleReconnectStart = useCallback((event: React.MouseEvent<Element>) => {
     reconnectSuccessful.current = false;
+    reconnectStartRef.current = pointerPos(event);
   }, []);
-  const handleReconnectEnd = useCallback((_event: unknown, edge: Edge) => {
-    if (!reconnectSuccessful.current) useWorkflow.getState().detachEdges([edge.id]);
-  }, []);
+  const handleReconnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, edge: Edge) => {
+      if (reconnectSuccessful.current) return;
+      // same hair-trigger guard as the pane-disconnect gesture (L-F12):
+      // a plain click on the edge endpoint must not delete the edge
+      const started = reconnectStartRef.current;
+      reconnectStartRef.current = null;
+      if (started) {
+        const p = pointerPos(event);
+        if (Math.hypot(p.x - started.x, p.y - started.y) < 6) return;
+      }
+      useWorkflow.getState().detachEdges([edge.id]);
+    },
+    [],
+  );
 
   const handleAdd = (manifest: NodeManifest) => {
     // §8.1: place the new node at the center of the user's current
@@ -216,7 +247,9 @@ export default function App() {
     const id = uniqueNodeId();
     let position = { x: 80 + Math.random() * 200, y: 80 + Math.random() * 160 };
     if (inst) {
-      const el = document.querySelector<HTMLElement>(".canvas .react-flow");
+      // L-F12: query the RF container directly (`.react-flow` is unique)
+      // instead of coupling to the `.canvas` wrapper structure
+      const el = document.querySelector<HTMLElement>(".react-flow");
       const rect = el?.getBoundingClientRect();
       const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
       const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
@@ -251,7 +284,7 @@ export default function App() {
           const el = document.querySelector<HTMLElement>(
             `.react-flow__node[data-id="${id}"]`);
           const cr = document.querySelector<HTMLElement>(
-            ".canvas .react-flow")?.getBoundingClientRect();
+            ".react-flow")?.getBoundingClientRect();
           if (!el || !cr) return;
           const nr = el.getBoundingClientRect();
           const zoom = inst.getViewport().zoom || 1;
