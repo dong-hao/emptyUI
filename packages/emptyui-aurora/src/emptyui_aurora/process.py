@@ -819,7 +819,15 @@ class BuildFC(Node):
             for u in units:
                 per_rate.setdefault(u[1], []).append(u[0])
             for rate in sorted(per_rate, reverse=True):
-                ordered = sorted(per_rate[rate], key=lambda r: u_start[r])
+                # runs with no parseable time period pass through whole
+                # (u_start None) — they cannot be adjacency-tested, so
+                # each forms its own span (mixing None with Timestamps in
+                # the sort key raised TypeError after the reads)
+                datable = [r for r in per_rate[rate] if u_start[r] is not None]
+                for r in per_rate[rate]:
+                    if u_start[r] is None:
+                        spans.append([r])
+                ordered = sorted(datable, key=lambda r: u_start[r])
                 cur: list[str] = []
                 prev_end = None
                 for uid in ordered:
@@ -843,188 +851,197 @@ class BuildFC(Node):
                                               get_workspace_mth5)
 
             wm = get_workspace_mth5(ctx)
-        for i, span in enumerate(spans, 1):
-            members = []
-            memo: dict[str, dict] = {}
-            for uid in span:
-                _uid, rate, u_start, u_end, rid, lo, hi = unit_by_id[uid]
-                if lo is None:  # whole run (no session split, or unsplit)
-                    data_vars, sample_rate, start = read_run_channels(
-                        _resolve_run(station_obj, rid))
-                else:
-                    if rid not in memo:
-                        memo[rid] = read_run_channels(_resolve_run(station_obj,
-                                                                rid))[0]
-                    base = memo[rid]
-                    sample = next(iter(base.values()))
-                    t_arr = np.asarray(sample["time"].values)
-                    if np.issubdtype(t_arr.dtype, np.datetime64):
-                        idx = pd.DatetimeIndex(t_arr)
-                        if idx.tz is None:  # naive archive, aware bounds
-                            blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
-                        else:  # aware archive: localize naive bounds
-                            blo = (lo.tz_localize("UTC") if lo.tzinfo is None
-                                   else lo)
-                            bhi = (hi.tz_localize("UTC") if hi.tzinfo is None
-                                   else hi)
-                        data_vars = {
-                            name: da.sel(time=slice(blo, bhi))
-                            for name, da in base.items()}
+        try:
+            for i, span in enumerate(spans, 1):
+                members = []
+                memo: dict[str, dict] = {}
+                for uid in span:
+                    _uid, rate, u_start, u_end, rid, lo, hi = unit_by_id[uid]
+                    if lo is None:  # whole run (no session split, or unsplit)
+                        data_vars, sample_rate, start = read_run_channels(
+                            _resolve_run(station_obj, rid))
                     else:
-                        ctx.logger.warning(
-                            "run %s has no absolute time axis — its "
-                            "sessions cannot be sliced by UTC window and "
-                            "the whole run is used", rid)
-                        data_vars = base
-                    sample_rate = rate
-                    # naive-UTC numpy datetime64: matches what the channel
-                    # coords provide (the archive convention — aware stamps
-                    # would make the merged fc time coordinate an object
-                    # array downstream)
-                    ts = u_start.tz_convert("UTC").tz_localize(None) \
-                        if u_start.tzinfo is not None else u_start
-                    start = ts.to_datetime64()
-                members.append((uid, data_vars, sample_rate, start))
-            sample_rate = members[0][2]
-            span_id = (span[0] if len(span) == 1
-                       else f"sr{sample_rate:g}_span{i:04d}")
-            if len(span) == 1:
-                data_vars = members[0][1]
-                start = members[0][3]
-            else:
-                # union of channels across members: the 'saturated' aux
-                # QC mask exists only on runs with flagged samples — pad
-                # the others with zeros (no saturation there) instead of
-                # silently dropping the mask or crashing on concat. A run
-                # missing a REAL channel is dropped from the span with a
-                # loud warning: fabricating an all-zero series would
-                # silently corrupt the estimate (merge_fc_containers
-                # drops such channels per run the same way)
-                keys = list(members[0][1])
-                for mv in members[1:]:
-                    for name in mv[1]:
-                        if name not in keys:
-                            keys.append(name)
-                aux = {"saturated"}
-                real_missing = [
-                    n for n in keys
-                    if n not in aux and any(n not in mv[1] for mv in members)]
-                if real_missing:
-                    ctx.logger.warning(
-                        "span %s: run(s) lack channel(s) %s — dropped from "
-                        "the cascaded span (fabricating zeros would corrupt "
-                        "the estimate; process the runs separately or fix "
-                        "the ingestion)", span_id, real_missing)
-                    keys = [n for n in keys if n not in real_missing]
-                data_vars = {}
-                for name in keys:
-                    parts = []
-                    for mv in members:
-                        if name in mv[1]:
-                            parts.append(mv[1][name])
+                        if rid not in memo:
+                            memo[rid] = read_run_channels(_resolve_run(station_obj,
+                                                                    rid))[0]
+                        base = memo[rid]
+                        sample = next(iter(base.values()))
+                        t_arr = np.asarray(sample["time"].values)
+                        if np.issubdtype(t_arr.dtype, np.datetime64):
+                            idx = pd.DatetimeIndex(t_arr)
+                            if idx.tz is None:  # naive archive, aware bounds
+                                blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
+                            else:  # aware archive: localize naive bounds
+                                blo = (lo.tz_localize("UTC") if lo.tzinfo is None
+                                       else lo)
+                                bhi = (hi.tz_localize("UTC") if hi.tzinfo is None
+                                       else hi)
+                            data_vars = {
+                                name: da.sel(time=slice(blo, bhi))
+                                for name, da in base.items()}
                         else:
-                            parts.append(
-                                xr.zeros_like(next(iter(mv[1].values()))))
-                    data_vars[name] = xr.concat(parts, dim="time")
-                start = members[0][3]
-            registry = resolve_filter_registry(survey_obj, data_vars)
-            ds = xr.Dataset(data_vars)
-            run_ts = SimpleNamespace(
-                dataset=ds,
-                sample_rate=sample_rate,
-                start=start,
-                filters=registry,
-            )
-            r = sample_rate
-            lower = [x for x in family_rates if x < r * (1 - 1e-9)]
-            if not lower:
-                dec_of_span = decimation_levels
-            else:
-                d_max = max(0, int(np.ceil(np.log2(r / max(lower))
-                                           / np.log2(factor))) - 1)
-                dec_of_span = min(decimation_levels, d_max)
-            levels = compute_fc_levels(
-                run_ts, input_channels, output_channels,
-                num_decimations=dec_of_span, factor=factor,
-                num_samples_window=window_samples, overlap=overlap,
-                window_type=window_type,
-                magnetic_unit=magnetic_unit,
-                e_dipole_length_m=dipole,
-                channel_nomenclature=channel_nomenclature,
-                prewhitening=prewhitening,
-                per_window_detrend=per_window_detrend,
-                window_type_deep=window_type_deep,
-                deep_from_level=deep_from_level,
-                clock_zero=clock_zero,
-                reject_saturated=reject_saturated,
-                saturated_max=saturated_max,
-            )
-            # the station identity travels in the attrs (DESIGN.md §15);
-            # run_id is per-span, the rest comes from the hoisted station md
-            identity = dict(identity_base, run_id=span_id)
-            for level, fc in levels.items():
-                fc.attrs.update(identity)
-            if persist:
-                from emptyui_mth5.persist import persist_fc_level
-
-                for level, fc in levels.items():
-                    if "datetime64" in str(fc.time.dtype):
-                        persist_fc_level(ctx, fc, level,
-                                         fc.attrs["sample_rate"],
-                                         survey=surv, station=stat,
-                                         run=span_id, m=wm)
-                    else:
+                            ctx.logger.warning(
+                                "run %s has no absolute time axis — its "
+                                "sessions cannot be sliced by UTC window and "
+                                "the whole run is used", rid)
+                            data_vars = base
+                        sample_rate = rate
+                        # naive-UTC numpy datetime64: matches what the channel
+                        # coords provide (the archive convention — aware stamps
+                        # would make the merged fc time coordinate an object
+                        # array downstream)
+                        ts = u_start.tz_convert("UTC").tz_localize(None) \
+                            if u_start.tzinfo is not None else u_start
+                        start = ts.to_datetime64()
+                    members.append((uid, data_vars, sample_rate, start))
+                sample_rate = members[0][2]
+                span_id = (span[0] if len(span) == 1
+                           else f"sr{sample_rate:g}_span{i:04d}")
+                if len(span) == 1:
+                    data_vars = members[0][1]
+                    start = members[0][3]
+                else:
+                    # union of channels across members: the 'saturated' aux
+                    # QC mask exists only on runs with flagged samples — pad
+                    # the others with zeros (no saturation there) instead of
+                    # silently dropping the mask or crashing on concat. A run
+                    # missing a REAL channel is dropped from the span with a
+                    # loud warning: fabricating an all-zero series would
+                    # silently corrupt the estimate (merge_fc_containers
+                    # drops such channels per run the same way)
+                    keys = list(members[0][1])
+                    for mv in members[1:]:
+                        for name in mv[1]:
+                            if name not in keys:
+                                keys.append(name)
+                    aux = {"saturated"}
+                    real_missing = [
+                        n for n in keys
+                        if n not in aux and any(n not in mv[1] for mv in members)]
+                    if real_missing:
                         ctx.logger.warning(
-                            "run %s level %d has no absolute time axis — "
-                            "skipping persistence", span_id, level)
-                        break
-            # §24.13: per-window run identity at SESSION granularity — the
-            # merged FC database keeps only the first contributor's attrs,
-            # so the QC nodes need an explicit coordinate to group windows
-            # by run. Windows straddling an internal boundary follow the
-            # session their start falls in; Select Runs drops rejected
-            # sessions downstream, conservatively including the overlap
-            # neighbors that picked up their samples through the cascade.
-            if len(span) == 1:
+                            "span %s: run(s) lack channel(s) %s — dropped from "
+                            "the cascaded span (fabricating zeros would corrupt "
+                            "the estimate; process the runs separately or fix "
+                            "the ingestion)", span_id, real_missing)
+                        keys = [n for n in keys if n not in real_missing]
+                    data_vars = {}
+                    for name in keys:
+                        parts = []
+                        for mv in members:
+                            if name in mv[1]:
+                                parts.append(mv[1][name])
+                            else:
+                                # zeros_like copies the template channel's attrs
+                                # (incl. `filters` refs) — a fabricated channel
+                                # must not carry them (RunTS.calibrate divides
+                                # every channel by its response chain)
+                                pad = xr.zeros_like(next(iter(mv[1].values())))
+                                if name in aux:
+                                    pad.attrs = {"type": "auxiliary",
+                                                 "units": "1"}
+                                parts.append(pad)
+                        data_vars[name] = xr.concat(parts, dim="time")
+                    start = members[0][3]
+                registry = resolve_filter_registry(survey_obj, data_vars)
+                ds = xr.Dataset(data_vars)
+                run_ts = SimpleNamespace(
+                    dataset=ds,
+                    sample_rate=sample_rate,
+                    start=start,
+                    filters=registry,
+                )
+                r = sample_rate
+                lower = [x for x in family_rates if x < r * (1 - 1e-9)]
+                if not lower:
+                    dec_of_span = decimation_levels
+                else:
+                    d_max = max(0, int(np.ceil(np.log2(r / max(lower))
+                                               / np.log2(factor))) - 1)
+                    dec_of_span = min(decimation_levels, d_max)
+                levels = compute_fc_levels(
+                    run_ts, input_channels, output_channels,
+                    num_decimations=dec_of_span, factor=factor,
+                    num_samples_window=window_samples, overlap=overlap,
+                    window_type=window_type,
+                    magnetic_unit=magnetic_unit,
+                    e_dipole_length_m=dipole,
+                    channel_nomenclature=channel_nomenclature,
+                    prewhitening=prewhitening,
+                    per_window_detrend=per_window_detrend,
+                    window_type_deep=window_type_deep,
+                    deep_from_level=deep_from_level,
+                    clock_zero=clock_zero,
+                    reject_saturated=reject_saturated,
+                    saturated_max=saturated_max,
+                )
+                # the station identity travels in the attrs (DESIGN.md §15);
+                # run_id is per-span, the rest comes from the hoisted station md
+                identity = dict(identity_base, run_id=span_id)
                 for level, fc in levels.items():
-                    levels[level] = fc.assign_coords(run_id=(
-                        "time", np.full(int(fc.sizes["time"]), span[0])))
-            else:
-                lens = [len(next(iter(mv[1].values()))) for mv in members]
-                bnds = np.concatenate(
-                    ([0.0], np.cumsum(lens)[:-1])) / sample_rate
-                for level, fc in levels.items():
-                    t = np.asarray(fc["time"].values)
-                    # the fc time coordinate is the scipy window CENTER
-                    # (t = step·k + nperseg/2/fs); attribution must follow
-                    # the window START (§10.4: a straddling window follows
-                    # the session its start falls in) — shift the center
-                    # back by half a window of THIS level
-                    half_win = (float(fc.attrs.get("num_samples_window", 0))
-                                / 2.0
-                                / float(fc.attrs.get("sample_rate", 0)
-                                        or sample_rate))
-                    if np.issubdtype(t.dtype, np.datetime64):
-                        t0 = members[0][3]
-                        if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
-                            t0 = t0.tz_convert("UTC").tz_localize(None)
-                        t0 = np.asarray(t0, dtype="datetime64[ns]")
-                        off = ((t - t0) / np.timedelta64(1, "s")).astype(float) - half_win
-                    else:
-                        off = t.astype(float) - half_win
-                    k = np.minimum(
-                        np.searchsorted(bnds[1:], off, side="right"),
-                        len(span) - 1)
-                    levels[level] = fc.assign_coords(run_id=(
-                        "time", np.asarray(span)[k]))
-            containers.append(levels)
-            ctx.progress(
-                (i) / len(spans),
-                f"FC {i}/{len(spans)}: span {span_id} "
-                f"({len(levels)} level(s), {len(span)} run(s))",
-            )
-        if persist:
-            close_workspace_mth5(ctx)
+                    fc.attrs.update(identity)
+                if persist:
+                    from emptyui_mth5.persist import persist_fc_level
+
+                    for level, fc in levels.items():
+                        if "datetime64" in str(fc.time.dtype):
+                            persist_fc_level(ctx, fc, level,
+                                             fc.attrs["sample_rate"],
+                                             survey=surv, station=stat,
+                                             run=span_id, m=wm)
+                        else:
+                            ctx.logger.warning(
+                                "run %s level %d has no absolute time axis — "
+                                "skipping persistence", span_id, level)
+                            break
+                # §24.13: per-window run identity at SESSION granularity — the
+                # merged FC database keeps only the first contributor's attrs,
+                # so the QC nodes need an explicit coordinate to group windows
+                # by run. Windows straddling an internal boundary follow the
+                # session their start falls in; Select Runs drops rejected
+                # sessions downstream, conservatively including the overlap
+                # neighbors that picked up their samples through the cascade.
+                if len(span) == 1:
+                    for level, fc in levels.items():
+                        levels[level] = fc.assign_coords(run_id=(
+                            "time", np.full(int(fc.sizes["time"]), span[0])))
+                else:
+                    lens = [len(next(iter(mv[1].values()))) for mv in members]
+                    bnds = np.concatenate(
+                        ([0.0], np.cumsum(lens)[:-1])) / sample_rate
+                    for level, fc in levels.items():
+                        t = np.asarray(fc["time"].values)
+                        # the fc time coordinate is the scipy window CENTER
+                        # (t = step·k + nperseg/2/fs); attribution must follow
+                        # the window START (§10.4: a straddling window follows
+                        # the session its start falls in) — shift the center
+                        # back by half a window of THIS level
+                        half_win = (float(fc.attrs.get("num_samples_window", 0))
+                                    / 2.0
+                                    / float(fc.attrs.get("sample_rate", 0)
+                                            or sample_rate))
+                        if np.issubdtype(t.dtype, np.datetime64):
+                            t0 = members[0][3]
+                            if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
+                                t0 = t0.tz_convert("UTC").tz_localize(None)
+                            t0 = np.asarray(t0, dtype="datetime64[ns]")
+                            off = ((t - t0) / np.timedelta64(1, "s")).astype(float) - half_win
+                        else:
+                            off = t.astype(float) - half_win
+                        k = np.minimum(
+                            np.searchsorted(bnds[1:], off, side="right"),
+                            len(span) - 1)
+                        levels[level] = fc.assign_coords(run_id=(
+                            "time", np.asarray(span)[k]))
+                containers.append(levels)
+                ctx.progress(
+                    (i) / len(spans),
+                    f"FC {i}/{len(spans)}: span {span_id} "
+                    f"({len(levels)} level(s), {len(span)} run(s))",
+                )
+        finally:
+            if persist:
+                close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
         # the native rate families travel with the database (§20.1): the
         # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
