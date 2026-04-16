@@ -66,6 +66,49 @@ def test_3d_phase_tensor_skew_is_nonzero():
     assert 0 <= el[0] <= 1
 
 
+def test_azimuth_skew_recover_caldwell_decomposition():
+    """Absolute-orientation regression (review 2026-09-24): build Φ from
+    Caldwell et al. (2004) eq. (20) — Φ = Rᵀ(α−β)·diag(Φmax,Φmin)·R(α+β),
+    R(θ) = [[cosθ, sinθ], [−sinθ, cosθ]] — and assert the invariants
+    recover the construction parameters. The previous formula's spurious
+    −90° reported every azimuth 90° off (2D rotation-covariance tests
+    could not see a constant offset)."""
+    def R(a):
+        c, s = np.cos(a), np.sin(a)
+        return np.array([[c, s], [-s, c]])
+
+    for alpha_deg, beta_deg in ((30, 10), (60, 20), (170, 15), (-40, 25)):
+        a, b = np.radians(alpha_deg), np.radians(beta_deg)
+        phi = R(-(a - b)) @ np.diag([3.0, 1.0]) @ R(a + b)
+        az, sk, el, s1, s2 = pt_ellipse_params(phi[None])
+        # α is mod-180-periodic: 170° ≡ −10°; the fold into (−90, 90] is
+        # shape-preserving
+        expected_az = ((alpha_deg + 90) % 180) - 90
+        assert az[0] == pytest.approx(expected_az, abs=1e-9)
+        assert sk[0] == pytest.approx(beta_deg, abs=1e-9)
+        assert s1[0] == pytest.approx(3.0)
+        assert abs(s2[0]) == pytest.approx(1.0)
+        assert el[0] == pytest.approx((3.0 - 1.0) / (3.0 + 1.0))
+
+
+def test_2d_azimuth_recovers_strike():
+    """A 2D impedance's PT ellipse major axis must align with the
+    geoelectric strike (the docstring's stated invariant, tested here in
+    absolute terms for the first time)."""
+    zxy = 10.0 * np.exp(1j * np.radians(60))
+    zyx = 20.0 * np.exp(1j * np.radians(-100))
+    z0 = np.array([[[0, zxy], [zyx, 0]]])
+    az0, _sk0, _el0, _s10, _s20 = pt_ellipse_params(phase_tensor(z0))
+    for strike in (0.0, 30.0, 70.0, -45.0):
+        R = _rotmat(strike)
+        zr = R @ z0[0] @ R.T
+        az, sk, _el, _s1, _s2 = pt_ellipse_params(phase_tensor(np.array([zr])))
+        assert sk[0] == pytest.approx(0.0, abs=1e-12)
+        # strike 0 puts the major axis along x (azimuth 0 E of N)
+        shift = ((az[0] - az0[0] + 90) % 180) - 90
+        assert shift == pytest.approx(-strike)
+
+
 def test_singular_re_z_propagates_nan():
     """A singular Re(Z) band yields NaN, not inflated garbage."""
     z = np.array([[[0 + 1j, 0], [0, 0 + 1j]]])  # Re(Z) = 0 → singular

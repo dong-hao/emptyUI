@@ -42,13 +42,14 @@ def pt_ellipse_params(phi: np.ndarray):
 
     - σ1 = √(p1²+p4²) + √(p2²+p3²)  (major semi-axis, ≥ 0)
     - σ2 = √(p1²+p4²) − √(p2²+p3²)  (signed minor value; |σ2| = minor axis)
-    - principal azimuth θ = ½·atan2(p3, p2) − 90° (the ellipse major-axis
+    - principal azimuth θ = ½·atan2(p3, p2) (the ellipse major-axis
       direction; mod-180-periodic, folded into (−90°, 90°]). Rotation-
       covariant: rotating the impedance by ρ shifts θ by ∓ρ (the sign
       follows the rotation convention of the data) — verified on 2D
-      synthetic strikes.
-    - skew β = ½·asin(−p4/√(p1²+p4²)) = ½·asin((φyx−φxy)/(σ1+σ2)) —
-      Caldwell's β ∈ [−45°, 45°]; 2D → 0 (φxy = φyx), 1D → 0.
+      synthetic strikes (absolute azimuth recovers the strike).
+    - skew β = ½·atan(p4/p1) = ½·asin((φyx−φxy)/(σ1+σ2)) — Caldwell's
+      β ∈ (−45°, 45°) by construction (the arctan fold IS the paper's
+      branch convention, eq. A10); 2D → 0 (φxy = φyx), 1D → 0.
 
     NaN matrices propagate. ellipticity = (σ1−|σ2|)/(σ1+|σ2|) ∈ [0, 1].
     """
@@ -61,11 +62,11 @@ def pt_ellipse_params(phi: np.ndarray):
     b = np.hypot(p2, p3)
     sigma1 = a + b
     sigma2 = a - b  # signed (Caldwell); |sigma2| = minor semi-axis
-    az = np.degrees(np.arctan2(p3, p2)) / 2.0 - 90.0
+    az = np.degrees(np.arctan2(p3, p2)) / 2.0
     az = ((az + 90.0) % 180.0) - 90.0  # fold into (−90, 90]
     with np.errstate(invalid="ignore", divide="ignore"):
-        skew = np.degrees(np.arcsin(np.clip(-p4 / np.where(a > 0, a, np.nan),
-                                            -1.0, 1.0))) / 2.0
+        ratio = np.where(a > 0, p4 / p1, np.nan)  # p1=0, p4≠0 → ±inf → ±45°
+        skew = np.degrees(np.arctan(ratio)) / 2.0
     denom = sigma1 + np.abs(sigma2)
     ell = np.where(denom > 0, (sigma1 - np.abs(sigma2)) / np.where(denom == 0, 1, denom),
                    np.nan)
