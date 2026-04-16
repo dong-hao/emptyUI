@@ -148,3 +148,17 @@ def xr_concat_nan_run(ds):
     import xarray as xr
     return xr.concat([_ds_for_run("clean_0", 1.0, "2024-01-01T00:00:00"), ds],
                      dim="time")
+
+
+def test_select_runs_does_not_mutate_input_attrs(ctx):
+    """Immutability regression (review 2026-09-24): ds.isel() SHARES the
+    source's attrs dict — the previous implementation's QC stamps
+    (runs_kept/…) landed on the INPUT payload, poisoning executor-cached
+    payloads shared with fan-out branches."""
+    payload = _payload()
+    before = dict(payload[0].attrs)
+    SelectRuns().execute(ctx, payload, use_prior=False)
+    after = payload[0].attrs
+    for key in ("runs_kept", "runs_dropped", "select_runs_band_s"):
+        assert key not in after, f"input payload gained '{key}'"
+    assert after["input_channels"] == before["input_channels"]

@@ -178,9 +178,11 @@ def _pad_aux(rt, aux_comps):
     ds = rt.dataset.copy()
     sample = next(iter(rt.dataset.data_vars.values()))
     for c in missing:
+        # zeros_like copies the template channel's attrs (incl. `filters`
+        # refs) — the fabricated mask must not carry them: downstream
+        # RunTS.calibrate() divides every channel by its response chain
         ds[c] = xr.zeros_like(sample)
-        ds[c].attrs["type"] = "auxiliary"
-        ds[c].attrs["units"] = "1"
+        ds[c].attrs = {"type": "auxiliary", "units": "1"}
     out = RunTS(ds)
     for attr in ("run_metadata", "station_metadata", "survey_metadata"):
         md = getattr(rt, attr, None)

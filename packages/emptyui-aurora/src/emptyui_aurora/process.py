@@ -1267,6 +1267,12 @@ class SelectRuns(Node):
 
         import numpy as np
 
+        # the reference band converts to frequencies (1/period): a zero
+        # bound would raise ZeroDivisionError mid-scoring (review 2026-09-24)
+        if not period_min > 0 or not period_max > 0:
+            raise ValueError(
+                f"reference band bounds must be positive periods "
+                f"(got {period_min}-{period_max} s)")
         levels = fc if isinstance(fc, dict) else {0: fc}
         sample = next(iter(levels.values()))
         if "run_id" not in sample.coords:
@@ -1408,7 +1414,11 @@ class SelectRuns(Node):
                     extra = (delta < 0) & (delta > -dur)
                     n_extra += int(extra.sum())
                     mask &= ~extra
-            out[lv] = ds.isel(time=mask)
+            # ds.copy() first: isel shares the source's attrs dict, so the
+            # QC stamps below would mutate the INPUT payload (§7.1
+            # immutability contract — the input may be cached and shared
+            # with other fan-out branches)
+            out[lv] = ds.copy().isel(time=mask)
         if n_extra:
             ctx.logger.warning(
                 "Select Runs: dropping %d overlap neighbor window(s) "
@@ -1432,13 +1442,14 @@ class SelectRuns(Node):
 class ResidualSort(Node):
     type = "aurora.process.residual_sort"
     title = "Residual Sort"
-    tooltip = "Drop windows/runs whose data do not fit the first-pass TF model."
+    tooltip = "Drop runs whose windows do not fit the first-pass TF model."
     description = (
         "Residual-based two-pass selection (DESIGN §24.13, the orthogonal "
         "complement of power and coherence screening): a first-pass TF "
         "(Estimate TF's 'tf levels') predicts each FC window's outputs; "
-        "windows whose pooled unexplained-power fraction is excessive are "
-        "dropped (NaN) and the TF is re-estimated. The score is per RUN "
+        "RUNS whose pooled unexplained-power fraction is excessive are "
+        "dropped (all their windows) and the TF is re-estimated. The score "
+        "is per RUN "
         "(median over the run's windows, then median over the run's bands "
         "after per-band normalization against the station-wide median) — "
         "clean MT data sit near the noise floor of unexplained power; "
@@ -1626,7 +1637,8 @@ class ResidualSort(Node):
         out = {}
         for lv, ds in levels.items():
             mask = np.isin(np.asarray(ds["run_id"].values), list(kept))
-            out[lv] = ds.isel(time=mask)
+            # copy() first — isel shares attrs with the source (§7.1)
+            out[lv] = ds.copy().isel(time=mask)
         for ds in out.values():
             ds.attrs["runs_kept"] = ",".join(sorted(kept))
             ds.attrs["runs_dropped"] = ",".join(sorted(dropped_ids))
