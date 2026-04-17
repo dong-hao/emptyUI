@@ -131,6 +131,14 @@ class LoadLemi(Node):
                         calibration_dict=client.collection.calibration_dict,
                     )
                     if cal_filters is not None:
+                        if channel_nomenclature == "lemi34":
+                            # FAP files label the electric pair EX/EY (→
+                            # e1/e2); a lemi34 run carries e3/e4 — remap
+                            # the keys so the manufacturer response
+                            # attaches to the channels actually read
+                            cal_filters = {
+                                ({"e1": "e3", "e2": "e4"}.get(ch, ch)): fap
+                                for ch, fap in cal_filters.items()}
                         attach_filters(run_ts, cal_filters)
                     run_ts.run_metadata.id = run_id
                     run_group.from_runts(run_ts)
