@@ -494,7 +494,14 @@ class ExportTF(Node):
     )
 
     def execute(self, ctx, tf, path: str = "", file_type: str = "edi") -> dict[str, Any]:
-        out = Path(path) if path else Path.cwd()
+        if path:
+            out = Path(path)
+        else:
+            # empty path: write into the run workspace next to the artifacts
+            # (Path.cwd() made save_dir=cwd.parent / fn_basename=cwd.name —
+            # the file landed OUTSIDE the cwd; review 2026-09-24). Without a
+            # workspace artifact_path yields a relative basename.
+            out = Path(ctx.artifact_path("tf_export", ""))
         if out.suffix:  # user gave a full filename with extension
             base, ext = out.with_suffix(""), out.suffix.lstrip(".")
             file_type = ext or file_type
