@@ -1231,7 +1231,11 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
                     idx, _member_id(m, ext))
                 continue
             i0 = max(0, round((lo - abs_start).total_seconds() * sr))
-            n = max(0, round((hi - lo).total_seconds() * sr))
+            # hi is END-INCLUSIVE (the dataset axis's last sample, or
+            # Extract Run's `sel`-crop stamp): the sample count from lo
+            # through hi is (hi−lo)·sr + 1 — the previous exclusive
+            # arithmetic dropped each fully-covered member's final sample
+            n = max(0, round((hi - lo).total_seconds() * sr) + 1)
             n_avail = max((len(v) for v in ch.values()), default=0)
             n = max(0, min(n, n_avail - i0))
             if n < 1:
@@ -1244,7 +1248,9 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
             members.append(run_out)
             new_ext = dict(ext or {})
             new_ext["start"] = lo.isoformat()
-            new_ext["end"] = (lo + pd.Timedelta(seconds=n / sr)).isoformat()
+            # match Extract Run's END-INCLUSIVE extents convention
+            new_ext["end"] = (lo + pd.Timedelta(
+                seconds=(n - 1) / sr)).isoformat()
             new_ext["sample_rate"] = float(sr)
             extents.append(new_ext)
             n_before += n_avail
