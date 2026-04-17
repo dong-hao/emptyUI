@@ -84,7 +84,10 @@ def _resolve_rate_tiers(levels: dict, sample_rate: str):
                 families = fam
                 break
     if families is None:
-        # legacy fc: every level, native rate first (indices = cascade depth)
+        # legacy fc (per-level sample_rate attrs, no family_rates stamp —
+        # e.g. Merge FC of separately-computed ComputeFC outputs): the
+        # TESTED legacy contract is 'auto' = every level (indices =
+        # cascade depth), titled with the native rate first
         ids = [lv for r in rates for lv in by_rate[r]]
         return rates[0], ids
     want_rate = min(families)
@@ -149,7 +152,10 @@ class PlotCoherency(Node):
                           "database (auto = the lowest rate present — the "
                           "continuous stream, e.g. 15 Hz Phoenix / 1 Hz "
                           "LEMI). A single-rate fc keeps every cascade "
-                          "level. The connected fc's tiers are offered as "
+                          "level; an fc without family-rate metadata (e.g. "
+                          "merged separately-computed FCs) falls back to "
+                          "plotting every level, titled with the native "
+                          "rate. The connected fc's tiers are offered as "
                           "suggestions after a run."),
     )
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
@@ -264,40 +270,53 @@ class PlotCoherency(Node):
         if not rows:
             raise ValueError("no usable frequency bins to plot")
 
-        rows.sort(key=lambda r: r["period"])
-        period = np.array([r["period"] for r in rows])
-        sig = np.array([r["coherence_signal"] for r in rows], dtype=float)
-        xfer = np.array([r["coherence_transfer"] for r in rows], dtype=float)
-
-        def _arr(key):
-            lo = np.array([r[key][0] if r[key][0] is not None else np.nan
-                           for r in rows], dtype=float)
-            hi = np.array([r[key][1] if r[key][1] is not None else np.nan
-                           for r in rows], dtype=float)
-            return lo, hi
+        # one series per decimation level (DESIGN §10.6): the cascades
+        # overlap in period, so a single flattened series zigzags between
+        # levels and interleaves their markers
+        levels_order = sorted({r["decimation_level"] for r in rows})
+        cmap = plt.get_cmap("tab10")
+        series_color = {lv: cmap(i % 10) for i, lv in enumerate(levels_order)}
+        signal_label = ("signal coherence (E–H)"
+                        if ref_fc is None else "signal coherence (E–remote H)")
 
         fig, ax = plt.subplots(figsize=(7, 4), dpi=150)
         apply_style(fig, (ax,))
         ax.axhspan(coherence_min, coherence_max, color="0.85", zorder=0,
                    label=f"sort bounds [{coherence_min:.2f}, {coherence_max:.2f}]")
-        if variation != "none":
-            # per-bin spread behind the median, shaded (the whiskers of
-            # hundreds of dense points would be unreadable)
-            for y, key, color in ((sig, "signal_band", "#1f77b4"),
-                                  (xfer, "transfer_band", "#d62728")):
-                if not np.isfinite(y).any():
-                    continue
-                lo, hi = _arr(key)
-                if not np.isfinite(lo).any() and not np.isfinite(hi).any():
-                    continue
-                ax.fill_between(period, lo, hi, color=color, alpha=0.18,
-                                lw=0, label=f"{variation} band")
-        ax.plot(period, sig, "o-", color="#1f77b4", markersize=3,
-                label="signal coherence (E–H)"
-                if ref_fc is None else "signal coherence (E–remote H)")
-        if ref_fc is not None:
-            ax.plot(period, xfer, "s--", color="#d62728", markersize=3,
-                    label="local↔remote transfer coherence")
+        for lv in levels_order:
+            rows_lv = sorted((r for r in rows if r["decimation_level"] == lv),
+                             key=lambda r: r["period"])
+            period = np.array([r["period"] for r in rows_lv])
+            sig = np.array([r["coherence_signal"] for r in rows_lv],
+                           dtype=float)
+            xfer = np.array([r["coherence_transfer"] for r in rows_lv],
+                            dtype=float)
+
+            def _arr(key, rows_lv=rows_lv):
+                lo = np.array([r[key][0] if r[key][0] is not None else np.nan
+                               for r in rows_lv], dtype=float)
+                hi = np.array([r[key][1] if r[key][1] is not None else np.nan
+                               for r in rows_lv], dtype=float)
+                return lo, hi
+
+            color = series_color[lv]
+            if variation != "none":
+                # per-bin spread behind the median, shaded (the whiskers of
+                # hundreds of dense points would be unreadable)
+                for y, key in ((sig, "signal_band"),
+                               (xfer, "transfer_band")):
+                    if not np.isfinite(y).any():
+                        continue
+                    lo, hi = _arr(key)
+                    if not np.isfinite(lo).any() and not np.isfinite(hi).any():
+                        continue
+                    ax.fill_between(period, lo, hi, color=color, alpha=0.18,
+                                    lw=0)
+            ax.plot(period, sig, "o-", color=color, markersize=3,
+                    label=f"level {lv} — {signal_label}")
+            if ref_fc is not None:
+                ax.plot(period, xfer, "s--", color=color, markersize=3,
+                        label=f"level {lv} — local↔remote transfer coherence")
         ax.set_xscale("log")
         ax.set_xlabel("Period (s)")
         ax.set_ylabel("Coherence$^2$")
