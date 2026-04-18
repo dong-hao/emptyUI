@@ -2591,7 +2591,17 @@ def _cov_coords(cov):
     for key in ("input_channel_1", "output_channel_1"):
         if key in cov.coords:
             return list(cov.coords[key].values)
-    return list(cov.dims[0] if cov.dims else [])
+    if cov.dims:
+        # the DataArray dim is a NAME (a string) — iterating it produced
+        # one bogus letter per character; fall back to the coordinate of
+        # the first dim, or the declared order is unknowable
+        first = cov.dims[0]
+        if first in cov.coords:
+            return list(cov.coords[first].values)
+    raise ValueError(
+        "aurora covariance DataArray carries neither input_channel_1/"
+        "output_channel_1 nor a coordinate for its first dimension — "
+        "cannot map channel order")
 
 
 def _std_from_cov(cov_ss_inv, cov_nn, input_channels, output_channels):
