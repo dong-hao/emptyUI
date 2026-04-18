@@ -850,7 +850,10 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
     if data_start_abs.tzinfo is not None and t0.tzinfo is None:
         t0 = t0.tz_localize("UTC")
     elif data_start_abs.tzinfo is None and t0.tzinfo is not None:
-        t0 = t0.tz_localize(None)
+        # CONVERT to UTC then drop the tz: tz_localize(None) alone keeps
+        # the wall time, silently shifting a non-UTC-offset anchor (RR
+        # pairing matches by these coordinates; review 2026-09-24)
+        t0 = t0.tz_convert("UTC").tz_localize(None)
     dt = (data_start_abs - t0).total_seconds()
     if dt < 0:
         # an anchor LATER than the data would silently degrade to run-start
