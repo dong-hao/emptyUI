@@ -28,6 +28,7 @@ export const PORT_COLORS: Record<string, string> = {
   bands: "#d2b4de",
   "ts.run": "#2980b9",
   "ts.channel": "#7fb3d5",
+  "ts.runs": "#5dade2",
   fc: "#186a3b",
   "tf.level": "#e74c3c",
   tf: "#c0392b",

@@ -423,6 +423,9 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       selectedNodeId: null,
       clipboard: null,
       docName: "untitled",
+      // a fresh document must not inherit the previous document's
+      // creation timestamp (Load → New → Save stamped it)
+      docCreated: undefined,
     }),
 }));
 
