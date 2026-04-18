@@ -102,10 +102,14 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
             # the try); emit the per-member runs only — the frontend
             # renders no top-level bar and degrades gracefully
             return {"kind": "ts.runs", "runs": runs}
+        # guard the symmetric edge: starts parse but every end is empty
+        ends_ok = [e for e in ends if e]
+        if not ends_ok:
+            return {"kind": "ts.runs", "runs": runs}
         return {
             "kind": "ts.runs",
             "start": min(bounds),
-            "end": max(e for e in ends if e),
+            "end": max(ends_ok),
             "absolute": True,
             "runs": runs,
         }
