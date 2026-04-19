@@ -60,7 +60,6 @@ def test_spectrogram_step_semantics_burst(tmp_path):
     """decimation_level indexes the cascade STEP within the selected
     family: 0 = the family's native tier (original data), 1 = one deeper,
     -1 = deepest; out-of-range steps reject naming the family's steps."""
-    import logging
     from emptyui.context import RunContext
     from emptyui.store import DataStore
     from emptyui_aurora.plots import PlotSpectrogramFC

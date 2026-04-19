@@ -13,14 +13,14 @@ one mth5 run each (the mth5/aurora run-per-segment convention,
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import numpy as np
 import pandas as pd
-
 from emptyui import Node, Output, Param
 
 _log = logging.getLogger("emptyui")
@@ -487,9 +487,9 @@ def read_phoenix_mtu(
             f"expected exactly one TBL in {data_path}, found "
             f"{[p.name for p in tbls]}")
     win_start, win_end = _window_bounds(start, end)
-    from mth5.mth5 import MTH5
     from mt_io.phoenix.readers.mtu.mtu_table import MTUTable
     from mt_timeseries import ChannelTS
+    from mth5.mth5 import MTH5
 
     table = MTUTable(tbls[0])
     table.read_tbl()

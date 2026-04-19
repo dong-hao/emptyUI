@@ -17,12 +17,9 @@ depending on the magnetic-unit param — all wrong. Now:
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 import pytest
-
-from test_magnetic_units import MU0, N_TO_AM, _field, _runts
+from test_magnetic_units import _field, _runts
 
 
 def _core_series(runts):
@@ -128,9 +125,8 @@ def test_counts_impedance_would_be_meaningless(tmp_path):
 # --- §24.12: instrument response chains survive the payload path ----------
 
 def _fap(name="t_fap"):
-    from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
-
     import numpy as np
+    from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
 
     fap = FrequencyResponseTableFilter(
         frequencies=np.array([1e-3, 1e3]),
@@ -156,7 +152,7 @@ def _attach_calibration(runts, chains):
 
 
 def test_coerce_run_carries_calibration():
-    from emptyui_core_nodes.types import channel_calibration, coerce_run
+    from emptyui_core_nodes.types import channel_calibration
 
     runts = _attach_calibration(
         _runts(*_field(np.random.default_rng(21))),

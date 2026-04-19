@@ -91,7 +91,6 @@ def test_load_lemi34_attaches_calibration_to_e3_e4(tmp_path, monkeypatch):
     EX/EY (mapped to e1/e2), so the keys must be remapped onto the e3/e4
     channels actually read — previously attach_filters(strict=True) raised
     'calibration channel e1 not present in the run'."""
-    import mth5 as mth5_mod
     from mth5.clients import lemi424 as lemi424_mod
 
     data_dir = tmp_path / "lemi_data"

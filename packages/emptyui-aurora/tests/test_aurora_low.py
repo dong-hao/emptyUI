@@ -145,7 +145,8 @@ def test_build_fc_dipole_from_run_metadata(tmp_path):
     import warnings
 
     warnings.filterwarnings("ignore")
-    from mt_metadata.timeseries import Electric, Run as RunMD
+    from mt_metadata.timeseries import Electric
+    from mt_metadata.timeseries import Run as RunMD
     from mt_timeseries import ChannelTS, RunTS
     from mth5.mth5 import MTH5
 
@@ -178,9 +179,9 @@ def test_build_fc_dipole_from_run_metadata(tmp_path):
     archive = MTH5()
     archive.open_mth5(str(path), "r", locking=False)
 
-    from emptyui_aurora.process import BuildFC
     from emptyui.context import RunContext
     from emptyui.store import DataStore
+    from emptyui_aurora.process import BuildFC
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     fc = BuildFC().execute(

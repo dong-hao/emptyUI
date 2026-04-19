@@ -107,7 +107,6 @@ def test_select_runs_flags_dead_channels_too(ctx):
 
 
 def test_select_runs_requires_run_id(ctx):
-    import xarray as xr
 
     ds = _ds_for_run("a", 1.0, "2024-01-01T00:00:00").drop_vars("run_id")
     with pytest.raises(ValueError, match="run_id"):

@@ -16,9 +16,10 @@ from emptyui_core_nodes.types import coerce_run
 
 def _collection(rates, starts, comps=("hx", "hy", "ex", "ey")):
     """A collection (duck-typed: runs + extents — core stays mth5-free)."""
+    from types import SimpleNamespace
+
     import pandas as pd
     import xarray as xr
-    from types import SimpleNamespace
 
     runs, extents = [], []
     for rid, sr, start in zip(("r1", "r2", "r3"), rates, starts):
@@ -109,7 +110,6 @@ def test_map_matches_the_single_run_recipe(tmp_path):
 def test_bandpass_scope_rejects_out_of_scope_members(tmp_path, caplog):
     """A 50–100 Hz bandpass on 15 Hz members: every member is out of scope
     → the whole node rejects (a silently empty map would lie downstream)."""
-    import logging
 
     from emptyui_core_nodes.filters import Bandpass
 

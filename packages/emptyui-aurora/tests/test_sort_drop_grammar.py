@@ -19,9 +19,7 @@ import logging
 import sys
 
 import numpy as np
-import pytest
 import xarray as xr
-
 from emptyui_aurora._processing import (
     coherence_sort_fcs,
     compute_fc_levels,
@@ -30,7 +28,7 @@ from emptyui_aurora._processing import (
 )
 
 sys.path.insert(0, "packages/emptyui-aurora/tests")
-from test_magnetic_units import _field, _runts  # noqa: E402
+from test_magnetic_units import _field, _runts
 
 
 def _container(seed=31):

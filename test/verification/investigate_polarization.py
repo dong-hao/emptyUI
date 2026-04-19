@@ -36,11 +36,10 @@ P_MIN, P_MAX = 1.0, 10.0  # QC band
 
 def build_fc():
     import pandas as pd  # noqa: F401
-    from mth5.mth5 import MTH5
-
     from emptyui.context import RunContext
     from emptyui.store import DataStore
     from emptyui_aurora.process import BuildFC
+    from mth5.mth5 import MTH5
 
     ctx = RunContext(workspace=OUT, store=DataStore(), node_id=TAG)
     m = MTH5()
@@ -55,7 +54,6 @@ def build_fc():
 
 
 def features(fc):
-    import pandas as pd
 
     from emptyui_aurora.process import _fc_io_channels
 

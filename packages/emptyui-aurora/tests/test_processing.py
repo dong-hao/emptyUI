@@ -524,7 +524,7 @@ def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
       banding);
     - remote_reference declares its estimator condition instead of the
       frontend string-sniffing the engine value."""
-    from emptyui_aurora.process import EstimateTF, CoherenceSort
+    from emptyui_aurora.process import CoherenceSort, EstimateTF
 
     m = EstimateTF().manifest()
     assert not m["inherit"], "banding inherit from the sort must be gone"
@@ -544,9 +544,8 @@ def test_compute_fc_levels_starved_cascade_stops(tmp_path):
     cascade stops: deeper levels are strictly shorter, and decimating them
     anyway crashed scipy's decimate (padlen) on the full 3.5-day record
     (DESIGN §24.12 comparison run)."""
-    from emptyui_aurora._processing import compute_fc_levels
-
     from _synthetic import synthetic_runts, synthetic_source
+    from emptyui_aurora._processing import compute_fc_levels
 
     runts = synthetic_runts(synthetic_source(31, n=600))
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=10,

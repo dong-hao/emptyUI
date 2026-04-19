@@ -13,12 +13,9 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
-
-from test_magnetic_units import _field, _runts
-
 from emptyui.context import RunContext
 from emptyui.store import DataStore
+from test_magnetic_units import _field, _runts
 
 
 def _fap(name="t_fap", amp=2.0, phase_deg=90.0):
@@ -166,9 +163,9 @@ def test_compute_fc_zero_dc_response_sets_nan():
 def test_core_payload_calibration_survives_filters():
     """coerce_run carries the chains into the core TimeSeries; the core
     Detrend preserves them; Compute FC applies them from the core payload."""
-    from emptyui_core_nodes.types import channel_calibration, coerce_run
-    from emptyui_core_nodes.filters import Detrend
     from emptyui_aurora._processing import compute_fc_levels
+    from emptyui_core_nodes.filters import Detrend
+    from emptyui_core_nodes.types import channel_calibration, coerce_run
 
     rng_seed = 15
     rng = np.random.default_rng(rng_seed)

@@ -5,11 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-
 from emptyui import Input, Node, Output, Param
 
-from .types import (TimeSeries, collection_member_ds, coerce_run,
-                    ensure_finite, is_run_collection)
+from .types import (
+    TimeSeries,
+    coerce_run,
+    collection_member_ds,
+    ensure_finite,
+    is_run_collection,
+)
 
 
 class Bandpass(Node):
@@ -183,7 +187,7 @@ class Detrend(Node):
                     {k: np.asarray(ds[k].values, dtype=float)
                      for k in ds.data_vars}, "Detrend")
                 if method == "mean":
-                    fn = lambda v: v - v.mean()  # noqa: E731
+                    fn = lambda v: v - v.mean()
                 else:
                     from scipy.signal import detrend
 

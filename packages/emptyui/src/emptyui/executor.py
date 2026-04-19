@@ -64,7 +64,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     # NameError AND log an ERROR line — probe via dir() (no __getattr__
     # invocation) so summarizing an mth5 RunTS stays quiet
     visible = dir(value)
-    rs = getattr(value, "run_summary") if "run_summary" in visible else None
+    rs = value.run_summary if "run_summary" in visible else None
     if rs is not None and hasattr(rs, "iterrows") and len(rs):
         runs = []
         for _, row in rs.iterrows():
@@ -82,7 +82,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     # run collection (Extract Run 'time range' mode): union bounds on top,
     # per-member extents for provenance — the frontend renders the union
     # track directly (non-mth5 kinds use the top-level start/end)
-    extents = getattr(value, "extents") if "extents" in visible else None
+    extents = value.extents if "extents" in visible else None
     if (extents is not None and "runs" in visible
             and isinstance(extents, list) and extents):
         starts = [str(e.get("start", ""))[:19] for e in extents]
@@ -122,7 +122,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
     if "n_samples" in visible:
         try:
             n = int(value.n_samples)
-        except Exception as exc:  # noqa: BLE001 - mt_timeseries raises NameError
+        except Exception:  # noqa: BLE001 - mt_timeseries raises NameError
             n = None
     else:
         try:

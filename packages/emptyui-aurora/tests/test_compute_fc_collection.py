@@ -17,7 +17,7 @@ from emptyui.store import DataStore
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
-from _archive import multi_run_archive  # noqa: E402
+from _archive import multi_run_archive
 
 
 def _two_run_archive(tmp_path: Path):

@@ -246,7 +246,7 @@ class ComputeFC(Node):
         # into NameError AND log an ERROR line — probe via dir() (no
         # __getattr__ invocation) instead of try/getattr
         names = dir(data)
-        extents = getattr(data, "extents") if "extents" in names else None
+        extents = data.extents if "extents" in names else None
         if (isinstance(extents, list) and "runs" in names):
             return self._execute_collection(
                 ctx, data, input_channels, output_channels,
@@ -270,9 +270,12 @@ class ComputeFC(Node):
             reject_saturated=reject_saturated,
             saturated_max=saturated_max,
         )
-        from emptyui_mth5.persist import (close_workspace_mth5,
-                                          get_workspace_mth5,
-                                          persist_fc_level, runts_context)
+        from emptyui_mth5.persist import (
+            close_workspace_mth5,
+            get_workspace_mth5,
+            persist_fc_level,
+            runts_context,
+        )
 
         # Station identity travels with the fc (attrs) so EstimateTF can attach
         # it to the TF — the single point of truth for plot titles and export
@@ -289,7 +292,7 @@ class ComputeFC(Node):
                         "merged_gap_method"):
                 if src_attrs.get(key) is not None:
                     identity[key] = src_attrs[key]
-        except AttributeError:  # noqa: S110 — payloads without dataset attrs
+        except AttributeError:
             pass
         for level, fc in levels.items():
             fc.attrs.update(identity)
@@ -342,10 +345,11 @@ class ComputeFC(Node):
         """Build FC's route on already-extracted runs ('time range' mode):
         per-run cascades merged along time, per level (DESIGN §9.3)."""
         import numpy as np
-
-        from emptyui_mth5.persist import (close_workspace_mth5,
-                                          get_workspace_mth5,
-                                          persist_fc_level)
+        from emptyui_mth5.persist import (
+            close_workspace_mth5,
+            get_workspace_mth5,
+            persist_fc_level,
+        )
 
         members = list(collection.runs)
         extents = list(collection.extents)
@@ -661,8 +665,11 @@ class BuildFC(Node):
                     "the window (%s kept)", win[0], win[1], len(dropped),
                     len(kept))
             wanted = kept
-        from emptyui_mth5.runs import (_group_id, read_run_channels,
-                                       resolve_filter_registry)
+        from emptyui_mth5.runs import (
+            _group_id,
+            read_run_channels,
+            resolve_filter_registry,
+        )
 
         # survey/station ids from the HDF5 group paths (free) — the group
         # .metadata properties rebuild the FULL hierarchy through pydantic
@@ -728,7 +735,6 @@ class BuildFC(Node):
 
         import xarray as xr
 
-        from emptyui_mth5.runs import read_run_channels, resolve_filter_registry
 
         station_md = SimpleNamespace(
             station_metadata=SimpleNamespace(
@@ -847,8 +853,7 @@ class BuildFC(Node):
         # summary tables (the fc summary recursively walks every persisted
         # FC level)
         if persist:
-            from emptyui_mth5.persist import (close_workspace_mth5,
-                                              get_workspace_mth5)
+            from emptyui_mth5.persist import close_workspace_mth5, get_workspace_mth5
 
             wm = get_workspace_mth5(ctx)
         try:

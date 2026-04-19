@@ -82,12 +82,11 @@ def ingest(tag: str, neutralize: bool):
 
 
 def process(archive_path: Path, tag: str, decimation_levels: int = 8):
-    from mth5.mth5 import MTH5
-
     from emptyui.context import RunContext
     from emptyui.store import DataStore
     from emptyui_aurora.process import BuildFC, CoherenceSort, EstimateTF
     from emptyui_mth5.plots import PlotAppResPhase
+    from mth5.mth5 import MTH5
 
     ctx = RunContext(workspace=OUT, store=DataStore(), node_id=tag)
     m = MTH5()

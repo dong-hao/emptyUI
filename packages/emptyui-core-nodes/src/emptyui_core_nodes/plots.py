@@ -21,10 +21,9 @@ import numpy as np
 from emptyui import Input, Node, Output, Param
 
 from ._channels import auto_channel, resolve_channels
-from .types import is_run_collection
 from ._plotstyle import DPI, apply_style, channel_unit_hint
 from ._timewindow import resolve_window_s
-from .types import TimeSeries, coerce_run
+from .types import TimeSeries, coerce_run, is_run_collection
 
 
 def _select_channels(data: TimeSeries, spec: str) -> list[str]:

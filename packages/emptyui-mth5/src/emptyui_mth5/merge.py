@@ -60,7 +60,7 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
         chans = getattr(rt, "channels", None)
         if chans is not None:
             return set(map(str, chans))
-        return {str(v) for v in getattr(rt, "dataset").data_vars}
+        return {str(v) for v in rt.dataset.data_vars}
 
     comp_sets = [_rt_channels(rt) for rt in run_ts_list]
     union = set.union(*comp_sets)
@@ -275,8 +275,11 @@ class MergeRuns(Node):
             deduped.append(r)
         wanted = deduped
         run_ts_list = []
-        from .runs import (_group_id, _wrap_runts, read_run_channels,
-                           resolve_filter_registry)
+        from .runs import (
+            _wrap_runts,
+            read_run_channels,
+            resolve_filter_registry,
+        )
         for run_id in wanted:
             run_obj = _resolve_run(station_obj, run_id)
             # fast channel read (§24.8): to_runts's mt_metadata

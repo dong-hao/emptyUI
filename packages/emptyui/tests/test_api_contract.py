@@ -9,13 +9,12 @@ Additions are tolerated (the frontend ignores unknown fields — the same
 "files may travel" philosophy as the settings file).
 """
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from emptyui import Input, Node, Output, Param
 from emptyui.registry import CORE_PORT_TYPES, PluginInfo, Registry
 from emptyui.server.app import create_app
-
 
 MANIFEST_KEYS = {
     "type", "version", "title", "tooltip", "description", "category",
