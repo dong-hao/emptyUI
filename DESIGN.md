@@ -281,9 +281,11 @@ The aurora processing run is split at the Fourier-coefficient boundary:
   internally. Output `tf` + per-level `tf.level`. The TF is built aurora-style:
   rows/cols carry the **actual** channel names and the `channel_nomenclature`
   map is attached — a 2×2 impedance, or a 3×2 impedance + tipper. The remote
-  reference (**RME_RR**, aurora-backed) pairs local/remote FC samples by row, so
-  the ref fc must share the local fc's **frequency AND time grids** (both
-  validated with clear errors); the runs must be aligned first (see
+  reference (**RME_RR**, aurora-backed) pairs local/remote FC samples by row;
+  by default (`pairing="intersect"`, §9.3) windows are matched by absolute
+  start time and unmatched rows are dropped loudly on both sides; `strict`
+  preserves the legacy identical-grid contract (both grids validated with
+  clear errors); the runs must be aligned first (see
   `Align Runs`). When the ref fc's provenance records interpolated merge
   gaps inside the local span, the pairing warns (§3, M4 #2).
 - **`Align Runs` node (`mth5.runs.align`)** — two `ts.run` inputs → two `ts.run`
@@ -451,8 +453,8 @@ and sidebar are generated entirely from it.
 Widget vocabulary (`number`, `integer`, `string`, `text`, `boolean`, `select`,
 `radio`, `file`, `directory`, `code`, `list`) is fixed in core; the frontend has
 dedicated controls for `boolean`/`select`/`radio`/`number`/`integer`/
-`file`/`directory`, and the remaining string-like widgets fall back to a
-single-line text input.
+`file`/`directory` (and an array-coercing control for `list`), and the
+remaining string-like widgets fall back to a single-line text input.
 
 #### Tooltip / description / palette protocol
 
@@ -956,11 +958,14 @@ convention puts the response on the channel metadata
 (`AppliedFilter(name, applied, stage)` → `/Survey/Filters`, typed filter
 objects: ZPK / FAP / coefficient / time delay / FIR, evaluated as
 `complex_response(f)`), which the ts.run payloads already carry. Applied-flag
-semantics prevent double-calibration: only filters with `applied=True` are
-removed (divided out — the response IS part of the recorded data); a prior
-time-domain `Calibrate` flips the flags to `False`, so both routes coexist
-(the time-domain Calibrate node remains for the classical route and explicit
-control). The FC records the applied calibration in its attrs
+semantics prevent double-calibration **at the FC level** (Compute FC): only
+filters with `applied=True` are removed (divided out — the response IS part
+of the recorded data); a prior time-domain `Calibrate` flips the flags to
+`False`, so both routes coexist (the time-domain Calibrate node remains for
+the classical route and explicit
+control; NB mt_metadata's own time-domain `RunTS.calibrate` removes every
+chain filter regardless of the applied flag — do not chain time-domain
+Calibrates). The FC records the applied calibration in its attrs
 (`calibration_applied`, e.g. `"hx=box+coil; ex=box"`).
 
 The calibration chains ride the payload through the graph: core `TimeSeries`
@@ -1054,7 +1059,7 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   family's slots (`HSMP` slot period in seconds, `L3NS`/`L4NS` seconds
   recorded at the BEGINNING of every slot); slot identity is derived from
   the actual block timestamps (tag truth) with the schedule as the
-  cross-check: the slot period is the observed median spacing of
+  cross-check: the slot period is the observed minimum spacing of
   consecutive run starts, a disagreement with `HSMP` warns (never
   rejects — the official IAGA corpus is known to stagger TS3/TS4 against
   the TS5 slot grid; per the standard the bursts should align with the
@@ -1157,8 +1162,10 @@ window** are extracted (empty start/end = every run of the station), each
 cropped to the window overlap (the
 time-selector semantic — clamped, never fabricated). A `sample_rates`
 param scopes the families (empty = every family: the staggered burst slots
-plus the continuous stream). The output is a **`ts.runs` run collection**
-(second output port; the legacy `ts.run` output stays for run-id mode).
+plus the continuous stream). The single `data` output port carries the
+**`ts.runs` run collection** when range mode selects runs (a single run in
+run-id mode rides the same port as a 1-member collection; §4's
+runtime-shape hints tell the frontend which form is present).
 
 Compute FC consumes the collection on **Build FC's route**: per-run
 cascades (`compute_fc_levels`) merged along time per decimation level
@@ -1289,8 +1296,8 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   and unaffected; persisted FC amplitudes and spectrogram dB are in
   emptyUI's own convention (history §14.1, item A5).
 - **Saturation rejection (`reject_saturated`, default on)**: every FC window
-  overlapping ≥1 flagged sample of a per-sample `saturated` auxiliary mask
-  channel is NaN'd in all in/out FCs; the mask max-pools through decimation;
+  whose flagged-sample FRACTION exceeds `saturated_max` (default 0.01) is
+  NaN'd in all in/out FCs; the mask max-pools through decimation;
   the count is recorded in attrs. A no-op for payloads without the mask.
   Verified: surgical — medians barely move, daytime garbage windows vanish;
   official-EDI parity preserved (history §24.12).
