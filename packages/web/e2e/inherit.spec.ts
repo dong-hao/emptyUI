@@ -26,7 +26,8 @@ test("identities auto-fill and render as comboboxes through a pass-through filte
   // pass-through Bandpass, so its inherit walk must transitively seek the
   // same-named params on Extract Run.
   const H5 = path.resolve(
-    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+    here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
+    "smoke_2h_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
@@ -50,15 +51,15 @@ test("identities auto-fill and render as comboboxes through a pass-through filte
   // in 'run id' mode only).
   const er = node(page, "Extract Run");
   const surveyIn = er.locator(".param-field", { hasText: "Survey id" }).locator("input");
-  await surveyIn.fill("4P");
+  await surveyIn.fill("survey");
   await surveyIn.press("Enter");
   const stationIn = er.locator(".param-field", { hasText: "Station id" }).locator("input");
-  await stationIn.fill("SDG31");
+  await stationIn.fill("B0940330");
   await stationIn.press("Enter");
   const selIn = er.locator(".param-field", { hasText: "Selection" }).locator("select");
   await selIn.selectOption("run id");
   const runIn = er.locator(".param-field", { hasText: "Run id" }).locator("input");
-  await runIn.fill("b");
+  await runIn.fill("sr150_0001");
   await runIn.press("Enter");
 
   await connect(page, { node: "Load MTH5", port: "mth5: mth5" }, {
@@ -80,14 +81,16 @@ test("identities auto-fill and render as comboboxes through a pass-through filte
   const surveyBox = fc.locator(".param-field", { hasText: "Survey id" }).locator("input");
   const stationBox = fc.locator(".param-field", { hasText: "Station id" }).locator("input");
   const runBox = fc.locator(".param-field", { hasText: "Run id" }).locator("input");
-  await expect(surveyBox).toHaveValue("4P", { timeout: 15_000 });
-  await expect(stationBox).toHaveValue("SDG31");
-  await expect(runBox).toHaveValue("b");
+  await expect(surveyBox).toHaveValue("survey", { timeout: 15_000 });
+  await expect(stationBox).toHaveValue("B0940330");
+  await expect(runBox).toHaveValue("sr150_0001");
 
   // Combobox: the inherited params render as editable comboboxes whose
   // datalist suggestions carry the upstream values (the <datalist> is
   // display:none — assert its options, not visibility).
-  for (const [box, value] of [[surveyBox, "4P"], [stationBox, "SDG31"], [runBox, "b"]] as const) {
+  for (const [box, value] of [
+    [surveyBox, "survey"], [stationBox, "B0940330"], [runBox, "sr150_0001"],
+  ] as const) {
     const listId = await box.getAttribute("list");
     expect(listId, "inherited param renders as a combobox").toBeTruthy();
     const opts = await fc.locator(`datalist[id="${listId}"] option`)

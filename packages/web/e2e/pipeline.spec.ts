@@ -368,7 +368,8 @@ test("Extract Run offers the collection's sample rates as select suggestions (§
   page,
 }) => {
   const H5 = path.resolve(
-    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+    here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
+    "smoke_2h_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
@@ -407,14 +408,15 @@ test("Extract Run offers the collection's sample rates as select suggestions (§
     (os) => os.map((o) => o.getAttribute("value") ?? ""),
   );
   expect(opts[0]).toBe("auto");
-  expect(opts).toContain("1"); // 4P/SDG31 is all-1 Hz
+  expect(opts).toContain("150"); // smoke archive tiers: 150 / 15 / 2400 Hz
 });
 
 test("time selector bar on Extract Run shows the archive run extent (GMT)", async ({
   page,
 }) => {
   const H5 = path.resolve(
-    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+    here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
+    "smoke_2h_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
@@ -441,8 +443,8 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
   // Default 'time range' mode: the bar shows the UNION extent over every
   // run of the station (§23.4 — the collection's full coverage). Switch to
   // 'run id' mode so the bar shows one run's extent (the assertions below
-  // are tuned to run "a", the first run); rerun so the payload event
-  // reflects the new selection.
+  // are tuned to sr150_0001, the first run of the smoke archive's summary);
+  // rerun so the payload event reflects the new selection.
   const selection = node(page, "Extract Run")
     .locator(".param-field", { hasText: "Selection" })
     .locator("select");
@@ -453,25 +455,25 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
   });
 
   // The bar appears on Extract Run from the archive's per-run summary —
-  // run "a" (first run) of 4P/SDG31, absolute GMT ticks.
+  // run sr150_0001 (first run) of the smoke archive, absolute GMT ticks.
   const bar = node(page, "Extract Run").locator(".time-bar");
   await expect(bar).toBeVisible({ timeout: 15_000 });
   const ticks = bar.locator(".time-bar-ticks span");
-  await expect(ticks.nth(0)).toHaveText("2017-10-16 17:01:13");
-  await expect(ticks.nth(1)).toHaveText("2017-10-16 17:32:06");
+  await expect(ticks.nth(0)).toHaveText("2026-06-18 20:00:00");
+  await expect(ticks.nth(1)).toHaveText("2026-06-18 20:00:15");
 
   // Select a slot by editing the boxes; rerun crops the extraction.
   const startBox = node(page, "Extract Run")
     .locator(".param-field", { hasText: "Start (UTC)" })
     .locator("input");
-  await startBox.fill("2017-10-16 17:10:00");
+  await startBox.fill("2026-06-18 20:00:05");
   await startBox.press("Enter");
   const handlePct = await bar.locator(".time-bar-handle").nth(0).evaluate((el) => {
     const tr = el.parentElement!.getBoundingClientRect();
     const r = el.getBoundingClientRect();
     return ((r.x + r.width / 2 - tr.x) / tr.width) * 100;
   });
-  // run "a" is 31 min long; 17:10 is ~9 min in ≈ 29%
+  // sr150_0001 is ~16 s long; 5 s in ≈ 31%
   expect(handlePct).toBeGreaterThan(20);
   expect(handlePct).toBeLessThan(40);
 
@@ -486,7 +488,8 @@ test("a node error is shown as copyable text in the properties panel", async ({
 }) => {
   // Deterministic node error: Extract Run with a nonexistent run id.
   const H5 = path.resolve(
-    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+    here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
+    "smoke_2h_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");

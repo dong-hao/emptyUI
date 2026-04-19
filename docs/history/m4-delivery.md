@@ -466,7 +466,7 @@ Every parity experiment keeps these FIXED and changes exactly one factor:
   metrics JSON (fc attrs already carry `prewhitening`/`per_window_detrend`
   provenance, §19-style).
 
-Harness: `examples/data/lims-usarray-test/verify_sdg31.py` (importable
+Harness: `examples/data/nims-usarray-test/verify_sdg31.py` (importable
 helpers) and `parity_sdg31.py` (the ablation driver).
 
 ### 24.2 Discrepancy inventory (2026-09-13 full audit)
@@ -552,7 +552,7 @@ analytically incl. the `_default_unit` hx-mislabel fix (2026-09-13).
   detrend) is ablated and the persisted-FC convention (A5/E6) is settled —
   PW changes persisted FC amplitudes.
   Comparison figures (boxcar+PW vs official, §24.1 protocol):
-  `examples/data/lims-usarray-test/sdg31_parity_boxcar_first_difference_vs_official.png`
+  `examples/data/nims-usarray-test/sdg31_parity_boxcar_first_difference_vs_official.png`
   (raw overlay, each dataset at its own periods, ours rotated −5.7°) and
   `sdg31_parity_boxcar_first_difference_appres_phase.png` (§15
   EMTF-convention figure via the plot node); rendered with
@@ -1600,8 +1600,8 @@ caveat only.
 **Coupling comparison (2026-09-17, user-requested A/B).** Two TF images from
 the full 3.5-day record (BuildFC window 256/factor 4/11 levels, clock zero
 epoch, per-bin coherence sort defaults, self-reference Robust estimate,
-58 merged periods): `plot_appres_phase_asis_full.png` (CLB as-is) vs
-`plot_appres_phase_dropped_full.png` (CLB neutralized below its per-channel
+58 merged periods): `plot_appres_phase_asis.png` (CLB as-is) vs
+`plot_appres_phase_dropped.png` (CLB neutralized below its per-channel
 -3 dB corner: amp 1, phase 0). Numeric deltas (dropped/asis):
 
 - periods <= 182 s: bit-identical (the CLB is unity there) — both windows

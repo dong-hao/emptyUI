@@ -95,6 +95,10 @@ emptyui/
 │   │   └── tests/
 │   ├── emptyui-core-nodes/      # bundled minimal plugin (numpy/matplotlib)
 │   │   └── src/emptyui_core_nodes/
+│   ├── emptyui-mth5/           # archive/IO plugin: MTH5/LEMI/Phoenix, TF I/O, plots
+│   │   └── src/emptyui_mth5/
+│   ├── emptyui-aurora/         # processing plugin: FC/TF estimation, QC, sorts
+│   │   └── src/emptyui_aurora/
 │   └── web/                     # React frontend
 │       └── src/
 │           ├── graph/           # canvas, node rendering, edges
@@ -1484,7 +1488,8 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
 ### 10.6 Display & plot conventions
 
 Publication-quality standard (USArray convention; reference figure
-`SDG31b_H28coh.png`). `Plot AppRes & Phase` and `Plot Tipper` stay separate
+`examples/data/nims-usarray-test/SDG31b_H28coh.png`). `Plot AppRes & Phase`
+and `Plot Tipper` stay separate
 nodes — no combined plot.
 
 - **TF error propagation**: `_solve_band`/`build_tf` propagate

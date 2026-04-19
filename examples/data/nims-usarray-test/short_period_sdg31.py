@@ -39,7 +39,7 @@ Established here (2026-09-13):
    periods is far more optimistic than the data support (E5 must reconcile
    error conventions).
 
-Run:  .venv/bin/python examples/data/lims-usarray-test/short_period_sdg31.py
+Run:  .venv/bin/python examples/data/nims-usarray-test/short_period_sdg31.py
 Outputs: printed tables + sdg31_short_period_metrics.json
 """
 

@@ -21,7 +21,7 @@ Sort bands with the l2u scheme (no band-table input) while the harness
 sorted on the exact official table — slightly different per-window
 weights at the head. Everything else is parameter-identical.
 
-Run:  .venv/bin/python examples/data/lims-usarray-test/node_vs_harness_sdg31.py
+Run:  .venv/bin/python examples/data/nims-usarray-test/node_vs_harness_sdg31.py
 """
 
 from __future__ import annotations

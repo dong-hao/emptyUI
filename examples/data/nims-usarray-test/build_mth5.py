@@ -17,7 +17,7 @@ Downloads 1 Hz MT time series from the EarthScope FDSN dataselect service
     SDG31: 2017-10-16T17:01:13 -> 2017-10-26T14:59:54 (runs a+b)
     SDH28: 2017-10-12T19:43:14 -> 2017-10-31T15:55:16
 
-The MTH5 files land in examples/data/lims-usarray-test/ (gitignored;
+The MTH5 files land in examples/data/nims-usarray-test/ (gitignored;
 regenerate with this script). The official EMTF transfer function
 USArray.SDG31.2017.edi lives next to them.
 """

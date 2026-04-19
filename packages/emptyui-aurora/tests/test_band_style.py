@@ -488,26 +488,35 @@ def test_manual_bands_geometry():
 
 def test_manual_bands_matches_harness_formula():
     """The shared helper equals the parity harness's exact_official_bands
-    (the provenance guarantee for band_style='manual')."""
+    (the provenance guarantee for band_style='manual'): the official SDG31
+    EDI's 30 band centers — (6,6,6,6,4,2) per level, classic EMTF structure —
+    rebuilt edge for edge. Inputs come from the harness's own EDI reader, so
+    the comparison always runs on the real official grid (the EDI is a
+    tracked file); both sides implement the geometric-midpoint rule and must
+    agree to floating-point precision."""
     import sys
     from pathlib import Path
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]
-                           / "examples" / "data" / "lims-usarray-test"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]
+                           / "examples" / "data" / "nims-usarray-test"))
     from emptyui_aurora._processing import manual_bands
 
     try:
-        from verify_sdg31 import exact_official_bands
+        from verify_sdg31 import exact_official_bands, read_official_edi
     except ImportError:  # harness deps unavailable — skip quietly
         pytest.skip("parity harness unavailable")
-    periods_off = np.array([7.34, 9.17, 11.68, 15.08, 19.75, 25.6,
-                            33.0, 42.7, 53.9])
-    table_h = exact_official_bands(1.0 / periods_off)
-    table_m = manual_bands(1.0 / periods_off, "6,2")
+    periods_off, _, _ = read_official_edi()
+    freqs_off = 1.0 / np.asarray(periods_off)  # descending (harness order)
+    table_h = exact_official_bands(freqs_off)
+    table_m = manual_bands(freqs_off, "6,6,6,6,4,2")
+    # shape first: zip() below would silently truncate a level mismatch
+    assert {lv: len(b) for lv, b in table_m.items()} == {
+        lv: len(b) for lv, b in table_h.items()}
+    assert [len(table_m[lv]) for lv in sorted(table_m)] == [6, 6, 6, 6, 4, 2]
     for lv in table_h:
         for (hi_h, lo_h), (hi_m, lo_m) in zip(table_h[lv], table_m[lv]):
             assert hi_m == pytest.approx(hi_h, rel=1e-12)
-            assert lo_m == pytest.approx(lo_h, rel=1e-12)
+            assert lo_h == pytest.approx(lo_m, rel=1e-12)
 
 
 def test_manual_bands_validation():

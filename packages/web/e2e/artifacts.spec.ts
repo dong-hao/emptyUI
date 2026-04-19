@@ -16,7 +16,8 @@ test("View Table renders the incoming table artifact inline with a download link
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   const H5 = path.resolve(
-    here, "..", "..", "..", "examples", "data", "lims-usarray-test", "4P_SDG31.h5",
+    here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
+    "smoke_2h_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");

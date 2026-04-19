@@ -20,7 +20,7 @@ Probes:
    merge choice" from "level-5 estimate quality";
 3. official σ at the tail rows.
 
-Run:  .venv/bin/python examples/data/lims-usarray-test/long_period_sdg31.py
+Run:  .venv/bin/python examples/data/nims-usarray-test/long_period_sdg31.py
 """
 
 from __future__ import annotations

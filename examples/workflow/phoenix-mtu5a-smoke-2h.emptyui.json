@@ -1,0 +1,247 @@
+{
+  "format": "emptyui/workflow",
+  "version": 1,
+  "meta": {
+    "name": "untitled",
+    "created": "2026-09-26T06:34:25.054Z"
+  },
+  "nodes": [
+    {
+      "id": "ne47ef671-7e82-4ae3-a56d-bf923c40a069",
+      "type": "mth5.io.extract_run",
+      "params": {
+        "selection": "time range",
+        "survey": "",
+        "station": "",
+        "run": "",
+        "sample_rates": "",
+        "start": "",
+        "end": ""
+      },
+      "position": {
+        "x": 229.70522680699838,
+        "y": 13.696020541093056
+      }
+    },
+    {
+      "id": "n6ebfa4d3-0fae-419a-bab5-707735535a34",
+      "type": "core.plot.timeseries",
+      "params": {
+        "channels": "ex, hy, ey, hx",
+        "sample_rate": "auto",
+        "start": "",
+        "end": ""
+      },
+      "position": {
+        "x": 598.252077246505,
+        "y": -146.168947215406
+      }
+    },
+    {
+      "id": "nfb5c6f4b-1dd8-4e75-8063-357eec514b51",
+      "type": "core.display.preview_plot",
+      "params": {},
+      "position": {
+        "x": 930.8438377155287,
+        "y": -313.6486160619392
+      }
+    },
+    {
+      "id": "n481eea63-4992-4019-b605-2b10e4635f55",
+      "type": "mth5.io.load",
+      "params": {
+        "mode": "r",
+        "path": "examples/data/phoenix-mtu-test/smoke_2h_phoenix_mtu.mth5"
+      },
+      "position": {
+        "x": -83.72252539010162,
+        "y": 13.213830638945083
+      }
+    },
+    {
+      "id": "n72f040d7-cb82-4a15-a65a-4b45e260d0b6",
+      "type": "aurora.process.compute_fc",
+      "params": {
+        "channel_nomenclature": "auto",
+        "input_channels": "",
+        "output_channels": "",
+        "magnetic_unit": "auto",
+        "decimation_levels": 4,
+        "factor": 4,
+        "window_samples": 256,
+        "overlap": 0.5,
+        "window_type": "hamming",
+        "window_type_deep": "",
+        "clock_zero": "",
+        "prewhitening": "first difference",
+        "per_window_detrend": "",
+        "reject_saturated": true,
+        "saturated_max": 0.01,
+        "persist": true,
+        "survey": "",
+        "station": "",
+        "run": ""
+      },
+      "position": {
+        "x": 593.8778609763159,
+        "y": 84.91846550750874
+      }
+    },
+    {
+      "id": "nf4733346-39df-4833-9c2f-45faa0e0381d",
+      "type": "aurora.process.coherence_sort",
+      "params": {
+        "coherence_min": 0.4,
+        "coherence_max": 1,
+        "mode": "weight",
+        "apply_below_period": 0.3,
+        "ensemble_windows": 16,
+        "smooth_bins": 0,
+        "pairing": "intersect",
+        "pair_tolerance_s": 0
+      },
+      "position": {
+        "x": 930.2551324032374,
+        "y": 83.22575446499174
+      }
+    },
+    {
+      "id": "n0036a716-a750-47f2-80c2-fcd39758a5da",
+      "type": "aurora.process.estimate_tf",
+      "params": {
+        "estimator_engine": "Robust",
+        "remote_reference": false,
+        "periods_per_octave": 3,
+        "band_style": "l2u",
+        "band_centers": "",
+        "bands_per_level": "",
+        "min_bins_per_band": 15,
+        "t_short": 0,
+        "pairing": "intersect",
+        "pair_tolerance_s": 0
+      },
+      "position": {
+        "x": 1253.3086306879068,
+        "y": 82.90438979951688
+      }
+    },
+    {
+      "id": "n74700bfa-feea-4529-8593-831aad52431d",
+      "type": "mth5.plot.appres_phase",
+      "params": {
+        "mode": "off-diagonal",
+        "rho_ylim": "auto",
+        "print_params": false
+      },
+      "position": {
+        "x": 1254.5943985711758,
+        "y": 397.5914877362424
+      }
+    },
+    {
+      "id": "n16da735a-6675-4ce6-8724-85b1d735dcc0",
+      "type": "core.display.preview_plot",
+      "params": {},
+      "position": {
+        "x": 1574.5652907657075,
+        "y": 83.3060854474124
+      }
+    },
+    {
+      "id": "nda1d0a2f-dea7-4ef5-8930-6643d4ea5432",
+      "type": "aurora.plot.spectrogram",
+      "params": {
+        "channel": "",
+        "decimation_level": 0,
+        "sample_rate": "auto",
+        "window_samples": "256",
+        "decimation_levels": "4"
+      },
+      "position": {
+        "x": 928.176856895933,
+        "y": 424.143131033203
+      }
+    },
+    {
+      "id": "n3f29a518-7e96-4239-a36c-0c3960ad43b9",
+      "type": "core.display.preview_plot",
+      "params": {},
+      "position": {
+        "x": 1230.5527837249035,
+        "y": 578.9840874292878
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "ea1782b78-369b-41e7-a4ce-08e31577c682",
+      "source": "ne47ef671-7e82-4ae3-a56d-bf923c40a069",
+      "source_port": "data",
+      "target": "n6ebfa4d3-0fae-419a-bab5-707735535a34",
+      "target_port": "data"
+    },
+    {
+      "id": "eae371363-ac36-40ef-aa58-91f20eaa3894",
+      "source": "n6ebfa4d3-0fae-419a-bab5-707735535a34",
+      "source_port": "plot",
+      "target": "nfb5c6f4b-1dd8-4e75-8063-357eec514b51",
+      "target_port": "plot"
+    },
+    {
+      "id": "ec6b687d7-cd43-4c23-9a59-f54c027e8b52",
+      "source": "n481eea63-4992-4019-b605-2b10e4635f55",
+      "source_port": "mth5",
+      "target": "ne47ef671-7e82-4ae3-a56d-bf923c40a069",
+      "target_port": "mth5"
+    },
+    {
+      "id": "ee85022b8-c91a-49c9-9cb1-4619828c53db",
+      "source": "ne47ef671-7e82-4ae3-a56d-bf923c40a069",
+      "source_port": "data",
+      "target": "n72f040d7-cb82-4a15-a65a-4b45e260d0b6",
+      "target_port": "data"
+    },
+    {
+      "id": "e292ffdd7-bbd5-4235-8f81-b3904d8c72f6",
+      "source": "n72f040d7-cb82-4a15-a65a-4b45e260d0b6",
+      "source_port": "fc",
+      "target": "nf4733346-39df-4833-9c2f-45faa0e0381d",
+      "target_port": "fc"
+    },
+    {
+      "id": "e26a548c8-397c-42a9-b6ce-c9abd0dbe3bd",
+      "source": "nf4733346-39df-4833-9c2f-45faa0e0381d",
+      "source_port": "fc",
+      "target": "n0036a716-a750-47f2-80c2-fcd39758a5da",
+      "target_port": "fc"
+    },
+    {
+      "id": "e2fd017aa-8247-410a-9e1a-68ce5ed66b9b",
+      "source": "n0036a716-a750-47f2-80c2-fcd39758a5da",
+      "source_port": "tf",
+      "target": "n74700bfa-feea-4529-8593-831aad52431d",
+      "target_port": "tf"
+    },
+    {
+      "id": "ef117a0cb-7f48-48ed-afd8-2bc4331e36a0",
+      "source": "n74700bfa-feea-4529-8593-831aad52431d",
+      "source_port": "plot",
+      "target": "n16da735a-6675-4ce6-8724-85b1d735dcc0",
+      "target_port": "plot"
+    },
+    {
+      "id": "e381fabf0-808f-49d7-843c-5c2e1e94f296",
+      "source": "n72f040d7-cb82-4a15-a65a-4b45e260d0b6",
+      "source_port": "fc",
+      "target": "nda1d0a2f-dea7-4ef5-8930-6643d4ea5432",
+      "target_port": "fc"
+    },
+    {
+      "id": "e2c6235e2-9913-4c84-97fe-7e4f6c69f437",
+      "source": "nda1d0a2f-dea7-4ef5-8930-6643d4ea5432",
+      "source_port": "plot",
+      "target": "n3f29a518-7e96-4239-a36c-0c3960ad43b9",
+      "target_port": "plot"
+    }
+  ]
+}

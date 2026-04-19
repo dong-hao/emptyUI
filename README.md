@@ -10,6 +10,8 @@ architecture and design decisions.
 packages/
 ├── emptyui/              # Python core: node API, registry, DAG executor, FastAPI server
 ├── emptyui-core-nodes/   # bundled minimal node plugin
+├── emptyui-mth5/         # archive/IO plugin: MTH5/LEMI/Phoenix, TF I/O, plots
+├── emptyui-aurora/       # processing plugin: FC/TF estimation, QC, sorts
 └── web/                  # React + React Flow frontend (Vite)
 
 examples/

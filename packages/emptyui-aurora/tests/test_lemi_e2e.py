@@ -1,7 +1,8 @@
-"""End-to-end LEMI424 test through the emptyUI workflow engine.
+"""End-to-end LEMI-417 (BGS) test through the emptyUI workflow engine.
 
-Requires the raw LEMI data at examples/data/lemi-424-test (gitignored, on
-disk). Skipped when absent so CI without the data still passes.
+Requires the raw BGS LEMI-417 data at
+examples/data/bgs-lemi-424/lemi_txt/NO46 (gitignored, on disk). Skipped
+when absent so CI without the data still passes.
 """
 
 from __future__ import annotations
@@ -15,7 +16,8 @@ from emptyui.executor import Executor
 from emptyui.registry import build_default_registry
 from emptyui.schema import Workflow
 
-LEMI_DIR = Path(__file__).resolve().parents[3] / "examples" / "data" / "lemi-424-test"
+LEMI_DIR = (Path(__file__).resolve().parents[3] / "examples" / "data"
+            / "bgs-lemi-424" / "lemi_txt" / "NO46")
 
 
 def _lemi_workflow(lemi_path, out_dir):
@@ -25,8 +27,7 @@ def _lemi_workflow(lemi_path, out_dir):
                 "data_path": lemi_path, "survey_id": "test", "station_id": "mt001",
                 "mth5_filename": "lemi_e2e.mth5", "save_path": str(out_dir)}),
             node("x", "mth5.io.extract_run",
-                  {"selection": "run id", "survey": "test", "station": "mt001",
-                   "run": "sr1_0001"}),
+                  {"selection": "run id", "survey": "test", "station": "mt001"}),
             node("d", "core.filter.detrend", {"method": "mean"}),
             node("c", "aurora.process.compute_fc",
                   {"input_channels": "bx,by", "output_channels": "e1,e2",
@@ -52,8 +53,8 @@ def run_dir(tmp_path_factory):
     shutil.rmtree(d, ignore_errors=True)
 
 
-@pytest.mark.skipif(not LEMI_DIR.exists(), reason="LEMI data not on disk")
-def test_lemi424_pipeline_end_to_end(run_dir):
+@pytest.mark.skipif(not LEMI_DIR.exists(), reason="LEMI-417 data not on disk")
+def test_lemi417_pipeline_end_to_end(run_dir):
     registry = build_default_registry()
     wf = Workflow.model_validate(_lemi_workflow(str(LEMI_DIR), run_dir))
     events = []

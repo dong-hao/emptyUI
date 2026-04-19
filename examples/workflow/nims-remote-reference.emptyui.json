@@ -11,7 +11,7 @@
       "type": "mth5.io.load",
       "params": {
         "mode": "r",
-        "path": "/Users/donghao/src/emptyUI/examples/data/lims-usarray-test/4P_SDG31.h5"
+        "path": "examples/data/nims-usarray-test/4P_SDG31.h5"
       },
       "position": {
         "x": -187.87596740718317,
@@ -61,7 +61,7 @@
       "type": "mth5.io.load",
       "params": {
         "mode": "r",
-        "path": "/Users/donghao/src/emptyUI/examples/data/lims-usarray-test/4P_SDH28.h5"
+        "path": "examples/data/nims-usarray-test/4P_SDH28.h5"
       },
       "position": {
         "x": -194.9497580046575,

@@ -14,7 +14,7 @@ matched official periods, split into short-period [15, 100) s (the leakage
 -limited target) and the reliable tail [100, 18 725] s; plus error-bar
 agreement (our σ_Z vs the official EDI `.VAR` — E5's first metric).
 
-Run:  .venv/bin/python examples/data/lims-usarray-test/parity_sdg31.py
+Run:  .venv/bin/python examples/data/nims-usarray-test/parity_sdg31.py
 Outputs (next to the EDI): sdg31_parity_metrics.json, and a printed table.
 """
 

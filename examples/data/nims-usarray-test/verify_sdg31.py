@@ -42,7 +42,7 @@ Findings recorded here (2026-09-10):
   full history). The metrics JSON "rows" carries the official->ours period
   mapping + per-period deltas; "n_distinct_ours" detects double-matching.
 
-Run:  .venv/bin/python examples/data/lims-usarray-test/verify_sdg31.py
+Run:  .venv/bin/python examples/data/nims-usarray-test/verify_sdg31.py
 Outputs (next to the EDI): sdg31_plot_<variant>_vs_official.png RAW
 comparison figures (no period matching — each dataset at its own evaluated
 periods; emptyUI rotated −5.7° to true north),

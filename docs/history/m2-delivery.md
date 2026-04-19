@@ -362,7 +362,8 @@ titles, low DPI (110), inconsistent style.
 
 **Status: delivered** (P1–P4). Conventions implemented as decided below.
 Reference figure: `SDG31b_H28coh.png` (USArray convention — primary style
-reference; repo root). We do **not** build a combined plot — `Plot AppRes &
+reference; now at `examples/data/nims-usarray-test/SDG31b_H28coh.png`,
+moved from the repo root). We do **not** build a combined plot — `Plot AppRes &
 Phase` and
 `Plot Tipper` stay separate nodes.
 

@@ -141,7 +141,7 @@ ground-truth transfer function before relying on it: process USArray station
 **4P.SDG31** (Stratford Slough, SD) with emptyUI and compare with the official
 EMTF result for the same site, using **4P.SDH28** as the remote reference (the
 official processing used `REMOTESITE=SDH28`). Reproducible via
-`examples/data/lims-usarray-test/verify_sdg31.py`.
+`examples/data/nims-usarray-test/verify_sdg31.py`.
 
 **Data** (aurora operate-aurora recipe, `build_mth5.py`): 1 Hz channels
 LQE/LQN (100 m dipoles) + LFE/LFN/LFZ (NIMS), 2017-10-16→10-26 (SDG31) and
