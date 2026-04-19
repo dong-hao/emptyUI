@@ -1137,9 +1137,19 @@ keyed by run (off by default).
   until their rate would reach the next family's native rate — prevents
   same-rate levels from different families double-covering identical windows.
 - **Performance hardening** (mth5/mt_metadata pathologies): `pyproj.CRS`
-  LRU cache (`_compat.apply_crs_cache`), `ChannelDataset.to_xarray` channel
+  LRU cache (`_compat.apply_crs_cache`), `Unit`-object LRU cache
+  (`_compat.apply_unit_object_cache` — unit validation rebuilds Unit
+  objects from a DataFrame lookup per attribute update), memoized
+  dynamic metadata-class enhancement
+  (`_compat.apply_metadata_class_cache` — mth5's group/channel init
+  builds a NEW pydantic model class per init; the deterministic
+  enhancement is memoized per input class, ~80 s on a ~1000-run burst
+  ingest), `ChannelDataset.to_xarray` channel
   reads (~40× faster than `RunGroup.to_runts`), station metadata hoisted out
-  of the run loop, `add_run`+`from_channel_ts` archive writes. The **group
+  of the run loop, `add_run`+`from_channel_ts` archive writes, and loaders
+  that write station/survey summaries directly from the known segment
+  geometry (mth5's child-walking `update_metadata` costs ~40 s per property
+  access on a ~1000-run archive). The **group
   `.metadata` properties are the same storm** — `station.metadata`/
   `survey.metadata` rebuild the FULL hierarchy through pydantic on every
   access (~30-40 s on a 145-run burst archive): identity (ids) is read free

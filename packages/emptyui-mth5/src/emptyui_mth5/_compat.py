@@ -103,6 +103,89 @@ def apply_crs_cache() -> None:
 
 _rate_patched = False
 
+_meta_patched = False
+
+_unit_patched = False
+
+
+def apply_unit_object_cache() -> None:
+    """Idempotently LRU-cache ``mt_metadata.common.units.get_unit_object``.
+
+    Every channel-metadata unit validation builds Unit objects from a
+    pandas-DataFrame lookup (~0.8 ms each, 22k calls ≈ 18 s when ingesting
+    a ~1000-run burst archive) — and instruments repeat a handful of
+    distinct unit strings exhaustively. The lookup is pure (no state), so
+    an LRU cache makes repeats free without changing behavior.
+    """
+    global _unit_patched
+    if _unit_patched:
+        return
+    try:
+        from mt_metadata.common import units as _units
+    except ImportError:
+        return
+    orig = _units.get_unit_object
+    _cached = functools.lru_cache(maxsize=128)(orig)
+    _units.get_unit_object = _cached
+    # mt_metadata modules import the function BY NAME at module import
+    # time — rebind every already-imported module's reference too (the
+    # module-attr patch alone would only affect future imports)
+    import sys
+
+    for name, mod in list(sys.modules.items()):
+        if (name.startswith("mt_metadata.") and mod.__dict__.get(
+                "get_unit_object") is orig):
+            mod.get_unit_object = _cached
+    _unit_patched = True
+
+
+def apply_metadata_class_cache() -> None:
+    """Idempotently memoize mth5's dynamic metadata-class enhancement.
+
+    mth5's group/channel init calls
+    ``add_attributes_to_metadata_class_pydantic`` on essentially every
+    metadata object it constructs; each call builds a NEW pydantic model
+    class via ``create_model`` (~5-6 ms) — 7300+ calls ≈ 80 s when
+    ingesting a ~1300-run burst archive (DESIGN §24.8 performance note).
+    The enhancement is deterministic per metadata class (it adds the
+    ``mth5_type``/``hdf5_reference`` fields onto a fresh instance of the
+    input class), so the ENHANCED CLASS is memoized per input class and
+    repeats instantiate the cached class directly — a fresh instance with
+    identical defaults; the groups set ``hdf5_reference``/``mth5_type``
+    per instance afterwards.
+
+    NB the mth5 groups modules import the function BY NAME at module
+    import time, so every already-imported ``mth5.*`` module's bound
+    reference is rebound too (the module-attr patch alone would only
+    affect future imports).
+    """
+    global _meta_patched
+    if _meta_patched:
+        return
+    try:
+        import sys
+
+        import mth5.helpers as _helpers
+    except ImportError:
+        return
+    orig = _helpers.add_attributes_to_metadata_class_pydantic
+    cache: dict[type, type] = {}
+
+    def _cached(obj):
+        cls = cache.get(obj)
+        if cls is None:
+            inst = orig(obj)
+            cache[obj] = type(inst)
+            return inst
+        return cls()
+
+    _helpers.add_attributes_to_metadata_class_pydantic = _cached
+    for name, mod in list(sys.modules.items()):
+        if (name.startswith("mth5.") and mod.__dict__.get(
+                "add_attributes_to_metadata_class_pydantic") is orig):
+            mod.add_attributes_to_metadata_class_pydantic = _cached
+    _meta_patched = True
+
 
 def apply_channel_rate_fix() -> None:
     """Idempotently replace ``ChannelTS.compute_sample_rate``'s endpoint

@@ -691,8 +691,55 @@ def read_phoenix_mtu(
             run_group = station_group.add_run(run_id, run_metadata=run_meta)
             for ch_ts in array_list:
                 run_group.from_channel_ts(ch_ts)
-        station_group.update_metadata()
-        survey_group.update_metadata()
+        # station/survey summaries from the KNOWN segment geometry.
+        # NB: never touch mth5's `metadata` property here — its getter
+        # walks every child run's metadata through pydantic and
+        # mt_metadata's add_run/update_all storms (~40 s PER ACCESS on a
+        # ~1000-run archive; the original update_metadata() paid this via
+        # run_summary + write_metadata's own property access). The fields
+        # update_metadata would set are written directly instead — the
+        # diff-based attr write makes this equivalent.
+        from mth5.helpers import to_numpy_type
+
+        starts = [si[2] for si in seg_info]
+        ends = [si[3] for si in seg_info]
+        st_meta = station_group._metadata
+        st_meta.time_period.start = min(starts).isoformat()
+        st_meta.time_period.end = max(ends).isoformat()
+        recorded = set(channel_keys)
+        if n_saturated:
+            recorded.add("saturated")
+        st_meta.channels_recorded = sorted(recorded)
+        sv_meta = survey_group._metadata
+        sv_meta.time_period.start_date = min(starts).isoformat()[:10]
+        sv_meta.time_period.end_date = max(ends).isoformat()[:10]
+        location = table.station_metadata.location
+        for corner in (sv_meta.northwest_corner, sv_meta.southeast_corner):
+            corner.latitude = location.latitude
+            corner.longitude = location.longitude
+        for grp, entries in (
+                (station_group, [("time_period.start", st_meta.time_period.start),
+                                 ("time_period.end", st_meta.time_period.end),
+                                 ("channels_recorded",
+                                  st_meta.channels_recorded)]),
+                (survey_group, [("time_period.start_date",
+                                 sv_meta.time_period.start_date),
+                                ("time_period.end_date",
+                                 sv_meta.time_period.end_date),
+                                ("northwest_corner.latitude",
+                                 sv_meta.northwest_corner.latitude),
+                                ("northwest_corner.longitude",
+                                 sv_meta.northwest_corner.longitude),
+                                ("southeast_corner.latitude",
+                                 sv_meta.southeast_corner.latitude),
+                                ("southeast_corner.longitude",
+                                 sv_meta.southeast_corner.longitude)])):
+            for key, value in entries:
+                v = to_numpy_type(value)
+                if key in grp.hdf5_group.attrs:
+                    grp.hdf5_group.attrs.modify(key, v)
+                else:
+                    grp.hdf5_group.attrs.create(key, v)
 
     return {
         "path": str(target),
