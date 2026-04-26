@@ -4,7 +4,7 @@
 #   ./scripts/dev.sh
 #
 # Starts the API server (scripts/dev-backend.sh: uvicorn on :8000) and the
-# Vite dev server (packages/web on :5173, /api proxied to the backend).
+# Vite dev server (packages/web on :7860, /api proxied to the backend).
 # Ctrl+C stops both cleanly. Useful when you want one command instead of
 # two terminals; the Playwright e2e suite still starts its own servers.
 set -euo pipefail
@@ -51,10 +51,10 @@ frontend_pid=$!
 
 echo "Starting emptyUI dev servers (Ctrl+C to stop both)…"
 wait_for http://127.0.0.1:8000/api/health "backend" 30
-wait_for http://localhost:5173 "frontend (Vite)" 40
+wait_for http://localhost:7860 "frontend (Vite)" 40
 
 echo
-echo "  emptyUI:      http://localhost:5173"
+echo "  emptyUI:      http://localhost:7860"
 echo "  backend API:  http://127.0.0.1:8000/api"
 echo
 

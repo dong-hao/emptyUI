@@ -16,7 +16,7 @@ import { addNode, connect, node, placeNode, settleViewport } from "./_flow";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MOUNT = "/tools/emptyui";
 const PROXY_PORT = 5199;
-const TARGET_PORT = 5173;
+const TARGET_PORT = 7860;
 
 let server: http.Server;
 

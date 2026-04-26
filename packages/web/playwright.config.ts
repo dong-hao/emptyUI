@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
  *
  * The suite is full-stack: the frontend catalog/run API comes from the Python
  * backend, so both servers are started by Playwright's `webServer`:
- *   - Vite dev server (http://localhost:5173), which proxies /api -> :8000
+ *   - Vite dev server (http://localhost:7860), which proxies /api -> :8000
  *   - The FastAPI backend (uvicorn, http://127.0.0.1:8000)
  *
  * The backend command auto-resolves to the repo-root `.venv` when present
@@ -44,7 +44,7 @@ export default defineConfig({
     : [["list"], ["html", { open: "never" }]],
   outputDir: "test-results",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: "http://localhost:7860",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -67,7 +67,7 @@ export default defineConfig({
     {
       command: "npm run dev",
       cwd: path.join(repoRoot, "packages", "web"),
-      url: "http://localhost:5173",
+      url: "http://localhost:7860",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
