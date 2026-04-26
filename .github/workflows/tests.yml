@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python backend (editable packages)
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Create venv with the full plugin stack
+        # same five editable installs as scripts/install.sh: the registry
+        # in CI must match a local dev checkout, plugin-template included.
+        # --python pins the target explicitly (a stray VIRTUAL_ENV in the
+        # environment would otherwise redirect the install)
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]" -e "packages/emptyui-mth5[dev]" -e "packages/emptyui-aurora[dev]" -e "examples/plugin-template[dev]"
+
+      - name: Pytest happy path
+        run: .venv/bin/python -m pytest packages -q -m "not errors"
+
+      - name: Pytest edge cases
+        run: .venv/bin/python -m pytest packages -q -m errors

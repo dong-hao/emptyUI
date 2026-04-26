@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import build_tf
@@ -160,6 +161,8 @@ def test_import_official_edi_rho_is_physical(tmp_path: Path):
 
     edi = (Path(__file__).resolve().parents[3] / "examples" / "data"
            / "phoenix-mtu-test" / "B0940330_z.edi")
+    if not edi.exists():
+        pytest.skip("official Phoenix EDI not on disk (gitignored, G7)")
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     tf = ImportTF().execute(ctx, str(edi))["tf"]
     arr = tf.dataset["transfer_function"]

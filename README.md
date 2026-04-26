@@ -50,6 +50,9 @@ cd packages/web && npm install
 .venv/bin/python -m pytest packages -q -m "not errors"   # happy path
 .venv/bin/python -m pytest packages -q -m errors         # edge cases (~5 s)
 
+# CI runs the same two groups (.github/workflows/tests.yml) on every
+# push/PR, plus the Playwright e2e suite (.github/workflows/e2e.yml)
+
 # Start API server on http://127.0.0.1:8000
 ./scripts/dev-backend.sh
 

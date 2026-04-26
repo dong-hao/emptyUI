@@ -17,9 +17,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Create venv with MT plugin stack
+        # --python pins the target: a stray VIRTUAL_ENV would otherwise
+        # redirect the install away from ./​.venv (the backend is spawned
+        # from the repo-root .venv in playwright.config.ts)
         run: |
           uv venv --python 3.12 .venv
-          uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]" -e "packages/emptyui-mth5[dev]" -e "packages/emptyui-aurora[dev]"
+          uv pip install --python .venv/bin/python -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]" -e "packages/emptyui-mth5[dev]" -e "packages/emptyui-aurora[dev]" -e "examples/plugin-template[dev]"
 
       - uses: actions/setup-node@v4
         with:

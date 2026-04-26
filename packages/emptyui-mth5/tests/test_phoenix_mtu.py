@@ -360,7 +360,10 @@ def test_window_invalid_args_raise(tmp_path):
 
 # --- real-corpus test (user station 1690618B; §24.11) --------------------
 
-@pytest.mark.skipif(not REAL_DIR.exists(), reason="MTU-5A corpus not on disk")
+@pytest.mark.skipif(
+    not all((REAL_DIR / f"1690618B.{ext}").exists()
+            for ext in ("TS3", "TS4", "TS5")),
+    reason="MTU-5A real corpus (1690618B.*) not on disk (gitignored)")
 def test_real_corpus_structure(tmp_path):
     """The 1690618B recording: TS3 -> 506 x 2 s, TS4 -> 506 x 16 s,
     TS5 -> 1 x 84.4 h continuous (DESIGN §24.11 block-tag walk numbers).
