@@ -52,7 +52,7 @@ def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
     Note the mode only drives the nT->A/m conversion via
     :func:`_magnetic_to_h`: 'b' always converts (fluxgate B is nT), while
     'h' converts unless the payload units already say A/m (coil archives are
-    nT too — see DESIGN §16.3 USArray verification).
+    nT too — see history §16.3 USArray verification).
     """
     mu = str(magnetic_unit or "auto").strip().lower()
     if mu in ("h", "b"):
@@ -443,7 +443,7 @@ def compute_fc_levels(
     low-frequency resolution improves. Level *i*'s sample rate = native / factor^i.
 
     ``window_type_deep`` + ``deep_from_level``: per-level taper override
-    (DESIGN §24.5 P2) — levels >= ``deep_from_level`` are STFT'd with
+    (DESIGN.md §10.1) — levels >= ``deep_from_level`` are STFT'd with
     ``window_type_deep`` instead of ``window_type``. Physically motivated
     (§24.3): the dominant contamination differs by scale — white-ish
     fluxgate noise (post-prewhitening) at the short-period levels, where
@@ -645,7 +645,7 @@ def _channel_units(value):
 #: the instrument response), so any FC/TF built from them is garbage with a
 #: plausible-looking shape. mth5 archives built from FDSN store raw counts
 #: with the response attached — a Calibrate step is mandatory before
-#: Compute FC (DESIGN §16.3).
+#: Compute FC (DESIGN.md §10.5).
 _COUNT_UNITS = ("digital counts", "count", "counts")
 
 
@@ -703,7 +703,7 @@ def _canonical_unit(u):
 def _electric_to_vm(x, comp, e_scale, units):
     """Convert an electric channel to V/m; returns ``(x_scaled, label)``.
 
-    Policy (DESIGN §19, review 2026-09-12 — modelled on _magnetic_to_h):
+    Policy (DESIGN.md §10.5, review 2026-09-12 — modelled on _magnetic_to_h):
 
     - ``e_scale`` set (``e_dipole_length_m``): the explicit raw-potential
       path, ``x * 1e-3 / dipole`` — the data are assumed to be a raw mV
@@ -770,7 +770,7 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
     """Apply instrument unit normalization (B->H, mV->V/m) to a channel dict.
 
     Returns ``(out, electric_scaling)`` — the normalized dict and the
-    electric-scaling label for the fc attrs (DESIGN §19).
+    electric-scaling label for the fc attrs (DESIGN.md §10.5).
     """
     out = {}
     e_labels = set()
@@ -894,7 +894,7 @@ def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
     recolors with the idealized j2πf, which does not exactly invert its
     central-difference operator (response j·sin(ωΔt)/Δt) and leaves a
     low-frequency amplitude bias — the exact inverse filter is used here
-    (DESIGN §24).
+    (history §24).
     ``per_window_detrend``: "" (off, default) or ``"linear"`` — scipy detrend
     per STFT segment before tapering (aurora's per-window default), keeping
     window-level trends out of the low-frequency bins.
@@ -1371,7 +1371,7 @@ def _coherence_weight(coh2, lo, hi, mode, ramp=0.05):
 
 def _resolve_band_style(band_style):
     """Normalize the ``band_style`` value to one of the two supported
-    schemes (DESIGN.md §14.9): ``"l2u"`` (default) — the fixed reference
+    schemes (DESIGN.md §10.2): ``"l2u"`` (default) — the fixed reference
     template with log-uniform window-starvation coarsening — or
     ``"uniform"`` — the uniform log2-grid partition with merge-based level
     combination (formerly named ``"log"``, legacy alias accepted). The
@@ -1397,7 +1397,7 @@ def _resolve_band_style(band_style):
 def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
                        smooth_bins=0):
     """Per-frequency multiple coherence squared over a sliding window
-    ensemble (DESIGN 24.6 - the EMTF-style statistic, M4 #7/E7).
+    ensemble (history §24.6 - the EMTF-style statistic, M4 #7/E7).
 
     For every frequency bin f and window w: the multiple coherence squared
     of each output on the magnetic inputs, estimated over the ensemble of
@@ -1533,7 +1533,7 @@ def _coherence_weight_array(coh, lo, hi, mode, ramp=0.05):
 def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
                   coherence_min, coherence_max, mode,
                   apply_below_period, ensemble_windows, smooth_bins):
-    """The per-frequency sort body (DESIGN §24.6, §24.9): per-(bin, window)
+    """The per-frequency sort body (DESIGN.md §10.3): per-(bin, window)
     weights from :func:`_per_bin_coherence` — banding-independent weighting,
     per-frequency-bin diagnostic rows (one row per bin). The period scope
     and NaN-row grammar follow §24.5 P3."""
@@ -1596,7 +1596,7 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
                       ensemble_windows=16, smooth_bins=0,
                       pairing="intersect", tol_s=0.0):
     """EMTF-style per-frequency coherence sort of one decimation level's FC
-    (DESIGN §16.2, §24.9).
+    (DESIGN.md §10.3).
 
     L-A9: ``ensemble_windows`` < 1 degenerates the sliding ensemble to the
     window itself — the adjusted-R² then zeroes every weight (the whole
@@ -1717,10 +1717,10 @@ def estimate_tf(
                             remote-reference estimator (aurora ``RME_RR``).
     There is intentionally **no least-squares + remote-reference** path: aurora
     offers remote reference only through the robust ``RME_RR``, and we keep
-    that design (see DESIGN.md §13). For backward compatibility the legacy
+    that design (see history §13). For backward compatibility the legacy
     engine values ``OLS`` / ``RME`` / ``RME_RR`` are still accepted.
 
-    Period bands (DESIGN.md §14.9): ``band_style="l2u"`` (default) uses the
+    Period bands (DESIGN.md §10.2): ``band_style="l2u"`` (default) uses the
     reference-template band table with log-uniform window-starvation
     coarsening (:func:`_l2u_band_table`) — the same fixed template at every
     decimation level, starved levels rebuilt as a coarser uniform grid;
@@ -1784,7 +1784,7 @@ def estimate_tf(
             _warn_remote_gaps(fc, ref_fc)
 
     # Realistic, octave-aligned period bands for this decimation level
-    # (DESIGN.md §14.9: band_style selects the uniform log2-grid partition
+    # (DESIGN.md §10.2: band_style selects the uniform log2-grid partition
     # or the reference-template table; bands_override carries a precomputed
     # table (frequency pairs from _l2u_band_table — disjoint by design,
     # nothing to merge) when the container-level derivation succeeded
@@ -1951,7 +1951,7 @@ def _container_geometry(levels):
             "window": window}
 
 
-#: Reference band template in window-128 native bins (DESIGN.md §14.9):
+#: Reference band template in window-128 native bins (DESIGN.md §10.2):
 #: the classic EMTF ladder the official USArray grid repeats verbatim at
 #: levels 1-3 (L1-L3 = {[15-16],[12],[9-10],[7-8],[6],[5]}), hand-crafted
 #: ~3 bands/octave. Scaled to the container's window (×window/128), the
@@ -1993,7 +1993,7 @@ def _l2u_intervals(lv, template, geom):
 
 def _l2u_band_table(levels, min_bins_per_band=20.0, t_short=None):
     """Reference-template band table with log-uniform window-starvation
-    coarsening (DESIGN.md §14.9, the default frequency-grid method).
+    coarsening (DESIGN.md §10.2, the default frequency-grid method).
 
     The reference template (:func:`_l2u_template`) is applied to EVERY
     decimation level (same bin indices; periods scale by the cascade factor
@@ -2096,8 +2096,8 @@ def _l2u_band_table(levels, min_bins_per_band=20.0, t_short=None):
 
 
 def _resolve_cross_level_claims(out, levels):
-    """Deepest-rate-first period tiling across decimation levels (DESIGN
-    §24.8): on aligned single-rate cascades the template's level spans
+    """Deepest-rate-first period tiling across decimation levels
+    (history §24.8): on aligned single-rate cascades the template's level spans
     already abut (nothing to resolve), but a burst archive's rate families
     are NOT related by the cascade factor (150/15 = 10) — their level spans
     overlap and the same periods would be estimated twice with slightly
@@ -2212,7 +2212,7 @@ def _grid_nearest_keep(reference, other, rtol=1e-3):
 def merge_fc_containers(containers):
     """Concatenate per-run FC containers along time, per rate level.
 
-    The FC-database merge (aurora ``merge_stfts``; DESIGN §24.5 P1 v2) for
+    The FC-database merge (aurora ``merge_stfts``; history §24.5 P1 v2) for
     runs that must not be concatenated in the time domain: physically
     non-adjacent runs (gaps) and burst-mode acquisition (thousands of short
     recurring slots — a merged-TS decimation cascade cannot cross slot
@@ -2248,7 +2248,7 @@ def merge_fc_containers(containers):
         raise ValueError("no fc to merge")
     # re-key by actual sample rate: the rate — not the decimation level
     # index — is the identity that makes cascades from different rate
-    # families commensurable (DESIGN §24.8)
+    # families commensurable (history §24.8)
     by_rate: dict[float, list[xr.Dataset]] = {}
     for c in norm:
         for ds in c.values():
@@ -2338,7 +2338,7 @@ def manual_bands(freqs, counts) -> dict[int, list[tuple[float, float]]]:
     """Per-level ``(f_hi, f_lo)`` band table from band-center frequencies.
 
     The EMTF band-table reconstruction used by the SDG31 parity harness
-    (`exact_official_bands`, DESIGN §24.4 item 5 / §24.5 P4): ``freqs`` is
+    (`exact_official_bands`, history §24.4 item 5 / §24.5 P4): ``freqs`` is
     the flat list of band-center frequencies (any order — normalized to
     descending), ``counts`` the number of bands per decimation level as a
     comma string or sequence (level 0 = the highest frequencies, e.g.
@@ -2396,7 +2396,7 @@ def manual_bands(freqs, counts) -> dict[int, list[tuple[float, float]]]:
 
 
 def _period_bands_indexed(fc, periods_per_octave=4):
-    """Discrete, bin-snapped period bands (DESIGN.md §14.6) — the
+    """Discrete, bin-snapped period bands (DESIGN.md §10.2) — the
     per-level fallback of the ``"l2u"`` scheme: used when the
     container-level table (:func:`_l2u_band_table`) could not be derived
     (fcs without metadata); each level then walks its own bin grid.
@@ -2501,7 +2501,7 @@ def _period_bands_indexed(fc, periods_per_octave=4):
 
 def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u",
                           t_short=None):
-    """Dispatch to the two band-construction schemes (DESIGN.md §14.9):
+    """Dispatch to the two band-construction schemes (DESIGN.md §10.2):
     the uniform log2-grid bands (:func:`_period_bands`) or the discrete
     bin-snapped partition (:func:`_period_bands_indexed` — the per-level
     fallback used when :func:`_l2u_band_table` could not derive the
@@ -2707,7 +2707,7 @@ def build_tf(periods, Z, input_channels, output_channels, channel_nomenclature=N
     and exports (EDI/XML/ZMM) can carry error bars / error lines. The station
     identity (survey/station/run id + lat/lon/elevation) is attached to
     ``tf.survey_metadata``/``tf.station_metadata`` — the single point of truth
-    for plot titles and export headers (DESIGN.md §15).
+    for plot titles and export headers (DESIGN.md §10.6).
     """
     import xarray as xr
     from mt_metadata.transfer_functions.core import TF, Station, Survey
@@ -2813,7 +2813,7 @@ def estimate_tf_levels(
     "survey_id"/"station_id"/"run_id"/"station_latitude"/...: ...}}``.
     ``ref_levels`` is an optional same-shaped container (or a single fc) used
     as the remote reference per level. ``band_style`` selects the band
-    construction scheme (DESIGN.md §14.9):
+    construction scheme (DESIGN.md §10.2):
 
     - ``"l2u"`` (default): the reference-template band table with
       log-uniform window-starvation coarsening (:func:`_l2u_band_table`) —
@@ -2827,7 +2827,7 @@ def estimate_tf_levels(
     if the container's metadata is insufficient (missing attrs, non-uniform
     level ratios) the per-level bin walk is used as a fallback.
     ``min_bins_per_band`` (window-starvation threshold on total samples per
-    band) and ``t_short`` (head clip) refine the table per DESIGN.md §14.9;
+    band) and ``t_short`` (head clip) refine the table per DESIGN.md §10.2;
     ``t_short`` is honored for both schemes (the uniform path clips in
     :func:`_resolve_period_bands`; a fully-clipped level is skipped).
     """
@@ -2847,7 +2847,7 @@ def estimate_tf_levels(
             # for metadata-less fcs): resolve the SAME table estimate_tf
             # will use internally (§23.5 choke point) and pass it
             # explicitly, so the recorded band_intervals align 1:1 with
-            # the Z rows — Residual Sort's pooling key (DESIGN §24.13).
+            # the Z rows — Residual Sort's pooling key (DESIGN.md §10.4).
             fc_n = _normalize_fc_layout(fc)
             fc_n = fc_n.isel(frequency=fc_n["frequency"].values > 0)
             f_n = np.asarray(fc_n["frequency"].values, dtype=float)
@@ -2888,7 +2888,7 @@ def estimate_tf_levels(
             "periods_per_octave": periods_per_octave,
             # the band geometry this level's estimates were built from —
             # Residual Sort pools the FC bins per band to predict each
-            # window's output from the band's Z (DESIGN §24.13)
+            # window's output from the band's Z (DESIGN.md §10.4)
             "band_intervals": [tuple(b) for b in bands] if bands else None,
         }
         entry.update(_identity_attrs(fc))
@@ -2918,8 +2918,8 @@ def merge_tf_levels(per_level):
     the shared octave grid (within half the level's center spacing,
     1/(2·ppo) octaves): aligned cascades collide exactly (legacy exact
     dedup), while a burst archive's misaligned rate families interleave
-    near-duplicate centers that must also resolve to one estimate (DESIGN
-    §24.8). The resulting grid is strictly ascending and free of
+    near-duplicate centers that must also resolve to one estimate
+    (history §24.8). The resulting grid is strictly ascending and free of
     duplicates.
     """
     merged: dict[float, np.ndarray] = {}

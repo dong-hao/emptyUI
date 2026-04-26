@@ -79,7 +79,7 @@ class LoadLemi(Node):
         )
         client.collection.survey_id = survey_id
         client.collection.station_id = station_id
-        # Manufacturer calibration (DESIGN §16.1): explicit file/dir wins,
+        # Manufacturer calibration (DESIGN.md §9.1): explicit file/dir wins,
         # otherwise auto-pickup in the data directory; the filters are
         # attached to each run BEFORE it is written, so the association is
         # archived and survives Extract Run / MTH5 round trips.

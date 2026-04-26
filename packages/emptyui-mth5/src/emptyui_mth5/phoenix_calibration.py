@@ -1,4 +1,4 @@
-"""Phoenix MTU-5A ASC calibration tables (DESIGN §24.12).
+"""Phoenix MTU-5A ASC calibration tables (DESIGN.md §9.2).
 
 The manufacturer exports two ASC table kinds: ``*_CLB.asc`` (the box /
 instrument response, one table per channel) and ``*_CLC.asc`` (one file per
@@ -220,7 +220,7 @@ def _extend_below(table: PhoenixChannelTable, mode: str) -> tuple[np.ndarray, np
     measured range, and it makes the subsequent linear extrapolation of the
     interp1d grid follow the same proportional law arbitrarily deep.
     ``"flat"``: the repo-wide FAP convention (first amplitude, zero phase;
-    log-extrapolation was found to be worse, DESIGN §16.1).
+    log-extrapolation was found to be worse, DESIGN.md §9.1).
     """
     f, a, p = table.frequencies, table.amplitudes, table.phases_deg
     if mode == "flat":

@@ -1,4 +1,4 @@
-"""MTU-5A burst ingestion tests (DESIGN §24.8): per-block tag parsing
+"""MTU-5A burst ingestion tests (history §24.8): per-block tag parsing
 (the upstream reader's dense-concat defect fixed), maximal-contiguous
 segment grouping, run-per-segment archive build, TBL scalar calibration at
 ingest, quality warnings. The synthetic corpus is written from scratch
@@ -366,7 +366,7 @@ def test_window_invalid_args_raise(tmp_path):
     reason="MTU-5A real corpus (1690618B.*) not on disk (gitignored)")
 def test_real_corpus_structure(tmp_path):
     """The 1690618B recording: TS3 -> 506 x 2 s, TS4 -> 506 x 16 s,
-    TS5 -> 1 x 84.4 h continuous (DESIGN §24.11 block-tag walk numbers).
+    TS5 -> 1 x 84.4 h continuous (history §24.11 block-tag walk numbers).
     All three rates span the same 3.5 days. Parse-only (the 1013-run
     archive write costs ~3 min — its mechanics are covered by the
     synthetic tests); a single-rate archive build keeps an end-to-end

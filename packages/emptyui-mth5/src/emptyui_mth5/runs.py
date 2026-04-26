@@ -52,7 +52,7 @@ def read_run_channels(run_obj):
     Returns ``(data_vars, sample_rate, start)`` — reading channels via
     ``to_xarray`` avoids ``RunGroup.to_runts``'s mt_metadata
     deepcopy/validation storm (~7 s per run, ~40x the data read itself;
-    DESIGN §24.8 performance note). The caller wraps the result in a duck
+    history §24.8 performance note). The caller wraps the result in a duck
     payload (``SimpleNamespace(dataset=..., sample_rate=..., start=...,
     filters=...)``).
     """
@@ -579,7 +579,7 @@ class ExtractRun(Node):
         # identity from the HDF5 group names (free): the group .metadata
         # properties trigger the mt_metadata/HDF5 storm per access — ~20 s
         # each on a burst archive, ~250 s for the survey's all-station walk
-        # (DESIGN §24.8 performance note) — never inside the run loop
+        # (history §24.8 performance note) — never inside the run loop
         surv_id = survey_obj.hdf5_group.name.split("/")[-1]
         stat_id = station_obj.hdf5_group.name.split("/")[-1]
         members, extents = [], []
@@ -845,7 +845,7 @@ def _channel_units_from(source):
     mth5 RunTS archives carry units in the dataset variable attrs
     (``nanoTesla`` / ``milliVolt per kilometer``); core/synthetic payloads
     usually carry none. Align Runs must preserve them: Compute FC reads the
-    units to decide the nT→A/m conversion (DESIGN §16.3) — dropping them
+    units to decide the nT→A/m conversion (history §16.3) — dropping them
     silently returns the impedance to wrong units.
     """
     units: dict[str, str] = {}
@@ -1375,7 +1375,7 @@ def _warn_partial_coverage(ctx, lengths, n_common) -> None:
                 "— the other run starts/ends inside it; for remote "
                 "reference, merge the remote station's runs first (Merge "
                 "Runs) so alignment sees the station's full coverage "
-                "(DESIGN §24.3 E1b)",
+                "(history §24.3 E1b)",
                 100 * (1 - n_common / n), i, n - n_common, n,
             )
 

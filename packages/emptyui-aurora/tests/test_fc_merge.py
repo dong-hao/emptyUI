@@ -1,4 +1,4 @@
-"""Tests for Merge FC (FC-database concatenation, DESIGN §24.5 P1 v2) and
+"""Tests for Merge FC (FC-database concatenation, history §24.5 P1 v2) and
 the clock-zero window anchoring that makes per-run FCs pairable for remote
 reference."""
 
@@ -120,7 +120,7 @@ def test_merge_fc_mixed_rates_rekey_by_rate():
     """Levels are keyed by ACTUAL sample rate, not decimation index: a
     burst archive's rate families (whose cascade levels do not correspond
     by index) merge into consecutive int levels in DESCENDING rate order
- (DESIGN §24.8)."""
+ (history §24.8)."""
     t = pd.date_range("2024-01-01", periods=2, freq="s")
     f = _freqs()
     a = _fc(t, f, sr=8.0, seed=13)
@@ -185,7 +185,7 @@ def test_burst_mode_gapped_runs_rr(tmp_path):
     # unanchored grids drift apart and the strict check refuses to pair
     # them; note even WITH the anchor the stray drops B's first window
     # (coverage differs) — the future time-value-matching loosening covers
-    # that case (DESIGN §24.5 P1 v2b)
+    # that case (history §24.5 P1 v2b)
     stray_remote = {rid: synthetic_runts(
         (sr, m, t[i0:i0 + m], hx[i0:i0 + m], hy[i0:i0 + m]),
         z=(1.0, 3.0, -1.0, 4.0), e_noise=0.2, seed=22,

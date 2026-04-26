@@ -57,7 +57,7 @@ def test_estimate_tf_returns_standard_errors():
 
 def test_build_tf_carries_errors_and_station_identity():
     """build_tf stores element stds in transfer_function_error and the station
-    identity in station/survey metadata (DESIGN.md §15)."""
+    identity in station/survey metadata (DESIGN.md §10.6)."""
     periods = np.array([2.0, 4.0])
     Z = np.array([[[1 + 0j, 0j], [0j, 2 + 0j]],
                   [[1 + 0j, 0j], [0j, 2 + 0j]]])
@@ -538,7 +538,7 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
 
 
 def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
-    """Manifest-level contracts (DESIGN §24.9 + §4 `enabled_when`):
+    """Manifest-level contracts (DESIGN.md §10.3 + §4 `enabled_when`):
     - Estimate TF declares NO chain-walking inherit of banding params from
       the fc chain (§24.9 — the sort is band-free; the estimator owns
       banding);
@@ -563,7 +563,7 @@ def test_compute_fc_levels_starved_cascade_stops(tmp_path):
     """Once a decimation level has fewer samples than one window, the
     cascade stops: deeper levels are strictly shorter, and decimating them
     anyway crashed scipy's decimate (padlen) on the full 3.5-day record
-    (DESIGN §24.12 comparison run)."""
+    (history §24.12 comparison run)."""
     from _synthetic import synthetic_runts, synthetic_source
     from emptyui_aurora._processing import compute_fc_levels
 

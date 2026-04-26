@@ -148,8 +148,8 @@ are open-ended strings so plugins can add their own):
 
 | Category | Role | Examples |
 |----------|------|----------|
-| **Data I/O** | Bring data in/out of the graph; convert formats | LoadMTH5, LoadCSV, SaveMTH5, SaveEDI, ExportXML, MetadataEditor |
-| **Processing** | Transform data; produce new typed outputs | Decimate, Detrend, BandpassFilter, NotchFilter, Calibrate(RemoveResponse), STFT, RobustEstimate, MergeTFLevels |
+| **Data I/O** | Bring data in/out of the graph; convert formats | Load MTH5, Load CSV, Save MTH5, Load Calibration, Import TF, Export TF, Read FC, Write FC |
+| **Processing** | Transform data; produce new typed outputs | Detrend, Bandpass Filter, Calibrate, Align Runs, Compute FC, Build FC Database, Coherence Sort, Estimate TF, Merge TF Levels |
 | **Display** | Render data to `plot` outputs (no data deps downstream) | PlotTimeSeries, PlotSpectrogram, PlotAppResPhase, PlotTipper, PlotCoherency, PlotPhaseTensor |
 
 Display nodes emit a **`plot` output port** (rendered-figure reference), not
@@ -234,11 +234,11 @@ outputs near the right edge with names to their left (ComfyUI grammar).
 ### Reference MT workflow (type flow)
 
 ```
-LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ ExportEDI
+LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ EstimateTF ─tf─┬▶ ExportTF
 (LoadLemi / LoadCsv)                        │                        ├▶ PlotAppResPhase
-                                              └─fc─▶ Denoise ─fc─▶ EstimateTF
-                                                                     ├─tf.level─▶ MergeTFLevels
-                                                                     └─tf─▶ PlotTipper
+                                              └─fc─▶ CoherenceSort ─fc─▶ EstimateTF
+                                                                           ├─tf.level─▶ MergeTFLevels
+                                                                           └─tf─▶ PlotTipper
 
 LoadMTH5 ─mth5─▶ ExtractRun(selection=time range) ─ts.runs─▶ ComputeFC ─fc─▶ ...
                 (all runs intersecting the UTC window — the inclusive
@@ -417,7 +417,7 @@ No internal database. **MTH5 is the server-side container**:
 - A workspace directory **per run** (`ctx.workspace`); intermediates a node
   chooses to persist are written into `<workspace>/workspace.mth5` (see
   `persist.py`). The persist path uses **one cached open handle per node
-  execution** (§24.8): the per-level open/close is quadratic — every
+  execution** (history §24.8): the per-level open/close is quadratic — every
   `MTH5.close_mth5()` re-summarizes ALL summary tables (the fc summary
   recursively walks every persisted FC level; 294 levels ≈ 96 s of pure
   HDF5 walking). `persist_fc_level(m=...)` accepts the shared handle;
@@ -888,7 +888,7 @@ to days:
   extent is known only after the upstream node has run once.
 - **`Param.time_bar`** (rendering-only): the input port name(s) whose summary
   drives the frontend time bar for this param pair.
-- **`Param.suggest_from`** (rendering-only, §20.1): the input port name whose
+- **`Param.suggest_from`** (rendering-only, §10.6): the input port name whose
   payload summary offers select-option suggestions (an fc database's
   `rates` tiers) — the frontend extends the param's options in an editable
   datalist after a run; pre-run the free-text placeholder applies.
@@ -907,7 +907,7 @@ to days:
   pair over the aligned overlap — identical-interval outputs), Merge Channels
   extent; extent-unknown → passthrough with warning. A bounded window missing
   the resolved run entirely is rejected with an actionable message naming the
-  matched run (the clamp would extract a useless 0-sample slot; §24.12 L-M3
+  matched run (the clamp would extract a useless 0-sample slot; history §24.12 L-M3
   keeps this one hard reject deliberately). Boundary convention (L-M10,
   deliberate): Extract Run's ISO crop is END-INCLUSIVE (`xarray.sel(slice)`)
   while the windowed processors (Align Runs / Build FC) use half-open
@@ -1185,7 +1185,7 @@ Compute FC consumes the collection on **Build FC's route**: per-run
 cascades (`compute_fc_levels`) merged along time per decimation level
 (`merge_fc_containers`), with Build FC's **per-family decimation trim**
 (higher-rate families decimate only until their rate would reach the next
-family's native rate — §24.8) and **per-window `run_id`** stamping (§9.3).
+family's native rate — history §24.8) and **per-window `run_id`** stamping (§9.3).
 A multi-run collection without `clock_zero` anchoring warns naming the
 remedy (`epoch`): run-start grids differ per run, which is fine without
 remote reference and refuses loudly at the RR pairing sites. Parity
@@ -1201,7 +1201,7 @@ run's extent entirely rejects with an actionable message naming the matched
 run, its extent, and the station's longest runs (a burst archive's first
 summary row is a short slot; the continuous stream is what users want).
 
-Run-id mode also rides the **fast channel read** (§24.8): the run's
+Run-id mode also rides the **fast channel read** (history §24.8): the run's
 channels are read via `to_xarray` (crop-before-wrap when the time bar
 bounds the window) and wrapped into a real `RunTS` via a cached-channels
 subclass — `RunTS(dataset)` construction is ~0.2 s vs `to_runts`'s ~7-19 s
@@ -1688,7 +1688,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
 | 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
-| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§20.1). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
+| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§10.6). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
 accept collections, the recipe applied to every member and the collection
 shape preserved (extents rows unchanged — identity is not the recipe's
 business; `mapped_by`/`filter` provenance rides each member's dataset
@@ -1771,5 +1771,6 @@ the ephemeral per-run workspaces — a third storage realm (§11.2).
 | §23.5 t_short | §10.2 |
 | §24 physics parity | §9.2–9.3, §10.1–10.4; full research record in `docs/history/m4-delivery.md` |
 
-References to §13–§24 in code docstrings and commit messages resolve in the
-history files, which preserve the original numbering verbatim.
+References to §13–§24 are written `history §N` in code docstrings and commit
+messages and resolve in the history files, which preserve the original numbering
+verbatim.

@@ -221,7 +221,7 @@ button.danger:disabled {
   margin-right: auto;
 }
 
-/* time-selector bar (DESIGN.md §23.4): acquisition bar with two draggable
+/* time-selector bar (DESIGN.md §8.3): acquisition bar with two draggable
    handles sandwiching the selected slot; nodrag/nopan via .param-field-like
    interactive widget classes */
 .time-bar {
@@ -779,7 +779,7 @@ button.primary {
   background: #f5f5f5;
 }
 
-/* --- Edge interactions (DESIGN.md §9 disconnect gestures) ----------------
+/* --- Edge interactions (DESIGN.md §8.2 disconnect gestures) ----------------
  * Edges are clickable/selectable (click + Delete removes the link); make
  * the thin stroke discoverable: hover highlight + dashed selection. */
 .react-flow__edge {
@@ -793,7 +793,7 @@ button.primary {
   stroke-dasharray: 7 4;
 }
 
-/* Settings dialog sections (DESIGN.md §22) */
+/* Settings dialog sections (DESIGN.md §7.4) */
 .settings-section {
   font-size: 12px;
   text-transform: uppercase;

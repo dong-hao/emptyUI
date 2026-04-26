@@ -10,7 +10,7 @@ import type { ParamSpec, PayloadSummary, PortSpec } from "../api/client";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
 /** payload summary → time-bar extent (epoch/relative seconds); null when
- *  absent or degenerate (DESIGN.md §23.4). An `mth5` archive summary
+ *  absent or degenerate (DESIGN.md §8.3). An `mth5` archive summary
  *  resolves the run matching the node's survey/station/run params
  *  (mirroring the server's first-run fallbacks); multiple ports bind as an
  *  intersection (e.g. Align Runs shows the overlap of both inputs). */

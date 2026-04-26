@@ -1,4 +1,4 @@
-"""SDG31 physics-parity ablation (DESIGN §24): which classical-EMTF FC-stage
+"""SDG31 physics-parity ablation (history §24): which classical-EMTF FC-stage
 factor closes the gap to the official TF?
 
 Fixed protocol (§24.1 — nothing varies but the stated factor):

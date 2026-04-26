@@ -4,8 +4,8 @@ The MTU-5A writes one binary ``TSn`` file per sample-rate level (TS2..TS5;
 rates come from the TBL's ``SRL3/SRL4/SRL5``) plus one ``TBL`` metadata
 file. Burst-mode recordings interleave scheduled high-rate slots with
 continuous low-rate streams; the per-block 32-byte tags carry the true UTC
-timestamp of each block, which the upstream reader discards (DESIGN
-§24.8) — here the tags are parsed and maximal contiguous block runs become
+timestamp of each block, which the upstream reader discards (
+history §24.8) — here the tags are parsed and maximal contiguous block runs become
 one mth5 run each (the mth5/aurora run-per-segment convention,
 ``sr{rate}_{NNNN:04d}``).
 """
@@ -641,8 +641,8 @@ def read_phoenix_mtu(
                 ))
             # (run_id, run_metadata, channels) — written via from_channel_ts
             # below: RunGroup.from_runts costs ~5x more per run (mt_metadata
-            # deepcopy/validation storm + station-metadata rebuild, DESIGN
-            # §24.8 performance note)
+            # deepcopy/validation storm + station-metadata rebuild,
+            # history §24.8 performance note)
             runs.append((run_id, run_meta, array_list))
             n_samples_by_run.append(array_list[0].ts.size)
             seg_info.append((run_id, float(seg.rate), seg.start, seg.end,
@@ -658,7 +658,7 @@ def read_phoenix_mtu(
     if len(statuses) > 1:
         warnings.append(
             f"per-block clock status varies across the recording: "
-            f"{sorted(statuses)} — check GPS lock (DESIGN §24.5 P1 v2b)")
+            f"{sorted(statuses)} — check GPS lock (history §24.5 P1 v2b)")
     if max_clock_error:
         warnings.append(
             f"per-block clock error up to {max_clock_error:g} s reported by "
@@ -763,13 +763,13 @@ class LoadPhoenixMtu(Node):
         "continuous low-rate streams) become one run per maximal contiguous "
         "segment (mth5 convention sr{rate}_NNNN) — the per-block tags' true "
         "timestamps are parsed, unlike the upstream reader that densely "
-        "concatenates and compresses the slots (DESIGN §24.8). TBL scalar "
+        "concatenates and compresses the slots (history §24.8). TBL scalar "
         "calibrations are applied at ingest (units mV/km / nT); run time "
         "periods come from the actual block timestamps, never the TBL's "
         "placeholder schedule times. Manufacturer ASC calibration tables "
         "(box CLB + coil CLC) are auto-matched by the TBL serials and "
         "registered as FAP shape corrections that Compute FC removes "
-        "frequency-domain-wise (DESIGN §24.12)."
+        "frequency-domain-wise (DESIGN.md §9.2)."
     )
     category = "Data I/O"
     inputs = ()

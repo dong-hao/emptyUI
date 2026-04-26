@@ -1,4 +1,4 @@
-"""Time-selector hosts (DESIGN §23.4 phase 2): Extract Run (archive extent),
+"""Time-selector hosts (DESIGN.md §8.3 phase 2): Extract Run (archive extent),
 Align Runs (window within the overlap), Merge Channels (window on the run).
 Guards: clamp + warn (never reject), explicit bounded slot > 1 s."""
 

@@ -34,9 +34,9 @@ class TimeSeries:
     #: per-channel physical units (e.g. ``nanoTesla`` / ``milliVolt per
     #: kilometer``). Coerced from mth5 RunTS dataset attrs and carried
     #: through the core filter nodes so Compute FC's instrument-unit
-    #: normalization survives a core node in the chain (DESIGN §19).
+    #: normalization survives a core node in the chain (DESIGN.md §10.5).
     units: dict[str, str] = field(default_factory=dict)
-    #: per-channel instrument response chains (DESIGN §24.12):
+    #: per-channel instrument response chains (DESIGN.md §9.2):
     #: ``{channel: [(filter_object, applied: bool), ...]}`` in stage order.
     #: Compute FC divides the Fourier coefficients by the chained complex
     #: response of every *applied* filter (aurora semantics: ``applied=True``

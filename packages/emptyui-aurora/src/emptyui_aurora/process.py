@@ -1,7 +1,7 @@
 """aurora pipeline nodes: ComputeFC (TS→FC), EstimateTF (FC→TF), MergeTFLevels.
 
 ComputeFC/EstimateTF split the aurora pipeline at the FC boundary (DESIGN.md
-§3, §14). FC is passed in-memory between nodes and, when ``persist`` is on,
+§3, history §14). FC is passed in-memory between nodes and, when ``persist`` is on,
 also written into the workspace MTH5's FC layer so it can be reused / merged.
 Estimators are OLS / robust RME / remote-reference RME_RR (aurora-backed).
 """
@@ -52,7 +52,7 @@ def _station_location(data):
 
 
 def _station_identity_attrs(data, survey: str, station: str, run: str) -> dict[str, Any]:
-    """Primitive station-identity attrs to carry on an fc (DESIGN.md §15).
+    """Primitive station-identity attrs to carry on an fc (DESIGN.md §10.6).
 
     The ts.run payload (mth5 RunTS) exposes survey/station/run metadata and the
     station location; only primitives are stored (xarray attrs must survive
@@ -279,7 +279,7 @@ class ComputeFC(Node):
 
         # Station identity travels with the fc (attrs) so EstimateTF can attach
         # it to the TF — the single point of truth for plot titles and export
-        # headers (DESIGN.md §15).
+        # headers (DESIGN.md §10.6).
         surv, stat, run_id = runts_context(data, survey, station, run,
                                            logger=ctx.logger)
         identity = _station_identity_attrs(data, surv, stat, run_id)
@@ -472,7 +472,7 @@ class BuildFC(Node):
         "cascading-decimation FC levels, and merge them along time (Merge "
         "FC's route) — the per-run cascade builder for archives with many "
         "runs: burst-mode recordings (scheduled high-rate slots + "
-        "continuous low-rate streams, DESIGN §24.8) or gapped continuous "
+        "continuous low-rate streams, history §24.8) or gapped continuous "
         "acquisitions. A merged-time-series cascade cannot decimate across "
         "slot/run boundaries; per-run cascades are fine and starved deep "
         "levels are skipped with warnings. Clock zero defaults to 'epoch' "
@@ -540,7 +540,7 @@ class BuildFC(Node):
                           "slot schedules make run-start anchoring useless "
                           "for burst archives, and the absolute grid is "
                           "what pairs remote-reference slots across "
-                          "stations (DESIGN §24.8)."),
+                          "stations (history §24.8)."),
         Param("prewhitening", "select", label="Prewhitening",
               default="first difference", options=("", "first difference")),
         Param("per_window_detrend", "select", label="Per-window detrend",
@@ -565,7 +565,7 @@ class BuildFC(Node):
               description="Write each run's FC levels into the workspace "
                           "MTH5 keyed by run (aurora's FC-layer pattern) — "
                           "off by default; turn on once the procedure is "
-                          "settled (DESIGN §24.8 decision (b))."),
+                          "settled (history §24.8 decision (b))."),
         Param("regroup_contiguous", "boolean", label="Regroup contiguous runs",
               default=False,
               description="Cascade maximal contiguous spans of same-rate "
@@ -678,7 +678,7 @@ class BuildFC(Node):
         surv = _group_id(survey_obj)
         stat = _group_id(station_obj)
 
-        # per-family decimation trim (DESIGN §24.8): on a mixed-rate burst
+        # per-family decimation trim (history §24.8): on a mixed-rate burst
         # archive the continuous (lowest-rate) family carries the full
         # 'decimation_levels' cascade; higher-rate families decimate only
         # until their rate would reach the next family's native rate — the
@@ -726,7 +726,7 @@ class BuildFC(Node):
         # fast per-run data path (shared with Extract Run 'time range'):
         # reading channels via to_xarray and wrapping in a duck payload
         # avoids RunGroup.to_runts — whose mt_metadata deepcopy/validation
-        # storm costs ~7 s per run (40x the data read itself; DESIGN §24.8
+        # storm costs ~7 s per run (40x the data read itself; history §24.8
         # performance note). The same storm lives in the group .metadata
         # properties (~20 s per access on a burst archive) — access station
         # metadata ONCE and derive per-run rate/start from the channel
@@ -980,7 +980,7 @@ class BuildFC(Node):
                     reject_saturated=reject_saturated,
                     saturated_max=saturated_max,
                 )
-                # the station identity travels in the attrs (DESIGN.md §15);
+                # the station identity travels in the attrs (DESIGN.md §10.6);
                 # run_id is per-span, the rest comes from the hoisted station md
                 identity = dict(identity_base, run_id=span_id)
                 for level, fc in levels.items():
@@ -1098,7 +1098,7 @@ class CoherenceSort(Node):
         "single shared weight is applied to both FCs (exact weighted-LS "
         "semantics for RME_RR). The weights are per (frequency bin, window) "
         "and independent of band geometry: band construction is Estimate "
-        "TF's concern (DESIGN §24.9)."
+        "TF's concern (DESIGN.md §10.3)."
     )
     category = "Processing"
     inputs = (
@@ -1200,7 +1200,7 @@ class SelectRuns(Node):
     title = "Select Runs"
     tooltip = "Drop noise-dominated runs before TF estimation (run-level QC)."
     description = (
-        "Run-level QC (DESIGN §24.13, after Weckmann et al. 2005): score "
+        "Run-level QC (DESIGN.md §10.4, after Weckmann et al. 2005): score "
         "every run by its per-window impedance level in a reference band — "
         "the per-window |Z| from the run's own Fourier coefficients, "
         "compared against the station-wide clean level (a percentile of the "
@@ -1449,7 +1449,7 @@ class ResidualSort(Node):
     title = "Residual Sort"
     tooltip = "Drop runs whose windows do not fit the first-pass TF model."
     description = (
-        "Residual-based two-pass selection (DESIGN §24.13, the orthogonal "
+        "Residual-based two-pass selection (DESIGN.md §10.4, the orthogonal "
         "complement of power and coherence screening): a first-pass TF "
         "(Estimate TF's 'tf levels') predicts each FC window's outputs; "
         "RUNS whose pooled unexplained-power fraction is excessive are "
@@ -1699,7 +1699,7 @@ class EstimateTF(Node):
               description="Log2 period bands per power-of-2 octave."),
         Param("band_style", "select", label="Band style",
               options=("l2u", "uniform", "manual"), default="l2u",
-              description="Band construction scheme (DESIGN.md §14.9). "
+              description="Band construction scheme (DESIGN.md §10.2). "
                           "'l2u' (default) is the reference-template band "
                           "table with log-uniform window-starvation "
                           "coarsening: the same fixed band template at every "
@@ -1733,7 +1733,7 @@ class EstimateTF(Node):
         Param("min_bins_per_band", "number", label="Min bins per band",
               default=20.0, min=0,
               description="Window-starvation coarsening threshold "
-                          "(DESIGN.md §14.9): a level where any band has "
+                          "(DESIGN.md §10.2): a level where any band has "
                           "fewer than this many total samples (windows × "
                           "band width) is rebuilt as a coarser uniform grid "
                           "(n−⌊n/3⌋ bands, widened to exceed the threshold, "
@@ -1742,7 +1742,7 @@ class EstimateTF(Node):
                           "coarsening."),
         Param("t_short", "number", label="Shortest period (s)",
               default=0.0, min=0,
-              description="Head clip (DESIGN.md §14.9): bands shorter than "
+              description="Head clip (DESIGN.md §10.2): bands shorter than "
                           "this are not evaluated. 0 starts at the "
                           "template's shortest band (the legacy behavior); "
                           "the official USArray grid clips at ~7.3 s for "
@@ -1858,7 +1858,7 @@ class EstimateTF(Node):
         )
         return {"tf": tf, "tf_levels": per_level}
 
-    #: Banding is Estimate TF's own concern (DESIGN §24.9): no inherit from
+    #: Banding is Estimate TF's own concern (DESIGN.md §10.3): no inherit from
     #: an upstream Coherence Sort — the sort's per-(bin, window) weights are
     #: band-independent, so there is no banding parameter to auto-fill (and
     #: no duplicated banding param set on the sort node).

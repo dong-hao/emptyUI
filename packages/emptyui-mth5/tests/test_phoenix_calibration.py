@@ -1,4 +1,4 @@
-"""Phoenix MTU-5A ASC calibration parser tests (DESIGN §24.12).
+"""Phoenix MTU-5A ASC calibration parser tests (DESIGN.md §9.2).
 
 The real manufacturer files live in examples/data/phoenix-mtu-test/
 (COIL1620/2417/2418_CLC.asc + MTU-1690_CLB.asc); the synthetic fixtures

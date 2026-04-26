@@ -1,4 +1,4 @@
-"""SDG31 long-period investigation (DESIGN §24, E2 + tail probes).
+"""SDG31 long-period investigation (history §24, E2 + tail probes).
 
 Baseline: the E1b working recipe — boxcar + first-difference PW, window 128
 samples constant across levels, factor 4, 5 decimations, exact official

@@ -1,5 +1,5 @@
 /**
- * Time-selector bar (DESIGN.md §23.4): a horizontal acquisition bar whose
+ * Time-selector bar (DESIGN.md §8.3): a horizontal acquisition bar whose
  * length spans the upstream ts payload's extent, with two draggable handles
  * sandwiching the selected time slot. Synced bidirectionally with the
  * paired Start/End edit boxes — which are the node's own `start`/`end`

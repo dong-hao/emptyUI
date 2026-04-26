@@ -46,7 +46,7 @@ def _as_float(value: Any) -> float:
 
 
 def _ts_summary(value: Any) -> dict[str, Any] | None:
-    """Lightweight extent summary for a time-series payload (DESIGN §23.4).
+    """Lightweight extent summary for a time-series payload (DESIGN.md §8.3).
 
     Drives the frontend time-selector bar. Duck-typed over the payload
     shapes so the core package stays independent of mth5:
@@ -195,7 +195,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
 
 
 def _fc_summary(value) -> dict[str, Any] | None:
-    """Lightweight rate-tier summary for an fc payload (DESIGN §20.1).
+    """Lightweight rate-tier summary for an fc payload (DESIGN.md §8.3).
 
     A merged burst FC database is rate-keyed (`{tier: Dataset}`); the plot
     nodes select a tier by its actual sample rate — the summary streams the
@@ -562,7 +562,7 @@ class Executor:
         `targets` restricts execution to the given nodes plus their
         ancestors ("execute to here"); other nodes emit no events.
 
-        `data_root` (DESIGN.md §17.2) confines input path params to a
+        `data_root` (DESIGN.md §11.2) confines input path params to a
         read-only root and resolves output path params into the run
         workspace; None keeps local-dev behavior. `project_dir` (§12.3,
         planned) is the stable user-designated directory whose relative

@@ -1,4 +1,4 @@
-"""Plot Coherency node (DESIGN §20.1/§24.9): fc-direct per-frequency-bin
+"""Plot Coherency node (DESIGN.md §10.6 and §10.3): fc-direct per-frequency-bin
 window-ensemble coherence — the exact statistic Coherence Sort applies
 (shared `_per_bin_coherence` helper). No band geometry anywhere."""
 

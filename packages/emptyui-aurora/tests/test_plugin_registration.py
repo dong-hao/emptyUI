@@ -2,7 +2,7 @@
 
 Regression: SelectRuns and ResidualSort were fully implemented and tested
 but never added in plugin.py, so the nodes were unreachable from the UI
-(DESIGN.md §24.13 claims both delivered). This guards the plugin wiring
+(history §24.13 claims both delivered). This guards the plugin wiring
 itself, not node behavior — mirroring emptyui-mth5's test_registration.py.
 """
 

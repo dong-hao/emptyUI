@@ -1,4 +1,4 @@
-"""Phase tensor computation (DESIGN §20.2) — Caldwell et al. (2004).
+"""Phase tensor computation (DESIGN.md §10.6) — Caldwell et al. (2004).
 
 The phase tensor Φ = X⁻¹·Y of a 2×2 impedance Z = X + iY is dimensionless
 and galvanic-distortion free. Its polar form Φ = R(α1)·diag(σ1,σ2)·R(α2)

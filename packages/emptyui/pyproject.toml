@@ -15,8 +15,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.4"]
 
-[project.entry-points."emptyui.nodes"]
-# core framework registers nothing itself; see emptyui-core-nodes
 
 [build-system]
 requires = ["hatchling"]

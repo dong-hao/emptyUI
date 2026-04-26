@@ -136,7 +136,7 @@ def create_app(
     disabled_plugins: tuple[str, ...] | None = None,
     settings_path: Path | str | None = None,
 ) -> FastAPI:
-    """Build the application (DESIGN.md §7.3, remote-mode knobs §17/§17.2).
+    """Build the application (DESIGN.md §7.3, remote-mode knobs §11/§11.2).
 
     Explicit keyword arguments win over ``settings``/env: embedding platforms
     pass what they need without env coupling. ``data_root`` confines input
@@ -608,7 +608,7 @@ def create_app(
     def list_files(path: str = "") -> dict:
         """Server-side directory listing for the file-picker widget.
 
-        With a data root configured (DESIGN.md §17.2, remote/embedded mode)
+        With a data root configured (DESIGN.md §11.2, remote/embedded mode)
         the listing is confined to that root: requests outside it resolve to
         the root itself, so users can never browse beyond the
         platform-provisioned data. Without one (local dev) the whole
@@ -696,7 +696,7 @@ def create_app(
             # server shutdown) must drop the client from the hub
             hub.disconnect(ws)
 
-    # single-origin serving (DESIGN.md §17.3): mount the built frontend
+    # single-origin serving (DESIGN.md §11.3): mount the built frontend
     # last, so /api/* routes win; html=True serves index.html at the root.
     # API routes stay on top — a same-origin deployment needs no CORS at all.
     if serve_dist:

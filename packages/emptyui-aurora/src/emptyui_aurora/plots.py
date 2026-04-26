@@ -1,4 +1,4 @@
-"""Display nodes for the frequency-domain QC products (DESIGN §20.1).
+"""Display nodes for the frequency-domain QC products (DESIGN.md §10.6).
 
 Plot Coherency renders the per-frequency coherence of an fc — the exact
 statistic Coherence Sort applies (shared `_per_bin_coherence` helper) —
@@ -108,7 +108,7 @@ class PlotCoherency(Node):
         "Per-frequency coherence vs period — the exact statistic "
         "Coherence Sort applies (EMTF-style window-ensemble coherence at "
         "each frequency bin, median across the sliding window ensemble, "
-        "DESIGN.md §20.1/§24.6): the E–H signal coherence (remote H when a "
+        "DESIGN.md §10.6 / history §24.6): the E–H signal coherence (remote H when a "
         "'ref fc' is connected) and, two-FC, the local↔remote magnetic "
         "transfer coherence. Shaded guidance band at [coherence_min, "
         "coherence_max] (the sort's default bounds). Each decimation level "

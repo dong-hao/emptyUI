@@ -1,4 +1,4 @@
-"""Phase tensor computation + plot node (DESIGN §20.2).
+"""Phase tensor computation + plot node (DESIGN.md §10.6).
 
 Invariants: 1D → Φ ∝ I (circular, skew ≡ 0); 2D strike θ → azimuth
 rotation-covariant (azimuth − azimuth₀ = ∓ρ), skew ≡ 0, singular values

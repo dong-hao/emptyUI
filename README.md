@@ -66,7 +66,7 @@ cd packages/web && npm run dev
 ### Commit-log convention
 
 ```
-Type: one-line summary — the what and where (DESIGN §ref)
+Type: one-line summary — the what and where (DESIGN.md §ref)
 
 Short paragraph: the problem/motivation — why the change exists.
 
@@ -81,10 +81,10 @@ message-only/docs chores + why).
 subject under ~72 characters where possible; the DESIGN.md section
 reference anchors the change to the design record. The message must
 describe the diff it accompanies — a message narrating changes that are
-not in the commit falsifies the decision record. Historical `DESIGN §N`
-references (§13 and above) resolve in `docs/history/`, which preserves the
-original numbering verbatim; current-contract references use DESIGN.md's
-living numbering (§1–§12).
+not in the commit falsifies the decision record. Historical references (§13
+and above) are written `history §N` and resolve in `docs/history/`, which
+preserves the original numbering verbatim; current-contract references are
+written `DESIGN.md §<n>` against DESIGN.md's living numbering (§1–§12).
 
 ## Browser end-to-end tests (Playwright)
 
@@ -161,5 +161,5 @@ ranked in DESIGN.md §12.2.
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.
 - [docs/deployment.md](docs/deployment.md) — remote/embedded deployment.
 - `docs/history/` — verbatim delivery records (M2/M3/M4) preserving the
-  original §13–§24 numbering; historical `DESIGN §N` references in code
-  docstrings and commit messages resolve there.
+  original §13–§24 numbering; write references to them as `history §N`
+  in code docstrings and commit messages.

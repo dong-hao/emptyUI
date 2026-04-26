@@ -1,4 +1,4 @@
-"""Build MTH5 archives for the SDG31 USArray verification (DESIGN §16.4).
+"""Build MTH5 archives for the SDG31 USArray verification (history §16.3).
 
 Downloads 1 Hz MT time series from the EarthScope FDSN dataselect service
 (IRIS alias, redirected to service.earthscope.org) for the local station

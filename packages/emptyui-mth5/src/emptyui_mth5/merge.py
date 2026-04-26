@@ -2,8 +2,8 @@
 
 Combines several acquisition runs of one station (e.g. SDH28 'b' + 'c') into
 a single ``ts.run`` so a downstream Align Runs sees the station's full
-coverage — the parity recipe's dominant short-period factor (DESIGN
-§24.3 E1b: aligning against a partial remote cropped away ~29% of the local
+coverage — the parity recipe's dominant short-period factor (
+history §24.3 E1b: aligning against a partial remote cropped away ~29% of the local
 run). The run list comes from the node parameters (like Extract Run's ids);
 the dead ``selection``-payload path was removed (its producer node was
 never delivered, M4-deferred).
@@ -225,7 +225,7 @@ class MergeRuns(Node):
         "Combine several acquisition runs of one station (e.g. runs 'b,c') "
         "into a single time series so a downstream Align Runs sees the "
         "station's full coverage — remote-reference alignment against a "
-        "partial remote otherwise crops away local data (DESIGN §24.3 E1b). "
+        "partial remote otherwise crops away local data (history §24.3 E1b). "
         "Runs are concatenated in the given order; inter-run gaps are "
         "bridged by interpolation (gap_method). Resolve ids like Extract "
         "Run: empty survey/station fall back to the first available."

@@ -1,4 +1,4 @@
-"""Minimal shared plot style for core Display nodes (DESIGN.md §15).
+"""Minimal shared plot style for core Display nodes (DESIGN.md §10.6).
 
 Core must not depend on the mth5 plugin, so this mirrors the tiny subset of
 the TF style module (``emptyui-mth5/plotting.py``) that applies to

@@ -1,11 +1,11 @@
-"""Unit-aware electric scaling (DESIGN §19): Compute FC converts E to V/m
+"""Unit-aware electric scaling (DESIGN.md §10.5): Compute FC converts E to V/m
 according to the payload's unit attrs — the review found the electric path
 scaled unconditionally x1e-6 (mV/km assumed), silently mis-scaling payloads
 already in V/m and double-scaling when e_dipole_length_m was set on mV/km
 data. Unitless payloads keep the legacy behavior (compat).
 
 Mirrors test_magnetic_units.py (the magnetic path was fixed the same way in
-DESIGN §16.4).
+history §16.3).
 """
 
 from __future__ import annotations

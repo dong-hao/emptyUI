@@ -2,7 +2,7 @@
 
 Display nodes emit a typed `plot` port (rendered-figure reference) consumed
 by `Preview Plot` (inline viewer) and `Save Plot` (export) — ComfyUI's
-Preview/Save Image pattern. Plot conventions follow DESIGN.md §15 (shared
+Preview/Save Image pattern. Plot conventions follow DESIGN.md §10.6 (shared
 style module ``_plotstyle.py``): 150 dpi, grid/tick conventions, absolute
 datetime x-axis when the run carries a start time, channel unit hints, and
 run/station identity in titles.

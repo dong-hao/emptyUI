@@ -4,7 +4,7 @@ pyproj ``CRS.from_user_input`` is called by mt_metadata's datum validator
 (``Location.validate_datum``) on essentially every metadata attribute
 update — mth5's group/metadata rebuilds trigger it thousands of times on
 burst archives (25k+ CRS constructions — 75 s — for a single Build FC
-pass over 121 slot runs, DESIGN §24.8 performance note). CRS objects are
+pass over 121 slot runs, history §24.8 performance note). CRS objects are
 immutable and datum strings repeat exhaustively, so an LRU cache makes
 repeat validations free without changing behavior.
 """
@@ -146,7 +146,7 @@ def apply_metadata_class_cache() -> None:
     ``add_attributes_to_metadata_class_pydantic`` on essentially every
     metadata object it constructs; each call builds a NEW pydantic model
     class via ``create_model`` (~5-6 ms) — 7300+ calls ≈ 80 s when
-    ingesting a ~1300-run burst archive (DESIGN §24.8 performance note).
+    ingesting a ~1300-run burst archive (history §24.8 performance note).
     The enhancement is deterministic per metadata class (it adds the
     ``mth5_type``/``hdf5_reference`` fields onto a fresh instance of the
     input class), so the ENHANCED CLASS is memoized per input class and

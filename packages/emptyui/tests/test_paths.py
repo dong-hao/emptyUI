@@ -1,4 +1,4 @@
-"""Path confinement (DESIGN.md §17.2) — remote-mode data-root policy.
+"""Path confinement (DESIGN.md §11.2) — remote-mode data-root policy.
 
 Feature tests: PathPolicy resolution/validation and the manifest
 ``path_kind`` serialization. Error surfaces (outside-root rejection) are

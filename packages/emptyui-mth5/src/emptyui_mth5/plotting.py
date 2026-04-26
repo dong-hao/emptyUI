@@ -1,4 +1,4 @@
-"""Shared publication-quality TF plot helpers (DESIGN.md §15).
+"""Shared publication-quality TF plot helpers (DESIGN.md §10.6).
 
 Conventions follow the USArray reference figure (``SDG31b_H28coh.png``):
 x = Period (secs) on log10, apparent resistivity on log10 (Ω·m), phase in
@@ -86,7 +86,7 @@ def run_notes(tf) -> str:
 
 
 def _wrap_notes(fig, text: str, width_px: float, fontsize: float) -> str:
-    """Greedy word-wrap measured in display pixels (DESIGN §23.3).
+    """Greedy word-wrap measured in display pixels (DESIGN.md §10.6).
 
     Proportional fonts make character-count wrapping unreliable, so each
     candidate line is measured with the real renderer: a word moves to the
@@ -116,8 +116,8 @@ def _annotate_notes(fig, ax, notes: str, show: bool = True,
                     fontsize: float = 7.0, gap_px: float = 5.0) -> None:
     """Place the provenance note below the x-axis label of ``ax``.
 
-    Anchored to the *measured* x-label bottom (never overlapping it, DESIGN
-    §23.3), centered on the axes, and word-wrapped so no line is wider than
+    Anchored to the *measured* x-label bottom (never overlapping it,
+    DESIGN.md §10.6), centered on the axes, and word-wrapped so no line is wider than
     the axes — an unwrapped long note used to blow the figure width up via
     ``bbox_inches="tight"``. Skipped entirely when ``show`` is False (the
     production-images toggle on the plot nodes).
@@ -266,7 +266,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
 
     ``rho_ylim`` optionally pins the apparent-resistivity y-limits
     (``(min, max)``) instead of the auto whole-decade fit — used to match an
-    external reference figure's axis range exactly (DESIGN §15, the
+    external reference figure's axis range exactly (DESIGN.md §10.6, the
     SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m). ``show_params=False``
     drops the processing-provenance line for production images (§23.3).
     """
@@ -286,7 +286,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
         rho_all.append(rho[ok])
         if mode == "off-diagonal":
             # L-M8 display convention: the plot FOLDS the off-diagonal
-            # phase to 0-90° (the half-height panel, DESIGN §15) — the
+            # phase to 0-90° (the half-height panel, DESIGN.md §10.6) — the
             # ViewTF table deliberately shows the RAW ±180° values
             # (provenance: what was estimated); the fold is display-only
             phase_all.append(_fold_phase_deg(phase)[ok])
@@ -306,7 +306,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
                 "plot; check the calibration/decimation of the source FC")
         y_min, y_max = _decade_limits(np.concatenate(rho_all))
     # Off-diagonal phase spans 0-90° -> half-height panel; diagonal spans
-    # the full signed range -> full-height panel (DESIGN.md §15).
+    # the full signed range -> full-height panel (DESIGN.md §10.6).
     phase_h = 1.3 if mode == "off-diagonal" else 2.6
     fig = plt.figure(figsize=(6.5, 8.0))
     gs = fig.add_gridspec(2, 1, height_ratios=[3.2, phase_h], hspace=0.18)
@@ -370,7 +370,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
 
 
 def plot_tipper(tf, path, ylim=None, show_params: bool = True):
-    """Render the tipper figure — Re/Im panels, Tzx/Tzy series (DESIGN §23).
+    """Render the tipper figure — Re/Im panels, Tzx/Tzy series (DESIGN.md §10.6).
 
     Mirrors the AppRes & Phase grammar exactly (USArray reference figure):
     panels = Re (top) / Im (bottom); series = Tzx = OPEN circle (blue) /
@@ -485,7 +485,7 @@ def _ellipse_outline(p, w_px, h_px, angle_deg, px_per_decade, px_per_y, n=72):
 
 
 def plot_phase_tensor(tf, path, show_params: bool = True):
-    """Render the Caldwell-style phase-tensor figure (DESIGN §20.2).
+    """Render the Caldwell-style phase-tensor figure (DESIGN.md §10.6).
 
     PT ellipses vs period: the image ellipse of Φ = Re(Z)⁻¹·Im(Z) at each
     period (semi-axes scaled by the largest σ1 so the biggest ellipse fits

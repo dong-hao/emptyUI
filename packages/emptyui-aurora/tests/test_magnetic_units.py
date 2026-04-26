@@ -1,7 +1,7 @@
 """Magnetic-unit handling: mth5 coil data are archived in nT (like fluxgate
 B) and must be converted to A/m so the fc impedance is in ohm (V/m per A/m).
 
-Regression for the USArray verification (DESIGN §16.4): the coil/'h' path
+Regression for the USArray verification (history §16.3): the coil/'h' path
 used to leave nT data untouched, which scaled Z by mu0*1e9 (~1.26e3) and
 rho by ~1.6e6. Payloads that carry explicit A/m units (or none — the
 synthetic test fixtures) must stay untouched.

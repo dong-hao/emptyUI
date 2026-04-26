@@ -1,4 +1,4 @@
-"""Prewhitening + per-window detrend STFT options (DESIGN §24, E1/E2 enablers).
+"""Prewhitening + per-window detrend STFT options (history §24, E1/E2 enablers).
 
 The first-difference prewhitening must be *exactly* inverted by the
 frequency-domain recoloring (÷ (1 − e^{−j2πfΔt})) so ratio-based TF products

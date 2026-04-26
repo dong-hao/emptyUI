@@ -1,11 +1,11 @@
-"""Tests for the two band-construction schemes (DESIGN.md §14.9):
+"""Tests for the two band-construction schemes (DESIGN.md §10.2):
 ``band_style="l2u"`` (default) — the reference-template band table with
 log-uniform window-starvation coarsening — and ``band_style="uniform"``
 (formerly named ``"log"``) — the uniform log2-grid partition with
 merge-based level combination. The retired ``"emtf"`` value is accepted as
 a legacy alias of ``"l2u"`` (the auto-derived disjoint EMTF-style table was
 replaced 2026-09-11); the ``"index"`` mode was removed after the 2026-09-09
-assessment; see the history in DESIGN.md §14.6/§14.9.
+assessment; see history §14.6/§14.9.
 """
 
 from __future__ import annotations

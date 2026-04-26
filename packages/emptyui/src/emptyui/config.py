@@ -1,4 +1,4 @@
-"""Runtime configuration (DESIGN.md §17 embedded mode).
+"""Runtime configuration (DESIGN.md §11 embedded mode).
 
 Env-first knobs mirrored as ``create_app(...)`` keyword arguments so the
 platform can embed emptyUI as a module without env coupling (kwargs win).

@@ -1,4 +1,4 @@
-"""Build FC Database node tests (DESIGN §24.8): per-run cascades merged
+"""Build FC Database node tests (history §24.8): per-run cascades merged
 along time — the burst-mode / many-run per-run cascade builder."""
 
 from __future__ import annotations

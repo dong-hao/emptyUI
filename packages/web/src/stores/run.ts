@@ -18,7 +18,7 @@ export interface NodeRunState {
   cached?: boolean;
 }
 
-/** payload summaries per node per output port (DESIGN.md §23.4) — e.g. the
+/** payload summaries per node per output port (DESIGN.md §8.3) — e.g. the
  *  time extent a `ts.run` payload covers, driving the time-selector bar. */
 export type PayloadMap = Record<string, Record<string, PayloadSummary>>;
 
@@ -43,7 +43,7 @@ interface RunState {
   reset: () => void;
 }
 
-/** Ephemeral run state streamed over WebSocket (DESIGN.md §8). */
+/** Ephemeral run state streamed over WebSocket (DESIGN.md §7.2). */
 export const useRun = create<RunState>((set) => ({
   runId: null,
   runStatus: "idle",

@@ -1,4 +1,4 @@
-"""Plot Spectrogram (fc-based, aurora.plot.spectrogram — DESIGN §23).
+"""Plot Spectrogram (fc-based, aurora.plot.spectrogram — DESIGN.md §10.6).
 
 Power comes straight from the Compute FC coefficients (no second FFT);
 channel/level selection resolve from the fc with actionable errors."""
@@ -77,7 +77,7 @@ def test_spectrogram_channel_resolution(tmp_path):
 
 
 def test_spectrogram_manifest_inherits_from_compute_fc():
-    """Inherit map + split_inherited contract (DESIGN §23)."""
+    """Inherit map + split_inherited contract (DESIGN.md §10.6)."""
     from emptyui_aurora.plots import PlotSpectrogramFC
     from emptyui_aurora.process import ComputeFC
 

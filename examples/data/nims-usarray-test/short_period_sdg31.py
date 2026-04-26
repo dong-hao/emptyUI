@@ -1,4 +1,4 @@
-"""SDG31 short-period gap investigation (DESIGN §24, E1 follow-up).
+"""SDG31 short-period gap investigation (history §24, E1 follow-up).
 
 Baseline: boxcar + first-difference prewhitening (the E1-adopted starting
 point), window 128, factor 4, 5 decimations, exact official band table,

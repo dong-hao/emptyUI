@@ -1,7 +1,7 @@
 """SDG31 verification: emptyUI processing vs the official EMTF (SPUD) TF.
 
 Pins the emptyUI MT processing chain against a ground-truth transfer
-function (DESIGN.md §16.3):
+function (history §16.3):
 
 1. Loads the 4P.SDG31 (and 4P.SDH28 remote reference) MTH5 archives built by
    ``build_mth5.py`` (1 Hz, NIMS/100 m dipole, counts -> mV/km / nT via the
@@ -17,7 +17,7 @@ function (DESIGN.md §16.3):
 3. Compares against the official USArray.SDG31.2017.edi (EMTF, robust remote
    reference vs SDH28) at the official periods: apparent resistivity + phase
    for xy/yx, error statistics, and overlay figures in the USArray style
-   (DESIGN §15 conventions; official = filled ○/✕, emptyUI = hollow □/◇).
+   (DESIGN.md §10.6 conventions; official = filled ○/✕, emptyUI = hollow □/◇).
 
 Findings recorded here (2026-09-10):
 - The xy-down / yx-up systematic offset (from ~100 s) is a COORDINATE-FRAME
@@ -38,7 +38,7 @@ Findings recorded here (2026-09-10):
   gives 0.019 median / 0.045 p90 / 98% pass; the l2u default gives
   0.019 / 0.089 / 93% at window 128 and 0.020 / 0.071 / 93% at window 256
   (the grid is window-invariant — the template scales ×window/128 — but
-  the finer bins at window 256 improve the p90; see DESIGN §14.9 for the
+  the finer bins at window 256 improve the p90; see history §14.9 for the
   full history). The metrics JSON "rows" carries the official->ours period
   mapping + per-period deltas; "n_distinct_ours" detects double-matching.
 
@@ -85,14 +85,14 @@ FC_KWARGS = {"num_decimations": 5, "factor": 4, "overlap": 0.5, "window_type": "
 EST_KWARGS = {"estimator_engine": "Robust", "periods_per_octave": 3,
                   "band_style": "l2u"}
 
-#: Comparison gates (DESIGN §16.3): the well-estimated band [15 s, 18 725 s]
+#: Comparison gates (history §16.3): the well-estimated band [15 s, 18 725 s]
 #: must agree within these; the < 15 s end is expected to be noise-limited.
 RELIABLE_MIN_S = 15.0
 GATE_RHO_DECADES = 0.1   # ~26%
 GATE_PHASE_DEG = 10.0
 
 #: Frame rotation applied to compare with the official EMTF product
-#: (DESIGN §16.3): USArray data are acquired in the geomagnetic frame; the
+#: (history §16.3): USArray data are acquired in the geomagnetic frame; the
 #: official product was rotated to true north ("Angle To GG North: 0.00").
 #: Standard convention: angle positive = clockwise from true north;
 #: magnetic -> true north with declination D => angle = -D (here -5.7 deg).
@@ -376,7 +376,7 @@ def fit_rotation(official_periods, zo, periods, Z, lo=RELIABLE_MIN_S):
 
 
 def rotate_tensor(Z, angle_deg):
-    """Z' = R(angle) Z R(angle)ᵀ — STANDARD MT convention (DESIGN §16.3):
+    """Z' = R(angle) Z R(angle)ᵀ — STANDARD MT convention (history §16.3):
     angle positive = clockwise from true north;
     R(angle) = [[cos α, sin α], [−sin α, cos α]].
     Magnetic -> true north with declination D: angle = −D."""
@@ -443,7 +443,7 @@ def raw_overlay_figure(periods, Z, path, title, periods_o, zo,
 def render_appres_figure(reg, ctx, label, p, Z, Ze, out_name, note,
                          window=128):
     """    EMTF-convention AppRes & Phase figure via the Plot AppRes & Phase node
-    (DESIGN §15: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
+    (DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
     title, ρ_a y-limits pinned to the reference figure's range 5-4e4 Ωm) —
     the head-to-head counterpart of SDG31b_H28coh.png. The TF is rotated to
     TRUE NORTH with the package rotation (mth5.tf.rotate /
@@ -591,7 +591,7 @@ def main():
         rotated_compare(label, p, Zl)
 
     # EMTF-convention AppRes & Phase figures via the Plot AppRes & Phase node
-    # (DESIGN §15: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
+    # (DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
     # title, ρ_a y-limits pinned to the reference figure's range 5-4e4 Ωm) —
     # the head-to-head counterpart of SDG31b_H28coh.png. Rendered from the
     # N=128 exact-grid variant (so the evaluated periods match the EMTF grid)

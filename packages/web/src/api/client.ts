@@ -35,17 +35,17 @@ export interface ParamSpec {
   enabled_when?: { param: string; values: string[] } | null;
   /** Split inherited comma-separated candidates into individual options. */
   split_inherited?: boolean;
-  /** Time-selector bar binding (DESIGN.md §23.4): input port name whose
+  /** Time-selector bar binding (DESIGN.md §8.3): input port name whose
    *  payload summary (extent, via `payload` run events) drives the bar. */
   time_bar?: string;
-  /** Select-option suggestions (DESIGN.md §20.1): input port name whose
+  /** Select-option suggestions (DESIGN.md §8.3): input port name whose
    *  payload summary offers the options (e.g. an fc database's sample-rate
    *  tiers) — the static options are extended after a run. */
   suggest_from?: string | null;
 }
 
 /** Extent summary of a ts payload, streamed via `payload` run events
- *  (DESIGN.md §23.4): absolute ISO bounds (UTC) or relative seconds. */
+ *  (DESIGN.md §8.3): absolute ISO bounds (UTC) or relative seconds. */
 export interface RunExtent {
   survey: string;
   station: string;
@@ -72,7 +72,7 @@ export interface PayloadSummary {
 /** inherit: input port -> { targetParam: upstreamParam } */
 export type InheritMap = Record<string, Record<string, string>>;
 
-/** One runtime knob in GET /api/settings (DESIGN.md §22). */
+/** One runtime knob in GET /api/settings (DESIGN.md §7.4). */
 export interface LiveSetting {
   value: number | null;
   type: string;
@@ -144,7 +144,7 @@ export interface PluginInfo {
   enabled: boolean;
 }
 
-/** API base, derived at runtime (DESIGN.md §17.3 single-origin convention):
+/** API base, derived at runtime (DESIGN.md §11.3 single-origin convention):
  *  the API always lives one segment below the document root — so this works
  *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
  *  proxies /api). No build-time env or hardcoded mount is needed. */
@@ -165,7 +165,7 @@ export const api = {
   nodes: () => getJson<Catalog>("/nodes"),
   files: (path = "") =>
     getJson<FileListing>(`/files?path=${encodeURIComponent(path)}`),
-  // runtime settings (DESIGN.md §22): live knobs editable, deployment rows
+  // runtime settings (DESIGN.md §7.4): live knobs editable, deployment rows
   // read-only, planned (§12.3 cache) knobs reserved
   settings: () => getJson<SettingsView>("/settings"),
   putSettings: async (values: Record<string, number | null>): Promise<SettingsView> => {

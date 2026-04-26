@@ -1,4 +1,4 @@
-"""Workspace MTH5 + Fourier-coefficient persistence (DESIGN.md §3, §14).
+"""Workspace MTH5 + Fourier-coefficient persistence (DESIGN.md §3, history §14).
 
 The server workspace is itself an MTH5 archive: every intermediate result a
 node chooses to persist is written into ``<workspace>/workspace.mth5``. FCs are

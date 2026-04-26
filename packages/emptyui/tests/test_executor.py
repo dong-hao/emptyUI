@@ -211,7 +211,7 @@ def test_string_number_param_invalid_raises_clean_error():
 
 
 def test_payload_summary_events_for_ts_outputs():
-    """ts.run outputs stream a lightweight extent summary (DESIGN §23.4)."""
+    """ts.run outputs stream a lightweight extent summary (DESIGN.md §8.3)."""
     from emptyui_core_nodes.types import TimeSeries
 
     from emptyui import Node, Output
@@ -363,7 +363,7 @@ def test_payload_summary_on_cache_hit():
 
 def test_payload_summary_mth5_archive_per_run_extents():
     """An open archive (`.run_summary`) streams per-run extents for the
-    Extract Run bar (DESIGN §23.4 phase 2)."""
+    Extract Run bar (DESIGN.md §8.3 phase 2)."""
     import pandas as pd
 
     from emptyui import Node, Output

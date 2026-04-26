@@ -147,7 +147,7 @@ def _tipper(tf):
 
 
 def test_rot_matrix_convention():
-    """R(angle) matches DESIGN.md §16.3 (positive = clockwise from true
+    """R(angle) matches history §16.3 (positive = clockwise from true
     north): R(0) = I and R(90) maps x -> -y."""
     assert np.allclose(_rot_matrix(0.0), np.eye(2))
     assert np.allclose(_rot_matrix(90.0), [[0, 1], [-1, 0]], atol=1e-12)

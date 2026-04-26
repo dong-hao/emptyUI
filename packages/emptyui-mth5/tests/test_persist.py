@@ -1,4 +1,4 @@
-"""FC persistence round-trip through the workspace MTH5 (DESIGN.md §14
+"""FC persistence round-trip through the workspace MTH5 (history §14
 Phase 1). Error surfaces live in test_errors.py."""
 
 from __future__ import annotations

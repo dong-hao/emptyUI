@@ -1,5 +1,5 @@
 """Re-extract the official Phoenix MT-Editor EDI (B0940330_z.edi) Z values
-for the one-night window 2026-06-18 11:00-23:00 UTC (DESIGN §24.12
+for the one-night window 2026-06-18 11:00-23:00 UTC (history §24.12
 parity ground truth). Manual section parser (mt_metadata EDI.read()
 returns None for this file).
 
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     w = 2 * np.pi * d["frequency"]
     # SEG default units: mV/km per nT -> SI = Z_EDI x 1e-6 x mu0/1e-9
     # (= /795.77). Verified: SI rho reproduces our chain's rho and the
-    # 180-deg exp(+iwt) flip accounts for the sign (DESIGN §24.12 parity).
+    # 180-deg exp(+iwt) flip accounts for the sign (history §24.12 parity).
     zxy_si = d["zxy"] * EDI_TO_SI
     zyx_si = d["zyx"] * EDI_TO_SI
     rows = []

@@ -1,4 +1,4 @@
-"""CLB coupling comparison (DESIGN §24.12): two TF images from the real
+"""CLB coupling comparison (history §24.12): two TF images from the real
 MTU-5A corpus (1690618B), one per CLB handling variant.
 
 Background: the box CLB table carries a first-order high-pass with -3 dB

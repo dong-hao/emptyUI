@@ -1,4 +1,4 @@
-"""FC-level frequency-domain calibration (DESIGN §24.12).
+"""FC-level frequency-domain calibration (DESIGN.md §9.2).
 
 Compute FC divides the Fourier coefficients by the chained complex response
 of the payload's *applied* filters (aurora semantics between STFT and

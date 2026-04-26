@@ -1,4 +1,4 @@
-"""Path confinement for remote/embedded mode (DESIGN.md §17.2).
+"""Path confinement for remote/embedded mode (DESIGN.md §11.2).
 
 Two storage realms: a read-only data root (platform-provisioned original
 data — inputs resolve only inside it) and the writable per-run workspace

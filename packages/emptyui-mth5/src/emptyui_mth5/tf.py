@@ -194,9 +194,9 @@ class ImportTF(Node):
         "'Angle' parameter of Rotate TF applies). Sign conventions in the "
         "EDI world are NOT reliably self-describing: the official USArray "
         "EMTF EDI declares exp(+i omega t) but its data already matches "
-        "emptyUI's exp(-i omega t) convention as-is (DESIGN §16.3), while "
+        "emptyUI's exp(-i omega t) convention as-is (history §16.3), while "
         "Phoenix MT-Editor EDIs declare nothing and need the 180-deg "
-        "negation (DESIGN §24.12). 'Sign convention' = as-is imports the "
+        "negation (history §24.12). 'Sign convention' = as-is imports the "
         "file untouched (default); the negation/conjugation options convert "
         "the data (a processing note records the conversion); the "
         "SIGNCONVENTION header field, when present, is checked with a "
@@ -294,7 +294,7 @@ class ImportTF(Node):
 
 
 def _rot_matrix(angle_deg: float) -> np.ndarray:
-    """Standard MT frame-rotation matrix (DESIGN.md §16.3):
+    """Standard MT frame-rotation matrix (history §16.3):
     R(angle) = [[cos α, sin α], [−sin α, cos α]], positive = clockwise from
     true north; magnetic → true north ⇒ angle = −declination."""
     a = np.radians(angle_deg)
@@ -373,7 +373,7 @@ def rotate_transfer_function(tf, angle_deg: float):
     """Return a copy of ``tf`` rotated by ``angle_deg`` (positive = clockwise
     from true north; magnetic → true north ⇒ angle = −declination).
 
-    Standard MT convention (DESIGN.md §16.3): ``Z' = R(angle) Z R(angle)ᵀ``,
+    Standard MT convention (history §16.3): ``Z' = R(angle) Z R(angle)ᵀ``,
     the tipper rotates as a vector, and per-element error stds rotate with
     ``|R|`` (conservative bound — no covariance is stored). A tipper-less
     TF rotates fine (only the impedance block is rotated; mt_metadata's
@@ -437,7 +437,7 @@ class RotateTF(Node):
     description = (
         "Rotate a transfer function by an arbitrary angle (or to true north "
         "using the station declination) before comparison/inversion. Standard "
-        "MT convention (DESIGN.md §16.3): Z' = R(angle) Z R(angle)ᵀ with "
+        "MT convention (history §16.3): Z' = R(angle) Z R(angle)ᵀ with "
         "R(angle) = [[cos α, sin α], [−sin α, cos α]], angle positive = "
         "clockwise from true north; magnetic → true north ⇒ angle = "
         "−declination. The tipper rotates as a vector; per-element error stds "

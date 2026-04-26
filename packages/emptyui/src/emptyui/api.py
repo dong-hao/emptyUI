@@ -90,7 +90,7 @@ class Param:
     description: str = ""
     #: Placeholder text for text inputs (e.g. "auto (detect from data)").
     placeholder: str = ""
-    #: Remote-mode path confinement (DESIGN.md §17.2): "" = not a path,
+    #: Remote-mode path confinement (DESIGN.md §11.2): "" = not a path,
     #: "in" = read-only input resolved under the data root (validated),
     #: "out" = writable output resolved into the run workspace.
     path_kind: str = ""
@@ -225,8 +225,8 @@ class Node:
     #: "<…>", "url": "https://…", "license": "CC-BY-4.0"}``.
     models: ClassVar[list[dict[str, str]]] = []
 
-    #: Whether structural cache hits may skip this node's execution (DESIGN
-    #: §7.1). Save/export nodes are ``False``: their side effect IS writing
+    #: Whether structural cache hits may skip this node's execution
+    #: (DESIGN.md §7.1). Save/export nodes are ``False``: their side effect IS writing
     #: the file — a cache hit that skips it reports "done (cached)" while the
     #: file is never (re-)written (and a deleted destination stays gone).
     #: Cheap to re-run: the inputs come from the cache either way.

@@ -16,7 +16,7 @@ from .types import is_unknown_start
 
 _log = logging.getLogger("emptyui")
 
-#: minimum explicitly bounded slot (DESIGN §23.4): a narrower window
+#: minimum explicitly bounded slot (DESIGN.md §8.3): a narrower window
 #: carries no useful MT signal and usually indicates a slider/box slip
 MIN_SLOT_S = 1.0
 

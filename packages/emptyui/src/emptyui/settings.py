@@ -1,4 +1,4 @@
-"""Runtime settings persistence (DESIGN.md §5.1, §22).
+"""Runtime settings persistence (DESIGN.md §5.1, §7.4).
 
 The ``EMPTYUI_DISABLED_PLUGINS`` environment variable is the platform-level
 plugin baseline (env wins at startup; in embedded mode §17 the platform
@@ -227,7 +227,7 @@ class SettingsStore:
 
 @dataclass
 class RuntimeSettings:
-    """Live-editable runtime knobs (DESIGN.md §22) — a mutable holder so UI
+    """Live-editable runtime knobs (DESIGN.md §7.4) — a mutable holder so UI
     changes take effect without a restart (the app closures read it).
 
     Initialized from the effective start values (kwarg → env → settings

@@ -1,4 +1,4 @@
-"""Tests for the rebuilt Merge Runs node (DESIGN §24.5 P1): params-based
+"""Tests for the rebuilt Merge Runs node (history §24.5 P1): params-based
 run list, physical gap-aware concatenation. Error surfaces live in
 test_errors.py."""
 

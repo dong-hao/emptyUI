@@ -1,4 +1,4 @@
-"""Residual Sort node tests (DESIGN §24.13): residual-based two-pass
+"""Residual Sort node tests (DESIGN.md §10.4): residual-based two-pass
 selection. The score asks 'does this window fit the first-pass TF model'
 rather than 'is the floor high' — the orthogonal complement of power and
 coherence screening."""

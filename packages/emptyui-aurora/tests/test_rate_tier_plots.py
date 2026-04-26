@@ -1,4 +1,4 @@
-"""Burst-mode rate-tier plotting (DESIGN §20.1): the merged FC database is
+"""Burst-mode rate-tier plotting (DESIGN.md §10.6): the merged FC database is
 rate-keyed; the plot nodes select a tier by its actual sample rate."""
 
 from __future__ import annotations
