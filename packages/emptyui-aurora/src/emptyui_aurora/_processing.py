@@ -720,7 +720,9 @@ def _electric_to_vm(x, comp, e_scale, units):
         * other unknown units -> warning + passthrough (never silently
           scale what cannot be interpreted)
         * no unit attrs -> x1e-6 (legacy unitless behavior: synthetic
-          fixtures and core payloads; emptyui's LEMI reader writes mV/km)
+          fixtures and core payloads; emptyui's LEMI reader writes mV/km).
+          The branch WARNS — missing attrs are indistinguishable from a
+          stripped V/m payload (which this assumption would corrupt 1e6)
     """
     u = (_canonical_unit((units or {}).get(comp, "")) or "").lower()
     _reject_counts(x, comp, units, "Compute FC")
@@ -735,6 +737,13 @@ def _electric_to_vm(x, comp, e_scale, units):
             )
         return x * e_scale, "mV potential -> V/m (dipole)"
     if not u:
+        _log.warning(
+            "electric channel '%s' carries NO unit attrs — the legacy path "
+            "assumes mV/km and scales x1e-6 (a payload actually in V/m, "
+            "e.g. with stripped attrs, would be wrong by 1e6): set the "
+            "channel's units attr to make the scaling explicit",
+            comp,
+        )
         return x * 1e-6, "legacy (unitless, mV/km assumed)"
     if u == "millivolt per kilometer":
         return x * 1e-6, "mV/km -> V/m"
@@ -1098,7 +1107,7 @@ def _pair_remote_times(local_t, ref_t, tol_s):
     if tol_s and tol_s > 0:
         tol = float(tol_s)
         if np.issubdtype(np.asarray(local_t).dtype, np.datetime64):
-            tol_ns = int(round(tol * 1e9))
+            tol_ns = round(tol * 1e9)
         else:
             tol_ns = tol
         # candidate pairs: each local's nearest ref (within tol), greedy
@@ -1254,7 +1263,11 @@ def _warn_remote_gaps(local_fc, ref_fc) -> None:
     for g in gaps:
         try:
             gs, ge = _as_utc(pd.Timestamp(g[0])), _as_utc(pd.Timestamp(g[1]))
-        except Exception:  # noqa: BLE001 — malformed interval, skip it
+        except Exception as exc:  # noqa: BLE001
+            _log.warning(
+                "remote-reference fc: malformed gap interval %r in its "
+                "provenance attrs (%s) — skipping it, the gap coverage check "
+                "is only partial for this level", g, exc)
             continue
         m = (t_idx >= gs) & (t_idx < ge)
         if m.any():
@@ -1723,6 +1736,8 @@ def estimate_tf(
     remote reference is requested), the local input channels are reused as the
     reference — a self-reference (degenerate but well-defined, equals RME).
     This is also what a duplicated/identical "dummy remote station" reduces to.
+    The omission is **warned loudly**: an operator must never believe remote
+    reference is in effect when it is not (review 2026-09-28, E2).
 
     ``t_short`` (head clip, §14.9) is honored for BOTH schemes: the primary
     l2u table clips upstream (:func:`_clip_head_bands`), and the uniform /
@@ -1734,6 +1749,17 @@ def estimate_tf(
     """
 
     engine = _resolve_estimator(estimator_engine, remote_reference)
+
+    if engine == "RME_RR" and ref_fc is None:
+        # E2: the RR topology degenerates to plain RME — the operator must
+        # know (each level logs; _level_ref keeps the per-level pairing
+        # semantics of the surrounding loop)
+        _log.warning(
+            "Estimate TF: remote reference is enabled but no remote fc is "
+            "connected (ref_fc empty) — estimating against a SELF-REFERENCE, "
+            "which is mathematically equivalent to plain Robust RME: connect "
+            "the remote station's fc to the ref input for true remote "
+            "reference")
 
     fc = _normalize_fc_layout(fc)
     freq = fc["frequency"].values

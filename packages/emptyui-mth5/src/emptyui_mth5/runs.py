@@ -686,8 +686,9 @@ def _get_channel(data, name: str):
                 sid = getattr(data, "survey_metadata", None)
                 if sid is not None:
                     ch.survey_metadata = sid
-        except Exception:  # noqa: BLE001 — identity only, never blocks
-            pass
+        except Exception as exc:  # noqa: BLE001 — identity only, never blocks
+            _log.debug("_get_channel: survey identity carry-over skipped (%s)",
+                       exc)
         return ch
     from emptyui_core_nodes.types import channel_calibration
     from mt_metadata.timeseries.filtered import AppliedFilter
@@ -1302,8 +1303,8 @@ def _carry_merge_provenance(source, out) -> None:
                 out.dataset.attrs["merged_gap_method"] = gm
         if runs is not None:
             out.dataset.attrs["merged_source_runs"] = runs
-    except Exception:  # noqa: BLE001 — duck-typed payloads without dataset attrs
-        pass
+    except Exception as exc:  # noqa: BLE001 — duck-typed payloads without dataset attrs
+        _log.debug("_carry_merge_provenance: attrs not recorded (%s)", exc)
 
 
 def _warn_merge_gaps_in_overlap(ctx, inputs, outputs, overlap) -> None:
@@ -1331,7 +1332,11 @@ def _warn_merge_gaps_in_overlap(ctx, inputs, outputs, overlap) -> None:
         for g in gaps:
             try:
                 gs, ge = _utc(pd.Timestamp(g[0])), _utc(pd.Timestamp(g[1]))
-            except Exception:  # noqa: BLE001 — malformed interval, skip it
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(
+                    "merge provenance: malformed gap interval %r (%s) — "
+                    "skipping it, the overlap gap report is only partial",
+                    g, exc)
                 continue
             lo, hi = max(gs, t0), min(ge, t1)
             if hi > lo:

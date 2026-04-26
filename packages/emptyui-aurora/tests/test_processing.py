@@ -3,6 +3,8 @@ Error surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytest
 from _synthetic import synthetic_runts, synthetic_source
@@ -335,6 +337,24 @@ def test_remote_reference_uses_duplicated_dummy_station():
     _, Z_ols, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                            estimator_engine="Least Squares", periods_per_octave=8)
     assert not np.allclose(Z, Z_ols)
+
+
+def test_remote_reference_without_remote_fc_warns(caplog):
+    """RR requested but ref_fc absent: estimate against a self-reference AND
+    warn loudly — the operator must never believe remote reference is in
+    effect when it silently degenerated to plain RME (E2)."""
+    runts = _synthetic_runts()
+    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+                    window_length_s=256, overlap=0.5, window_type="hamming")
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
+                                 estimator_engine="Robust",
+                                 remote_reference=True,
+                                 periods_per_octave=8)
+    assert any("SELF-REFERENCE" in r.message for r in caplog.records)
+    # the degenerate estimate still runs and is well-defined (equals RME)
+    assert periods.size > 1
+    assert np.all(np.isfinite(Z))
 
 
 def test_compute_fc_levels_cascading_decimation():

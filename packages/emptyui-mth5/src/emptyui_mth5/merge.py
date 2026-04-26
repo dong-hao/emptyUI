@@ -151,8 +151,8 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
                     "recorded method is the LAST one applied",
                     method, gap_method)
             merged.dataset.attrs["merged_gap_method"] = str(gap_method)
-    except Exception:  # noqa: BLE001 — duck-typed payloads without dataset attrs
-        pass
+    except Exception as exc:  # noqa: BLE001 — duck-typed payloads without dataset attrs
+        _log.debug("merge_runts: merge provenance attrs not recorded (%s)", exc)
     return merged
 
 

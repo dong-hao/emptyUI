@@ -97,8 +97,9 @@ class SaveMth5(Node):
             # flushes as a no-op).
             try:
                 mth5.flush()
-            except Exception:  # noqa: BLE001 — flush best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 — flush best-effort
+                ctx.logger.debug(
+                    "MTH5 flush before Save-As copy failed (%s)", exc)
             if dest.exists():
                 ctx.logger.warning("overwriting existing MTH5 at %s", dest)
                 # replace via temp file: a failed copy must not destroy the

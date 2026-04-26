@@ -132,14 +132,18 @@ def test_dipole_on_raw_mv_data_is_correct(tmp_path):
     _assert_z(P, Z)
 
 
-def test_unitless_keeps_legacy_behavior(tmp_path):
-    """No unit attrs -> x1e-6 (compat: synthetic fixtures, core payloads)."""
+def test_unitless_keeps_legacy_behavior(tmp_path, caplog):
+    """No unit attrs -> x1e-6 (compat: synthetic fixtures, core payloads);
+    the legacy branch warns (E1) — a stripped V/m payload would be 1e6 off
+    and the operator must see the assumption, not infer it."""
     rng = np.random.default_rng(47)
     hx, hy, ex, ey = _field_vm(rng)
     runts = _runts(hx, hy, ex * 1e6, ey * 1e6, units_e="")
-    P, Z, _ = _recovered(runts)
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        P, Z, _ = _recovered(runts)
     _assert_z(P, Z)
     assert "legacy (unitless, mV/km assumed)" in levels(runts)["electric_scaling"]
+    assert any("NO unit attrs" in r.message for r in caplog.records)
 
 
 def test_unrecognized_unit_warns_and_passes_through(tmp_path, caplog):

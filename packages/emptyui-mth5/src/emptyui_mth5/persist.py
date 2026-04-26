@@ -10,8 +10,11 @@ directly to the long-term "saved mth5 as workspace" design.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger("emptyui")
 
 #: Name of the workspace archive inside ``ctx.workspace``.
 WORKSPACE_MTH5_NAME = "workspace.mth5"
@@ -42,8 +45,10 @@ def get_workspace_mth5(ctx):
         try:
             if m.h5_is_write():
                 return m
-        except Exception:  # noqa: BLE001 — stale handle, reopen
-            pass
+        except Exception as exc:  # noqa: BLE001 — stale handle, reopen
+            _log.debug(
+                "workspace mth5: cached handle write-state check failed "
+                "(%s) — reopening", exc)
         _workspace_handles.pop(key, None)
     from mth5.mth5 import MTH5
 
@@ -66,8 +71,8 @@ def close_workspace_mth5(ctx) -> None:
     if m is not None:
         try:
             m.close_mth5()
-        except Exception:  # noqa: BLE001 — close is best effort
-            pass
+        except Exception as exc:  # noqa: BLE001 — close is best effort
+            _log.debug("workspace mth5: close failed (%s)", exc)
         finally:
             from ._compat import release_write_open
 

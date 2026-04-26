@@ -1467,7 +1467,7 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   | attrs = milliVolt per meter | ×1e-3 |
   | attrs = milliVolt (raw potential) | **hard error**: set `e_dipole_length_m` |
   | unrecognized | warning + passthrough (never silently scale what cannot be interpreted) |
-  | no attrs (unitless) | ×1e-6 — legacy behavior (synthetic fixtures, core payloads) |
+  | no attrs (unitless) | ×1e-6 — legacy behavior (synthetic fixtures, core payloads); **warns** on every use: missing attrs are indistinguishable from a stripped payload |
 
   The fc records `electric_scaling` in attrs. Unitless payloads behave exactly
   as the legacy path (all synthetic fixtures and the USArray verification
