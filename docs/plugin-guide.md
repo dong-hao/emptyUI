@@ -92,6 +92,7 @@ frontend renders:
 | `description` | full details for the properties panel (shown on click) |
 | `category` | palette grouping; unknown categories are appended alphabetically |
 | `hidden` | utility/test nodes excluded from the palette (still executable) |
+| `viewer` | inline canvas-body renderer the frontend mounts in the node card: `"plot"` or `"table"` (L-F12: the frontend never switches on node types); omit for ordinary nodes |
 | `version` | bump on behavior changes; workflows record versions for reproducibility |
 | `deps` | human-readable dependency notes surfaced in the properties panel |
 | `inherit` | params auto-filled (as dropdowns) from the upstream chain — see DESIGN §4 |

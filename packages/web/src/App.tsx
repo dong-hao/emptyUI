@@ -269,11 +269,11 @@ export default function App() {
             .map((p) => [p.name, p.default]),
         ),
       } satisfies MTNodeData,
-      style:
-        manifest.type === "core.display.preview_plot" ||
-        manifest.type === "core.display.view_table"
-          ? { width: 340, height: 260 }
-          : { width: 280, height: "auto" },
+      // viewer nodes get the fixed figure box — from the manifest flag,
+      // never a node-type literal (L-F12)
+      style: manifest.viewer
+        ? { width: 340, height: 260 }
+        : { width: 280, height: "auto" },
     });
     // second pass: the card's height is unknown before the manifest renders
     // the params — measure it after it mounts and shift so its CENTER sits

@@ -16,6 +16,7 @@ class ViewTableNode(Node):
         "to resize."
     )
     category = "Display"
+    viewer = "table"
     inputs = (Input("table", "table"),)
     outputs = (Output("table", "table"),)
     params = ()

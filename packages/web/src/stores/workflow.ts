@@ -411,7 +411,11 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   loadDocument: (nodes, edges, name, created) =>
     set({
       nodes,
-      edges: migrateEdges(nodes, edges),
+      // the runs→data remap happens exactly once, inside
+      // deserializeWorkflow — every document crosses that boundary; the
+      // second copy that re-ran it here on sourceHandle was provably a
+      // no-op and is gone (D2)
+      edges,
       selectedNodeId: null,
       ...(name ? { docName: name } : {}),
       docCreated: created,
@@ -435,25 +439,6 @@ function extractRunIds(nodes: Node<MTNodeData>[]): Set<string> {
     nodes
       .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === "mth5.io.extract_run")
       .map((n) => n.id));
-}
-
-/** One-port migration (§4): Extract Run's dual outputs (data + runs) merged
- *  into a single `data` port whose value follows the selection — edges
- *  sourced from the retired `runs` port remap at load time. NB the retired
- *  port was an OUTPUT of Extract Run, so the edge carries it on the SOURCE
- *  end (matching `targetHandle` silently left every legacy edge unmigrated;
- *  they were then pruned as stale on the next catalog arrival). */
-export function migrateEdges(
-  nodes: Node<MTNodeData>[],
-  edges: Edge[],
-): Edge[] {
-  const extract = extractRunIds(nodes);
-  if (!extract.size) return edges;
-  return edges.map((e) =>
-    extract.has(e.source) && e.sourceHandle === "runs"
-      ? { ...e, sourceHandle: "data" }
-      : e,
-  );
 }
 
 /** Wiring-rule enforcement for LOADED documents (L-F1, defense-in-depth):
@@ -575,11 +560,11 @@ export function deserializeWorkflow(
         nodeType: n.type,
         params: n.params ?? {},
       },
-      style:
-        n.type === "core.display.preview_plot" ||
-        n.type === "core.display.view_table"
-          ? { width: 340, height: 260 }
-          : { width: 280, height: "auto" },
+      // viewer sizing is manifest-driven (L-F12) — a load that races the
+      // catalog falls back to the default box (reload after it arrives)
+      style: manifest?.viewer
+        ? { width: 340, height: 260 }
+        : { width: 280, height: "auto" },
     };
   });
   const nodeIds = new Set(nodes.map((n) => n.id));
@@ -589,6 +574,8 @@ export function deserializeWorkflow(
   // declared by the manifest, so an unmigrated edge is pruned as stale
   // before the migration can remap it (pruneStaleEdges runs first
   // otherwise)
+  // — and the ONLY copy of the rule (D2): loadDocument used to re-run it
+  // on sourceHandle after conversion, always as a no-op
   const extract = extractRunIds(nodes);
   const migrated = extract.size
     ? doc.edges.map((e) =>

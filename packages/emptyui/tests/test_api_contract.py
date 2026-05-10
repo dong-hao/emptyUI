@@ -20,7 +20,8 @@ from emptyui.server.app import create_app
 
 MANIFEST_KEYS = {
     "type", "version", "title", "tooltip", "description", "category",
-    "hidden", "inputs", "outputs", "params", "deps", "inherit", "models",
+    "hidden", "viewer", "inputs", "outputs", "params", "deps", "inherit",
+    "models",
 }
 PORT_KEYS = {"name", "type", "description", "label"}
 INPUT_KEYS = PORT_KEYS | {"required", "accepts", "collection_ok"}
@@ -96,6 +97,8 @@ def test_nodes_catalog_shape(client: TestClient):
     assert manifest["version"] == "1.2.3"
     # tooltip fallback: first sentence of the description
     assert manifest["tooltip"] == "Exercises every manifest field."
+    # viewer: undeclared by default -> the frontend renders port rows
+    assert manifest["viewer"] is None
     for port in manifest["inputs"]:
         assert INPUT_KEYS <= set(port)
     for port in manifest["outputs"]:

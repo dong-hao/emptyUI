@@ -195,6 +195,11 @@ class Node:
     #: Utility/test nodes are excluded from the palette by default (still
     #: executable when present in a saved workflow).
     hidden: ClassVar[bool] = False
+    #: Inline canvas-body renderer the frontend mounts inside the node card
+    #: ("plot" | "table"); None = the standard port rows. The frontend
+    #: switches on this manifest flag — never on node-type literals
+    #: (L-F12, plugin guide §"Manifest fields").
+    viewer: ClassVar[str | None] = None
     category: ClassVar[str] = "Processing"
     version: ClassVar[str] = "0.1.0"
     inputs: ClassVar[tuple[Input, ...]] = ()
@@ -252,6 +257,7 @@ class Node:
             "description": self.description,
             "category": self.category,
             "hidden": self.hidden,
+            "viewer": self.viewer,
             "inputs": [p.to_dict() for p in self.inputs],
             "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params],

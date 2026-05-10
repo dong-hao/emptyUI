@@ -396,9 +396,10 @@ export function MTNode({ id, data, selected }: NodeProps) {
         </div>
       )}
 
-      {d.nodeType === "core.display.preview_plot" ? (
+      {/* body renderer declared by the manifest's viewer flag (L-F12) */}
+      {manifest?.viewer === "plot" ? (
         <PreviewBody nodeId={id} />
-      ) : d.nodeType === "core.display.view_table" ? (
+      ) : manifest?.viewer === "table" ? (
         <TableBody nodeId={id} />
       ) : (
         <div className="mt-node-ports">

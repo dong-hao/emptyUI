@@ -102,6 +102,10 @@ export interface NodeManifest {
   category: string;
   /** utility/test nodes: excluded from the palette by default */
   hidden?: boolean;
+  /** inline canvas-body renderer the node card mounts (manifest-driven —
+   *  the frontend never switches on node types, L-F12): "plot" | "table",
+   *  absent = the standard port rows */
+  viewer?: "plot" | "table" | null;
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];

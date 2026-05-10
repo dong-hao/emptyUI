@@ -16,6 +16,7 @@ class PreviewPlotNode(Node):
         "to resize the figure."
     )
     category = "Display"
+    viewer = "plot"
     inputs = (Input("plot", "plot"),)
     outputs = (Output("plot", "plot"),)
     params = ()
