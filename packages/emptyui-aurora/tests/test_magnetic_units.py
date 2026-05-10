@@ -138,6 +138,98 @@ def test_unitless_payload_keeps_legacy_behavior(tmp_path):
     assert np.median(Z[ok, 0, 1].real) == pytest.approx(3.0, abs=0.5)
 
 
+def test_fluxgate_explicit_am_is_not_converted(tmp_path):
+    """Mode 'b' (fluxgate) + explicit A/m attrs -> no nT->A/m scaling.
+
+    The nomenclature-derived mode must never override an explicit unit: the
+    payload already carries H, so converting it again scales Z by
+    1e-9/mu0 (~1.26e3) and rho by ~1.6e6 (issues.md H2).
+    """
+    rng = np.random.default_rng(15)
+    hx, hy, ex, ey = _field(rng)
+    runts = _runts(hx * N_TO_AM, hy * N_TO_AM, ex, ey,
+                   units_h="ampere per meter")
+    levels = compute_fc_levels(
+        runts, ["hx", "hy"], ["ex", "ey"],
+        num_decimations=1, factor=4, num_samples_window=256,
+        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        channel_nomenclature="default",
+    )
+    per = estimate_tf_levels(
+        levels, ["hx", "hy"], ["ex", "ey"], estimator_engine="Robust",
+        periods_per_octave=4, channel_nomenclature="default",
+    )
+    _, Z, _ = merge_tf_levels(per)
+    ok = np.abs(Z[:, 0, 1]) > 1e-9
+    assert np.median(Z[ok, 0, 0].real) == pytest.approx(1.0, abs=0.5)
+    assert np.median(Z[ok, 0, 1].real) == pytest.approx(3.0, abs=0.5)
+    assert np.median(Z[ok, 1, 0].real) == pytest.approx(-1.0, abs=0.5)
+    assert np.median(Z[ok, 1, 1].real) == pytest.approx(4.0, abs=0.5)
+
+
+def test_fluxgate_tesla_unit_converts_at_its_own_scale(tmp_path):
+    """An explicit 'tesla' payload converts x1/mu0, not x1e-9/mu0.
+
+    The old b-mode short-circuit scaled every unit string as if it were nT,
+    so a tesla-labelled fluxgate payload would be wrong by 1e9.
+    """
+    rng = np.random.default_rng(16)
+    hx, hy, ex, ey = _field(rng)
+    # H here is nT-valued; label it as tesla to prove the prefix is honoured
+    runts = _runts(hx, hy, ex, ey, units_h="tesla")
+    levels_t = compute_fc_levels(
+        runts, ["hx", "hy"], ["ex", "ey"],
+        num_decimations=1, factor=4, num_samples_window=256,
+        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        channel_nomenclature="default",
+    )
+    # the same payload labelled nT: the two FCs must differ by exactly 1e9
+    runts_nt = _runts(hx, hy, ex, ey, units_h="nanoTesla")
+    levels_n = compute_fc_levels(
+        runts_nt, ["hx", "hy"], ["ex", "ey"],
+        num_decimations=1, factor=4, num_samples_window=256,
+        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        channel_nomenclature="default",
+    )
+    a = np.abs(levels_t[0]["hx"].values)
+    b = np.abs(levels_n[0]["hx"].values)
+    ratio = np.median(b[np.isfinite(b) & (b > 0)] /
+                      a[np.isfinite(a) & (a > 0)])
+    assert np.isclose(ratio, 1e-9, rtol=1e-6)
+
+
+def test_magnetic_to_h_precedence():
+    """Unit-attr precedence over the mode, both ways (issues.md H2)."""
+    from emptyui_aurora._processing import _magnetic_to_h
+
+    x = np.array([1.0, 2.0])
+    to_h = 1e-9 / MU0
+    # 1. explicit A/m wins over mode 'b' (the H2 regression)
+    for units in ("ampere per meter", "A/m", "milliAmpere per meter"):
+        out = _magnetic_to_h(x, "hx", True, {"hx": units})
+        factor = {"ampere per meter": 1.0, "A/m": 1.0,
+                  "milliAmpere per meter": 1e-3}[units]
+        np.testing.assert_allclose(out, x * factor)
+        np.testing.assert_allclose(_magnetic_to_h(x, "hx", False, {"hx": units}),
+                                    x * factor)
+    # 2. explicit induction units convert at their own prefix, both modes
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", True, {"hx": "nanoTesla"}),
+                                x * to_h)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", False, {"hx": "nT"}),
+                                x * to_h)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", True, {"hx": "tesla"}),
+                                x / MU0)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", False, {"hx": "tesla"}),
+                                x / MU0)
+    # 3. no unit attrs: mode decides (fluxgate converts, coil/legacy does not)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", True, {}), x * to_h)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", False, {}), x)
+    np.testing.assert_allclose(_magnetic_to_h(x, "hx", True, None), x * to_h)
+    # 3b. unrecognized attrs keep the mode's legacy path (loud elsewhere)
+    np.testing.assert_allclose(
+        _magnetic_to_h(x, "hx", False, {"hx": "furlongs per fortnight"}), x)
+
+
 def test_fluxgate_nt_always_converts(tmp_path):
     """Explicit 'b' (fluxgate) converts even with unknown units."""
     rng = np.random.default_rng(14)

@@ -2,7 +2,9 @@
 
 Conventions follow the USArray reference figure (``SDG31b_H28coh.png``):
 x = Period (secs) on log10, apparent resistivity on log10 (Ω·m), phase in
-linear degrees; off-diagonal phase folded into (0°, 90°); markers/colors
+linear degrees; off-diagonal phase folded into (0°, 90°) with a loud warning
+for the values ±180° cannot place there (never a silent empty panel);
+markers/colors
 ○ XY (blue) / ✕ YX (red); error bars with caps; equal per-decade scale
 between the period and ρ_a axes (MT convention); framed legend; site title
 with LON/LAT.
@@ -14,11 +16,15 @@ on mth5.
 
 from __future__ import annotations
 
+import logging
+
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+_log = logging.getLogger("emptyui")
 
 MU0 = 4.0 * np.pi * 1e-7
 
@@ -196,11 +202,20 @@ def _decade_limits(values, lo=None, hi=None):
 
 
 def _fold_phase_deg(phase):
-    """Fold phases into the first quadrant (0°, 90°] — aurora RhoPlot
-    convention: rotate negative phases by +180°; the ylim clips the rare
-    values beyond 90°."""
+    """Fold phases by ±180° into [0°, 180°) — the off-diagonal display
+    convention (DESIGN.md §10.6: Z and −Z carry the same physics, so the
+    USArray panel shows both XY and YX in one quadrant).
+
+    A single ``p < 0 → p + 180`` pass (the old behaviour) left every wrapped
+    value in (180°, 360°) untouched, so a convention-flipped import drew an
+    empty phase panel: the axis is (0°, 90°) and matplotlib simply drops
+    what falls outside it. Values that stay above 90° after the fold are
+    genuinely outside the display quadrant (±180° cannot reach it) — the
+    callers warn about them instead of losing them silently. NaN/inf pass
+    through (the callers mask them).
+    """
     p = np.asarray(phase, dtype=float)
-    return np.where(p < 0, p + 180.0, p)
+    return np.mod(p, 180.0)
 
 
 def impedance_panels(tf, mode: str):
@@ -275,7 +290,9 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
         raise ValueError("transfer function has no impedance data")
     period = comps[0]["period"]
     rho_all = []
-    phase_all = []
+    # NB: only rho drives the axis fit — the phase panel's limits are fixed
+    # by the convention, so nothing phase-shaped is collected here (the fold
+    # itself is applied once, at draw time, below).
     for c in comps:
         z = c["z"]
         rho = (np.abs(z) ** 2) / (MU0 * (2.0 * np.pi / period))
@@ -284,14 +301,6 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
         if not np.any(ok):
             continue
         rho_all.append(rho[ok])
-        if mode == "off-diagonal":
-            # L-M8 display convention: the plot FOLDS the off-diagonal
-            # phase to 0-90° (the half-height panel, DESIGN.md §10.6) — the
-            # ViewTF table deliberately shows the RAW ±180° values
-            # (provenance: what was estimated); the fold is display-only
-            phase_all.append(_fold_phase_deg(phase)[ok])
-        else:
-            phase_all.append(phase[ok])
 
     x_min, x_max = _decade_limits(period)
     if rho_ylim is not None:
@@ -313,6 +322,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
     ax_rho = fig.add_subplot(gs[0])
     ax_phi = fig.add_subplot(gs[1], sharex=ax_rho)
 
+    clipped: dict[str, tuple[int, float, float]] = {}
     for c in comps:
         z = c["z"]
         rho = (np.abs(z) ** 2) / (MU0 * (2.0 * np.pi / period))
@@ -333,13 +343,38 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
                         markerfacecolor=mfc,
                         label=label, capsize=2.5, markersize=5,
                         linewidth=1.0, elinewidth=0.8)
+        # L-M8 display convention: the plot FOLDS the off-diagonal phase
+        # to 0-90° (the half-height panel, DESIGN.md §10.6) — the ViewTF
+        # table deliberately shows the RAW ±180° values (provenance: what
+        # was estimated); the fold is display-only.
         ph = _fold_phase_deg(phase)[ok] if mode == "off-diagonal" else phase[ok]
+        if mode == "off-diagonal":
+            # the axis is (0°, 90°) and matplotlib drops what falls outside
+            # it — count those instead of losing the series in silence
+            # (issues.md H5: a convention-flipped import drew an empty panel)
+            outside = (ph < 0.0) | (ph > 90.0)
+            if np.any(outside):
+                clipped[label] = (int(outside.sum()),
+                                  float(np.min(ph[outside])),
+                                  float(np.max(ph[outside])))
         phi_se_ok = phi_se[ok] if phi_se is not None else None
         ax_phi.errorbar(period[ok], ph, yerr=phi_se_ok,
                         fmt=fmt, color=COLORS.get(key, "k"),
                         markerfacecolor=mfc,
                         label=label, capsize=2.5, markersize=5,
                         linewidth=1.0, elinewidth=0.8)
+
+    if clipped:
+        detail = "; ".join(
+            f"{name}: {n} point(s) at {lo:.1f}°–{hi:.1f}°"
+            for name, (n, lo, hi) in sorted(clipped.items())
+        )
+        _log.warning(
+            "off-diagonal phase panel shows only 0°–90° (DESIGN.md §10.6) — "
+            "%s fall outside it and are clipped: no ±180° fold can place "
+            "them in the display quadrant. The raw values are still in the "
+            "View TF table; check the impedance sign/phase convention of "
+            "the source TF if they were not expected.", detail)
 
     apply_style(fig, (ax_rho, ax_phi))
     ax_rho.set_xscale("log")

@@ -49,10 +49,12 @@ def _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) -> str:
     it from the nomenclature keyword (mt_metadata CHANNEL_MAPS) or, failing
     that, from the actual channel names (bx/by -> fluxgate B, hx/hy -> coil H).
 
-    Note the mode only drives the nT->A/m conversion via
-    :func:`_magnetic_to_h`: 'b' always converts (fluxgate B is nT), while
-    'h' converts unless the payload units already say A/m (coil archives are
-    nT too — see history §16.3 USArray verification).
+    Note the mode only drives the *fallback* of :func:`_magnetic_to_h`:
+    explicit unit attrs win first (A/m is never rescaled; an explicit
+    magnetic-induction unit converts at its own prefix), and only payloads
+    without usable unit attrs fall back to the mode — 'b' (fluxgate B is
+    archived in nT) converts, 'h' keeps the legacy unitless convention
+    (history §16.3 USArray verification).
     """
     mu = str(magnetic_unit or "auto").strip().lower()
     if mu in ("h", "b"):
@@ -660,21 +662,71 @@ def _reject_counts(x, comp, units, where):
         )
 
 
-def _magnetic_to_h(x, comp, b_to_h, units):
-    """Convert a magnetic channel from nT to A/m (B -> H, /mu0).
+#: Explicit H (magnetic field intensity) unit attrs — canonical mt_metadata
+#: name (or raw spelling when the registry is unavailable) -> factor to A/m.
+#: A payload carrying one of these already holds H and must never be
+#: rescaled, whatever the nomenclature-derived mode says (DESIGN.md §10.5,
+#: "explicit A/m -> leave").
+_H_UNIT_FACTORS = {
+    "ampere per meter": 1.0,
+    "a/m": 1.0,
+    "milliampere per meter": 1e-3,
+    "microampere per meter": 1e-6,
+}
 
-    The fc must carry H in A/m for the impedance to be in ohm (V/m per A/m);
-    nT data must therefore be divided by mu0. ``b_to_h`` (fluxgate B, mode
-    'b') always converts; mode 'h' (coil) is archived in nT by mth5 as well,
-    so it converts too — unless the payload explicitly says the data are
-    already in A/m (or carries no unit info at all, e.g. synthetic tests,
-    which pass mode 'h' for unit-neutral A/m data).
+#: Explicit B (magnetic induction) unit attrs -> factor to tesla; H follows
+#: as ``x * factor / MU0`` (A/m). Exact canonical names only — a gradient
+#: unit ("nanoTesla per meter") must not be mistaken for a field. The raw
+#: "nT"/"nanotesla" spellings below cover a missing unit registry.
+_B_UNIT_FACTORS = {
+    "tesla": 1.0,
+    "millitesla": 1e-3,
+    "microtesla": 1e-6,
+    "nanotesla": 1e-9,
+    "picotesla": 1e-12,
+    "nt": 1e-9,
+}
+
+
+def _magnetic_to_h(x, comp, b_to_h, units):
+    """Convert a magnetic channel to A/m (B -> H, /mu0) — DESIGN.md §10.5.
+
+    The fc must carry H in A/m for the impedance to be in ohm (V/m per A/m).
+    Precedence, identical for modes 'b' and 'h':
+
+    1. **explicit H units** (A/m and friends) win over every mode — the
+       payload already carries H, so it is returned untouched;
+    2. an **explicit magnetic-induction unit** (pT/nT/uT/mT/T, or any raw
+       spelling containing "nano") is scaled by its own prefix, then /mu0;
+    3. **no usable unit attrs** fall back to the mode alone: 'b' (fluxgate
+       B is archived in nT) converts, 'h' keeps the legacy unitless
+       convention (synthetic fixtures hold A/m already).
+
+    Previously (3) short-circuited before the units were consulted, so a
+    fluxgate-mode payload that had been converted to A/m upstream was
+    scaled a second time (Z wrong by ~1.26e3).
     """
     _reject_counts(x, comp, units, "Compute FC")
+    raw = (units or {}).get(comp, "")
+    # _canonical_unit keeps the registry's own casing — normalize here so
+    # the tables below are plain lowercase lookups (as _electric_to_vm does)
+    canon = _canonical_unit(raw)
+    key = (canon if canon is not None else str(raw)).strip().lower()
+    factor = _H_UNIT_FACTORS.get(key)
+    if factor is not None:
+        if b_to_h and factor != 1.0:
+            # the mode promised a B payload; the units say otherwise and
+            # win — worth a trace for anyone reading the fc attrs later
+            _log.debug(
+                "channel '%s': mode 'b' but unit attrs %r are already H — "
+                "leaving untouched (DESIGN.md §10.5)", comp, raw)
+        return x * factor
+    factor = _B_UNIT_FACTORS.get(key)
+    if factor is None and "nano" in key:
+        factor = 1e-9  # raw nano-spelling the registry could not canonicalize
+    if factor is not None:
+        return x * factor / MU0
     if b_to_h:
-        return x * 1e-9 / MU0
-    u = str((units or {}).get(comp, "")).lower()
-    if u and ("nano" in u or u in ("nt", "nanotesla")):
         return x * 1e-9 / MU0
     return x
 

@@ -9,6 +9,7 @@ per-decade scale (MT convention).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -125,6 +126,85 @@ def test_appres_phase_diagonal_signed(tmp_path: Path):
         ax_phi = fig.axes[1]
         assert ax_phi.get_ylim() == (-180, 180)
         assert fig._suptitle.get_text().startswith("NO46")
+    finally:
+        plt.close(fig)
+
+
+def _phase_series(ax_phi, name):
+    """Drawn phase y-values of the series labelled ``name`` (XY / YX)."""
+    for container in ax_phi.containers:
+        line = container.lines[0]
+        if name in (container.get_label(), line.get_label()):
+            return np.asarray(line.get_ydata(), dtype=float)
+    raise AssertionError(f"no {name!r} series drawn on the phase panel")
+
+
+def test_fold_phase_deg_is_a_full_mod180():
+    """The ±180° fold is complete in both directions (issues.md H5).
+
+    The old one-sided ``p < 0 → p + 180`` pass left anything at/above 180°
+    untouched, so wrapped phases were clipped away by the (0°, 90°) axis.
+    """
+    from emptyui_mth5.plotting import _fold_phase_deg
+
+    raw = np.array([-135.0, -18.4, 0.0, 45.0, 90.0, 161.6, 180.0, 190.0,
+                    375.0, np.nan])
+    got = _fold_phase_deg(raw)
+    np.testing.assert_allclose(
+        got[:9], [45.0, 161.6, 0.0, 45.0, 90.0, 161.6, 0.0, 10.0, 15.0],
+        atol=1e-9)
+    assert np.isnan(got[9])
+
+
+def test_in_quadrant_phase_draws_every_point(tmp_path: Path, caplog):
+    """A healthy off-diagonal TF fills the phase panel with no warning."""
+    periods = np.array([2.0, 4.0, 8.0, 16.0])
+    Z = np.zeros((4, 3, 2), dtype=complex)
+    Z[:, 0, 1] = 3 + 1j    # xy: +18.4° — first quadrant
+    Z[:, 1, 0] = 2 + 1j    # yx: +26.6° — first quadrant
+    tf = build_tf(periods, Z, ["bx", "by"], ["e1", "e2", "bz"],
+                  channel_nomenclature="lemi12",
+                  survey_id="bgs", station_id="NO46", run_id="sr1_0001")
+    with caplog.at_level(logging.WARNING):
+        fig, _ = _render(tf, "off-diagonal", tmp_path)
+    try:
+        ax_phi = fig.axes[1]
+        for name in ("XY", "YX"):
+            series = _phase_series(ax_phi, name)
+            assert len(series) == len(periods)
+            assert np.all((series >= 0.0) & (series <= 90.0)), (name, series)
+        assert not [r for r in caplog.records
+                    if "phase panel" in r.getMessage()]
+    finally:
+        plt.close(fig)
+
+
+def test_out_of_quadrant_phase_is_reported_not_silent(tmp_path: Path,
+                                                       caplog):
+    """Values ±180° cannot place in (0°, 90°) are counted and warned about.
+
+    The shipped fixture's ``Zxy = 3 - 1j`` folds to 161.6° — outside the
+    display quadrant, so matplotlib drops those markers: previously they
+    vanished silently and the panel simply looked empty (issues.md H5).
+    """
+    tf = _impedance_tf()
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        fig, _ = _render(tf, "off-diagonal", tmp_path)
+    try:
+        ax_phi = fig.axes[1]
+        xy = _phase_series(ax_phi, "XY")
+        yx = _phase_series(ax_phi, "YX")
+        # YX (26.6°) is inside the panel and stays drawn
+        assert np.all((yx >= 0.0) & (yx <= 90.0))
+        # XY folds to 161.6° — outside the 0–90° box, so it is clipped, and
+        # the clip is now loud instead of silent
+        assert np.all((xy > 90.0) & (xy < 180.0)), xy
+        messages = [r.getMessage() for r in caplog.records
+                     if "phase panel" in r.getMessage()]
+        assert len(messages) == 1, messages
+        assert "XY" in messages[0]
+        assert "4 point(s)" in messages[0]
+        assert "161.6" in messages[0]
     finally:
         plt.close(fig)
 

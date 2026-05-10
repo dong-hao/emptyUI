@@ -1454,9 +1454,14 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
 ### 10.5 Units & scaling
 
 - **Magnetic**: B/H mode derived from nomenclature/channel names (bx/by →
-  fluxgate B→H; hx/hy → coil H, archived in nT like fluxgate B). nT→A/m
-  conversion is units-aware: nT units → convert; explicit A/m (or unknown,
-  legacy synthetic) → leave. Regression: `test_magnetic_units.py`.
+  fluxgate B→H; hx/hy → coil H, archived in nT like fluxgate B). Conversion
+  is **units-first, mode-second**: explicit A/m attrs → leave untouched
+  (whichever mode — the payload already carries H); an explicit induction
+  unit (T/mT/µT/nT/pT) → scale by its own prefix ÷ μ₀; only payloads with
+  **no** usable unit attrs fall back to the mode alone ('b' converts —
+  fluxgate is archived in nT; 'h' leaves — the legacy unitless synthetic
+  convention). Regression: `test_magnetic_units.py` (incl. the `b`+A/m
+  precedence case, issues.md H2).
 - **Electric (`Compute FC`, attr-aware)**:
 
   | condition | action |
@@ -1499,9 +1504,14 @@ nodes — no combined plot.
 - **Error-bar math** (aurora/mtpy formulas): `σ_|Z| = σ_Z/√2`;
   `σ_ρ/ρ = 2·σ_|Z|/|Z|`; `σ_φ(rad) = σ_|Z|/|Z|`; tipper per Re/Im panel:
   `σ_component = σ_T/√2`.
-- **Phase display**: off-diagonal components folded into (0°, 90°) by ±180°,
-  ylim 0–90°, ticks every 15°; **diagonal components keep signed phase in
-  [-180°, 180°]**.
+- **Phase display**: off-diagonal components folded into (0°, 90°) by ±180°
+  (full `mod 180`, both directions), ylim 0–90°, ticks every 15°; **diagonal
+  components keep signed phase in [-180°, 180°]**. A value no ±180° fold can
+  place inside (0°, 90°) is **reported, not silently dropped**: one loud
+  warning names the component, the clipped point count and their value range
+  (issues.md H5). The axis stays at 0–90° — parity with USArray/aurora
+  `plot_config`, never an auto-expanding ylim; raw values stay in the View
+  TF table.
 - **Axes**: x = Period (secs) log10 (decade ticks, shared across panels);
   ρ_a = log10 (Ω·m); φ = linear (Degrees); tipper = Re/Im, ylim [-1, 1];
   **equal per-decade scale** (one decade of period = one decade of ρ_a — MT
