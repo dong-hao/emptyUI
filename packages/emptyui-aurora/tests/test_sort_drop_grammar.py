@@ -111,7 +111,7 @@ def test_starved_deep_level_dropped_loudly(caplog):
     vanishes from the merged TF, but now with a warning instead of
     silently."""
     levels = _container()
-    out, _ref, rows = coherence_sort_fcs(
+    out, _ref, _rows = coherence_sort_fcs(
         levels, None, ["hx", "hy"], ["ex", "ey"],
         mode="weight", coherence_min=0.25, coherence_max=0.98)
     est = estimate_tf_levels(out, ["hx", "hy"], ["ex", "ey"],

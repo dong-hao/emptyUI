@@ -495,7 +495,7 @@ def test_pairing_intersect_drops_unmatched(caplog):
 
     fc, ref = _paired_pair_fcs(extra_ref=2)
     with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
-        periods, Z, Z_err = estimate_tf(
+        _periods, Z, _Z_err = estimate_tf(
             fc, ("hx", "hy"), ("ex", "ey"), estimator_engine="RME_RR",
             remote_reference=True, ref_fc=ref)
     assert any("kept" in r.message and "remote window" in r.message

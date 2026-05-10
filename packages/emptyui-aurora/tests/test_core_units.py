@@ -67,7 +67,6 @@ def test_align_restamps_units_from_core_series(tmp_path):
     node = AlignRuns()
     out = node.execute(RunContext(workspace=tmp_path, store=DataStore()), a, b)
     for key in ("data1", "data2"):
-        import sys; print('DBG test:', key, out[key].dataset['hx'].attrs.get('filters'), file=sys.stderr)
         ds = out[key].dataset
         assert ds["hx"].attrs.get("units") == "nanoTesla"
         assert ds["ex"].attrs.get("units") == "milliVolt per kilometer"

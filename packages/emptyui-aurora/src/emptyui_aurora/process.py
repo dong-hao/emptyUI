@@ -818,7 +818,6 @@ class BuildFC(Node):
         if not regroup_contiguous:
             spans = [[u[0]] for u in units]
         else:
-            u_rate = {u[0]: u[1] for u in units}
             u_start = {u[0]: u[2] for u in units}
             u_end = {u[0]: u[3] for u in units}
             per_rate: dict[float, list[str]] = {}

@@ -30,3 +30,16 @@ jobs:
 
       - name: Pytest edge cases
         run: .venv/bin/python -m pytest packages -q -m errors
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: ruff check (same pinned version as the [dev] extras)
+        # uvx --from pins the exact release, so CI's rule set is the one
+        # the repo's own ruff==0.16.4 pin resolves for local dev
+        run: uvx --from ruff==0.16.4 ruff check .

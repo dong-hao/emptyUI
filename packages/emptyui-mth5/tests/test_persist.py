@@ -138,7 +138,7 @@ def test_runts_context_param_wins_without_payload_metadata(tmp_path):
     assert runts_context(_Duck()) == ("S", "B", "r")
     # the payload's plain fields are metadata too — a disagreeing param
     # loses (same payload-truth rule); params fill only the true gap
-    survey, station, run = runts_context(
+    _survey, _station, run = runts_context(
         _Duck(), run="override",
         logger=__import__("logging").getLogger("emptyui.test"))
     assert run == "r"
@@ -156,7 +156,7 @@ def test_runts_context_payload_truth_overrides_stale_param(caplog):
     not poison the fc/TF metadata: the payload id wins, loudly."""
     from emptyui_mth5.persist import runts_context
 
-    survey, station, run = runts_context(
+    _survey, _station, run = runts_context(
         _WithRunMd("sr1_0001"), survey="NO46", station="NO46", run="a,b",
         logger=__import__("logging").getLogger("emptyui.test"))
     assert run == "sr1_0001"

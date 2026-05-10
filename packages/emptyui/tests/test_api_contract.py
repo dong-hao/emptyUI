@@ -9,6 +9,8 @@ Additions are tolerated (the frontend ignores unknown fields — the same
 "files may travel" philosophy as the settings file).
 """
 
+from typing import ClassVar
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -63,9 +65,10 @@ def _registry() -> Registry:
             Param("span", "string", time_bar="data"),
             Param("note", "text", placeholder="…", optional=True),
         )
-        inherit = {"data": {"survey": "survey"}}
+        inherit: ClassVar[dict] = {"data": {"survey": "survey"}}
         deps = ("numpy>=1.24",)
-        port_types = {"test.kind": {"color": "#123456", "label": "Test"}}
+        port_types: ClassVar[dict] = {
+            "test.kind": {"color": "#123456", "label": "Test"}}
 
         def execute(self, ctx, **kw):
             return {"out": {"kind": "image", "path": ""}}

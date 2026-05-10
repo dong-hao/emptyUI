@@ -97,7 +97,7 @@ def test_single_rate_keeps_every_level():
             coords={"frequency": np.arange(1, 130) * (fs / 256),
                     "time": np.arange(100)},
             attrs={"sample_rate": fs})
-    rate, tiers = _resolve_rate_tiers(levels, "auto")
+    _rate, tiers = _resolve_rate_tiers(levels, "auto")
     assert tiers == [0, 1, 2, 3]  # the filter is a no-op
 
 

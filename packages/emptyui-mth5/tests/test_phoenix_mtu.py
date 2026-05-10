@@ -9,7 +9,7 @@ skipped when the data dir is absent."""
 from __future__ import annotations
 
 import struct
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -43,7 +43,8 @@ def _tbl_value(tag: str, value) -> bytes:
     elif kind == "char":
         v[0 : len(value)] = value.encode("latin-1")
     elif kind == "time":
-        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+        dt = datetime.strptime(
+            value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
         v[0:6] = bytes([dt.second, dt.minute, dt.hour, dt.day, dt.month,
                         dt.year - 2000])
     else:
@@ -116,13 +117,13 @@ def _synthetic_corpus(data_path: Path) -> None:
     TS3 = 2 x 1-s slots every 10 min, TS4 = 2 x 16-s slots every 10 min,
     TS5 = continuous."""
     _write_tbl(data_path / "SYNTH01.TBL")
-    t0 = datetime(2009, 12, 16, 7, 55, 0)
+    t0 = datetime(2009, 12, 16, 7, 55, 0, tzinfo=timezone.utc)
     _write_ts(data_path / "SYNTH01.TS3", 2400,
               [(t0, 1), (t0 + _slot_delta(10), 1)], seed=1)
-    t4 = datetime(2009, 12, 16, 7, 50, 0)
+    t4 = datetime(2009, 12, 16, 7, 50, 0, tzinfo=timezone.utc)
     _write_ts(data_path / "SYNTH01.TS4", 150,
               [(t4, 16), (t4 + _slot_delta(10), 16)], seed=2)
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     _write_ts(data_path / "SYNTH01.TS5", 15, [(t5, 100)], seed=3)
 
 
@@ -141,9 +142,9 @@ def test_block_tag_decode(tmp_path):
 
 
     rng = np.random.default_rng(0)
-    t = datetime(2009, 12, 16, 8, 5, 0)
+    t = datetime(2009, 12, 16, 8, 5, 0, tzinfo=timezone.utc)
     tag = _block_tag(_ts_block(t, 2400, 2400, 5, rng=rng))
-    assert tag.start == pd.Timestamp(t, tz="UTC")
+    assert tag.start == pd.Timestamp(t)
     assert (tag.rate, tag.n_scan, tag.n_ch) == (2400, 2400, 5)
     assert tag.clock_status == 4 and tag.clock_error_s == 0.0
     assert not tag.saturated
@@ -153,7 +154,7 @@ def test_group_segments_slots_and_continuous(tmp_path):
     """Contiguous blocks regroup: slots stay separate, continuous streams
     collapse to one segment."""
     p = tmp_path / "SYNTH01.TS4"
-    t4 = datetime(2009, 12, 16, 7, 50, 0)
+    t4 = datetime(2009, 12, 16, 7, 50, 0, tzinfo=timezone.utc)
     _write_ts(p, 150, [(t4, 16), (t4 + _slot_delta(10), 16)], seed=4)
     segs = _group_segments(_iter_blocks(p))
     assert len(segs) == 2
@@ -161,7 +162,7 @@ def test_group_segments_slots_and_continuous(tmp_path):
     assert (segs[1].start - segs[0].start).total_seconds() == 600.0
 
     p5 = tmp_path / "SYNTH01.TS5"
-    _write_ts(p5, 15, [(datetime(2009, 12, 16, 7, 46, 52), 100)], seed=5)
+    _write_ts(p5, 15, [(datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc), 100)], seed=5)
     segs5 = _group_segments(_iter_blocks(p5))
     assert len(segs5) == 1 and segs5[0].n_blocks == 100
 
@@ -241,7 +242,7 @@ def test_read_phoenix_mtu_quality_warnings(tmp_path):
     warnings — never rejections (§24.8)."""
     _write_tbl(tmp_path / "SYNTH01.TBL")
     rng = np.random.default_rng(9)
-    t = datetime(2009, 12, 16, 7, 46, 52)
+    t = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     with open(tmp_path / "SYNTH01.TS5", "wb") as fid:
         fid.write(_ts_block(t, 15, 15, 5, rng=rng))
         fid.write(_ts_block(t + _second_delta(1), 15, 15, 5, rng=rng,
@@ -260,7 +261,7 @@ def test_read_phoenix_mtu_truncated_tail(tmp_path):
     the on-disk norm after a receiver is pulled mid-write)."""
     _write_tbl(tmp_path / "SYNTH01.TBL")
     rng = np.random.default_rng(11)
-    t = datetime(2009, 12, 16, 7, 46, 52)
+    t = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     buf = _ts_block(t, 15, 15, 5, rng=rng)
     with open(tmp_path / "SYNTH01.TS5", "wb") as fid:
         fid.write(buf)
@@ -275,14 +276,15 @@ def test_read_phoenix_mtu_schedule_crosscheck(tmp_path):
     cross-check, never a rejection)."""
     _write_tbl(tmp_path / "SYNTH01.TBL")
     rng = np.random.default_rng(13)
-    t = datetime(2009, 12, 16, 7, 55, 0)
+    t = datetime(2009, 12, 16, 7, 55, 0, tzinfo=timezone.utc)
     with open(tmp_path / "SYNTH01.TS3", "wb") as fid:
         fid.write(_ts_block(t, 2400, 2400, 5, rng=rng))
     # the TBL says L3NS = 1 s; write a second 1-s slot 2 s later — fine
     # (spacing is loose), but then a 2-s continuous segment: length warns
     with open(tmp_path / "SYNTH01.TS4", "wb") as fid:
-        for k in range(32):  # 32 s continuous at 150 Hz — schedule says 16
-            fid.write(_ts_block(t + _second_delta(k), 150, 150, 5, rng=rng))
+        fid.writelines(
+            _ts_block(t + _second_delta(k), 150, 150, 5, rng=rng)
+            for k in range(32))
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
     assert any("TBL schedule says 16 s" in w for w in res["warnings"])
 
@@ -526,7 +528,7 @@ def test_read_phoenix_mtu_saturated_mask(tmp_path):
     from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     rng = np.random.default_rng(9)
     with open(tmp_path / "SYNTH01.TS5", "wb") as fid:
         fid.writelines(_ts_block(t5 + timedelta(seconds=k), 15, 15, 5,
@@ -559,7 +561,7 @@ def test_read_phoenix_mtu_clean_no_mask(tmp_path):
     from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 4)], seed=10)
     res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path)
     with MTH5() as m:
@@ -577,7 +579,7 @@ def test_read_phoenix_mtu_stream_split(tmp_path):
     from mth5.mth5 import MTH5
 
     _write_tbl(tmp_path / "SYNTH01.TBL")
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     t0 = pd.Timestamp("2009-12-16T07:46:52", tz="UTC")
     # 10 one-second blocks at 15 Hz; session = 4 s -> 4+4+2 s runs
     _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 10)], seed=11)
@@ -640,8 +642,8 @@ def test_slot_schedule_hsmp_mismatch_warns(tmp_path):
     nonsense slot indices."""
     _write_tbl(tmp_path / "SYNTH01.TBL", HSMP=5)  # 5 s vs the real 600 s
     _write_ts(tmp_path / "SYNTH01.TS3", 2400,
-              [(datetime(2009, 12, 16, 7, 55, 0), 1),
-               (datetime(2009, 12, 16, 8, 5, 0), 1)], seed=5)
+              [(datetime(2009, 12, 16, 7, 55, 0, tzinfo=timezone.utc), 1),
+               (datetime(2009, 12, 16, 8, 5, 0, tzinfo=timezone.utc), 1)], seed=5)
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
     df = res["slot_schedule"]
     t3 = df[df["sample_rate"] == 2400.0]
@@ -658,9 +660,9 @@ def test_slot_schedule_survives_missed_interior_slot(tmp_path):
     physical slot positions (slot 2 is simply absent)."""
     _write_tbl(tmp_path / "SYNTH01.TBL")  # defaults: HSMP=600, L3NS=1
     _write_ts(tmp_path / "SYNTH01.TS3", 2400,
-              [(datetime(2009, 12, 16, 7, 55, 0), 1),
-               (datetime(2009, 12, 16, 8, 5, 0), 1),
-               (datetime(2009, 12, 16, 8, 25, 0), 1)],  # 08:15 missed
+              [(datetime(2009, 12, 16, 7, 55, 0, tzinfo=timezone.utc), 1),
+               (datetime(2009, 12, 16, 8, 5, 0, tzinfo=timezone.utc), 1),
+               (datetime(2009, 12, 16, 8, 25, 0, tzinfo=timezone.utc), 1)],  # 08:15 missed
               seed=6)
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
     df = res["slot_schedule"]
@@ -733,7 +735,7 @@ def test_session_by_slot(tmp_path):
     (every HSMP seconds): slot-granular QC units that preserve longer
     contiguous spans than fixed-hour splitting."""
     _write_tbl(tmp_path / "SYNTH01.TBL", HSMP=20)  # 20-s slot grid
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 100)], seed=11)  # 100 s
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
                            session_by_slot=True)
@@ -752,7 +754,7 @@ def test_session_by_slot_falls_back_without_hsmp(tmp_path):
     tags_path.write_bytes(b"".join(
         blk for blk in (raw[i:i + 25] for i in range(0, len(raw), 25))
         if not blk.startswith(b"HSMP")))
-    t5 = datetime(2009, 12, 16, 7, 46, 52)
+    t5 = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
     _write_ts(tmp_path / "SYNTH01.TS5", 15, [(t5, 10)], seed=11)
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
                            session_by_slot=True, stream_session_hours=4e-4)
@@ -769,10 +771,11 @@ def test_read_phoenix_mtu_fractional_window_no_false_alarm(tmp_path):
     exemption is bounded by the slot length."""
     _write_tbl(tmp_path / "SYNTH01.TBL")
     rng = np.random.default_rng(13)
-    t4 = datetime(2009, 12, 16, 7, 50, 0)
+    t4 = datetime(2009, 12, 16, 7, 50, 0, tzinfo=timezone.utc)
     with open(tmp_path / "SYNTH01.TS4", "wb") as fid:
-        for k in range(16):  # one 16-s slot (L4NS = 16)
-            fid.write(_ts_block(t4 + _second_delta(k), 150, 150, 5, rng=rng))
+        fid.writelines(
+            _ts_block(t4 + _second_delta(k), 150, 150, 5, rng=rng)
+            for k in range(16))
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
                            start="2009-12-16 07:49:00",
                            end="2009-12-16 07:50:10.5")
@@ -788,7 +791,8 @@ def test_group_segments_subsecond_tolerance_and_out_of_order(tmp_path, caplog):
 
     def tag(y, mo, d, h, mi, s, rate=2400, n_scan=1200):
         return _BlockTag(
-            start=pd.Timestamp(datetime(y, mo, d, h, mi, s), tz="UTC"),
+            start=pd.Timestamp(
+                datetime(y, mo, d, h, mi, s, tzinfo=timezone.utc)),
             rate=rate, n_scan=n_scan, n_ch=5, clock_status=4,
             clock_error_s=0.0, saturated=False)
 

@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff==0.16.4"]
 
 [project.entry-points."emptyui.nodes"]
 example = "emptyui_example.plugin:register"

@@ -217,7 +217,7 @@ class PlotTimeSeriesNode(Node):
         that family plot as segments on the shared time axis (NOT one plot
         per member: thousands of runs would overwhelm). The time bar
         crops each run (clamped; runs entirely outside are skipped)."""
-        members, hit, rates = self._family_members(data, sample_rate)
+        members, hit, _rates = self._family_members(data, sample_rate)
         coerced = [coerce_run(payload) for payload, _ in members]
         # channel spec resolves against the first member (a family's runs
         # share components); per-member missing channels are skipped with

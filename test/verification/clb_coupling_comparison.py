@@ -48,7 +48,7 @@ def _corner_from_table(t):
 
 
 def _neutralize_clb(cal):
-    for num, t in cal.channels.items():
+    for t in cal.channels.values():
         fc = _corner_from_table(t)
         below = t.frequencies < fc
         t.amplitudes = np.where(below, 1.0, t.amplitudes)

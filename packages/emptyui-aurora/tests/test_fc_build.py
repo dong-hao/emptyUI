@@ -82,7 +82,7 @@ def test_build_fc_merges_runs_along_time(tmp_path):
     # windows on both sides of the 32-s gap: span > one run's length
     assert span_s > 32.0
     # identity attrs present (station truth for Estimate TF / export)
-    sample = fc[sorted(fc)[0]]
+    sample = fc[min(fc)]
     assert sample.attrs.get("station_id") == "SDX"
     assert sample.attrs.get("survey_id") == "4P"
     archive.close_mth5()
@@ -490,7 +490,7 @@ def test_build_fc_session_labels(tmp_path):
         window_type="boxcar", clock_zero="epoch",
         regroup_contiguous=True, session_hours=16.0 / 3600.0)
     fc = res["fc"]
-    sample = fc[sorted(fc)[0]]
+    sample = fc[min(fc)]
     runs = np.asarray(sample["run_id"].values)
     # two sessions per run, session labels at window granularity
     assert sorted(set(runs)) == ["sr2400_0001_s0001", "sr2400_0001_s0002",
@@ -523,7 +523,7 @@ def test_build_fc_session_selection_feeds_select_runs(tmp_path):
     # the selector runs end-to-end on session labels: the diagnostics
     # artifact is published and the surviving windows carry session ids
     assert out["table"] is not None
-    runs = np.asarray(out["fc"][sorted(out["fc"])[0]]["run_id"].values)
+    runs = np.asarray(out["fc"][min(out["fc"])]["run_id"].values)
     assert set(runs).issubset({
         "sr2400_0001_s0001", "sr2400_0001_s0002",
         "sr2400_0002_s0001", "sr2400_0002_s0002"})
@@ -553,7 +553,7 @@ def test_compute_fc_stamps_run_id(tmp_path):
                               output_channels="hx,hy", decimation_levels=0,
                               window_samples=16, overlap=0.5,
                               window_type="boxcar", run="b")
-    sample = res["fc"][sorted(res["fc"])[0]]
+    sample = res["fc"][min(res["fc"])]
     assert "run_id" in sample.coords
     assert set(np.asarray(sample["run_id"].values)) == {"b"}
 

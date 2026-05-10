@@ -281,7 +281,7 @@ def ensure_h5_openable(path, log=None) -> None:
             "archive %s carries a stale HDF5 write flag (its last writer "
             "was interrupted) — clearing the flag via `h5clear -s`", path)
         proc = subprocess.run([h5clear, "-s", str(path)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise OSError(
                 f"{exc} — `h5clear -s` failed: {proc.stderr.strip() or proc.stdout.strip()}"

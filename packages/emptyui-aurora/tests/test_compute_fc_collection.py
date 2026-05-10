@@ -27,8 +27,8 @@ def _two_run_archive(tmp_path: Path):
         starts=["2024-01-01T00:00:00", "2024-01-01T00:01:36"])
 
 
-KW = dict(decimation_levels=0, factor=4, window_samples=16, overlap=0.5,
-          window_type="boxcar", clock_zero="epoch", persist=False)
+KW = {"decimation_levels": 0, "factor": 4, "window_samples": 16, "overlap": 0.5,
+      "window_type": "boxcar", "clock_zero": "epoch", "persist": False}
 
 
 def test_collection_route_parity_with_build_fc(tmp_path):
@@ -39,7 +39,7 @@ def test_collection_route_parity_with_build_fc(tmp_path):
 
     archive = _two_run_archive(tmp_path)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    W = dict(start="2024-01-01 00:00:00", end="2024-01-01 00:02:08")
+    W = {"start": "2024-01-01 00:00:00", "end": "2024-01-01 00:02:08"}
 
     coll = ExtractRun().execute(
         ctx, archive, selection="time range", **W)["data"]
@@ -67,7 +67,7 @@ def test_collection_run_id_coords(tmp_path):
         ctx, archive, selection="time range",
         start="2024-01-01 00:00:00", end="2024-01-01 00:02:08")["data"]
     fc = ComputeFC().execute(ctx, coll, **KW)["fc"]
-    ids = set(str(x) for x in fc[0].run_id.values.tolist())
+    ids = {str(x) for x in fc[0].run_id.values.tolist()}
     assert ids == {"sr2400_0001", "sr2400_0002"}
 
 

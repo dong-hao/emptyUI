@@ -56,7 +56,9 @@ def _sign24(x: np.ndarray) -> np.ndarray:
 
 def _block_tag(buf: bytes) -> _BlockTag:
     start = pd.Timestamp(
-        datetime(2000 + buf[5], buf[4], buf[3], buf[2], buf[1], buf[0]),
+        # wall-clock tag bytes; localized one frame below (DTZ001 can't
+        # see through the pd.Timestamp wrapper)
+        datetime(2000 + buf[5], buf[4], buf[3], buf[2], buf[1], buf[0]),  # noqa: DTZ001
         tz="UTC",
     )
     return _BlockTag(
@@ -406,7 +408,7 @@ def _slot_schedule(seg_info, table, warnings: list[str]):
             period = 0.0
         anchor = starts[0]
         for (run_id, start, end, n), k_start in zip(entries, starts):
-            k = int(round((k_start - anchor) / period)) if period > 0 else 0
+            k = round((k_start - anchor) / period) if period > 0 else 0
             grid_start = (pd.Timestamp(anchor, unit="s")
                           + pd.to_timedelta(k * period, unit="s"))
             # block-tag times are UTC (the tags carry no zone, but the

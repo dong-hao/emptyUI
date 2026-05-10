@@ -106,7 +106,6 @@ def test_plot_has_no_banding_params():
 
 def test_no_usable_bins_raises(tmp_path):
     """An fc with no usable electric outputs is refused, not plotted."""
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
     from _synthetic import synthetic_runts, synthetic_source
 
     remote = compute_fc_levels(
