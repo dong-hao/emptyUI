@@ -56,7 +56,9 @@ cd packages/web && npm install
 # Start API server on http://127.0.0.1:8000
 ./scripts/dev-backend.sh
 
-# Frontend — dev server on http://localhost:7860 (proxies /api to :8000)
+# Frontend — dev server on http://localhost:7860 (proxies /api to :8000),
+# also on every interface (0.0.0.0:7860) for remote browsers. Narrow it:
+#   cd packages/web && npm run dev -- --host 127.0.0.1
 cd packages/web && npm run dev
 
 # …or launch both at once (Ctrl+C stops both cleanly)
