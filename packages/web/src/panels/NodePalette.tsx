@@ -7,6 +7,13 @@ const CATEGORY_ORDER = ["Data I/O", "Processing", "Display"];
 interface Props {
   manifests: NodeManifest[];
   onAdd: (manifest: NodeManifest) => void;
+  /** the catalog request is in flight (or retrying) — say so, instead of
+   *  showing an empty list with no clue that anything was expected */
+  pending?: boolean;
+  /** terminal catalog failure reason, e.g. "catalog: GET /nodes: 500" */
+  error?: string | null;
+  /** user-triggered refetch of GET /api/nodes */
+  onRetry?: () => void;
 }
 
 /**
@@ -18,7 +25,7 @@ interface Props {
  * excluded from the palette — they remain executable when present in a
  * saved workflow.
  */
-export function NodePalette({ manifests, onAdd }: Props) {
+export function NodePalette({ manifests, onAdd, pending, error, onRetry }: Props) {
   const [query, setQuery] = useState("");
 
   const grouped = useMemo(() => {
@@ -54,6 +61,23 @@ export function NodePalette({ manifests, onAdd }: Props) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
+      {/* H6: a catalog that never arrives used to render as a silently empty
+          list — the two states below are the difference between "empty" and
+          "we could not find out" */}
+      {pending && !error && (
+        <p className="palette-status muted">Loading node catalog…</p>
+      )}
+      {error && (
+        <div className="palette-error" role="alert">
+          <strong>Node catalog unavailable</strong>
+          <p className="muted">{error}</p>
+          {onRetry && (
+            <button className="primary" onClick={onRetry}>
+              Retry catalog
+            </button>
+          )}
+        </div>
+      )}
       {grouped.map(({ category, items }) => (
         <div key={category} className="palette-category">
           <h3>{category}</h3>

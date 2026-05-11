@@ -78,7 +78,11 @@ export default function App() {
 
   useEffect(() => stopPolling, [stopPolling]);
 
-  useQuery({
+  // H6: the palette's ONLY data source is this query — its result used to be
+  // discarded, so a boot-time backend failure produced an empty palette, a
+  // disabled Run and zero explanation. The status is routed to the toolbar
+  // and to the palette itself, which carries the retry.
+  const catalogQuery = useQuery({
     queryKey: ["nodes"],
     queryFn: async () => {
       const c = await api.nodes();
@@ -86,6 +90,14 @@ export default function App() {
       return c;
     },
   });
+  const catalogPending = catalogQuery.isPending;
+  const catalogError = catalogQuery.isError
+    ? `catalog: ${
+        catalogQuery.error instanceof Error
+          ? catalogQuery.error.message
+          : String(catalogQuery.error)
+      }`
+    : null;
 
   useEffect(() => {
     ensureSocket();
@@ -510,9 +522,12 @@ export default function App() {
         </button>
         <span className={`run-status ${runStatus}`}>{runStatus}</span>
         {notice && <span className="notice-msg">{notice}</span>}
-        {(message ?? runError) && (
-          <span className="error-msg" title={message ?? runError ?? undefined}>
-            {message ?? runError}
+        {(message ?? runError ?? catalogError) && (
+          <span
+            className="error-msg"
+            title={message ?? runError ?? catalogError ?? undefined}
+          >
+            {message ?? runError ?? catalogError}
           </span>
         )}
         <span className="spacer" />
@@ -530,7 +545,15 @@ export default function App() {
         </button>
       </header>
       <div className="main">
-        <NodePalette manifests={catalog?.nodes ?? []} onAdd={handleAdd} />
+        <NodePalette
+          manifests={catalog?.nodes ?? []}
+          onAdd={handleAdd}
+          pending={catalogPending}
+          error={catalogError}
+          onRetry={() => {
+            void catalogQuery.refetch();
+          }}
+        />
         <div className="canvas">
           <ReactFlow
             nodes={nodes}

@@ -848,7 +848,13 @@ Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Que
   New nodes are placed at the **center of the user's current viewport**
   (`screenToFlowPosition`, two-phase: the card is re-centered after it
   renders, since its height is unknown before the params mount) — a fixed
-  origin disappears once the user pans/zooms away from it.
+  origin disappears once the user pans/zooms away from it. The palette
+  never renders a *silent* empty list: while the catalog request is in
+  flight it says **"Loading node catalog…"**, and a failed request replaces
+  it with **"Node catalog unavailable"** + the reason + a **Retry catalog**
+  button (the same reason is echoed in the toolbar error slot). An empty
+  palette therefore always means "the catalog says so", never "we lost the
+  catalog".
 - **Inline node params (default, ComfyUI paradigm)** — parameters render as
   widgets directly on the node body; the right-hand PropertiesPanel shows
   metadata (id, type, version, ports, description, deps) plus Delete. Path
@@ -856,7 +862,20 @@ Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Que
 - **Preview Plot / View Table nodes** — render an incoming `plot`/`table` inside
   the node body (drag-resizable), each with a **⤓ download** link for the full
   artifact.
-- **Toolbar** — run, cancel (✕), new/open/save workflow.
+- **Toolbar** — run, cancel (✕), new/open/save workflow. One `.error-msg`
+  slot carries the current failure reason — the failed action, the failed
+  run (§7.2 `run_finished.error`) or the catalog fetch — so a red state is
+  never unexplained (notice/`notice-msg` is its amber twin for
+  non-fatal remarks).
+- **Error boundary (`AppErrorBoundary`)** — the whole tree sits inside one
+  React error boundary, because React only recovers from a render throw if a
+  boundary exists *above* it. A throw is replaced by a crash card (alert
+  role): the message, collapsible stack details, **Copy details** and
+  **Reload emptyUI** (the app keeps no browser-side document, so a reload is
+  a clean workflow). A white screen is a bug — nothing may fail silently.
+  Fault injection for this contract: the DEV-only `?fault=render` switch
+  makes the first render throw; it is compiled out of every production
+  bundle (`import.meta.env.DEV`).
 
 State split: Zustand for the workflow document/selection/connection drafts;
 TanStack Query for server resources; WebSocket client for ephemeral run state.
