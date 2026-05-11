@@ -305,10 +305,13 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     })),
   deleteSelected: () =>
     set((s) => {
-      // full RF selection: multi-selected nodes AND selected edges (the
-      // single-node fallback covers workflows restored before RF selection)
+      // H4: delete EXACTLY the visible RF selection — the multi-selected
+      // nodes AND the selected edges. The panel's selectedNodeId is display
+      // state: unioning it in also removed whatever node the panel happened
+      // to be showing (a node the user had already deselected — box-select
+      // B after clicking A used to delete A *and* B, with no undo anywhere).
       const nodeIds = new Set(
-        s.nodes.filter((n) => n.selected || n.id === s.selectedNodeId).map((n) => n.id),
+        s.nodes.filter((n) => n.selected).map((n) => n.id),
       );
       return {
         nodes: s.nodes.filter((n) => !nodeIds.has(n.id)),

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { node, placeNode, settleViewport } from "./_flow";
+
 /** Deterministic geometry: room for three spread-out nodes on the canvas. */
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -354,4 +356,48 @@ test("New asks for confirmation and clears the canvas on accept", async ({
   page.once("dialog", (d) => void d.accept());
   await page.getByRole("button", { name: "New" }).click();
   await expect(page.locator(".mt-node")).toHaveCount(0);
+});
+
+test("Delete selected removes exactly the highlighted nodes", async ({ page }) => {
+  // H4: the button used to delete React Flow's selection UNIONED with the
+  // properties panel's stale selectedNodeId — box-select B after clicking A
+  // removed A *and* B, and the app has no undo anywhere.
+  await page.goto("/");
+  await addNode(page, "Load CSV");
+  await addNode(page, "Coherence Sort");
+  await settle(page);
+  await placeNode(page, "Load CSV", 200, 120);
+  await placeNode(page, "Coherence Sort", 900, 500);
+  await page.getByRole("button", { name: "Fit View" }).click();
+  await settleViewport(page);
+
+  // click the first node: React Flow selects it and the panel focuses it
+  await node(page, "Load CSV").locator(".mt-node-header").click();
+  await settle(page);
+  await expect(page.locator(".properties h2")).toHaveText("Load CSV");
+
+  // Shift-box-select ONLY the second node (selectionMode=Full: it must sit
+  // fully inside the rectangle, which must not reach the first node)
+  const target = (await node(page, "Coherence Sort").boundingBox())!;
+  await page.keyboard.down("Shift");
+  await page.mouse.move(target.x - 12, target.y - 12);
+  await page.mouse.down();
+  await page.mouse.move(target.x + target.width + 12, target.y + target.height + 12, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await settle(page);
+
+  // one highlighted node; the panel keeps ITS focus (Load CSV) — the
+  // highlight is what "selected" means, not the panel's display state
+  await expect(page.locator(".mt-node.selected")).toHaveCount(1);
+  await expect(page.locator(".properties h2")).toHaveText("Load CSV");
+
+  await page.getByRole("button", { name: "Delete selected" }).click();
+  await settle(page);
+
+  // only the highlighted node went — the clicked-but-deselected one survives
+  await expect(node(page, "Load CSV")).toHaveCount(1);
+  await expect(node(page, "Coherence Sort")).toHaveCount(0);
 });

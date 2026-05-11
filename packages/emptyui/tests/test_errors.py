@@ -305,6 +305,72 @@ def test_execution_cancelled_before_start():
     )
 
 
+def _failed_terminal(events):
+    """The terminal ``run_finished`` of a failed run. H3: the run store keeps
+    only this event's status/error, so a bare ``failed`` renders a red badge
+    with an empty message and no reason anywhere the client can read."""
+    finished = [e for e in events if e["event"] == "run_finished"]
+    assert finished, "no run_finished event was emitted"
+    last = finished[-1]
+    assert last["status"] == "failed"
+    assert last.get("error"), "run_finished carries no reason"
+    return last
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["cycle", "unknown_type", "param_coercion", "node_error"],
+)
+def test_run_finished_carries_the_failure_reason(case):
+    """H3: every failure path — including the PRE-KEY ones that raise before
+    a single node runs — must put its reason on run_finished. The executor's
+    own emit is terminal, so the worker never gets to add the detail itself
+    (that is exactly how the reason was lost)."""
+    if case == "cycle":
+        wf = Workflow(
+            nodes=[
+                WorkflowNode(id="a", type="test.passthru"),
+                WorkflowNode(id="b", type="test.passthru"),
+            ],
+            edges=[
+                Edge(id="e1", source="a", source_port="data",
+                     target="b", target_port="data"),
+                Edge(id="e2", source="b", source_port="data",
+                     target="a", target_port="data"),
+            ],
+        )
+        needle = "cycle"
+    elif case == "unknown_type":
+        wf = Workflow(nodes=[WorkflowNode(id="n1", type="nope.nope")],
+                      edges=[])
+        needle = "nope.nope"
+    elif case == "param_coercion":
+        # fails while building the cache key — before the node ever runs
+        wf = Workflow(
+            nodes=[WorkflowNode(id="n1", type="test.scale",
+                                params={"factor": "abc"})],
+            edges=[],
+        )
+        needle = "not a number"
+    else:
+        wf = Workflow(
+            nodes=[
+                WorkflowNode(id="n1", type="test.source"),
+                WorkflowNode(id="n2", type="test.boom"),
+            ],
+            edges=[Edge(id="e1", source="n1", source_port="data",
+                        target="n2", target_port="data")],
+        )
+        needle = "boom"
+
+    events = []
+    with pytest.raises(ExecutionError):
+        Executor(_registry()).run(wf, emit=events.append)
+    finished = _failed_terminal(events)
+    assert needle in finished["error"], finished
+    assert finished.get("node"), "the terminal event must name the node"
+
+
 # --- server error surfaces (from test_server.py) ------------------------
 
 def test_invalid_workflow_returns_422(client):
@@ -314,6 +380,48 @@ def test_invalid_workflow_returns_422(client):
     }
     resp = client.post("/api/runs", json={"workflow": workflow})
     assert resp.status_code == 422
+
+
+def test_failed_run_reason_reaches_the_api_and_the_worker_log(client,
+                                                                caplog):
+    """H3 end-to-end over the HTTP surface: the reason rides the terminal
+    run_finished EVENT (the only thing the run store reads), survives on the
+    summary GET /api/runs/{id} returns, and the worker logs it. The UI showed
+    a red "failed" with an empty message because the first two disagreed and
+    the third stayed silent."""
+    import logging
+    import time
+
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.io.load_csv",
+                   "params": {"path": "/nonexistent.csv"}}],
+        "edges": [],
+    }
+    with caplog.at_level(logging.WARNING, logger="emptyui.server"):
+        run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+        deadline = time.monotonic() + 10.0
+        body: dict = {}
+        while time.monotonic() < deadline:
+            body = client.get(f"/api/runs/{run_id}").json()
+            if body["status"] in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(0.05)
+        # the worker logs on its own thread — give it a moment after the
+        # terminal summary lands
+        log_deadline = time.monotonic() + 2.0
+        while time.monotonic() < log_deadline and not any(
+            f"run {run_id} failed" in r.getMessage() for r in caplog.records
+        ):
+            time.sleep(0.02)
+
+    assert body["status"] == "failed"
+    finished = [e for e in body["events"] if e["event"] == "run_finished"]
+    assert finished and finished[-1]["status"] == "failed"
+    reason = finished[-1].get("error")
+    assert reason and "CSV not found" in reason, finished[-1]
+    assert "CSV not found" in body.get("error", "")
+    assert any(f"run {run_id} failed" in r.getMessage()
+               for r in caplog.records)
 
 
 @pytest.mark.parametrize(

@@ -546,6 +546,11 @@ def create_app(
                     data_root=data_root,
                 )
             except Exception as exc:  # noqa: BLE001 — reported to clients
+                # The reason is BOTH logged here and carried on run_finished
+                # (the executor attaches it there, H3): the UI reads only the
+                # terminal event, so a bare "failed" leaves the toolbar with
+                # nothing to show while the run looks broken.
+                logger.warning("run %s failed: %s", run_id, exc)
                 summary = {"status": "failed", "error": str(exc)}
                 with lock:
                     info = runs.get(run_id)

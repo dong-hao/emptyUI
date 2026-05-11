@@ -600,13 +600,16 @@ class Executor:
             # direct executor.run callers may skip validate_workflow; a cycle
             # (incl. a self-loop) must fail loudly, not silently skip nodes
             missing = sorted(set(by_id) - set(order))
-            emit({"event": "run_finished", "status": "failed"})
-            raise ExecutionError(
-                missing[0],
-                ValueError(
-                    f"workflow contains a cycle involving nodes: {missing}"
-                ),
+            cycle_error = f"workflow contains a cycle involving nodes: {missing}"
+            emit(
+                {
+                    "event": "run_finished",
+                    "status": "failed",
+                    "node": missing[0],
+                    "error": cycle_error,
+                }
             )
+            raise ExecutionError(missing[0], ValueError(cycle_error))
 
         # Snapshot the manifests this run needs at start (DESIGN.md §5.1):
         # a plugin enable/disable toggle mid-run must not yank a node out of
@@ -622,11 +625,16 @@ class Executor:
             # direct executor.run callers may skip validate_workflow; also
             # covers a type vanishing between validation and this snapshot
             missing_types = sorted({by_id[nid].type for nid in unknown})
-            emit({"event": "run_finished", "status": "failed"})
-            raise ExecutionError(
-                unknown[0],
-                ValueError(f"unknown node type(s): {missing_types}"),
+            type_error = f"unknown node type(s): {missing_types}"
+            emit(
+                {
+                    "event": "run_finished",
+                    "status": "failed",
+                    "node": unknown[0],
+                    "error": type_error,
+                }
             )
+            raise ExecutionError(unknown[0], ValueError(type_error))
 
         # Structural signatures for every node, in topo order so each embeds
         # the already-computed signatures of its inputs (§7). Deliberately
@@ -652,7 +660,14 @@ class Executor:
                 # param coercion now happens at key time (§7 hashes the
                 # EFFECTIVE params) — surface the failure as the same
                 # ExecutionError the execution phase would produce
-                emit({"event": "run_finished", "status": "failed"})
+                emit(
+                    {
+                        "event": "run_finished",
+                        "status": "failed",
+                        "node": node_id,
+                        "error": str(exc),
+                    }
+                )
                 raise ExecutionError(node_id, exc) from exc
 
         execute = (
@@ -739,7 +754,14 @@ class Executor:
                             "error": str(exc),
                         }
                     )
-                    emit({"event": "run_finished", "status": "failed"})
+                    emit(
+                        {
+                            "event": "run_finished",
+                            "status": "failed",
+                            "node": node_id,
+                            "error": str(exc),
+                        }
+                    )
                     self._sweep_run_payloads(store, outputs_by_node, cache,
                                              logging.getLogger("emptyui"))
                     raise ExecutionError(node_id, exc) from exc
@@ -812,7 +834,14 @@ class Executor:
                         "error": str(exc),
                     }
                 )
-                emit({"event": "run_finished", "status": "failed"})
+                emit(
+                    {
+                        "event": "run_finished",
+                        "status": "failed",
+                        "node": node_id,
+                        "error": str(exc),
+                    }
+                )
                 self._sweep_run_payloads(store, outputs_by_node, cache,
                                          logging.getLogger("emptyui"))
                 raise ExecutionError(node_id, exc) from exc
@@ -844,7 +873,14 @@ class Executor:
                         "error": str(exc),
                     }
                 )
-                emit({"event": "run_finished", "status": "failed"})
+                emit(
+                    {
+                        "event": "run_finished",
+                        "status": "failed",
+                        "node": node_id,
+                        "error": str(exc),
+                    }
+                )
                 self._sweep_run_payloads(store, outputs_by_node, cache,
                                          logging.getLogger("emptyui"))
                 raise ExecutionError(node_id, exc) from exc

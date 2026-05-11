@@ -523,6 +523,11 @@ test("a node error is shown as copyable text in the properties panel", async ({
     timeout: 120_000,
   });
 
+  // H3: the toolbar carries the REASON, not just the red status — the run
+  // store keeps run_finished.error, so a failed run is never unexplained
+  // (the element only mounts when there is a message to show)
+  await expect(page.locator("header .error-msg")).toBeVisible();
+
   // The node card shows an ellipsized badge; the panel must show the full,
   // copyable text. Select the failing node.
   await node(page, "Extract Run").click();

@@ -30,11 +30,14 @@ import type { NodeManifest } from "./api/client";
 import { useRun } from "./stores/run";
 
 export default function App() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode, selectedNodeId } =
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addNode } =
     useWorkflow();
   const setCatalog = useCatalog((s) => s.setCatalog);
   const catalog = useCatalog((s) => s.catalog);
   const runStatus = useRun((s) => s.runStatus);
+  // H3: the reason of a failed run — the status badge alone leaves a red
+  // "failed" with no explanation in the toolbar
+  const runError = useRun((s) => s.runError);
   const startingCount = useRun((s) => s.startingCount);
   // L-F3 (§8.1): surface WS outages loudly — the badge appears when the
   // socket drops (reconnect attempts up to the cap, then a hard stop)
@@ -507,14 +510,19 @@ export default function App() {
         </button>
         <span className={`run-status ${runStatus}`}>{runStatus}</span>
         {notice && <span className="notice-msg">{notice}</span>}
-        {message && <span className="error-msg">{message}</span>}
+        {(message ?? runError) && (
+          <span className="error-msg" title={message ?? runError ?? undefined}>
+            {message ?? runError}
+          </span>
+        )}
         <span className="spacer" />
         <button
           className="danger"
           disabled={
-            !nodes.some((n) => n.selected) &&
-            !edges.some((e) => e.selected) &&
-            !selectedNodeId
+            // H4: enabled by the VISIBLE React Flow selection only — the
+            // button deletes exactly what is highlighted, so a panel-only
+            // focus can never arm a delete the user is not looking at
+            !nodes.some((n) => n.selected) && !edges.some((e) => e.selected)
           }
           onClick={() => useWorkflow.getState().deleteSelected()}
         >

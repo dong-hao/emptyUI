@@ -25,6 +25,10 @@ export type PayloadMap = Record<string, Record<string, PayloadSummary>>;
 interface RunState {
   runId: string | null;
   runStatus: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  /** Reason of a failed run, straight from the terminal run_finished event
+   *  (H3): the UI shows this in the toolbar — the status badge alone leaves
+   *  a red "failed" with no explanation. */
+  runError: string | null;
   nodeStates: Record<string, NodeRunState>;
   artifacts: ArtifactInfo[];
   payloads: PayloadMap;
@@ -47,6 +51,7 @@ interface RunState {
 export const useRun = create<RunState>((set) => ({
   runId: null,
   runStatus: "idle",
+  runError: null,
   nodeStates: {},
   artifacts: [],
   payloads: {},
@@ -59,6 +64,7 @@ export const useRun = create<RunState>((set) => ({
     set({
       runId: id,
       runStatus: id ? "queued" : "idle",
+      runError: null,
       nodeStates: {},
       artifacts: [],
       payloads: {},
@@ -150,7 +156,15 @@ export const useRun = create<RunState>((set) => ({
         break;
       }
       case "run_finished":
-        set({ runStatus: event.status as RunState["runStatus"] });
+        set({
+          runStatus: event.status as RunState["runStatus"],
+          // H3: keep the reason of a failed run — the executor carries it on
+          // the terminal event; a terminal status without one clears it
+          runError:
+            event.status === "failed"
+              ? ((event.error as string | undefined) || null)
+              : null,
+        });
         break;
     }
   },
@@ -160,6 +174,7 @@ export const useRun = create<RunState>((set) => ({
     set({
       runId: null,
       runStatus: "idle",
+      runError: null,
       nodeStates: {},
       artifacts: [],
       payloads: {},

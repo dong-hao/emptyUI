@@ -774,6 +774,14 @@ The `artifact` event carries the output `handle` id so viewer nodes resolve
 exactly which figure arrives on which input edge, even when one node publishes
 several figures.
 
+**Failure reasons ride the terminal event.** `run_finished: failed` carries
+`error` — the human-readable reason (missing input, bad param, node exception)
+— plus `node`, the id of the node that failed, when there is one; the run
+summary (`GET /api/runs/{id}`) repeats the same string at its top level, the
+worker logs it, and the toolbar renders it. A `failed` status with no reason
+is a contract violation: the UI must never show a red badge that cannot
+explain itself.
+
 ### 7.3 REST API
 
 | Method | Path | Purpose |
@@ -874,8 +882,10 @@ re-checked in `onConnect`, then re-validated server-side before every run.
   internal edges and a 24 px fan-out offset — external edges are *not* rewired.
   `Ctrl/Cmd+D` duplicates in place. Keystrokes in form controls are ignored.
 - **Selection**: click = exclusive, `Ctrl/Cmd+click` = additive, `Shift+drag` =
-  box selection (`selectionMode: Full`); `Delete`/`Backspace` deletes the full
-  selection.
+  box selection (`selectionMode: Full`); `Delete`/`Backspace` and the toolbar
+  **Delete selected** button delete the full selection — the highlighted
+  nodes/edges and nothing else. The properties panel's focused node is
+  display state, never a second selection source (no undo anywhere, §8.1).
 - **Initial view**: `fitView` capped at `maxZoom: 1` with generous padding
   (fraction-based, v12-compatible).
 - **Node sizing**: standard node width 280 px (widened for the time bar; §8.3).
