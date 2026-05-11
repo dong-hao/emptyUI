@@ -388,7 +388,11 @@ the identical-grid check still passes. The provenance chain: `Merge Runs`
 records the bridged intervals on the merged payload
 (`merged_gap_intervals`, plus `merged_source_runs`); `Align Runs` warns when
 the aligned overlap includes them and carries the provenance through the
-crop, `Compute FC` stamps it on the fc attrs, and the RR pairing sites
+crop — **on both routes**: the single-run body and the default `'time
+range'` collection, which unions its members' provenance; `Compute FC` stamps
+it on the fc attrs on **both** routes (the FC merge unions the contributors'
+attrs instead of keeping only the first contributor's), and the RR pairing
+sites
 (`Estimate TF`, two-FC `Coherence Sort`) warn naming the affected windows —
 with the remedy (Merge FC concatenates Fourier coefficients without
 fabrication; or exclude the gap interval via the time-selector window).

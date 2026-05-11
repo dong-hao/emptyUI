@@ -1272,6 +1272,17 @@ def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
     return local_fc.isel(time=li), ref_fc.isel(time=ri)
 
 
+#: Provenance attrs Merge Runs records on the ts.run payload and Compute FC
+#: stamps on the fc (M4 #2); every producer/consumer of the chain keys off
+#: this single tuple (Compute FC copies them, merge_fc_containers unions
+#: them, _warn_remote_gaps reads the first two).
+_MERGE_PROVENANCE_ATTRS = (
+    "merged_gap_intervals",
+    "merged_source_runs",
+    "merged_gap_method",
+)
+
+
 def _warn_remote_gaps(local_fc, ref_fc) -> None:
     """M4 #2: warn when local windows pair with interpolated remote samples.
 
@@ -2261,6 +2272,38 @@ def _grid_nearest_keep(reference, other, rtol=1e-3):
     return keep
 
 
+def _union_merge_provenance_attrs(target: dict, parts: list) -> None:
+    """Union Merge Runs' provenance across one level's FC contributors.
+
+    The FC merge keeps the FIRST contributor's attrs (``merged.attrs =
+    dict(base.attrs)``), so an interpolated gap recorded on contributor 2+
+    was dropped — the remote-reference pairing then never learned that those
+    remote samples were fabricated (M4 #2). The list-shaped keys union across
+    every contributor; the scalar ``merged_gap_method`` keeps the first
+    recorded one.
+    """
+    list_keys = _MERGE_PROVENANCE_ATTRS[:2]
+    method_key = _MERGE_PROVENANCE_ATTRS[2]
+    for key in list_keys:
+        union: list = []
+        seen: set[str] = set()
+        for part in parts:
+            value = (getattr(part, "attrs", None) or {}).get(key)
+            if value is None:
+                continue
+            for item in value:
+                if str(item) not in seen:
+                    seen.add(str(item))
+                    union.append(item)
+        if union:
+            target[key] = union
+    for part in parts:
+        method = (getattr(part, "attrs", None) or {}).get(method_key)
+        if method is not None:
+            target[method_key] = method
+            break
+
+
 def merge_fc_containers(containers):
     """Concatenate per-run FC containers along time, per rate level.
 
@@ -2284,7 +2327,9 @@ def merge_fc_containers(containers):
     windows are concatenated in time-sorted order (duplicate/overlapping
     window times warn). Levels missing in some inputs merge the rest.
 
-    Returns ``{level: xr.Dataset}`` with the first contributor's attrs.
+    Returns ``{level: xr.Dataset}`` with the first contributor's attrs,
+    plus Merge Runs' gap provenance unioned over all contributors
+    (:func:`_union_merge_provenance_attrs`).
     """
     import xarray as xr
 
@@ -2382,6 +2427,7 @@ def merge_fc_containers(containers):
                 "across inputs", rate)
         merged = merged[keep_vars]
         merged.attrs = dict(base.attrs)
+        _union_merge_provenance_attrs(merged.attrs, parts)
         out[i] = merged
     return out
 

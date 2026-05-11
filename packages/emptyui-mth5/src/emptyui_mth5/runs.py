@@ -1273,6 +1273,21 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
         else:
             out[f"data{idx}"] = RunCollection(runs=members, extents=extents)
 
+    # M4 #2 / §24.3 E1b: the collection route is Extract Run's DEFAULT
+    # output — it must run the same warning chain as the single-run body
+    # (gap provenance inside the overlap, cross-station coherence). Partial
+    # coverage is already reported by the per-side drop warning above (the
+    # same 90% threshold, with the route's own remedy).
+    sr_overlap = next(iter(sorted(ra or rb)), None)
+    if sr_overlap is not None:
+        n_ov = max(1, round((w1 - w0).total_seconds() * sr_overlap))
+        _warn_merge_gaps_in_overlap(
+            ctx, (data1, data2), (out["data1"], out["data2"]),
+            (w0.isoformat(), n_ov, sr_overlap))
+        if ra and ra == rb and len(ra) == 1:
+            _warn_if_uncorrelated(
+                ctx, out["data1"], out["data2"], sr_overlap, n_ov)
+
     ctx.progress(
         1.0,
         f"aligned runs: [{t0:%Y-%m-%d %H:%M}, {t1:%Y-%m-%d %H:%M}] overlap "
@@ -1282,10 +1297,37 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
 
 def _merge_gap_attrs(payload):
     """(gap_intervals, source_runs) provenance attrs from a merged ts.run
-    payload (Merge Runs), or (None, None) on payloads without them."""
+    payload (Merge Runs), or (None, None) on payloads without them.
+
+    A run collection — Extract Run's default 'time range' output — reports
+    the union of its members' provenance: every member bridged by
+    interpolation must reach the overlap/coherence warnings (M4 #2), not
+    only the first one.
+    """
+    if is_run_collection(payload):
+        gaps: list = []
+        runs: list = []
+        for member in payload.runs:
+            g, r = _merge_gap_attrs(member)
+            _union_append(gaps, g)
+            _union_append(runs, r)
+        return (gaps or None), (runs or None)
     ds = getattr(payload, "dataset", None)
     attrs = getattr(ds, "attrs", None) or {}
     return attrs.get("merged_gap_intervals"), attrs.get("merged_source_runs")
+
+
+def _union_append(dst: list, values) -> None:
+    """Append every element of ``values`` to ``dst`` once, keyed by its
+    string form (provenance entries are lists/arrays of stamps, which do
+    not hash)."""
+    if values is None:
+        return
+    seen = {str(v) for v in dst}
+    for v in values:
+        if str(v) not in seen:
+            seen.add(str(v))
+            dst.append(v)
 
 
 def _carry_merge_provenance(source, out) -> None:
@@ -1321,10 +1363,10 @@ def _warn_merge_gaps_in_overlap(ctx, inputs, outputs, overlap) -> None:
         return  # relative alignment: gap intervals are not interpretable
     for tag, src, out in zip(("input 1", "input 2"), inputs, outputs):
         gaps, _runs = _merge_gap_attrs(src)
-        if not gaps:
+        if gaps is None or len(gaps) == 0:
             continue
         try:
-            t0 = pd.Timestamp(start_iso)
+            t0 = _utc(pd.Timestamp(start_iso))
             t1 = t0 + pd.Timedelta(seconds=n_common / sr)
         except Exception:  # noqa: BLE001 — malformed stamps degrade to no-op
             return
@@ -1380,6 +1422,39 @@ def _warn_partial_coverage(ctx, lengths, n_common) -> None:
             )
 
 
+def _aligned_channel_names(payload) -> list[str]:
+    """Channel names of an aligned output payload — a single ts.run, or a
+    run collection (Extract Run's 'time range' route aligns collections)."""
+    if is_run_collection(payload):
+        names: list[str] = []
+        for member in payload.runs:
+            for key in _payload(member)[0]:
+                if str(key) not in names:
+                    names.append(str(key))
+        return names
+    if hasattr(payload, "dataset") and not isinstance(payload, dict):
+        return [str(c) for c in payload.dataset.data_vars]
+    return [str(c) for c in payload.channels]
+
+
+def _aligned_channel_values(payload, name) -> np.ndarray:
+    """Samples of one channel of an aligned output payload; collection
+    members are concatenated in time order (Align Runs cropped every member
+    to the same overlap, so they tile it)."""
+    if is_run_collection(payload):
+        blocks = []
+        for member in payload.runs:
+            ch = _payload(member)[0]
+            if name in ch:
+                blocks.append(ch[name])
+        if not blocks:
+            return np.zeros(0, dtype=float)
+        return np.concatenate(blocks)
+    if hasattr(payload, "dataset") and not isinstance(payload, dict):
+        return np.asarray(payload.dataset[name].values, dtype=float)
+    return np.asarray(payload.channels[name], dtype=float)
+
+
 def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     """Diagnostic: warn when the stations' horizontal magnetic fields are not
     coherent at long periods after alignment.
@@ -1387,10 +1462,11 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     A clock offset or an un-filled data gap (mt_io's LEMI reader indexes by
     row, not by timestamp!) breaks station alignment and would silently
     degrade a remote-reference estimate — this catches that before the user
-    looks at a rough TF.
+    looks at a rough TF. Both output shapes are handled: a single ts.run and
+    a run collection (its members concatenated in time order).
     """
-    names1 = [str(c) for c in out1.dataset.data_vars]
-    names2 = [str(c) for c in out2.dataset.data_vars]
+    names1 = _aligned_channel_names(out1)
+    names2 = _aligned_channel_names(out2)
     # horizontal magnetic channels only — the vertical (hz) field is
     # naturally weakly coherent between stations (source-field geometry),
     # so checking it would false-alarm on healthy station pairs.
@@ -1406,15 +1482,17 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     mags = [s for s in ("hx", "hy") if s in std1 and s in std2]
     if not mags:
         return
+    x = _aligned_channel_values(out1, std1[mags[0]])
+    y = _aligned_channel_values(out2, std2[mags[0]])
+    n = int(min(x.size, y.size))
     # the coherence segments need room: a very short overlap (short windows,
     # heavy cropping) cannot support the diagnostic — skip it
-    if n_common < 256:
+    if n_common < 256 or n < 256:
         return
+    x, y = x[:n], y[:n]
     from scipy.signal import coherence
 
-    nperseg = min(4096, max(256, int(n_common // 4)))
-    x = np.asarray(out1.dataset[std1[mags[0]]].values, dtype=float)
-    y = np.asarray(out2.dataset[std2[mags[0]]].values, dtype=float)
+    nperseg = min(4096, max(256, int(n // 4)))
     f, C = coherence(x, y, fs=float(sr), nperseg=nperseg, noverlap=nperseg // 2)
     band = (f >= 1.0 / 1024.0) & (f <= 1.0 / 64.0)
     if not band.any():

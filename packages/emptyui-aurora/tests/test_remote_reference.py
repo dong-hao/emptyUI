@@ -389,6 +389,137 @@ def test_align_runs_warns_partial_coverage(tmp_path, caplog):
                for r in caplog.records)
 
 
+def _remote_piece(rid: str, start: str, n: int, seed: int):
+    """One real 8 Hz magnetic RunTS (hx, hy) — building block of the gapped
+    remote station (Merge Runs' input)."""
+    from mt_timeseries import ChannelTS, RunTS
+
+    rng = np.random.default_rng(seed)
+    chs = []
+    for comp in ("hx", "hy"):
+        c = ChannelTS("magnetic", data=rng.standard_normal(n),
+                      start=start, sample_rate=8.0)
+        c.component = comp
+        chs.append(c)
+    rt = RunTS(array_list=chs)
+    rt.run_metadata.id = rid
+    return rt
+
+
+def _gapped_remote():
+    """(plain member, member merged across a gap).
+
+    The plain member spans [00:04:00, 00:08:15.875]; the merged member spans
+    [00:09:00, 00:18:15.875] and bridges an acquisition gap inside itself
+    ([00:13:15.875, 00:14:00) — 44 s of interpolated samples). The local run
+    covers both, so that gap lands inside every overlap below.
+    """
+    from emptyui_mth5.merge import merge_runts
+
+    plain = _remote_piece("a", "2024-01-01T00:04:00", 2048, seed=61)
+    g1 = _remote_piece("b", "2024-01-01T00:09:00", 2048, seed=62)
+    g2 = _remote_piece("c", "2024-01-01T00:14:00", 2048, seed=63)
+    return plain, merge_runts([g1, g2], new_run_id="bc")
+
+
+def _local_with_e():
+    src = synthetic_source(64, n=8192, kind="white")
+    return synthetic_runts(src, magnetic=("hx", "hy"), electric=("ex", "ey"),
+                           start_datetime="2024-01-01T00:00:00", seed=64)
+
+
+_FC_KW = {"input_channels": "hx,hy", "decimation_levels": 0, "factor": 4,
+          "window_samples": 128, "overlap": 0.5, "window_type": "boxcar",
+          "clock_zero": "epoch", "magnetic_unit": "h",
+          "e_dipole_length_m": 0.001, "persist": False}
+
+
+def test_single_route_stamps_gap_provenance_on_the_fc(tmp_path, caplog):
+    """M4 #2's MISSING MIDDLE on the single-run route: Align carries the
+    provenance across the crop, Compute FC stamps it on the ref fc, and the
+    remote-reference pairing then warns. Both ends were tested; the middle
+    (what Compute FC actually stamps) was not."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+    from emptyui_aurora.process import ComputeFC
+
+    ctx = _ctx(tmp_path)
+    local = _local_with_e()
+    _, remote = _gapped_remote()
+    aligned = AlignRuns().execute(ctx, local, remote)
+    a, b = aligned["data1"], aligned["data2"]
+    assert b.dataset.attrs["merged_gap_intervals"]
+
+    levels_a = ComputeFC().execute(
+        ctx, a, output_channels="ex,ey", **_FC_KW)["fc"]
+    levels_b = ComputeFC().execute(
+        ctx, b, output_channels="", **_FC_KW)["fc"]
+    ref = levels_b[0]
+    assert ref.attrs["merged_gap_intervals"]
+    assert ref.attrs["merged_source_runs"] == ["b", "c"]
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(levels_a[0], ("hx", "hy"), ("ex", "ey"),
+                     estimator_engine="RME_RR", remote_reference=True,
+                     ref_fc=ref)
+    assert any("interpolated gap" in r.message for r in caplog.records)
+
+
+def test_collection_route_stamps_gap_provenance_on_the_fc(tmp_path, caplog):
+    """The same chain on the DEFAULT route (Extract Run 'time range' hands
+    Align Runs a collection): Align must warn from the union of the members'
+    provenance, Compute FC must stamp it (its collection route copied no
+    provenance at all before), and the FC merge must not drop contributor
+    2+'s gaps (the first contributor is the gap-less plain member)."""
+    import logging
+
+    from emptyui_aurora._processing import estimate_tf
+    from emptyui_aurora.process import ComputeFC
+    from emptyui_mth5.runs import RunCollection
+
+    ctx = _ctx(tmp_path)
+    local = _local_with_e()
+    plain, merged = _gapped_remote()
+    remote = RunCollection(
+        runs=[plain, merged],
+        extents=[_extent_row(plain, "s", "b", "a"),
+                  _extent_row(merged, "s", "b", "bc")])
+
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        aligned = AlignRuns().execute(ctx, local, remote)
+    assert any("interpolated gap" in r.message for r in caplog.records)
+    b = aligned["data2"]
+    assert b.runs[1].dataset.attrs["merged_gap_intervals"]
+
+    levels_a = ComputeFC().execute(
+        ctx, aligned["data1"], output_channels="ex,ey", **_FC_KW)["fc"]
+    levels_b = ComputeFC().execute(
+        ctx, b, output_channels="", **_FC_KW)["fc"]
+    ref = levels_b[0]
+    assert ref.attrs["merged_gap_intervals"], (
+        "the collection route dropped the members' gap provenance")
+    assert ref.attrs["merged_source_runs"] == ["b", "c"]
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="emptyui_aurora"):
+        estimate_tf(levels_a[0], ("hx", "hy"), ("ex", "ey"),
+                     estimator_engine="RME_RR", remote_reference=True,
+                     ref_fc=ref)
+    assert any("interpolated gap" in r.message for r in caplog.records)
+
+
+def _extent_row(rt, survey: str, station: str, run: str) -> dict:
+    """Extract Run-shaped identity/extent row for a payload (the span the
+    collection aligner crops a member to) — read from the payload's own
+    absolute time axis, so the row can never disagree with the data."""
+    t = pd.DatetimeIndex(rt.dataset["time"].values)
+    return {"survey": survey, "station": station, "run": run,
+            "start": t[0].isoformat(), "end": t[-1].isoformat(),
+            "sample_rate": float(rt.sample_rate)}
+
+
 def _aligned_pair_fcs():
     """(local_fc, ref_fc) with identical absolute time grids."""
     source = synthetic_source(36, n=8192, kind="white")

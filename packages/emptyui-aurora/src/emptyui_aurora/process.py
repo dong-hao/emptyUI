@@ -17,6 +17,7 @@ from emptyui_mth5.nomenclature import (
 )
 
 from ._processing import (
+    _MERGE_PROVENANCE_ATTRS,
     build_tf,
     coherence_sort_fcs,
     compute_fc_levels,
@@ -82,6 +83,35 @@ _NOMENCLATURE_PRESETS: dict[str, tuple[tuple[str, str], ...]] = {
     "phoenix123": (("input_channels", "h1,h2"), ("output_channels", "e1,e2,h3")),
     "default": (("input_channels", "hx,hy"), ("output_channels", "ex,ey,hz")),
 }
+
+
+def _merge_provenance_attrs(data, logger) -> dict[str, Any]:
+    """Merge Runs' gap provenance (M4 #2) carried by a ts.run payload.
+
+    Copies ``merged_gap_intervals`` / ``merged_source_runs`` /
+    ``merged_gap_method`` so the fc keeps the record of which intervals a
+    merge fabricated — the remote-reference pairing warns from exactly these
+    attrs. A payload carrying none contributes nothing (probe via ``dir()``
+    like the rest of this module: mt_timeseries turns a missing attribute
+    into NameError + an ERROR line); a payload that CAN carry them but
+    cannot be read is logged — losing the provenance in silence is the very
+    failure this copy prevents (E4: everything logs).
+    """
+    if data is None:
+        return {}
+    try:
+        if "dataset" not in dir(data):
+            return {}
+        attrs = getattr(data.dataset, "attrs", None) or {}
+        return {k: attrs[k] for k in _MERGE_PROVENANCE_ATTRS
+                if attrs.get(k) is not None}
+    except Exception as exc:  # noqa: BLE001 — duck-typed payloads
+        logger.warning(
+            "merge provenance: %s attrs could not be read (%s) — its "
+            "merged_gap_intervals will not ride the fc, so the "
+            "remote-reference gap warning stays silent for it",
+            type(data).__name__, exc)
+        return {}
 
 
 class ComputeFC(Node):
@@ -286,14 +316,7 @@ class ComputeFC(Node):
         # M4 #2: Merge Runs' gap provenance (interpolated intervals) travels
         # with the fc so the remote-reference pairing can warn when local
         # windows fall inside fabricated remote samples.
-        try:
-            src_attrs = data.dataset.attrs
-            for key in ("merged_gap_intervals", "merged_source_runs",
-                        "merged_gap_method"):
-                if src_attrs.get(key) is not None:
-                    identity[key] = src_attrs[key]
-        except AttributeError:
-            pass
+        identity.update(_merge_provenance_attrs(data, ctx.logger))
         for level, fc in levels.items():
             fc.attrs.update(identity)
         if persist:
@@ -370,6 +393,7 @@ class ComputeFC(Node):
         rates = [float(getattr(m, "sample_rate", 0.0) or 0.0)
                  for m in members]
         family_rates = sorted(set(rates))
+        coll_prov = _merge_provenance_attrs(collection, ctx.logger)
         containers = []
         for i, (member, ext) in enumerate(zip(members, extents), 1):
             r = rates[i - 1]
@@ -400,6 +424,13 @@ class ComputeFC(Node):
             stat = str(ext.get("station", "")) or station
             rid = str(ext.get("run", "")) or run
             identity = _station_identity_attrs(member, surv, stat, rid)
+            # M4 #2: the member's own gap provenance (Align Runs carried it
+            # through the crop), falling back to the collection's — the fc
+            # must keep every interpolated interval, or the remote-reference
+            # pairing stays silent about fabricated samples.
+            prov = dict(coll_prov)
+            prov.update(_merge_provenance_attrs(member, ctx.logger))
+            identity.update(prov)
             for level, fc in levels.items():
                 fc.attrs.update(identity)
             wm = get_workspace_mth5(ctx) if persist else None
