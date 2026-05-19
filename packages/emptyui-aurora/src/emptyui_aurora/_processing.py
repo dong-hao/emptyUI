@@ -1207,9 +1207,13 @@ def _pair_remote_times(local_t, ref_t, tol_s):
     # merged databases) would all map onto the same remote row — reusing
     # one remote window double-counts its information; keep the first
     li_out, ri_out = [], []
+    # M22: a boolean mask over the remote rows makes the reuse check O(1); a
+    # list membership test per row was quadratic (37 s at 10^5 windows)
+    used = np.zeros(ri.size, dtype=bool)
     for k, j in zip(np.nonzero(ok)[0], order[pos[ok]]):
-        if j in ri_out:
+        if used[j]:
             continue
+        used[j] = True
         li_out.append(k)
         ri_out.append(j)
     return (np.asarray(li_out, dtype=int), np.asarray(ri_out, dtype=int))
