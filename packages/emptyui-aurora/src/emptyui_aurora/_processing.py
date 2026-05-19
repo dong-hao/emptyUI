@@ -1309,6 +1309,19 @@ _MERGE_PROVENANCE_ATTRS = (
 )
 
 
+def _centre_to_start_s(fc) -> float:
+    """Seconds from a window's centre label back to its first sample (M10).
+
+    The fc time labels are scipy segment centres, so a window starts
+    ``N / (2 fs)`` before its label (L11 — the centre convention is kept).
+    Returns 0.0 when the window size or rate is not recorded on the fc.
+    """
+    attrs = getattr(fc, "attrs", None) or {}
+    n = float(attrs.get("num_samples_window") or 0)
+    fs = float(attrs.get("sample_rate") or 0)
+    return n / (2.0 * fs) if n > 0 and fs > 0 else 0.0
+
+
 def _warn_remote_gaps(local_fc, ref_fc) -> None:
     """M4 #2: warn when local windows pair with interpolated remote samples.
 
@@ -1323,6 +1336,12 @@ def _warn_remote_gaps(local_fc, ref_fc) -> None:
     separated by scheduled gaps, the epoch-anchored window grid pairs slots
     across stations by design, and the FC-database route (Build FC / Merge FC)
     never fabricates samples — see DESIGN.md §3 for the rationale.
+
+    M10: a window is flagged when its START lies in a gap. The fc labels are
+    window centres (half a window later), so the check shifts them back by
+    ``N / (2 fs)`` first; testing the centres missed gaps at the start of a
+    window (badly so at decimated levels, where the half window is tens of
+    minutes).
     """
     gaps = (getattr(ref_fc, "attrs", None) or {}).get("merged_gap_intervals")
     if not gaps:
@@ -1347,6 +1366,10 @@ def _warn_remote_gaps(local_fc, ref_fc) -> None:
         t_idx = t_idx.tz_localize("UTC")
     else:
         t_idx = t_idx.tz_convert("UTC")
+    # M10: the fc labels are window CENTRES; a window's samples start half a
+    # window earlier. Gap membership is tested on the window START (the first
+    # sample the window uses), so the centre labels are shifted back first.
+    t_idx = t_idx - pd.to_timedelta(_centre_to_start_s(local_fc), unit="s")
     affected = np.zeros(t_idx.size, dtype=bool)
     hits = []
     for g in gaps:
