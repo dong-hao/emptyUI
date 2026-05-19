@@ -1184,7 +1184,12 @@ def _pair_remote_times(local_t, ref_t, tol_s):
             used_r.add(j)
             li_out.append(k)
             ri_out.append(j)
-        return (np.asarray(li_out, dtype=int), np.asarray(ri_out, dtype=int))
+        # M11: the greedy match is closest-first, but the caller indexes the
+        # pairs by position (Coherence Sort's ensemble is a sliding window over
+        # array index), so return them in local time order
+        order = np.argsort(np.asarray(li_out, dtype=int), kind="stable")
+        return (np.asarray(li_out, dtype=int)[order],
+                np.asarray(ri_out, dtype=int)[order])
     # exact intersection
     order = np.argsort(ri, kind="stable")
     rs = ri[order]
