@@ -201,8 +201,10 @@ class ComputeFC(Node):
         Param("clock_zero", "string", label="Clock zero",
               default="", optional=True,
               placeholder='"epoch" or ISO datetime; empty = off',
-              description="Anchor window starts on a common absolute grid "
-                          "t0 + k·step (head partial window dropped): "
+              description="Anchor windows on a common absolute grid "
+                          "(labels are the actual sample times, within half "
+                          "a sample of t0 + k·step; head partial window "
+                          "dropped): "
                           "'epoch' (Unix epoch — automatically common to "
                           "all stations/runs) or an explicit ISO datetime. "
                           "Required for remote-reference pairing across "
@@ -1183,8 +1185,11 @@ class CoherenceSort(Node):
                           "grids. Frequency grids stay strict either way."),
         Param("pair_tolerance_s", "number", label="Pair tolerance (s)",
               default=0.0, min=0, optional=True,
-              description="Matching tolerance for window start times "
-                          "(0 = exact). Raise for GPS-stray clocks."),
+              description="Matching tolerance for window times (centre "
+                          "labels, L11) "
+                          "(0 = exact, or one sample of the level for "
+                          "sub-sample record offsets). Raise for GPS-stray "
+                          "clocks."),
     )
 
     def execute(self, ctx, fc, ref_fc=None,
@@ -1793,10 +1798,12 @@ class EstimateTF(Node):
                           "contract)."),
         Param("pair_tolerance_s", "number", label="Pair tolerance (s)",
               default=0.0, min=0, optional=True,
-              description="Matching tolerance for window start times "
-                          "(0 = exact — GPS-locked stations on the "
-                          "epoch-anchored grid match exactly). Raise for "
-                          "GPS-stray clocks: window starts shift by the "
+              description="Matching tolerance for window times (centre "
+                          "labels, L11) "
+                          "(0 = exact, or one sample of the level for "
+                          "sub-sample record offsets; GPS-locked stations "
+                          "on the epoch-anchored grid match exactly). Raise "
+                          "for GPS-stray clocks: window labels shift by the "
                           "receiver's clock error; the closest pairs "
                           "still match one-to-one."),
     )

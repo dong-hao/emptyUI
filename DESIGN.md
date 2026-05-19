@@ -1332,11 +1332,16 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   detrending was ablated as NOT a lever for the long-period tail
   (history §24.3 E2).
 - **No clock-zero truncation by default**: `clock_zero` ("" = run-start
-  anchoring, "epoch" = Unix epoch, or explicit ISO) anchors window starts to
-  `t0 + k·step` per level and drops the head partial window, so per-run FCs
+  anchoring, "epoch" = Unix epoch, or explicit ISO) anchors each level's
+  windows to `t0 + k·step` and drops the head partial window, so per-run FCs
   of different runs/stations share one window grid — the prerequisite for
   remote-reference pairing across separately-computed runs (burst slots).
-  Levels with fewer samples than one window are skipped with a warning.
+  Window labels are the window **centres** (scipy convention: the first
+  sample used + N/(2·fs)), and that first sample sits at the actual sample
+  time of the data (rounded to a whole sample — issues.md M9), i.e. within half
+  a sample of the grid; remote-reference pairing therefore accepts up to one
+  sample of label difference (`_pair_remote_fc`). Levels with fewer samples
+  than one window are skipped with a warning.
 - **FC normalization**: scipy 'spectrum' scaling (÷ win.sum()); aurora
   additionally applies a linear spectral-density calibration factor. All
   ratio-based products (Z, tipper, coherence, OLS σ) are scale-equivariant

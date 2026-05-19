@@ -874,11 +874,12 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
 
     Returns ``(n_skip, start_offset_s)``: drop ``n_skip`` samples from the
     series head so the first full window starts at (or after) the data
-    start AND on the grid ``t0 + k·step`` (step = window step in seconds);
-    ``start_offset_s`` is the sliced series' start relative to the payload
-    record start — the offset the fc ``time`` coordinate must be built
-    from. With ``clock_zero`` "" (default) nothing is dropped and the
-    current run-start anchoring is kept.
+    start, at the sample nearest the grid ``t0 + k·step`` (step = window
+    step in seconds; within half a sample of it, M9). ``start_offset_s`` is
+    the sliced series' start relative to the payload record start — the
+    offset the fc ``time`` coordinate must be built from, i.e. the time of
+    the sample the data really starts on. With ``clock_zero`` "" (default)
+    nothing is dropped and the current run-start anchoring is kept.
 
     The point (§24.5 P1 v2b): remote-reference pairing matches FC rows by
     window position with an identical-grid check, so separately-computed
@@ -928,8 +929,13 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
     step_s = (nperseg - noverlap) / float(sample_rate)
     k0 = int(np.ceil(dt / step_s))
     n_skip = max(0, round((k0 * step_s - dt) * sample_rate))
-    # sliced series' start relative to the payload's record start
-    return n_skip, max(0.0, k0 * step_s - dt)
+    # M9: the window labels must be the time of the sample the data really
+    # starts on. The skip is rounded to whole samples, so the offset is the
+    # rounded skip, not the unrounded grid distance (which put the labels up
+    # to half a sample off the data). Two records starting off the sample
+    # grid therefore differ by up to one sample of label; _pair_remote_fc
+    # pairs within one sample to absorb that.
+    return n_skip, n_skip / float(sample_rate)
 
 
 def _stft_channels(channels, sample_rate, num_samples, overlap, window_type,
@@ -1209,6 +1215,18 @@ def _pair_remote_times(local_t, ref_t, tol_s):
     return (np.asarray(li_out, dtype=int), np.asarray(ri_out, dtype=int))
 
 
+def _one_sample_s(local_fc, ref_fc) -> float:
+    """M9: one sample of the level's rate, in seconds — the pairing floor for
+    records that start off the sample grid (their labels differ by up to one
+    sample). A small epsilon absorbs float rounding at the boundary. Returns
+    0.0 when the rate is not recorded on either fc (exact pairing then)."""
+    for fc in (local_fc, ref_fc):
+        fs = float((getattr(fc, "attrs", None) or {}).get("sample_rate") or 0.0)
+        if fs > 0:
+            return 1.0 / fs + 1e-6
+    return 0.0
+
+
 def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
                     level=None):
     """Validate + pair the remote-reference fc to the local window grid.
@@ -1218,7 +1236,9 @@ def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
     TIME dimension follows the ``pairing`` mode:
 
     - ``"intersect"`` (default): match windows by absolute start time
-      (exact, or within ``tol_s`` for GPS-stray clocks) and drop the
+      (exact, or within ``tol_s`` — never less than one sample of the level,
+      M9, so sub-sample record offsets still pair — for GPS-stray clocks) and
+      drop the
       unmatched rows on BOTH sides with a loud warning naming counts and —
       when the per-window ``run_id`` coordinate exists (Build FC) — the
       affected slots. This is the slot-level pairing made de-facto: the
@@ -1245,12 +1265,13 @@ def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
             "acquisition overlap (Align Runs) before computing FCs, or "
             "use pairing='intersect' to match window times with row drops"
         )
-    li, ri = _pair_remote_times(lt, rt, tol_s)
+    tol_eff = max(float(tol_s or 0.0), _one_sample_s(local_fc, ref_fc))
+    li, ri = _pair_remote_times(lt, rt, tol_eff)
     if li.size == 0:
         raise ValueError(
             f"no remote-reference windows match the local time grid "
             f"(0 of {lt.size} local windows)"
-            + (f" within {tol_s:g} s" if tol_s else "")
+            + (f" within {tol_eff:g} s" if tol_eff else "")
             + " — check the clock-zero anchors (both stations must use "
             "'epoch' or the same explicit anchor), the window settings, "
             "or raise 'Pair tolerance (s)' for GPS-stray clocks")
