@@ -1,5 +1,7 @@
 """Server API — happy path (error surfaces in test_errors.py)."""
 
+import queue
+import threading
 import time
 from pathlib import Path
 from threading import Event
@@ -7,7 +9,7 @@ from threading import Event
 from fastapi.testclient import TestClient
 
 from emptyui import Node
-from emptyui.registry import Registry
+from emptyui.registry import Registry, build_default_registry
 from emptyui.server.app import create_app
 
 
@@ -84,7 +86,7 @@ def test_run_echo_workflow(client):
     body = resp.json()
     run_id = body["run_id"]
 
-    detail = client.get(f"/api/runs/{run_id}").json()
+    detail = _wait_status(client, run_id)
     statuses = {e["node"]: e["status"] for e in detail["events"] if e["event"] == "node_status"}
     assert statuses == {"n1": "done"}
 
@@ -307,6 +309,44 @@ def test_ws_disconnect_removes_client():
     # fresh app state would be needed to observe clients directly, so just
     # assert the endpoint accepted and closed cleanly (no leaked exception)
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def _pump_ws(ws, sink: queue.Queue) -> None:
+    """Forward every WebSocket message to ``sink`` until the socket closes."""
+    try:
+        while True:
+            sink.put(ws.receive_json())
+    except Exception:  # noqa: BLE001 — the session closed; nothing more to read
+        return
+
+
+def test_ws_delivers_run_events_under_the_lifespan():
+    """Broadcasts reach a connected WebSocket client. The hub's event loop is
+    set only inside ``with TestClient(...)``: a bare client drops every event
+    silently, which the disconnect-only test could not notice (M16a)."""
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.util.echo", "params": {"label": "hi"}}],
+        "edges": [],
+    }
+    sink: queue.Queue = queue.Queue()
+    with TestClient(create_app(build_default_registry())) as client, \
+            client.websocket_connect("/api/ws") as ws:
+        threading.Thread(target=_pump_ws, args=(ws, sink), daemon=True).start()
+        run_id = client.post("/api/runs", json={"workflow": workflow}).json()["run_id"]
+        _wait_status(client, run_id)
+        seen: list[dict] = []
+        deadline = time.monotonic() + 5.0
+        while not any(e.get("event") == "run_finished" for e in seen):
+            try:
+                seen.append(sink.get(timeout=max(0.01, deadline - time.monotonic())))
+            except queue.Empty:
+                raise AssertionError("no run events reached the WebSocket client") from None
+
+    statuses = {e["node"]: e["status"] for e in seen if e["event"] == "node_status"}
+    assert statuses == {"n1": "done"}
+    finished = [e for e in seen if e["event"] == "run_finished"]
+    assert finished[-1]["status"] == "completed"
+    assert seen[0]["event"] == "run_started"
 
 
 def test_settings_view_and_live_edit():

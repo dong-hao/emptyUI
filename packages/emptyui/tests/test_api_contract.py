@@ -21,7 +21,7 @@ from emptyui.server.app import create_app
 MANIFEST_KEYS = {
     "type", "version", "title", "tooltip", "description", "category",
     "hidden", "viewer", "inputs", "outputs", "params", "deps", "inherit",
-    "models",
+    "cacheable", "invalidates_inputs", "models",
 }
 PORT_KEYS = {"name", "type", "description", "label"}
 INPUT_KEYS = PORT_KEYS | {"required", "accepts", "collection_ok"}
@@ -29,7 +29,7 @@ OUTPUT_KEYS = PORT_KEYS | {"populated_when"}
 PARAM_KEYS = {
     "name", "widget", "label", "default", "optional", "options", "min",
     "max", "step", "description", "placeholder", "cascade", "path_kind",
-    "enabled_when", "split_inherited", "time_bar",
+    "enabled_when", "split_inherited", "time_bar", "suggest_from",
 }
 PLUGIN_KEYS = {
     "name", "version", "node_count", "bundled", "enabled", "error",
