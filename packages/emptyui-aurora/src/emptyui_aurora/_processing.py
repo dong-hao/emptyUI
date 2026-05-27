@@ -295,8 +295,9 @@ def compute_fc(
     ``start_datetime`` attr is recorded — required for mth5 FC persistence.
 
     ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
-    start; ``"epoch"`` or an explicit ISO datetime anchors window starts on
-    the grid ``t0 + k·step`` (head partial window dropped) so separately-
+    start; ``"epoch"`` or an explicit ISO datetime anchors windows on
+    the grid ``t0 + k·step`` (head partial window dropped; the time label is
+    the window CENTRE, N/(2·fs) after its first sample — issues.md L11) so separately-
     computed runs/stations share one absolute window grid — the prerequisite
     for remote-reference pairing across per-run FCs (Merge FC / burst mode).
     """
@@ -454,8 +455,10 @@ def compute_fc_levels(
     zero-endpoint taper wins.
 
     ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
-    start; ``"epoch"`` or an explicit ISO datetime anchors window starts on
-    the grid ``t0 + k·step`` per level (head partial window dropped), so
+    start; ``"epoch"`` or an explicit ISO datetime anchors windows on
+    the grid ``t0 + k·step`` per level (head partial window dropped; the time
+    labels are window CENTRES — issues.md L11 — so each window's first sample
+    is N/(2·fs) earlier), so
     per-run FCs share one absolute window grid across runs/stations —
     required for remote-reference pairing over merged per-run FCs. Levels
     with fewer usable samples than one window (e.g. burst slots at deep
