@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { node, placeNode, settleViewport } from "./_flow";
+import { must, node, placeNode, settleViewport } from "./_flow";
 
 /** Deterministic geometry: room for three spread-out nodes on the canvas. */
 test.use({ viewport: { width: 1600, height: 1000 } });
@@ -18,7 +18,7 @@ async function settle(page: Page) {
 /** Drag a node (by its header) so its top-left lands at (x, y). */
 async function moveNodeTo(page: Page, idx: number, x: number, y: number) {
   const h = page.locator(".mt-node").nth(idx).locator(".mt-node-header");
-  const b = await h.boundingBox();
+  const b = must(await h.boundingBox(), `node ${idx + 1}'s header`);
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
   await page.mouse.down();
   await page.mouse.move(x + b.width / 2, y + b.height / 2, { steps: 5 });
@@ -44,8 +44,8 @@ async function dragPortToPort(
     .nth(toNode)
     .locator(`.mt-port[data-handlepos="${toPos}"]`)
     .first();
-  const fb = await from.boundingBox();
-  const tb = await to.boundingBox();
+  const fb = must(await from.boundingBox(), "the source port handle");
+  const tb = must(await to.boundingBox(), "the target port handle");
   await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
   await page.mouse.down();
   await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 8 });
@@ -101,13 +101,13 @@ test("drag a connected handle to the pane unlinks it (ComfyUI gesture)", async (
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
   // drag node2's connected input handle to the empty pane -> unlink
-  const inp = await page
+  const inp = must(await page
     .locator(".mt-node")
     .nth(1)
     .locator('.mt-port[data-handlepos="left"]')
     .first()
-    .boundingBox();
-  const pane = await page.locator(".react-flow__pane").boundingBox();
+    .boundingBox(), "node 2's connected input handle");
+  const pane = must(await page.locator(".react-flow__pane").boundingBox(), "the React Flow pane");
   await page.mouse.move(inp.x + inp.width / 2, inp.y + inp.height / 2);
   await page.mouse.down();
   await page.mouse.move(pane.x + pane.width - 60, pane.y + pane.height - 40, { steps: 8 });
@@ -124,12 +124,12 @@ test("a plain click on a connected handle does NOT unlink (hair-trigger guard)",
   await dragPortToPort(page, 0, "right", 1, "left");
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
-  const inp = await page
+  const inp = must(await page
     .locator(".mt-node")
     .nth(1)
     .locator('.mt-port[data-handlepos="left"]')
     .first()
-    .boundingBox();
+    .boundingBox(), "node 2's connected input handle");
   // down + up at the same spot (a click, not a drag)
   await page.mouse.move(inp.x + inp.width / 2, inp.y + inp.height / 2);
   await page.mouse.down();
@@ -150,6 +150,7 @@ test("a plain click on an edge endpoint does NOT delete the edge (hair-trigger g
 
   const pt = await page.evaluate(() => {
     const c = document.querySelector(".react-flow__edgeupdater-target");
+    if (!c) throw new Error("no .react-flow__edgeupdater-target to grab");
     const r = c.getBoundingClientRect();
     const x = r.x + r.width / 2;
     const y = r.y + r.height / 2;
@@ -180,9 +181,12 @@ test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-route
   // bezier edges) to reveal the endpoint anchors
   const hoverPath = async () => {
     const pt = await page.evaluate(() => {
-      const p = document.querySelector(".react-flow__edge-path");
+      const p = document.querySelector<SVGGeometryElement>(".react-flow__edge-path");
+      if (!p) throw new Error("no .react-flow__edge-path to hover");
       const q = p.getPointAtLength(p.getTotalLength() * 0.3);
-      const s = new DOMPoint(q.x, q.y).matrixTransform(p.getScreenCTM());
+      const ctm = p.getScreenCTM();
+      if (!ctm) throw new Error("edge path has no screen transform");
+      const s = new DOMPoint(q.x, q.y).matrixTransform(ctm);
       return { x: s.x, y: s.y };
     });
     await page.mouse.move(pt.x, pt.y, { steps: 3 });
@@ -200,6 +204,7 @@ test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-route
   const grabTargetAnchor = async () => {
     const pt = await page.evaluate(() => {
       const c = document.querySelector(".react-flow__edgeupdater-target");
+      if (!c) throw new Error("no .react-flow__edgeupdater-target to grab");
       const r = c.getBoundingClientRect();
       const x = r.x + r.width / 2;
       const y = r.y + r.height / 2;
@@ -221,12 +226,15 @@ test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-route
   // The gesture can occasionally miss (a failed attempt detaches the edge),
   // so retry with a freshly re-created edge instead of flaking the suite.
   const ta = page.locator(".react-flow__edgeupdater-target").first();
-  const dst = await page
-    .locator(".mt-node")
-    .nth(2)
-    .locator('.mt-port[data-handlepos="left"]')
-    .first()
-    .boundingBox();
+  const dst = must(
+    await page
+      .locator(".mt-node")
+      .nth(2)
+      .locator('.mt-port[data-handlepos="left"]')
+      .first()
+      .boundingBox(),
+    "node 3's left input handle",
+  );
   for (let attempt = 0; attempt < 3; attempt++) {
     if ((await page.locator(".react-flow__edge").count()) === 0) {
       await dragPortToPort(page, 0, "right", 1, "left");
@@ -244,7 +252,7 @@ test("drag an edge endpoint: drop on the pane deletes, drop on a handle re-route
 
   // fresh hover, then drag the target-end anchor onto the empty pane -> delete
   // (retry: a failed grab leaves the edge untouched)
-  const pane = await page.locator(".react-flow__pane").boundingBox();
+  const pane = must(await page.locator(".react-flow__pane").boundingBox(), "the React Flow pane");
   for (let attempt = 0; attempt < 3; attempt++) {
     await hoverPath();
     await expect(ta).toBeVisible();
@@ -266,7 +274,7 @@ test("click an edge and press Delete removes it", async ({ page }) => {
   await dragPortToPort(page, 0, "right", 1, "left");
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
-  const eb = await page.locator(".react-flow__edge").first().boundingBox();
+  const eb = must(await page.locator(".react-flow__edge").first().boundingBox(), "the edge");
   await page.mouse.click(eb.x + eb.width / 2, eb.y + eb.height / 2);
   await page.keyboard.press("Delete");
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
@@ -293,7 +301,7 @@ test("copy-paste duplicates the selected subgraph with fresh ids and params", as
   // box-select both nodes deterministically: Shift + drag a selection
   // rectangle spanning the whole canvas (RF's selectionKeyCode is Shift;
   // selectionMode=Full requires nodes fully inside the box)
-  const pane = await page.locator(".react-flow__pane").boundingBox();
+  const pane = must(await page.locator(".react-flow__pane").boundingBox(), "the React Flow pane");
   await page.keyboard.down("Shift");
   await page.mouse.move(pane.x + 2, pane.y + 2);
   await page.mouse.down();

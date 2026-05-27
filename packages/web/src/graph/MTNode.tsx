@@ -118,7 +118,7 @@ export function MTNode({ id, data, selected }: NodeProps) {
   const inputs = manifest?.inputs ?? [];
   const outputs = manifest?.outputs ?? [];
   const rows = Math.max(inputs.length, outputs.length);
-  const params = manifest?.params ?? [];
+  const params = useMemo(() => manifest?.params ?? [], [manifest]);
 
   // Chain-walking inheritance context (DESIGN.md §4): survey/station/run (and
   // any other declared params) auto-fill from the upstream chain, flowing

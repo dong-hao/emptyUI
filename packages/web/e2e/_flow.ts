@@ -4,6 +4,16 @@
 
 import { expect, type Locator, type Page } from "@playwright/test";
 
+/** Narrow a value that is null when an element is not rendered (boundingBox()
+ *  returns null in that case). Without this the test dies with an unhelpful
+ *  TypeError; with it, the failure names what was missing (P0.3). */
+export function must<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`e2e: expected ${what} to be rendered`);
+  }
+  return value;
+}
+
 export function node(page: Page, title: string): Locator {
   return page.locator(".mt-node", { hasText: title }).first();
 }

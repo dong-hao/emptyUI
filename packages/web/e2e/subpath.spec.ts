@@ -43,7 +43,7 @@ test.beforeAll(async () => {
     });
     req.pipe(proxied);
   });
-  server.on("upgrade", (req, socket, head) => {
+  server.on("upgrade", (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const url = stripPrefix(req.url ?? "/");
     const upstream = net.connect(TARGET_PORT, "localhost", () => {
       const lines = [

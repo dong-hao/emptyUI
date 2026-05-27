@@ -316,9 +316,6 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
   const startBox = plotNode
     .locator(".param-field", { hasText: "Start (UTC)" })
     .locator("input");
-  const endBox = plotNode
-    .locator(".param-field", { hasText: "End (UTC)" })
-    .locator("input");
   await expect(startBox).toHaveValue("");
 
   // Drag the start handle ~25% into the bar → the Start box updates.

@@ -451,7 +451,7 @@ function extractRunIds(nodes: Node<MTNodeData>[]): Set<string> {
  *  cycle/type violations only WARN (the server re-validates before every
  *  run — silently pruning a legacy doc's edge would lose wiring with no
  *  recourse). */
-function enforceWiringRules<E extends { id: string; source: string; source_port: string; target: string; target_port: string }>(
+export function enforceWiringRules<E extends { id: string; source: string; source_port: string; target: string; target_port: string }>(
   candidates: E[],
   nodes: Node<MTNodeData>[],
   manifestOfType: (type: string) => NodeManifest | undefined,
@@ -570,7 +570,6 @@ export function deserializeWorkflow(
         : { width: 280, height: "auto" },
     };
   });
-  const nodeIds = new Set(nodes.map((n) => n.id));
   const manifestOfType = (type: string) =>
     catalog?.nodes.find((m) => m.type === type);
   // migrate BEFORE pruning (§4): the legacy `runs` port is no longer
