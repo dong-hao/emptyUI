@@ -1001,7 +1001,8 @@ of the recorded data); a prior time-domain `Calibrate` flips the flags to
 `False`, so both routes coexist (the time-domain Calibrate node remains for
 the classical route and explicit
 control; NB mt_metadata's own time-domain `RunTS.calibrate` removes every
-chain filter regardless of the applied flag — do not chain time-domain
+chain filter regardless of the applied flag, so the Calibrate node refuses a
+payload whose filters are already `applied=False` (M8); do not chain time-domain
 Calibrates). The FC records the applied calibration in its attrs
 (`calibration_applied`, e.g. `"hx=box+coil; ex=box"`).
 

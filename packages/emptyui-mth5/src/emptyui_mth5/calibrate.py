@@ -152,6 +152,26 @@ def _channel_filters(calibration, runts) -> dict:
     return out
 
 
+def _refuse_if_calibrated(data, where: str) -> None:
+    """M8: refuse a time-domain pass on a payload whose response is already gone.
+
+    ``RunTS.calibrate()`` divides the response out of every chain filter and
+    ignores the ``applied`` flag. An upstream Calibrate leaves its filters at
+    ``applied=False`` (the response is already removed), so a second pass divides
+    the same response out again: a silent double correction. Refuse loudly
+    instead (DESIGN.md §9.2).
+    """
+    done = sorted(ch for ch, pairs in channel_calibration(data).items()
+                  if any(not applied for _, applied in pairs))
+    if done:
+        raise ValueError(
+            f"{where}: channel(s) {done} already had their instrument response "
+            "removed by an upstream Calibrate; a second time-domain Calibrate "
+            "would divide that response out again (a silent double correction). "
+            "Remove the second Calibrate node, or apply the response once at the "
+            "Compute FC stage (DESIGN.md §9.2, issues.md M8)")
+
+
 class Calibrate(Node):
     type = "mth5.calibrate"
     title = "Calibrate"
@@ -200,6 +220,7 @@ class Calibrate(Node):
                     "— passing through uncalibrated (connect the run's own "
                     "archived responses or a 'Load Calibration' node)",
                     rid)
+            _refuse_if_calibrated(runts, f"Calibrate (collection member '{rid}')")
             members.append(runts.calibrate(**kwargs))
         ctx.progress(1.0, f"calibrated {len(members)} member(s) via their own responses")
         return {"data": _MappedCollection(members, collection.extents)}
@@ -217,6 +238,7 @@ class Calibrate(Node):
                 "explicit-filter collection mapping is planned (M4 backlog)")
         kwargs = {"include_decimation": include_decimation,
                   "include_delay": include_delay}
+        _refuse_if_calibrated(data, "Calibrate")
         # Idiomatic mth5 path: the run carries its own channel responses.
         if calibration is None:
             if hasattr(data, "calibrate") and not isinstance(data, dict):
