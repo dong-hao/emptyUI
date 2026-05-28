@@ -280,13 +280,20 @@ class ComputeFC(Node):
         names = dir(data)
         extents = data.extents if "extents" in names else None
         if (isinstance(extents, list) and "runs" in names):
-            return self._execute_collection(
-                ctx, data, input_channels, output_channels,
-                channel_nomenclature, magnetic_unit, e_dipole_length_m,
-                decimation_levels, factor, window_samples, overlap,
-                window_type, window_type_deep, deep_from_level, clock_zero,
-                prewhitening, per_window_detrend, reject_saturated,
-                saturated_max, persist, survey, station, run)
+            try:
+                return self._execute_collection(
+                    ctx, data, input_channels, output_channels,
+                    channel_nomenclature, magnetic_unit, e_dipole_length_m,
+                    decimation_levels, factor, window_samples, overlap,
+                    window_type, window_type_deep, deep_from_level, clock_zero,
+                    prewhitening, per_window_detrend, reject_saturated,
+                    saturated_max, persist, survey, station, run)
+            finally:
+                # M3: a failure while persisting a member must not leak the
+                # write-open workspace archive (the success path closes too)
+                if persist:
+                    from emptyui_mth5.persist import close_workspace_mth5
+                    close_workspace_mth5(ctx)
         levels = compute_fc_levels(
             data, input_channels, output_channels,
             num_decimations=decimation_levels, factor=factor,
@@ -371,7 +378,6 @@ class ComputeFC(Node):
         per-run cascades merged along time, per level (DESIGN §9.3)."""
         import numpy as np
         from emptyui_mth5.persist import (
-            close_workspace_mth5,
             get_workspace_mth5,
             persist_fc_level,
         )
@@ -455,8 +461,6 @@ class ComputeFC(Node):
             ctx.progress(
                 i / len(members),
                 f"FC {i}/{len(members)}: run {rid} ({len(levels)} level(s))")
-        if persist:
-            close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
         # the native rate families travel with the database (§20.1): the
         # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
