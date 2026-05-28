@@ -1455,6 +1455,19 @@ def _aligned_channel_values(payload, name) -> np.ndarray:
     return np.asarray(payload.channels[name], dtype=float)
 
 
+#: M7: the coherence diagnostic is sized in seconds, not in bins. The band is
+#: the long periods that set a remote reference's quality (64-1024 s).
+_COHERENCE_PERIOD_S = (64.0, 1024.0)
+#: The series is decimated to this analysis rate before the spectrum: the
+#: band's Nyquist (1/2 Hz) is far above 1/64 Hz, and a 150 Hz or 2400 Hz pair
+#: then resolves the band the same way an 8 Hz pair does.
+_COHERENCE_ANALYSIS_HZ = 1.0
+#: Segment length, in seconds: two of the longest band period.
+_COHERENCE_SEG_S = 2048.0
+#: Shortest aligned overlap that holds the longest band period.
+_COHERENCE_MIN_OVERLAP_S = _COHERENCE_PERIOD_S[1]
+
+
 def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     """Diagnostic: warn when the stations' horizontal magnetic fields are not
     coherent at long periods after alignment.
@@ -1481,21 +1494,41 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
     # stations may use different naming (standard local + LEMI-named remote)
     mags = [s for s in ("hx", "hy") if s in std1 and s in std2]
     if not mags:
+        # M7: every skip is logged; the check is optional, so info level
+        ctx.logger.info(
+            "station coherence check skipped: no horizontal magnetic channel "
+            "present on both stations")
         return
     x = _aligned_channel_values(out1, std1[mags[0]])
     y = _aligned_channel_values(out2, std2[mags[0]])
-    n = int(min(x.size, y.size))
-    # the coherence segments need room: a very short overlap (short windows,
-    # heavy cropping) cannot support the diagnostic — skip it
-    if n_common < 256 or n < 256:
+    n = int(min(x.size, y.size, n_common))
+    # the check needs an overlap that holds the longest band period (sized in
+    # seconds, so it is the same at every station rate)
+    if n / float(sr) < _COHERENCE_MIN_OVERLAP_S:
+        ctx.logger.info(
+            "station coherence check skipped: %.0f s of aligned overlap, "
+            "need %.0f s to cover the longest band period",
+            n / float(sr), _COHERENCE_MIN_OVERLAP_S)
         return
     x, y = x[:n], y[:n]
-    from scipy.signal import coherence
+    from scipy.signal import coherence, decimate
 
-    nperseg = min(4096, max(256, int(n // 4)))
-    f, C = coherence(x, y, fs=float(sr), nperseg=nperseg, noverlap=nperseg // 2)
-    band = (f >= 1.0 / 1024.0) & (f <= 1.0 / 64.0)
+    q = max(1, round(float(sr) / _COHERENCE_ANALYSIS_HZ))
+    rate = float(sr) / q
+    if q > 1:
+        x = decimate(x, q, zero_phase=True)
+        y = decimate(y, q, zero_phase=True)
+    # a quarter of the record as the segment cap leaves 7-8 segments at 50%
+    # overlap, so the coherence estimate is not biased high by a few segments
+    nperseg = min(round(_COHERENCE_SEG_S * rate), x.size // 4)
+    f, C = coherence(x, y, fs=rate, nperseg=nperseg, noverlap=nperseg // 2)
+    longest, shortest = _COHERENCE_PERIOD_S[1], _COHERENCE_PERIOD_S[0]
+    band = (f >= 1.0 / longest) & (f <= 1.0 / shortest)
     if not band.any():
+        ctx.logger.info(
+            "station coherence check skipped: no frequency bin in the "
+            "%.0f-%.0f s band for a %.0f s segment",
+            shortest, longest, nperseg / rate)
         return
     c = float(np.nanmedian(C[band]))
     if c < 0.5:
@@ -1506,4 +1539,5 @@ def _warn_if_uncorrelated(ctx, out1, out2, sr, n_common) -> None:
             c, mags[0],
         )
     else:
-        ctx.logger.info("station coherence (%s, 64-1024 s): %.2f", mags[0], c)
+        ctx.logger.info("station coherence (%s, %.0f-%.0f s): %.2f",
+                        mags[0], shortest, longest, c)
