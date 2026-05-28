@@ -64,6 +64,6 @@ def test_calibrate_then_compute_fc_matches_the_fc_route(tmp_path):
     fc_direct = compute_fc_levels(direct, ["hx", "hy"], ["ex", "ey"],
                                   num_samples_window=256, overlap=0.5,
                                   window_type="boxcar")[0]
-    ratio = (np.median(np.abs(fc_time["ex"].values))
-             / np.median(np.abs(fc_direct["ex"].values)))
+    ratio = (np.nanmedian(np.abs(fc_time["ex"].values))
+             / np.nanmedian(np.abs(fc_direct["ex"].values)))
     assert ratio == pytest.approx(1.0, rel=0.05)

@@ -139,9 +139,11 @@ def test_compute_fc_zero_dc_response_sets_nan():
     runts = _runts(*_field(rng))
     cal = _attach(runts, {"hy": [(_fap("coil0", amp=1.0, phase_deg=90.0),
                                   True)]})
+    # prewhitening='' pins the no-PW output: the first difference makes the DC
+    # bin NaN by design (DESIGN §10.1), which this NaN check would mask
     fc = compute_fc_levels(cal, "hx,hy", "ex,ey", num_decimations=0,
                            num_samples_window=256, overlap=0.5,
-                           window_type="boxcar")
+                           window_type="boxcar", prewhitening="")
     # amp=1/phase=90 does not vanish at DC via extrapolation... use a coil-
     # shaped table: build a linear-in-f response whose DC extrapolation is 0
     from mt_metadata.timeseries.filters import FrequencyResponseTableFilter
@@ -201,6 +203,8 @@ def test_channel_calibration_drops_unresolvable_refs(caplog):
 
 
 # --- §24.12 saturation QC: saturated FC windows are zero-weighted ---------
+# The NaN checks in this section pin prewhitening='' (see the note in
+# test_compute_fc_zero_dc_response_sets_nan).
 
 def _runts_with_mask(n=4096, sr=8.0, flagged_slice=None):
     """Fake RunTS with the standard four channels plus a binary 'saturated'
@@ -225,7 +229,8 @@ def test_compute_fc_rejects_saturated_windows():
     runts = _runts_with_mask(flagged_slice=flagged)
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=1,
                                factor=4, num_samples_window=nperseg,
-                               overlap=overlap, window_type="boxcar")
+                               overlap=overlap, window_type="boxcar",
+                               prewhitening="")
     # level 0: exactly the windows whose flagged fraction exceeds the
     # threshold are NaN (fraction-based §24.12: a few clipped samples out
     # of a long window are tolerated, not deleted)
@@ -266,7 +271,8 @@ def test_compute_fc_saturated_rejection_off():
     runts = _runts_with_mask(flagged_slice=slice(1000, 1008))
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=0,
                                num_samples_window=256, overlap=0.5,
-                               window_type="boxcar", reject_saturated=False)
+                               window_type="boxcar", reject_saturated=False,
+                               prewhitening="")
     assert not np.any(np.isnan(levels[0]["hx"].values))
     assert levels[0].attrs["saturated_windows_rejected"] == 0
 
@@ -277,7 +283,7 @@ def test_payload_without_mask_unaffected():
     runts = _runts(*_field(np.random.default_rng(42)))
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=0,
                                num_samples_window=256, overlap=0.5,
-                               window_type="boxcar")
+                               window_type="boxcar", prewhitening="")
     assert not np.any(np.isnan(levels[0]["hx"].values))
     assert levels[0].attrs["saturated_windows_rejected"] == 0
 
