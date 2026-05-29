@@ -228,12 +228,12 @@ def test_bad_ids_raise_clear_errors(archive):
 
 def test_persist_requires_datetime_time(tmp_path, fake_runts):
     """Persisting an fc with a float (relative) time axis must fail clearly."""
-    from emptyui_aurora._processing import compute_fc
+    from _fc import compute_fc_seconds
 
     runts = fake_runts
-    # drop the datetime start so compute_fc produces a float time axis
+    # drop the datetime start so compute_fc_seconds produces a float time axis
     runts.start = 0.0
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     assert "datetime64" not in str(fc.time.dtype)
     with pytest.raises(ValueError):

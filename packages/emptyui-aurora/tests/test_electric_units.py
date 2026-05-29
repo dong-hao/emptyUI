@@ -14,7 +14,8 @@ import logging
 
 import numpy as np
 import pytest
-from emptyui_aurora._processing import compute_fc, compute_fc_levels
+from _synthetic import compute_fc_seconds
+from emptyui_aurora._processing import compute_fc_levels
 from test_magnetic_units import N_TO_AM, _runts
 
 
@@ -101,7 +102,7 @@ def test_raw_mv_potential_without_dipole_errors(tmp_path):
     hx, hy, ex, ey = _field_vm(rng)
     runts = _runts(hx, hy, ex * 1e3, ey * 1e3, units_e="milliVolt")
     with pytest.raises(ValueError, match="e_dipole_length_m"):
-        compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+        compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                    window_length_s=256, overlap=0.5, window_type="hamming",
                    channel_nomenclature="default")
 
@@ -113,7 +114,7 @@ def test_dipole_on_mvkm_data_warns(tmp_path, caplog):
     hx, hy, ex, ey = _field_vm(rng)
     runts = _runts(hx, hy, ex * 1e6, ey * 1e6)  # E in mV/km
     with caplog.at_level(logging.WARNING, logger="emptyui"):
-        fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+        fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                         window_length_s=256, overlap=0.5,
                         window_type="hamming", e_dipole_length_m=100.0,
                         channel_nomenclature="default")

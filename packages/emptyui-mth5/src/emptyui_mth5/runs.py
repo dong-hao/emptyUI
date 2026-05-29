@@ -868,7 +868,7 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
     """Rebuild a ts.run payload cropped to [start_idx, start_idx+n_common).
 
     Both aligned outputs are normalized to an mth5 ``RunTS`` (regardless of
-    input type) so downstream consumers — aurora compute_fc and the core
+    input type) so downstream consumers — aurora compute_fc_levels and the core
     display/filter nodes via ``coerce_run`` — accept them. The absolute start
     is stamped so downstream FC time grids are identical for both runs.
     """

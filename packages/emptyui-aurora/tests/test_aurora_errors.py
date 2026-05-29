@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
+from _synthetic import (
+    compute_fc_seconds,
+    synthetic_fc,
+    synthetic_runts,
+    synthetic_source,
+)
 from emptyui_aurora._processing import (
     _coherence_weight,
     coherence_sort_fc,
-    compute_fc,
     compute_fc_levels,
     estimate_tf,
 )
@@ -34,7 +38,7 @@ def test_compute_fc_explicit_missing_output_dropped_with_warning():
         "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "bx,by", "e1,e2,bz",
+    fc = compute_fc_seconds(runts, "bx,by", "e1,e2,bz",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
     assert fc.attrs["output_channels"] == "e1,e2"
@@ -49,7 +53,7 @@ def test_compute_fc_explicit_missing_input_errors():
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
     })
     with pytest.raises(ValueError, match="input"):
-        compute_fc(runts, "hx,hy", "e1,e2",
+        compute_fc_seconds(runts, "hx,hy", "e1,e2",
                    window_length_s=128, overlap=0.5, window_type="hamming")
 
 
@@ -62,7 +66,7 @@ def test_compute_fc_rejects_nan_input():
                             electric=("e1", "e2"), z=(1.0, 2.0, 3.0, 4.0))
     runts.dataset["e1"].values[10] = np.nan
     with pytest.raises(ValueError, match="NaN/Inf"):
-        compute_fc(runts, ["bx", "by"], ["e1", "e2"], 256.0, 0.5, "hamming")
+        compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"], 256.0, 0.5, "hamming")
     with pytest.raises(ValueError, match="NaN/Inf"):
         compute_fc_levels(runts, ["bx", "by"], ["e1", "e2"])
 
@@ -91,7 +95,7 @@ def test_estimate_tf_accepts_mth5_read_fc_layout():
                 coords={"time": t},
             )
 
-    fc = compute_fc(FakeRunTS(), ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(FakeRunTS(), ["hx", "hy"], ["ex", "ey"],
                     window_length_s=128, overlap=0.5, window_type="hamming")
     # mth5 stores (time, frequency); emulate the read-back layout + bare attrs
     mth5_layout = fc.transpose("time", "frequency").copy()
@@ -108,7 +112,7 @@ def test_estimate_tf_accepts_mth5_read_fc_layout():
 def test_ls_remote_reference_rejected():
     """There is no least-squares + remote-reference path by design."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     with pytest.raises(ValueError):
         estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
@@ -119,9 +123,9 @@ def test_remote_reference_grid_mismatch_raises_clear_error():
     """A remote-reference fc with a different window (frequency grid) must fail
     with a clear message instead of aurora's bare Exception."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
-    ref = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    ref = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                      window_length_s=512, overlap=0.5, window_type="hamming")
     with pytest.raises(ValueError, match="frequency grid"):
         estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],

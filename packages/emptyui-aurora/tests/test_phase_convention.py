@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from emptyui_aurora._processing import compute_fc, estimate_tf
+from _synthetic import compute_fc_seconds
+from emptyui_aurora._processing import estimate_tf
 
 
 @pytest.mark.parametrize("engine,remote_reference,use_dummy", [
@@ -24,11 +25,11 @@ def test_phase_convention_matches_aurora_halfspace(
     test12rr_runts, engine, remote_reference, use_dummy
 ):
     runts = test12rr_runts
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5, "hamming",
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5, "hamming",
                     magnetic_unit="h")
     # model a second (dummy) remote station by duplicating the data file: a
     # copy of the same time series -> a second fc used as the remote reference
-    ref_fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5,
+    ref_fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5,
                         "hamming", magnetic_unit="h") if use_dummy else None
     _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], estimator_engine=engine,
                        remote_reference=remote_reference, periods_per_octave=8,

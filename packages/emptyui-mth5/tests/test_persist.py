@@ -6,9 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from _fc import compute_fc_seconds
 from emptyui.context import RunContext
 from emptyui.store import DataStore
-from emptyui_aurora._processing import compute_fc
 from emptyui_mth5.persist import (
     WORKSPACE_MTH5_NAME,
     load_fc_level,
@@ -21,7 +21,7 @@ def test_fc_persist_roundtrip(tmp_path: Path, fake_runts):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     runts = fake_runts
 
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     # the fc must carry an absolute (datetime64) time axis for persistence
     assert "datetime64" in str(fc.time.dtype)
@@ -79,7 +79,7 @@ def test_read_back_fc_feeds_estimate_tf(tmp_path: Path, fake_runts):
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     runts = fake_runts
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
 
     survey, station, run = runts_context(runts)

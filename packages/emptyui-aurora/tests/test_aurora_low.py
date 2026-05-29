@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+from _synthetic import compute_fc_seconds
 from emptyui_aurora._processing import (
     _container_geometry,
     _pair_remote_times,
     _resolve_cross_level_claims,
     coherence_sort_fc,
-    compute_fc,
 )
 
 
@@ -41,7 +41,7 @@ def test_compute_fc_rejects_overlap_ge_one():
     chs[0].component = "hx"
     runts = RunTS(array_list=chs)
     with pytest.raises(ValueError, match=r"overlap must be in \[0, 1\)"):
-        compute_fc(runts, ["hx"], ["hx"], 32.0, 1.0, "hamming")
+        compute_fc_seconds(runts, ["hx"], ["hx"], 32.0, 1.0, "hamming")
 
 
 # --- L-A6: the dead cascade factor field is gone ------------------------------

@@ -7,10 +7,9 @@ import logging
 
 import numpy as np
 import pytest
-from _synthetic import synthetic_runts, synthetic_source
+from _synthetic import compute_fc_seconds, synthetic_runts, synthetic_source
 from emptyui_aurora._processing import (
     build_tf,
-    compute_fc,
     compute_fc_levels,
     estimate_tf,
 )
@@ -23,7 +22,7 @@ def _synthetic_runts():
 
 def test_compute_fc_and_estimate_tf():
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     assert "frequency" in fc.dims and "time" in fc.dims
     assert set(fc.data_vars) == {"ex", "ey", "hx", "hy"}
@@ -42,7 +41,7 @@ def test_compute_fc_and_estimate_tf():
 def test_estimate_tf_returns_standard_errors():
     """estimate_tf returns per-element standard errors for both engines."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     for engine in ("Least Squares", "Robust"):
         _, Z, Zerr = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
@@ -121,7 +120,7 @@ def test_tipper_bz_output_recovered():
             )
 
     runts = FakeRunTS()
-    fc = compute_fc(runts, ["bx", "by"], ["e1", "e2", "bz"],
+    fc = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2", "bz"],
                     window_length_s=128, overlap=0.5, window_type="hamming")
     periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e1", "e2", "bz"],
                              periods_per_octave=8)
@@ -146,10 +145,10 @@ def test_magnetic_unit_h_vs_b_conversion():
     from emptyui_aurora._processing import MU0
 
     runts = _synthetic_runts()
-    fc_h = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc_h = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                       window_length_s=256, overlap=0.5, window_type="hamming",
                       magnetic_unit="h")
-    fc_b = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc_b = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                       window_length_s=256, overlap=0.5, window_type="hamming",
                       magnetic_unit="b")
     # fluxgate B [nT] -> H [A/m]: fc input is H = B*1e-9/mu0, so b-case is
@@ -162,7 +161,6 @@ def test_magnetic_unit_auto_derived_from_channel_names():
     """'auto' must derive the B/H mode from the nomenclature/channel names:
     bx/by (fluxgate, nT) -> B->H conversion; hx/hy (coil, A/m) -> unchanged."""
     import xarray as xr
-    from emptyui_aurora._processing import compute_fc
 
     sr = 8.0
     n = 8192
@@ -185,10 +183,10 @@ def test_magnetic_unit_auto_derived_from_channel_names():
 
     runts = FakeRunTS()
 
-    fc_b_auto = compute_fc(runts, ["bx", "by"], ["e1", "e2"],
+    fc_b_auto = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"],
                            window_length_s=256, overlap=0.5, window_type="hamming",
                            magnetic_unit="auto")
-    fc_b_manual = compute_fc(runts, ["bx", "by"], ["e1", "e2"],
+    fc_b_manual = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"],
                              window_length_s=256, overlap=0.5, window_type="hamming",
                              magnetic_unit="b")
     np.testing.assert_allclose(fc_b_auto["bx"].values, fc_b_manual["bx"].values)
@@ -197,10 +195,10 @@ def test_magnetic_unit_auto_derived_from_channel_names():
 
     # hx/hy naming (default nomenclature) means coil H: unchanged, unit 'h'
     runts_h = _synthetic_runts()
-    fc_h_auto = compute_fc(runts_h, ["hx", "hy"], ["ex", "ey"],
+    fc_h_auto = compute_fc_seconds(runts_h, ["hx", "hy"], ["ex", "ey"],
                            window_length_s=256, overlap=0.5, window_type="hamming",
                            magnetic_unit="auto")
-    fc_h_manual = compute_fc(runts_h, ["hx", "hy"], ["ex", "ey"],
+    fc_h_manual = compute_fc_seconds(runts_h, ["hx", "hy"], ["ex", "ey"],
                              window_length_s=256, overlap=0.5, window_type="hamming",
                              magnetic_unit="h")
     np.testing.assert_allclose(fc_h_auto["hx"].values, fc_h_manual["hx"].values)
@@ -234,7 +232,7 @@ def test_build_tf_lemi34_four_channel():
             )
 
     runts = FakeRunTS()
-    fc = compute_fc(runts, ["bx", "by"], ["e3", "e4"],
+    fc = compute_fc_seconds(runts, ["bx", "by"], ["e3", "e4"],
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert fc.attrs["channel_nomenclature"] == "lemi34"
     periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e3", "e4"],
@@ -271,7 +269,7 @@ def test_build_tf_phoenix123_nomenclature():
 
 def test_build_tf_returns_mt_metadata_tf():
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"])
     tf = build_tf(periods, Z, ["hx", "hy"], ["ex", "ey"])
@@ -289,7 +287,7 @@ def test_build_tf_returns_mt_metadata_tf():
 ])
 def test_estimator_engines_run(engine, rr):
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine=engine, remote_reference=rr,
@@ -302,7 +300,7 @@ def test_estimator_engines_run(engine, rr):
 def test_legacy_estimator_engine_names_still_accepted():
     """Old OLS/RME/RME_RR values keep loading previously saved workflows."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     for engine in ("OLS", "RME", "RME_RR"):
         rr = engine == "RME_RR"
@@ -321,10 +319,10 @@ def test_remote_reference_uses_duplicated_dummy_station():
     data makes this a self-reference, but it exercises the full ref_fc path.
     """
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     # duplicate the raw data as a dummy remote station -> separate fc
-    remote = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    remote = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                         window_length_s=256, overlap=0.5, window_type="hamming")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", remote_reference=True,
@@ -344,7 +342,7 @@ def test_remote_reference_without_remote_fc_warns(caplog):
     warn loudly — the operator must never believe remote reference is in
     effect when it silently degenerated to plain RME (E2)."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     with caplog.at_level(logging.WARNING, logger="emptyui"):
         periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
@@ -436,7 +434,7 @@ def test_compute_fc_auto_detects_lemi_channels_including_tipper():
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
         "bz": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2", "bz"}
     assert fc.attrs["input_channels"] == "bx,by"
@@ -452,7 +450,7 @@ def test_compute_fc_auto_drops_missing_vertical():
         "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
     assert fc.attrs["output_channels"] == "e1,e2"
@@ -466,7 +464,7 @@ def test_compute_fc_auto_tipper_only_when_no_electric():
         "bx": rng.standard_normal(n), "by": rng.standard_normal(n),
         "bz": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"bx", "by", "bz"}
     assert fc.attrs["output_channels"] == "bz"
@@ -481,7 +479,7 @@ def test_compute_fc_auto_phoenix_names():
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
         "h3": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"h1", "h2", "e1", "e2", "h3"}
     assert fc.attrs["input_channels"] == "h1,h2"
@@ -494,7 +492,7 @@ def test_compute_fc_auto_phoenix_names():
 def test_compute_fc_auto_standard_names():
     """Standard-named data with empty fields resolves to hx,hy / ex,ey."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=256, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
     assert fc.attrs["channel_nomenclature"] == "default"
@@ -509,7 +507,7 @@ def test_compute_fc_auto_case_insensitive_channel_names():
         "Ex": rng.standard_normal(n), "Ey": rng.standard_normal(n),
         "Hx": rng.standard_normal(n), "Hy": rng.standard_normal(n),
     })
-    fc = compute_fc(runts, "", "",
+    fc = compute_fc_seconds(runts, "", "",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"Ex", "Ey", "Hx", "Hy"}
     assert fc.attrs["input_channels"] == "Hx,Hy"
@@ -531,7 +529,7 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
         "ex": rng.standard_normal(n), "ey": rng.standard_normal(n),
         "temperature": aux,
     })
-    fc = compute_fc(runts, "hx,hy", "ex,ey",
+    fc = compute_fc_seconds(runts, "hx,hy", "ex,ey",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
     assert np.all(np.isfinite(fc["ex"].values))

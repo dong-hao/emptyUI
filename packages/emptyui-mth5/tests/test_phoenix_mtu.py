@@ -693,9 +693,9 @@ def test_macro_flow_extract_align(tmp_path):
     Run (per slot run OR the continuous stream) -> Align Runs crops two
     stations to their common overlap — the classic single-rate RR flow on
     burst archives."""
+    from _fc import compute_fc_seconds
     from emptyui.context import RunContext
     from emptyui.store import DataStore
-    from emptyui_aurora._processing import compute_fc
     from emptyui_mth5.phoenix_mtu import LoadPhoenixMtu
     from emptyui_mth5.runs import AlignRuns, ExtractRun
 
@@ -721,10 +721,10 @@ def test_macro_flow_extract_align(tmp_path):
     assert len(r_a.dataset.time) == len(r_b.dataset.time)
     assert str(r_a.start) == str(r_b.start)
     # and FCs computed from the aligned pair share the identical grid
-    fc = compute_fc(r_a, ("hx", "hy"), ("ex", "ey"),
+    fc = compute_fc_seconds(r_a, ("hx", "hy"), ("ex", "ey"),
                     window_length_s=32.0, overlap=0.5,
                     window_type="hamming", start_datetime=str(r_a.start))
-    ref = compute_fc(r_b, ("hx", "hy"), ("hx", "hy"),
+    ref = compute_fc_seconds(r_b, ("hx", "hy"), ("hx", "hy"),
                      window_length_s=32.0, overlap=0.5,
                      window_type="hamming", start_datetime=str(r_b.start))
     assert np.array_equal(fc["time"].values, ref["time"].values)

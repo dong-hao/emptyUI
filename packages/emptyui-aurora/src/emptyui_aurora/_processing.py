@@ -84,7 +84,7 @@ def _resolve_keyword(channel_nomenclature, input_channels, output_channels,
 
 def _resolve_io_channels(available, channel_nomenclature, input_channels,
                          output_channels):
-    """Resolve the actual input/output channel names for a compute_fc call.
+    """Resolve the actual input/output channel names for a compute_fc_levels call.
 
     Empty (or "auto") fields are resolved automatically from the nomenclature
     and the data: inputs = the horizontal magnetic pair, outputs = the
@@ -241,175 +241,6 @@ def _start_datetime_raw(value):
     return None
 
 
-def compute_fc(
-    value,
-    input_channels,
-    output_channels,
-    window_length_s,
-    overlap,
-    window_type,
-    magnetic_unit="auto",
-    e_dipole_length_m=None,
-    start_datetime=None,
-    channel_nomenclature=None,
-    prewhitening="",
-    per_window_detrend="",
-    clock_zero="",
-):
-    """Windowed STFT -> fc xarray Dataset (dims frequency x time).
-
-    ``window_length_s`` is the window length in SECONDS (the node surface
-    speaks samples — ``compute_fc_levels(num_samples_window=...)`` is the
-    authoritative multi-level route; L-A5 documents the distinction).
-
-    The input is assumed to be already detrended (use the Detrend node to
-    remove the DC/absolute-field baseline first — fluxgate magnetometers
-    report a huge DC offset that would otherwise swamp the autopower and drive
-    Z -> 0).
-
-    ``magnetic_unit``: "auto" (default) derives the mode from the channel    nomenclature / actual channel names — "b" (fluxgate gives absolute B,
-    converted B->H by dividing by μ0) or "h" (coil sensors — mth5 archives
-    coil data in nT too, so they are converted to A/m as well; only data
-    whose units explicitly say A/m, or unit-less synthetic payloads, are
-    left untouched). An explicit "h"/"b" always wins (legacy workflows keep
-    working — "h" there means "already A/m").
-    ``channel_nomenclature``: mt_metadata CHANNEL_MAPS keyword (e.g. "lemi12")
-    used to interpret channel names; when None/auto it is inferred and recorded
-    on the fc so EstimateTF can map back to standard TF coordinates.
-
-    ``e_dipole_length_m``: LEMI-style instruments store E as the raw potential
-    difference (mV) between electrodes, not an E-field. When set, output (E)
-    channels are converted mV -> V/m by dividing by the dipole length
-    (E = raw_mV * 1e-3 / dipole_m).
-
-    Output channels are classified by name: **electric** outputs (ex/ey/e1/e2/…)
-    get the E scaling above (mV/km -> V/m when no dipole length), while
-    **magnetic** outputs (bz/hz) get the same B->H conversion as the inputs (so
-    the fc carries H throughout and a tipper Bz/H is dimensionless). Output
-    channels are not required to be exactly the electric pair — a vertical
-    magnetic output extends the fc to support a geomagnetic transfer function.
-
-    ``start_datetime`` optionally overrides the absolute start time used for the
-    ``time`` coordinate (e.g. the run's start). When available (from the source
-    RunTS or this arg) the fc ``time`` coordinate is ``datetime64`` and a
-    ``start_datetime`` attr is recorded — required for mth5 FC persistence.
-
-    ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
-    start; ``"epoch"`` or an explicit ISO datetime anchors windows on
-    the grid ``t0 + k·step`` (head partial window dropped; the time label is
-    the window CENTRE, N/(2·fs) after its first sample — issues.md L11) so separately-
-    computed runs/stations share one absolute window grid — the prerequisite
-    for remote-reference pairing across per-run FCs (Merge FC / burst mode).
-    """
-    import xarray as xr
-
-    if prewhitening and prewhitening != "first difference":
-        raise ValueError(
-            f"unknown prewhitening {prewhitening!r} (supported: "
-            "'first difference' or '' for off)"
-        )
-    # L-A5: mirror compute_fc_levels' guard (review item B13) — the
-    # single-level API had none, so overlap >= 1 reached scipy.stft as
-    # noverlap >= nperseg and crashed mid-node
-    if not (0.0 <= float(overlap) < 1.0):
-        raise ValueError(
-            f"overlap must be in [0, 1) — got {overlap!r} "
-            "(0 = adjacent windows, 0.99 = near-total overlap)")
-
-    channels, sample_rate, start_s, src_start = to_channels(value, check_finite=False)
-    if start_datetime is None:
-        start_datetime = src_start
-    start_ts = pd.Timestamp(start_datetime) if start_datetime is not None else None
-    if clock_zero and start_ts is None:
-        _log.warning(
-            "clock_zero=%r requires an absolute start time — the payload "
-            "carries none; anchoring skipped (windows anchor at the run "
-            "start)", clock_zero)
-        clock_zero = ""
-    units = _channel_units(value)
-    calibration = channel_calibration(value)
-    nperseg = max(8, int(window_length_s * sample_rate))
-    noverlap = int(nperseg * overlap)
-    n_skip, off = _clock_zero_head_skip(start_ts, sample_rate, nperseg,
-                                        noverlap, clock_zero)
-    if start_ts is None:
-        off = start_s
-    input_channels, output_channels, keyword = _resolve_io_channels(
-        list(channels), channel_nomenclature, input_channels, output_channels
-    )
-    # NaN guard only on the channels that are actually STFT'd — a NaN in an
-    # unused auxiliary channel must not hard-fail the node
-    ensure_finite(
-        {c: channels[c] for c in dict.fromkeys(input_channels + output_channels)},
-        "Compute FC",
-    )
-    if len(channels[input_channels[0]]) - n_skip < nperseg:
-        raise ValueError(
-            f"series has {len(channels[input_channels[0]]) - n_skip} usable "
-            f"sample(s) after the clock-zero head clip — fewer than one "
-            f"window ({nperseg})")
-    b_to_h = _resolve_magnetic_unit(magnetic_unit, keyword, input_channels) == "b"
-    e_scale = (1e-3 / e_dipole_length_m) if e_dipole_length_m else None
-
-    converted: dict[str, np.ndarray] = {}
-    e_labels: set[str] = set()
-    for comp in input_channels + output_channels:
-        if comp not in channels:
-            raise ValueError(
-                f"channel '{comp}' not in data {list(channels)}; "
-                "LEMI data uses e1,e2,bx,by,bz — set input/output channels accordingly"
-            )
-        x = np.asarray(channels[comp], dtype=float)[n_skip:]
-        if comp in input_channels:
-            x = _magnetic_to_h(x, comp, b_to_h, units)
-        elif is_magnetic_name(comp):  # vertical magnetic output (bz/hz) — tipper
-            x = _magnetic_to_h(x, comp, b_to_h, units)  # same units as inputs
-        elif is_electric_name(comp):  # electric output channel
-            x, e_label = _electric_to_vm(x, comp, e_scale, units)
-            e_labels.add(e_label)
-        # unknown output channel: leave units untouched
-        converted[comp] = x
-    f, t, fc_vars = _stft_channels(
-        converted, sample_rate, nperseg, overlap, window_type,
-        input_channels, output_channels,
-        prewhitening=prewhitening, per_window_detrend=per_window_detrend)
-    cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
-
-    time_coord = t + off
-    start_iso = ""
-    if start_ts is not None:
-        dt_idx = start_ts + pd.to_timedelta(t + off, unit="s")
-        # repo-wide convention: naive stamps are UTC — a tz-aware coord makes
-        # xarray's .values an OBJECT array of datetime.datetime, breaking
-        # every np.datetime64 dtype check downstream (remote-reference
-        # pairing crashed on exactly this)
-        time_coord = dt_idx.tz_localize(None) if dt_idx.tz is not None else dt_idx
-        start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
-
-    fc = xr.Dataset(
-        data_vars=fc_vars,
-        coords={"frequency": f, "time": time_coord},
-        attrs={
-            "sample_rate": float(sample_rate),
-            "num_samples_window": int(nperseg),
-            "window_length_s": float(window_length_s),
-            "overlap": float(overlap),
-            "window_type": window_type,
-            "prewhitening": prewhitening or "off",
-            "per_window_detrend": per_window_detrend or "off",
-            "input_channels": ",".join(input_channels),
-            "output_channels": ",".join(output_channels),
-            "magnetic_unit": b_to_h and "b" or "h",
-            "electric_scaling": "; ".join(sorted(e_labels)) if e_labels else "none",
-            "channel_nomenclature": keyword,
-            "e_dipole_length_m": e_dipole_length_m or 0.0,
-            "calibration_applied": cal_note,
-            "start_datetime": start_iso,
-        },
-    )
-    return fc
-
-
 def compute_fc_levels(
     value,
     input_channels,
@@ -478,6 +309,13 @@ def compute_fc_levels(
         raise ValueError(
             f"overlap must be in [0, 1) — got {overlap!r} "
             "(0 = adjacent windows, 0.99 = near-total overlap)")
+    # the retired single-level compute_fc validated this up front; keep it here
+    # (the STFT check is reached only when a level has a full window)
+    if prewhitening and prewhitening != "first difference":
+        raise ValueError(
+            f"unknown prewhitening {prewhitening!r} (supported: "
+            "'first difference' or '' for off)"
+        )
     channels, sample_rate, start_s, start_dt = to_channels(value, check_finite=False)
     if start_datetime is None:
         start_datetime = start_dt
@@ -582,7 +420,7 @@ def compute_fc_levels(
         start_iso = ""
         if start_ts is not None:
             dt_idx = start_ts + pd.to_timedelta(t + off, unit="s")
-            # naive UTC (repo-wide convention) — see compute_fc's note
+            # naive UTC (repo-wide convention) — see compute_fc_levels' note
             time_coord = (dt_idx.tz_localize(None)
                           if dt_idx.tz is not None else dt_idx)
             start_iso = (start_ts + pd.to_timedelta(off, unit="s")).isoformat()
@@ -1118,7 +956,7 @@ def _resolve_estimator(estimator_engine, remote_reference) -> str:
 def _normalize_fc_layout(fc):
     """Normalize an fc to a ``(frequency, time)`` data layout.
 
-    emptyUI's :func:`compute_fc` produces ``(frequency, time)``; mth5's FC
+    emptyUI's :func:`compute_fc_levels` produces ``(frequency, time)``; mth5's FC
     persistence stores ``(time, frequency)`` and ``to_xarray`` returns that
     layout. The band loop indexes ``fc[channel][f_idx, :]`` (frequency rows),
     so read-back FCs must be transposed first.
@@ -1826,7 +1664,7 @@ def estimate_tf(
     With outputs = [ex,ey] this is the 2x2 impedance; adding a vertical
     magnetic output (bz/hz) extends it to a 3x2 whose third row is the
     geomagnetic transfer function (tipper). The fc already
-    holds H for the magnetic inputs (B->H done in compute_fc when the
+    holds H for the magnetic inputs (B->H done in compute_fc_levels when the
     instrument is fluxgate), so impedance is in ohm (V/m per A/m).
 
     ``estimator_engine`` selects the estimator (all aurora-backed):
@@ -1863,7 +1701,7 @@ def estimate_tf(
     l2u-fallback paths clip in :func:`_resolve_period_bands`.
 
     FCs read back from an mth5 archive carry a ``(time, frequency)`` layout
-    (mth5 ``to_xarray``), while :func:`compute_fc` produces
+    (mth5 ``to_xarray``), while :func:`compute_fc_levels` produces
     ``(frequency, time)``; both are normalized to ``(frequency, time)`` here.
     """
 

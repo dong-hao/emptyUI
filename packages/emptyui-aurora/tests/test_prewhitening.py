@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from emptyui_aurora._processing import compute_fc, compute_fc_levels
+from _synthetic import compute_fc_seconds
+from emptyui_aurora._processing import compute_fc_levels
 from emptyui_core_nodes.types import TimeSeries
 
 
@@ -34,8 +35,8 @@ def test_first_difference_recoloring_recovers_fc():
     prewhitened+recolored FC must match the un-prewhitened FC — the exact
     inverse filter undoes the differencing."""
     tone, _ = _tone()
-    base = compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
-    pw = compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"],
+    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
+    pw = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
                     **_kw(prewhitening="first difference"))
     f = base["frequency"].values
     k = int(np.argmin(np.abs(f - 0.5)))
@@ -49,10 +50,10 @@ def test_prewhitening_nans_dc_bin():
     """Recoloring is undefined at f=0 — the DC bin is NaN (it is excluded
     from bands and skipped by the estimator's non-finite row filter)."""
     tone, _ = _tone()
-    pw = compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"],
+    pw = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
                     **_kw(prewhitening="first difference"))
     assert np.isnan(pw["hx"].values[0, 0])
-    base = compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
+    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
     assert np.isfinite(base["hx"].values[0, 0])
 
 
@@ -70,9 +71,9 @@ def test_prewhitening_reduces_colored_noise_leakage():
     x = tone + red
 
     kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "hamming"}
-    base = compute_fc(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
+    base = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
                                  sample_rate=fs), ["hx", "hy"], ["hx", "hy"], **kw)
-    pw = compute_fc(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
+    pw = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
                                sample_rate=fs), ["hx", "hy"], ["hx", "hy"],
                     **kw, prewhitening="first difference")
     k = int(np.argmin(np.abs(base["frequency"].values - 2.0)))
@@ -94,10 +95,10 @@ def test_per_window_detrend_removes_trend():
     tone, t = _tone()
     ramp = 0.01 * t
     kw = _kw()
-    base = compute_fc(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"], **kw)
-    detr = compute_fc(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"],
+    base = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"], **kw)
+    detr = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"],
                       **_kw(per_window_detrend="linear"))
-    tone_only = compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"], **kw)
+    tone_only = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **kw)
     f = base["frequency"].values
     k = int(np.argmin(np.abs(f - 0.5)))
     off = np.ones(len(f), bool)
@@ -132,7 +133,7 @@ def test_options_threaded_through_levels_and_attrs():
 def test_unknown_prewhitening_rejected():
     tone, _ = _tone(n=256)
     with pytest.raises(ValueError, match="unknown prewhitening"):
-        compute_fc(_payload(tone), ["hx", "hy"], ["hx", "hy"],
+        compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
                    **_kw(prewhitening="arma"))
     with pytest.raises(ValueError, match="unknown prewhitening"):
         compute_fc_levels(_payload(tone), ["hx", "hy"], ["hx", "hy"],

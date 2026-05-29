@@ -74,37 +74,37 @@ def test_align_restamps_units_from_core_series(tmp_path):
 
 def test_compute_fc_reads_core_series_units(tmp_path):
     """A calibrated run through a core Detrend keeps the right scaling."""
-    from emptyui_aurora._processing import compute_fc
+    from _synthetic import compute_fc_seconds
 
     rng = np.random.default_rng(4)
     core = _core_series(_runts(*_field(rng)))
-    fc = compute_fc(core, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
+    fc = compute_fc_seconds(core, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
     assert fc.attrs["electric_scaling"] == "mV/km -> V/m"
 
 
 def test_compute_fc_rejects_counts(tmp_path):
     """Raw counts -> hard error naming the channel and the fix."""
-    from emptyui_aurora._processing import compute_fc
+    from _synthetic import compute_fc_seconds
 
     rng = np.random.default_rng(5)
     runts = _runts(*_field(rng), units_h="digital counts",
                    units_e="digital counts")
     core = _core_series(runts)
     with pytest.raises(ValueError, match="raw instrument counts.*Calibrate"):
-        compute_fc(core, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
+        compute_fc_seconds(core, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
     # the RunTS payload path rejects too (units intact, no core node)
     with pytest.raises(ValueError, match="raw instrument counts"):
-        compute_fc(runts, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
+        compute_fc_seconds(runts, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar")
 
 
 def test_compute_fc_rejects_counts_explicit_b(tmp_path):
     """Explicit magnetic_unit='b' does not bypass the counts rejection."""
-    from emptyui_aurora._processing import compute_fc
+    from _synthetic import compute_fc_seconds
 
     rng = np.random.default_rng(6)
     runts = _runts(*_field(rng), units_h="digital counts")
     with pytest.raises(ValueError, match="raw instrument counts"):
-        compute_fc(runts, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar",
+        compute_fc_seconds(runts, "hx,hy", "ex,ey", 128.0, 0.5, "boxcar",
                    magnetic_unit="b")
 
 

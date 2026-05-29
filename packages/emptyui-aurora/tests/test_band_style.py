@@ -14,7 +14,12 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from _synthetic import synthetic_fc, synthetic_runts, synthetic_source
+from _synthetic import (
+    compute_fc_seconds,
+    synthetic_fc,
+    synthetic_runts,
+    synthetic_source,
+)
 from emptyui_aurora._processing import (
     _l2u_band_table,
     _l2u_template,
@@ -23,7 +28,6 @@ from emptyui_aurora._processing import (
     _resolve_band_style,
     _resolve_period_bands,
     coherence_sort_fc,
-    compute_fc,
     compute_fc_levels,
     estimate_tf,
     estimate_tf_levels,
@@ -66,7 +70,7 @@ def test_resolve_period_bands_uniform_matches_legacy_log_behavior():
     """The "uniform" dispatch must reproduce the exact legacy boolean-edge
     band membership of the unmodified _period_bands function."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods_legacy, edges = _period_bands(fc, periods_per_octave=8)
     with np.errstate(divide="ignore"):
@@ -87,7 +91,7 @@ def test_resolve_period_bands_uniform_matches_legacy_log_behavior():
 @pytest.mark.parametrize("periods_per_octave", [1, 4, 8])
 def test_uniform_bands_respect_periods_per_octave(periods_per_octave):
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods, _ = _period_bands(fc, periods_per_octave=periods_per_octave)
     assert len(periods) >= 1
@@ -231,7 +235,7 @@ def test_period_bands_indexed_fallback_tiles_range_without_gaps():
     [index_floor, index_ceiling] to exactly one band: no gaps, no overlaps,
     no duplicated bins."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods, index_ranges = _period_bands_indexed(fc, periods_per_octave=4)
     assert len(periods) == len(index_ranges)
@@ -252,7 +256,7 @@ def test_period_bands_indexed_fallback_width_is_monotonic_non_decreasing():
     """Band width grows toward higher frequency (matches the shape of
     aurora's bundled bs_256_26.cfg EMTF band-setup table)."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     _, index_ranges = _period_bands_indexed(fc, periods_per_octave=4)
     ordered = sorted(index_ranges, key=lambda r: r[0])
@@ -265,7 +269,7 @@ def test_period_bands_indexed_fallback_handles_degenerate_short_window():
     """A very short window (few usable bins) must not crash and must still
     return at least one non-empty band covering the available range."""
     runts = synthetic_runts(synthetic_source(1, n=512), seed=1)
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=8, overlap=0.5, window_type="hamming")
     periods, index_ranges = _period_bands_indexed(fc, periods_per_octave=4)
     assert len(periods) == len(index_ranges) >= 1
@@ -280,7 +284,7 @@ def test_estimate_tf_recovers_known_impedance_both_band_styles(band_style):
     """Both schemes must recover the same known synthetic impedance
     (z = (1.0, 3.0, 2.0, 1.0) baked into synthetic_runts)."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                                 periods_per_octave=8, band_style=band_style)
@@ -342,7 +346,7 @@ def test_node_estimate_tf_accepts_band_style(tmp_path):
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
 
     # default (l2u) via node execute without band_style
@@ -402,7 +406,7 @@ def test_uniform_head_clip_drops_short_periods():
     was silently ignored for band_style='uniform' (only the l2u table path
     clipped); the same geometric-mean center-period criterion applies."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     periods_all, _ = _resolve_period_bands(fc, periods_per_octave=8,
                                            band_style="uniform")
@@ -450,7 +454,7 @@ def test_head_clip_applies_to_l2u_fallback():
 def test_head_clip_zero_is_noop_for_both_schemes():
     """t_short=0/None preserves the legacy behavior for both schemes."""
     runts = _synthetic_runts()
-    fc = compute_fc(runts, ["hx", "hy"], ["ex", "ey"],
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                     window_length_s=256, overlap=0.5, window_type="hamming")
     for style in ("uniform", "l2u"):
         p0, b0 = _resolve_period_bands(fc, periods_per_octave=8,
