@@ -39,7 +39,7 @@ def test_compute_fc_explicit_missing_output_dropped_with_warning():
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "bx,by", "e1,e2,bz",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
     assert fc.attrs["output_channels"] == "e1,e2"
 
@@ -54,7 +54,7 @@ def test_compute_fc_explicit_missing_input_errors():
     })
     with pytest.raises(ValueError, match="input"):
         compute_fc_seconds(runts, "hx,hy", "e1,e2",
-                   window_length_s=128, overlap=0.5, window_type="hamming")
+                   window_length_s=128, overlap=0.5, window_type="boxcar")
 
 
 def test_compute_fc_rejects_nan_input():
@@ -66,7 +66,7 @@ def test_compute_fc_rejects_nan_input():
                             electric=("e1", "e2"), z=(1.0, 2.0, 3.0, 4.0))
     runts.dataset["e1"].values[10] = np.nan
     with pytest.raises(ValueError, match="NaN/Inf"):
-        compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"], 256.0, 0.5, "hamming")
+        compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"], 256.0, 0.5, "boxcar")
     with pytest.raises(ValueError, match="NaN/Inf"):
         compute_fc_levels(runts, ["bx", "by"], ["e1", "e2"])
 
@@ -96,7 +96,7 @@ def test_estimate_tf_accepts_mth5_read_fc_layout():
             )
 
     fc = compute_fc_seconds(FakeRunTS(), ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     # mth5 stores (time, frequency); emulate the read-back layout + bare attrs
     mth5_layout = fc.transpose("time", "frequency").copy()
     mth5_layout.attrs = {}
@@ -113,7 +113,7 @@ def test_ls_remote_reference_rejected():
     """There is no least-squares + remote-reference path by design."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     with pytest.raises(ValueError):
         estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                     estimator_engine="Least Squares", remote_reference=True)
@@ -124,9 +124,9 @@ def test_remote_reference_grid_mismatch_raises_clear_error():
     with a clear message instead of aurora's bare Exception."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     ref = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                     window_length_s=512, overlap=0.5, window_type="hamming")
+                     window_length_s=512, overlap=0.5, window_type="boxcar")
     with pytest.raises(ValueError, match="frequency grid"):
         estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                     estimator_engine="Robust", remote_reference=True,
@@ -147,10 +147,10 @@ def test_remote_reference_unaligned_time_grid_errors(tmp_path):
     }, local.sample_rate, start_datetime="2024-01-01T00:00:40")
     fc = compute_fc_levels(local, ["bx", "by"], ["e1", "e2"],
                            num_samples_window=256, overlap=0.5,
-                           window_type="hamming")[0]
+                           window_type="boxcar")[0]
     ref = compute_fc_levels(shifted, ["bx", "by"], ["e1", "e2"],
                             num_samples_window=256, overlap=0.5,
-                            window_type="hamming")[0]
+                            window_type="boxcar")[0]
     with pytest.raises(ValueError, match="time grid"):
         estimate_tf(fc, ["bx", "by"], ["e1", "e2"],
                     estimator_engine="Robust", remote_reference=True,
@@ -169,7 +169,7 @@ def test_remote_reference_partial_ref_container_errors(tmp_path):
     aligned = AlignRuns().execute(_ctx(tmp_path), local, remote)
     a, b = aligned["data1"], aligned["data2"]
     fc_kwargs = {"num_decimations": 1, "num_samples_window": 256,
-                 "overlap": 0.5, "window_type": "hamming", "magnetic_unit": "h"}
+                 "overlap": 0.5, "window_type": "boxcar", "magnetic_unit": "h"}
     levels_a = compute_fc_levels(a, ins, outs, **fc_kwargs)
     levels_b = compute_fc_levels(b, ins, "", **fc_kwargs)
     del levels_b[1]  # simulate a Compute FC with fewer decimation levels
@@ -191,7 +191,7 @@ def test_coherence_sort_partial_ref_container_errors(tmp_path):
     local, _ = _synthetic_stations()
     ins, outs = ["bx", "by"], ["e1", "e2"]
     fc_kwargs = {"num_decimations": 1, "num_samples_window": 256,
-                 "overlap": 0.5, "window_type": "hamming", "magnetic_unit": "h"}
+                 "overlap": 0.5, "window_type": "boxcar", "magnetic_unit": "h"}
     levels_a = compute_fc_levels(local, ins, outs, **fc_kwargs)
     # dummy remote: duplicated data -> identical grids per level
     levels_b = compute_fc_levels(local, ins, "", **fc_kwargs)
@@ -289,9 +289,9 @@ def test_compute_fc_overlap_out_of_bounds_rejected():
         with pytest.raises(ValueError, match="overlap must be in"):
             compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
                               num_decimations=0, num_samples_window=64,
-                              overlap=bad, window_type="hamming")
+                              overlap=bad, window_type="boxcar")
     # the manifest bound (0.99) still passes
     levels = compute_fc_levels(r, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=0, num_samples_window=64,
-                               overlap=0.99, window_type="hamming")
+                               overlap=0.99, window_type="boxcar")
     assert 0 in levels

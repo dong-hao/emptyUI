@@ -87,6 +87,6 @@ def compute_fc_seconds(value, input_channels, output_channels, window_length_s,
 
 
 def synthetic_fc(runts, ins, outs, **kw):
-    """FC for synthetic runs: 256 s windows, 50% overlap, Hamming."""
+    """FC for synthetic runs: 256 s windows, 50% overlap, boxcar."""
     return compute_fc_seconds(runts, ins, outs, window_length_s=256, overlap=0.5,
-                              window_type="hamming", **kw)
+                              window_type="boxcar", **kw)

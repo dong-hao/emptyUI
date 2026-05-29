@@ -24,7 +24,7 @@ def _levels(seed=13):
     return compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                              num_decimations=2, factor=4,
                              num_samples_window=256, overlap=0.5,
-                             window_type="hamming")
+                             window_type="boxcar")
 
 
 def test_plot_matches_coherence_sort_numerically(tmp_path):
@@ -84,7 +84,7 @@ def test_node_renders_png_single_and_two_fc(tmp_path):
     ref_levels = compute_fc_levels(remote, ["hx", "hy"], "",
                                    num_decimations=2, factor=4,
                                    num_samples_window=256, overlap=0.5,
-                                   window_type="hamming")
+                                   window_type="boxcar")
     res2 = PlotCoherency().execute(
         RunContext(workspace=tmp_path, store=DataStore()), levels, ref_fc=ref_levels)
     assert len(Path(res2["plot"]["path"]).read_bytes()) > 1000
@@ -111,7 +111,7 @@ def test_no_usable_bins_raises(tmp_path):
     remote = compute_fc_levels(
         synthetic_runts(synthetic_source(16), with_e=False, seed=16),
         ["hx", "hy"], "", num_decimations=2, factor=4,
-        num_samples_window=256, overlap=0.5, window_type="hamming")
+        num_samples_window=256, overlap=0.5, window_type="boxcar")
     # drop the attrs the node uses to classify outputs — with no electric
     # channel in the container and no attrs hint, the node must refuse
     for fc in remote.values():

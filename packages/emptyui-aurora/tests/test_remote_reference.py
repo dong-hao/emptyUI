@@ -104,7 +104,7 @@ def test_remote_reference_end_to_end_decimated(tmp_path):
     # identity (1e-3/1e-3), so the recovered Z matches the simulation values.
     fc_kwargs = {
         "num_decimations": 2, "factor": 4, "num_samples_window": 256,
-        "overlap": 0.5, "window_type": "hamming", "magnetic_unit": "h",
+        "overlap": 0.5, "window_type": "boxcar", "magnetic_unit": "h",
         "e_dipole_length_m": 0.001,
     }
     levels_a = compute_fc_levels(a, ins, outs, **fc_kwargs)

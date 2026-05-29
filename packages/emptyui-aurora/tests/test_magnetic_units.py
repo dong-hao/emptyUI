@@ -78,7 +78,7 @@ def _recovered_z(runts):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", channel_nomenclature="default",
+        overlap=0.5, window_type="boxcar", channel_nomenclature="default",
     )
     per = estimate_tf_levels(
         levels, ["hx", "hy"], ["ex", "ey"], estimator_engine="Robust",
@@ -126,7 +126,7 @@ def test_unitless_payload_keeps_legacy_behavior(tmp_path):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", magnetic_unit="h",
+        overlap=0.5, window_type="boxcar", magnetic_unit="h",
         channel_nomenclature="default",
     )
     per = estimate_tf_levels(
@@ -152,7 +152,7 @@ def test_fluxgate_explicit_am_is_not_converted(tmp_path):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        overlap=0.5, window_type="boxcar", magnetic_unit="b",
         channel_nomenclature="default",
     )
     per = estimate_tf_levels(
@@ -180,7 +180,7 @@ def test_fluxgate_tesla_unit_converts_at_its_own_scale(tmp_path):
     levels_t = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        overlap=0.5, window_type="boxcar", magnetic_unit="b",
         channel_nomenclature="default",
     )
     # the same payload labelled nT: the two FCs must differ by exactly 1e9
@@ -188,7 +188,7 @@ def test_fluxgate_tesla_unit_converts_at_its_own_scale(tmp_path):
     levels_n = compute_fc_levels(
         runts_nt, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        overlap=0.5, window_type="boxcar", magnetic_unit="b",
         channel_nomenclature="default",
     )
     a = np.abs(levels_t[0]["hx"].values)
@@ -238,7 +238,7 @@ def test_fluxgate_nt_always_converts(tmp_path):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", magnetic_unit="b",
+        overlap=0.5, window_type="boxcar", magnetic_unit="b",
         channel_nomenclature="default",
     )
     per = estimate_tf_levels(
@@ -264,7 +264,7 @@ def test_impedance_absolute_scale_is_ohm_analytic(tmp_path):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=2, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", channel_nomenclature="default",
+        overlap=0.5, window_type="boxcar", channel_nomenclature="default",
     )
     per = estimate_tf_levels(
         levels, ["hx", "hy"], ["ex", "ey"], estimator_engine="OLS",

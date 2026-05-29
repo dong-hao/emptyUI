@@ -165,7 +165,7 @@ def test_band_intervals_populated_for_uniform_style(ctx):
     runts = _runts(hx, hy, ex, ey)
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=2,
                                factor=4, num_samples_window=256,
-                               overlap=0.5, window_type="hamming")
+                               overlap=0.5, window_type="boxcar")
     # Residual Sort's contract: per-window run_id (Build FC stamps it)
     for lv in levels:
         levels[lv] = levels[lv].assign_coords(

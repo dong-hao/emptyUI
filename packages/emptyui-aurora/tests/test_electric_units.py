@@ -33,7 +33,7 @@ def _recovered(runts, **fc_kw):
     levels = compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=1, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming", channel_nomenclature="default",
+        overlap=0.5, window_type="boxcar", channel_nomenclature="default",
         **fc_kw,
     )
     from emptyui_aurora._processing import estimate_tf_levels, merge_tf_levels
@@ -69,7 +69,7 @@ def levels(runts):
     return compute_fc_levels(
         runts, ["hx", "hy"], ["ex", "ey"],
         num_decimations=0, num_samples_window=256, overlap=0.5,
-        window_type="hamming", channel_nomenclature="default",
+        window_type="boxcar", channel_nomenclature="default",
     )[0].attrs
 
 
@@ -103,7 +103,7 @@ def test_raw_mv_potential_without_dipole_errors(tmp_path):
     runts = _runts(hx, hy, ex * 1e3, ey * 1e3, units_e="milliVolt")
     with pytest.raises(ValueError, match="e_dipole_length_m"):
         compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                   window_length_s=256, overlap=0.5, window_type="hamming",
+                   window_length_s=256, overlap=0.5, window_type="boxcar",
                    channel_nomenclature="default")
 
 
@@ -116,7 +116,7 @@ def test_dipole_on_mvkm_data_warns(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="emptyui"):
         fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
                         window_length_s=256, overlap=0.5,
-                        window_type="hamming", e_dipole_length_m=100.0,
+                        window_type="boxcar", e_dipole_length_m=100.0,
                         channel_nomenclature="default")
     assert any("double-scale" in r.message for r in caplog.records)
     assert fc.attrs["electric_scaling"] == "mV potential -> V/m (dipole)"

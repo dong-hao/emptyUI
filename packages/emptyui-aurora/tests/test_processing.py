@@ -23,7 +23,7 @@ def _synthetic_runts():
 def test_compute_fc_and_estimate_tf():
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     assert "frequency" in fc.dims and "time" in fc.dims
     assert set(fc.data_vars) == {"ex", "ey", "hx", "hy"}
 
@@ -42,7 +42,7 @@ def test_estimate_tf_returns_standard_errors():
     """estimate_tf returns per-element standard errors for both engines."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     for engine in ("Least Squares", "Robust"):
         _, Z, Zerr = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                                  estimator_engine=engine, periods_per_octave=8)
@@ -121,7 +121,7 @@ def test_tipper_bz_output_recovered():
 
     runts = FakeRunTS()
     fc = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2", "bz"],
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e1", "e2", "bz"],
                              periods_per_octave=8)
     assert Z.shape[1:] == (3, 2)  # n_out x n_in (includes the tipper row)
@@ -146,10 +146,10 @@ def test_magnetic_unit_h_vs_b_conversion():
 
     runts = _synthetic_runts()
     fc_h = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                      window_length_s=256, overlap=0.5, window_type="hamming",
+                      window_length_s=256, overlap=0.5, window_type="boxcar",
                       magnetic_unit="h")
     fc_b = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                      window_length_s=256, overlap=0.5, window_type="hamming",
+                      window_length_s=256, overlap=0.5, window_type="boxcar",
                       magnetic_unit="b")
     # fluxgate B [nT] -> H [A/m]: fc input is H = B*1e-9/mu0, so b-case is
     # the h-case (already H) scaled by 1e-9/mu0
@@ -184,10 +184,10 @@ def test_magnetic_unit_auto_derived_from_channel_names():
     runts = FakeRunTS()
 
     fc_b_auto = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"],
-                           window_length_s=256, overlap=0.5, window_type="hamming",
+                           window_length_s=256, overlap=0.5, window_type="boxcar",
                            magnetic_unit="auto")
     fc_b_manual = compute_fc_seconds(runts, ["bx", "by"], ["e1", "e2"],
-                             window_length_s=256, overlap=0.5, window_type="hamming",
+                             window_length_s=256, overlap=0.5, window_type="boxcar",
                              magnetic_unit="b")
     np.testing.assert_allclose(fc_b_auto["bx"].values, fc_b_manual["bx"].values)
     assert fc_b_auto.attrs["magnetic_unit"] == "b"
@@ -196,10 +196,10 @@ def test_magnetic_unit_auto_derived_from_channel_names():
     # hx/hy naming (default nomenclature) means coil H: unchanged, unit 'h'
     runts_h = _synthetic_runts()
     fc_h_auto = compute_fc_seconds(runts_h, ["hx", "hy"], ["ex", "ey"],
-                           window_length_s=256, overlap=0.5, window_type="hamming",
+                           window_length_s=256, overlap=0.5, window_type="boxcar",
                            magnetic_unit="auto")
     fc_h_manual = compute_fc_seconds(runts_h, ["hx", "hy"], ["ex", "ey"],
-                             window_length_s=256, overlap=0.5, window_type="hamming",
+                             window_length_s=256, overlap=0.5, window_type="boxcar",
                              magnetic_unit="h")
     np.testing.assert_allclose(fc_h_auto["hx"].values, fc_h_manual["hx"].values)
     assert fc_h_auto.attrs["magnetic_unit"] == "h"
@@ -233,7 +233,7 @@ def test_build_tf_lemi34_four_channel():
 
     runts = FakeRunTS()
     fc = compute_fc_seconds(runts, ["bx", "by"], ["e3", "e4"],
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert fc.attrs["channel_nomenclature"] == "lemi34"
     periods, Z, _ = estimate_tf(fc, ["bx", "by"], ["e3", "e4"],
                              periods_per_octave=8)
@@ -270,7 +270,7 @@ def test_build_tf_phoenix123_nomenclature():
 def test_build_tf_returns_mt_metadata_tf():
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"])
     tf = build_tf(periods, Z, ["hx", "hy"], ["ex", "ey"])
     assert hasattr(tf, "dataset")
@@ -288,7 +288,7 @@ def test_build_tf_returns_mt_metadata_tf():
 def test_estimator_engines_run(engine, rr):
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine=engine, remote_reference=rr,
                              periods_per_octave=8)
@@ -301,7 +301,7 @@ def test_legacy_estimator_engine_names_still_accepted():
     """Old OLS/RME/RME_RR values keep loading previously saved workflows."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     for engine in ("OLS", "RME", "RME_RR"):
         rr = engine == "RME_RR"
         _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
@@ -320,10 +320,10 @@ def test_remote_reference_uses_duplicated_dummy_station():
     """
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     # duplicate the raw data as a dummy remote station -> separate fc
     remote = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                        window_length_s=256, overlap=0.5, window_type="hamming")
+                        window_length_s=256, overlap=0.5, window_type="boxcar")
     periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", remote_reference=True,
                              ref_fc=remote, periods_per_octave=8)
@@ -343,7 +343,7 @@ def test_remote_reference_without_remote_fc_warns(caplog):
     effect when it silently degenerated to plain RME (E2)."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     with caplog.at_level(logging.WARNING, logger="emptyui"):
         periods, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"],
                                  estimator_engine="Robust",
@@ -361,7 +361,7 @@ def test_compute_fc_levels_cascading_decimation():
     runts = _synthetic_runts()  # native sample_rate 8.0
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=2, factor=2, num_samples_window=64,
-                               overlap=0.5, window_type="hamming")
+                               overlap=0.5, window_type="boxcar")
     assert list(levels) == [0, 1, 2]
     for level, fc in levels.items():
         assert fc.attrs["decimation_level"] == level
@@ -383,7 +383,7 @@ def test_multi_level_merge_broadband():
     runts = _synthetic_runts()
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=3, factor=2, num_samples_window=128,
-                               overlap=0.5, window_type="hamming")
+                               overlap=0.5, window_type="boxcar")
     per = estimate_tf_levels(levels, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", periods_per_octave=4,
                              band_style="uniform")
@@ -435,7 +435,7 @@ def test_compute_fc_auto_detects_lemi_channels_including_tipper():
         "bz": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2", "bz"}
     assert fc.attrs["input_channels"] == "bx,by"
     assert fc.attrs["output_channels"] == "e1,e2,bz"
@@ -451,7 +451,7 @@ def test_compute_fc_auto_drops_missing_vertical():
         "e1": rng.standard_normal(n), "e2": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"bx", "by", "e1", "e2"}
     assert fc.attrs["output_channels"] == "e1,e2"
 
@@ -465,7 +465,7 @@ def test_compute_fc_auto_tipper_only_when_no_electric():
         "bz": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"bx", "by", "bz"}
     assert fc.attrs["output_channels"] == "bz"
 
@@ -480,7 +480,7 @@ def test_compute_fc_auto_phoenix_names():
         "h3": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"h1", "h2", "e1", "e2", "h3"}
     assert fc.attrs["input_channels"] == "h1,h2"
     assert fc.attrs["output_channels"] == "e1,e2,h3"
@@ -493,7 +493,7 @@ def test_compute_fc_auto_standard_names():
     """Standard-named data with empty fields resolves to hx,hy / ex,ey."""
     runts = _synthetic_runts()
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
     assert fc.attrs["channel_nomenclature"] == "default"
 
@@ -508,7 +508,7 @@ def test_compute_fc_auto_case_insensitive_channel_names():
         "Hx": rng.standard_normal(n), "Hy": rng.standard_normal(n),
     })
     fc = compute_fc_seconds(runts, "", "",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"Ex", "Ey", "Hx", "Hy"}
     assert fc.attrs["input_channels"] == "Hx,Hy"
     assert fc.attrs["output_channels"] == "Ex,Ey"
@@ -530,7 +530,7 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
         "temperature": aux,
     })
     fc = compute_fc_seconds(runts, "hx,hy", "ex,ey",
-                    window_length_s=128, overlap=0.5, window_type="hamming")
+                    window_length_s=128, overlap=0.5, window_type="boxcar")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
     # the DC bin is NaN under the first-difference prewhitening (DESIGN §10.1)
     assert np.all(np.isfinite(fc["ex"].values[1:]))

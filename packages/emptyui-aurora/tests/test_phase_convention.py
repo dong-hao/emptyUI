@@ -25,12 +25,12 @@ def test_phase_convention_matches_aurora_halfspace(
     test12rr_runts, engine, remote_reference, use_dummy
 ):
     runts = test12rr_runts
-    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5, "hamming",
+    fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5, "boxcar",
                     magnetic_unit="h")
     # model a second (dummy) remote station by duplicating the data file: a
     # copy of the same time series -> a second fc used as the remote reference
     ref_fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"], 256.0, 0.5,
-                        "hamming", magnetic_unit="h") if use_dummy else None
+                        "boxcar", magnetic_unit="h") if use_dummy else None
     _, Z, _ = estimate_tf(fc, ["hx", "hy"], ["ex", "ey"], estimator_engine=engine,
                        remote_reference=remote_reference, periods_per_octave=8,
                        ref_fc=ref_fc)
@@ -57,7 +57,7 @@ def test_multilevel_merged_phase_convention_matches_aurora_halfspace(test12rr_ru
     runts = test12rr_runts
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=3, factor=2, num_samples_window=128,
-                               overlap=0.5, window_type="hamming", magnetic_unit="h")
+                               overlap=0.5, window_type="boxcar", magnetic_unit="h")
     per = estimate_tf_levels(levels, ["hx", "hy"], ["ex", "ey"],
                              estimator_engine="Robust", periods_per_octave=8)
     _, Z, _ = merge_tf_levels(per)

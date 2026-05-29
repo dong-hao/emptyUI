@@ -25,7 +25,7 @@ def _tone(fs=8.0, n=2048, f0=0.5):
 
 
 def _kw(**over):
-    kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "hamming"}
+    kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "boxcar"}
     kw.update(over)
     return kw
 
@@ -70,7 +70,7 @@ def test_prewhitening_reduces_colored_noise_leakage():
     red /= np.abs(red).std() * 10  # 10x weaker than the tone
     x = tone + red
 
-    kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "hamming"}
+    kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "boxcar"}
     base = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
                                  sample_rate=fs), ["hx", "hy"], ["hx", "hy"], **kw, prewhitening="")
     pw = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
@@ -90,26 +90,29 @@ def test_prewhitening_reduces_colored_noise_leakage():
 
 def test_per_window_detrend_removes_trend():
     """Per-window linear detrend removes a linear trend's spectral
-    contribution entirely (residual = tone's own leakage), while the
-    un-detrended STFT carries the ramp's leakage on top."""
+    contribution (the residual equals the detrended tone's own leakage), while
+    the un-detrended STFT carries the ramp's leakage on top."""
     tone, t = _tone()
     ramp = 0.01 * t
     kw = _kw(prewhitening="")
     base = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"], **kw)
     detr = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"],
                       **_kw(prewhitening="", per_window_detrend="linear"))
-    tone_only = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **kw)
+    tone_detr = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
+                           **_kw(prewhitening="", per_window_detrend="linear"))
     f = base["frequency"].values
     k = int(np.argmin(np.abs(f - 0.5)))
     off = np.ones(len(f), bool)
     off[k] = False
     a_base = np.abs(base["hx"].values[off, 0]).max()
     a_detr = np.abs(detr["hx"].values[off, 0]).max()
-    a_tone = np.abs(tone_only["hx"].values[off, 0]).max()
-    # without detrend the ramp adds ~2x the tone's own leakage
-    assert a_base > 1.5 * a_tone
-    # with detrend only the tone's own (window-edge) leakage remains
-    assert a_detr == pytest.approx(a_tone, rel=0.05)
+    a_tone_detr = np.abs(tone_detr["hx"].values[off, 0]).max()
+    # without detrend the ramp adds leakage on top of the detrended tone's own
+    assert a_base > 1.5 * a_tone_detr
+    # detrend is linear: detrend(tone + ramp) == detrend(tone), the ramp removed
+    # exactly. (Comparing with the un-detrended tone was only accidentally true
+    # under the hamming taper: a boxcar window leaks the tone into the detrend.)
+    assert a_detr == pytest.approx(a_tone_detr, rel=0.05)
 
 
 def test_options_threaded_through_levels_and_attrs():
@@ -119,7 +122,7 @@ def test_options_threaded_through_levels_and_attrs():
     levels = compute_fc_levels(
         _payload(tone), ["hx", "hy"], ["hx", "hy"],
         num_decimations=2, factor=4, num_samples_window=256,
-        overlap=0.5, window_type="hamming",
+        overlap=0.5, window_type="boxcar",
         prewhitening="first difference", per_window_detrend="linear")
     assert sorted(levels) == [0, 1, 2]
     for fc in levels.values():

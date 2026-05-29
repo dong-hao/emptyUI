@@ -234,7 +234,7 @@ def test_persist_requires_datetime_time(tmp_path, fake_runts):
     # drop the datetime start so compute_fc_seconds produces a float time axis
     runts.start = 0.0
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     assert "datetime64" not in str(fc.time.dtype)
     with pytest.raises(ValueError):
         persist_fc_level(_ctx(tmp_path), fc, 0, fc.attrs["sample_rate"])

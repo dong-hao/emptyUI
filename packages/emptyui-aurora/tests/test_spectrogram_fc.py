@@ -20,7 +20,7 @@ def _levels(seed=16):
     return compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                              num_decimations=2, factor=4,
                              num_samples_window=256, overlap=0.5,
-                             window_type="hamming")
+                             window_type="boxcar")
 
 
 def test_spectrogram_power_peaks_at_signal_frequency(tmp_path):
@@ -66,7 +66,7 @@ def test_spectrogram_channel_resolution(tmp_path):
                             electric=("e1", "e2"), seed=17)
     levels = compute_fc_levels(runts, ["bx", "by"], "e1,e2",
                                num_decimations=0, num_samples_window=256,
-                               overlap=0.5, window_type="hamming",
+                               overlap=0.5, window_type="boxcar",
                                channel_nomenclature="lemi12")
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     # standard name ex maps to e1 (lemi12)

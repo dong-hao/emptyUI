@@ -38,7 +38,7 @@ def _container(seed=31):
     return compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                              num_decimations=3, factor=4,
                              num_samples_window=256, overlap=0.5,
-                             window_type="hamming",
+                             window_type="boxcar",
                              prewhitening="first difference")
 
 

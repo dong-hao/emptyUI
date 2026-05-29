@@ -107,7 +107,7 @@ def test_spectra_to_fc_group_metadata(writable_archive, tmp_path, caplog):
 
 _GEOMETRY = {
     "sample_rate": 2.0, "decimation_level": 0, "factor": 4,
-    "num_samples_window": 256, "overlap": 0.5, "window_type": "hamming",
+    "num_samples_window": 256, "overlap": 0.5, "window_type": "boxcar",
     "prewhitening": "first difference", "per_window_detrend": "linear",
 }
 
@@ -133,7 +133,7 @@ def test_fc_provenance_round_trip(writable_archive, tmp_path):
     # geometry from mth5's native FC metadata
     assert out.attrs["sample_rate"] == 2.0
     assert out.attrs["num_samples_window"] == 256
-    assert out.attrs["window_type"] == "hamming"
+    assert out.attrs["window_type"] == "boxcar"
     assert abs(out.attrs["overlap"] - 0.5) < 1e-9
     assert out.attrs["prewhitening"] == "first difference"
     assert out.attrs["per_window_detrend"] == "linear"
@@ -162,7 +162,7 @@ def test_persist_fc_level_round_trips_geometry(tmp_path):
     out = load_fc_level(ctx, 0, survey="ws", station="st", run="r1")
     assert out.attrs["sample_rate"] == 2.0
     assert out.attrs["num_samples_window"] == 256
-    assert out.attrs["window_type"] == "hamming"
+    assert out.attrs["window_type"] == "boxcar"
     assert abs(out.attrs["overlap"] - 0.5) < 1e-9
     assert out.attrs["station_id"] == "st"
     assert out.attrs["run_id"] == "r1"

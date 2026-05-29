@@ -723,10 +723,10 @@ def test_macro_flow_extract_align(tmp_path):
     # and FCs computed from the aligned pair share the identical grid
     fc = compute_fc_seconds(r_a, ("hx", "hy"), ("ex", "ey"),
                     window_length_s=32.0, overlap=0.5,
-                    window_type="hamming", start_datetime=str(r_a.start))
+                    window_type="boxcar", start_datetime=str(r_a.start))
     ref = compute_fc_seconds(r_b, ("hx", "hy"), ("hx", "hy"),
                      window_length_s=32.0, overlap=0.5,
-                     window_type="hamming", start_datetime=str(r_b.start))
+                     window_type="boxcar", start_datetime=str(r_b.start))
     assert np.array_equal(fc["time"].values, ref["time"].values)
 
 

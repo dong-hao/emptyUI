@@ -22,7 +22,7 @@ def test_fc_persist_roundtrip(tmp_path: Path, fake_runts):
     runts = fake_runts
 
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
     # the fc must carry an absolute (datetime64) time axis for persistence
     assert "datetime64" in str(fc.time.dtype)
     assert fc.attrs["start_datetime"]
@@ -52,7 +52,7 @@ def test_persist_multiple_decimation_levels(tmp_path: Path, fake_runts):
     runts = fake_runts
     levels = compute_fc_levels(runts, ["hx", "hy"], ["ex", "ey"],
                                num_decimations=1, factor=4, num_samples_window=128,
-                               overlap=0.5, window_type="hamming")
+                               overlap=0.5, window_type="boxcar")
 
     survey, station, run = runts_context(runts)
     for level, fc in levels.items():
@@ -80,7 +80,7 @@ def test_read_back_fc_feeds_estimate_tf(tmp_path: Path, fake_runts):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     runts = fake_runts
     fc = compute_fc_seconds(runts, ["hx", "hy"], ["ex", "ey"],
-                    window_length_s=256, overlap=0.5, window_type="hamming")
+                    window_length_s=256, overlap=0.5, window_type="boxcar")
 
     survey, station, run = runts_context(runts)
     path = persist_fc_level(ctx, fc, 0, fc.attrs["sample_rate"],
