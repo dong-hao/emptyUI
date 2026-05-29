@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from emptyui.params import coerce_param
+
 
 class Position(BaseModel):
     x: float = 0
@@ -53,6 +55,91 @@ class ValidationError_(Exception):
         super().__init__("; ".join(errors))
 
 
+def _missing_param_error(wnode: WorkflowNode, name: str) -> str:
+    return (
+        f"node '{wnode.id}' ({wnode.type}): required parameter '{name}' "
+        "is not provided"
+    )
+
+
+def _param_value_problems(wnode: WorkflowNode, manifest) -> list[str]:
+    """Validate param *values* against the manifest's own declarations (M1).
+
+    The API is the trust boundary in remote mode (DESIGN §11): widgets
+    guard the UI, but a POSTed document bypasses them. Each param present
+    in the document is coerced with the executor's own
+    :func:`emptyui.params.coerce_param` — validation and execution
+    therefore agree on what a value means — and then checked against the
+    declared ``min``/``max`` (number/integer), the declared ``options``
+    (select/radio) and the ``optional`` flag. Manifest defaults are not
+    re-checked (plugin-declared, not client-supplied), and stale params a
+    node no longer declares stay tolerated per the §24.9 policy (the
+    executor warns about them).
+
+    Option checks are skipped for params whose option set is extended at
+    runtime: ``suggest_from`` (payload-summary suggestions) and inherit
+    targets (upstream-fed editable comboboxes).
+    """
+    problems: list[str] = []
+    inherited: set[str] = set()
+    for mapping in (getattr(manifest, "inherit", {}) or {}).values():
+        inherited.update(mapping.keys())
+    for param in getattr(manifest, "params", ()) or ():
+        name = param.name
+        if name in wnode.params:
+            raw: Any = wnode.params[name]
+        else:
+            if param.default is None and not param.optional:
+                problems.append(_missing_param_error(wnode, name))
+            continue
+        # explicit null, or an empty path widget, is an unprovided value
+        if raw is None or (
+            getattr(param, "widget", "") in ("file", "directory")
+            and isinstance(raw, str) and not raw.strip()
+        ):
+            if not param.optional and param.default is None:
+                problems.append(_missing_param_error(wnode, name))
+            continue
+        try:
+            value = coerce_param(param, raw)
+        except ValueError as exc:
+            problems.append(f"node '{wnode.id}' ({wnode.type}): {exc}")
+            continue
+        widget = getattr(param, "widget", "")
+        if widget in ("number", "integer"):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                problems.append(
+                    f"node '{wnode.id}' ({wnode.type}): param '{name}': "
+                    f"{raw!r} is not a number"
+                )
+                continue
+            if widget == "integer" and float(value) != int(value):
+                problems.append(
+                    f"node '{wnode.id}' ({wnode.type}): param '{name}': "
+                    f"{raw!r} requires an integer value"
+                )
+                continue
+            lo, hi = getattr(param, "min", None), getattr(param, "max", None)
+            if (lo is not None and value < lo) or (
+                    hi is not None and value > hi):
+                bounds = lo if hi is None else (
+                    hi if lo is None else f"[{lo}, {hi}]")
+                problems.append(
+                    f"node '{wnode.id}' ({wnode.type}): param '{name}': "
+                    f"{raw!r} is out of range ({bounds})"
+                )
+        elif widget in ("select", "radio"):
+            opts = getattr(param, "options", ()) or ()
+            if (opts and not getattr(param, "suggest_from", "")
+                    and name not in inherited and value not in opts):
+                problems.append(
+                    f"node '{wnode.id}' ({wnode.type}): param '{name}': "
+                    f"{raw!r} is not one of the declared options "
+                    f"({', '.join(str(o) for o in opts)})"
+                )
+    return problems
+
+
 def validate_workflow(workflow: Workflow, registry) -> None:
     """Validate a workflow against the current node catalog.
 
@@ -98,6 +185,8 @@ def validate_workflow(workflow: Workflow, registry) -> None:
         # resolves only manifest params and emits a node-level progress
         # note naming them — validation must not hard-reject what the
         # documented policy is to warn about.
+
+        errors.extend(_param_value_problems(wnode, manifest))
 
         required_inputs = {i.name for i in manifest.inputs if i.required}
         for name in required_inputs:

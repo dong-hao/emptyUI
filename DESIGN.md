@@ -687,7 +687,12 @@ One file = one reproducible pipeline.
 - Edges reference ports by name → resilient to port reordering.
 - `position` is UI-only → headless/batch execution ignores it cleanly.
 - Executor validates against current manifests at load time with actionable
-  messages. Saved workflows carrying params a node no longer declares are
+  messages — structure (types, edges, cycles) **and param values** (M1):
+  declared `min`/`max`, `select`/`radio` `options` and required
+  (non-optional, default-less) params, coerced with the executor's own
+  coercion so the trust boundary and execution agree (widgets guard the
+  UI; the API is the boundary in remote mode, §11). Saved workflows carrying
+  params a node no longer declares are
   processed unchanged (only manifest params are resolved); one node-level
   progress note lists all stale params per node — stale surfaces degrade
   loudly, never silently.

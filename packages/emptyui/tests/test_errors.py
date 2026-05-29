@@ -382,6 +382,20 @@ def test_invalid_workflow_returns_422(client):
     assert resp.status_code == 422
 
 
+def test_out_of_range_param_value_returns_422(client):
+    """M1 end-to-end: the API is the trust boundary (DESIGN §11) — the
+    issue's exact probe (order=-5 on a min=1/max=10 param) must 422 naming
+    the param, not POST a 200 and let node code see the garbage."""
+    workflow = {
+        "nodes": [{"id": "n1", "type": "core.filter.bandpass",
+                   "params": {"order": -5}}],
+        "edges": [],
+    }
+    resp = client.post("/api/runs", json={"workflow": workflow})
+    assert resp.status_code == 422
+    assert any("order" in str(d) for d in resp.json()["detail"])
+
+
 def test_failed_run_reason_reaches_the_api_and_the_worker_log(client,
                                                                 caplog):
     """H3 end-to-end over the HTTP surface: the reason rides the terminal

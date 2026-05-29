@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from emptyui.cache import CacheEntry, NodeCache
 from emptyui.context import RunContext
+from emptyui.params import coerce_param
 from emptyui.paths import PathPolicy
 from emptyui.schema import Workflow, WorkflowNode
 from emptyui.store import DataStore
@@ -492,49 +493,12 @@ class Executor:
     def _coerce_param(param, value: Any) -> Any:
         """Coerce a workflow param value to the manifest's declared type.
 
-        Workflows are JSON-borne and older saved documents (or free-text
-        combobox entries) can carry numbers as strings — a '10' string on a
-        number param reaches node code as str and breaks arithmetic
-        ('10' <= 0 TypeError, review 2026-09-12). number/integer params are
-        coerced (empty string -> None); select params whose declared
-        options are numeric are matched back by their string form. Unknown
-        formats raise a clean ValueError naming the param.
+        Delegates to the single shared :func:`emptyui.params.coerce_param`
+        (M1) — schema validation applies the identical coercion before its
+        min/max/options checks, so the trust boundary and execution can
+        never disagree about what a value means.
         """
-        if value is None:
-            return None
-        widget = getattr(param, "widget", "")
-        if widget in ("number", "integer") and isinstance(value, str):
-            s = value.strip()
-            if s == "":
-                return None
-            try:
-                f = float(s)
-            except ValueError:
-                raise ValueError(
-                    f"param '{param.name}': '{value}' is not a number"
-                ) from None
-            return round(f) if widget == "integer" else f
-        if widget == "boolean" and isinstance(value, str):
-            # L-C1: a JSON workflow can carry "false" as a STRING (older
-            # documents, free-text editing) — the raw string reaches node
-            # code truthy ('false' is truthy!). Empty string = unchecked.
-            s = value.strip().lower()
-            if s in ("true", "1", "yes", "on"):
-                return True
-            if s in ("false", "0", "no", "off", ""):
-                return False
-            raise ValueError(
-                f"param '{param.name}': '{value}' is not a boolean")
-        if widget == "select" and isinstance(value, str):
-            opts = getattr(param, "options", ()) or ()
-            if opts and all(
-                isinstance(o, (int, float)) and not isinstance(o, bool)
-                for o in opts
-            ):
-                for o in opts:
-                    if str(o) == value.strip():
-                        return o
-        return value
+        return coerce_param(param, value)
 
     def run(
         self,
