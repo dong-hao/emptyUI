@@ -1,9 +1,9 @@
 """Test helper: level-0 FC with the window given in seconds (the retired
 single-level ``compute_fc`` surface).
 
-Delegates to ``compute_fc_levels`` with the recipe the fixtures were written
-against: no decimation, prewhitening off unless passed explicitly. The aurora
-package keeps the same helper in ``emptyui-aurora/tests/_synthetic.py``.
+Delegates to ``compute_fc_levels``: no decimation; prewhitening follows the
+library's shipped default unless passed. The aurora package keeps the same
+helper in ``emptyui-aurora/tests/_synthetic.py``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ def compute_fc_seconds(value, input_channels, output_channels, window_length_s,
     from emptyui_aurora._processing import compute_fc_levels, to_channels
 
     _, sample_rate, _, _ = to_channels(value, check_finite=False)
-    kw.setdefault("prewhitening", "")
     levels = compute_fc_levels(
         value, input_channels, output_channels, num_decimations=0,
         num_samples_window=max(8, int(window_length_s * sample_rate)),

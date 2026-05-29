@@ -70,13 +70,11 @@ def synthetic_runts(source, *, e_noise: float = 8.0, h_noise_segment=None,
 def compute_fc_seconds(value, input_channels, output_channels, window_length_s,
                        overlap, window_type, **kw):
     """Level-0 FC with the window given in seconds (the retired single-level
-    ``compute_fc`` surface). Delegates to ``compute_fc_levels`` with the recipe
-    the fixtures were written against: no decimation, prewhitening off unless
-    passed explicitly."""
+    ``compute_fc`` surface). Delegates to ``compute_fc_levels``: no decimation;
+    prewhitening follows the library's shipped default unless passed."""
     from emptyui_aurora._processing import compute_fc_levels, to_channels
 
     _, sample_rate, _, _ = to_channels(value, check_finite=False)
-    kw.setdefault("prewhitening", "")
     levels = compute_fc_levels(
         value, input_channels, output_channels, num_decimations=0,
         num_samples_window=max(8, int(window_length_s * sample_rate)),

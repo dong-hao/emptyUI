@@ -35,7 +35,7 @@ def test_first_difference_recoloring_recovers_fc():
     prewhitened+recolored FC must match the un-prewhitened FC — the exact
     inverse filter undoes the differencing."""
     tone, _ = _tone()
-    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
+    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw(prewhitening=""))
     pw = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
                     **_kw(prewhitening="first difference"))
     f = base["frequency"].values
@@ -53,7 +53,7 @@ def test_prewhitening_nans_dc_bin():
     pw = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"],
                     **_kw(prewhitening="first difference"))
     assert np.isnan(pw["hx"].values[0, 0])
-    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw())
+    base = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **_kw(prewhitening=""))
     assert np.isfinite(base["hx"].values[0, 0])
 
 
@@ -72,7 +72,7 @@ def test_prewhitening_reduces_colored_noise_leakage():
 
     kw = {"window_length_s": 256.0, "overlap": 0.5, "window_type": "hamming"}
     base = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
-                                 sample_rate=fs), ["hx", "hy"], ["hx", "hy"], **kw)
+                                 sample_rate=fs), ["hx", "hy"], ["hx", "hy"], **kw, prewhitening="")
     pw = compute_fc_seconds(TimeSeries(channels={"hx": x.copy(), "hy": x.copy()},
                                sample_rate=fs), ["hx", "hy"], ["hx", "hy"],
                     **kw, prewhitening="first difference")
@@ -94,10 +94,10 @@ def test_per_window_detrend_removes_trend():
     un-detrended STFT carries the ramp's leakage on top."""
     tone, t = _tone()
     ramp = 0.01 * t
-    kw = _kw()
+    kw = _kw(prewhitening="")
     base = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"], **kw)
     detr = compute_fc_seconds(_payload(tone + ramp), ["hx", "hy"], ["hx", "hy"],
-                      **_kw(per_window_detrend="linear"))
+                      **_kw(prewhitening="", per_window_detrend="linear"))
     tone_only = compute_fc_seconds(_payload(tone), ["hx", "hy"], ["hx", "hy"], **kw)
     f = base["frequency"].values
     k = int(np.argmin(np.abs(f - 0.5)))

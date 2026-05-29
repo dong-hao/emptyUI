@@ -153,7 +153,7 @@ def test_magnetic_unit_h_vs_b_conversion():
                       magnetic_unit="b")
     # fluxgate B [nT] -> H [A/m]: fc input is H = B*1e-9/mu0, so b-case is
     # the h-case (already H) scaled by 1e-9/mu0
-    ratio = np.median(np.abs(fc_b["hx"].values) / np.abs(fc_h["hx"].values))
+    ratio = np.nanmedian(np.abs(fc_b["hx"].values) / np.abs(fc_h["hx"].values))
     assert np.isclose(ratio, 1e-9 / MU0, rtol=1e-6)
 
 
@@ -532,7 +532,8 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
     fc = compute_fc_seconds(runts, "hx,hy", "ex,ey",
                     window_length_s=128, overlap=0.5, window_type="hamming")
     assert set(fc.data_vars) == {"hx", "hy", "ex", "ey"}
-    assert np.all(np.isfinite(fc["ex"].values))
+    # the DC bin is NaN under the first-difference prewhitening (DESIGN §10.1)
+    assert np.all(np.isfinite(fc["ex"].values[1:]))
 
 
 def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
