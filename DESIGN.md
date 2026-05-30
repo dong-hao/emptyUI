@@ -718,7 +718,12 @@ One file = one reproducible pipeline.
   and misses the cache (recompute, the safe direction); only mtime-preserving
   moves stay hits), so externally modified input files invalidate. On a cache
   hit the executor re-registers outputs and
-  **copies artifact files into the new run's workspace**; vanished artifact
+  **copies artifact files into the new run's workspace**, rewriting each
+  artifact-valued output's `path` to this run's copy as a **shallow copy**
+  (issues.md M4 — the stored value and the `artifact` event name the same
+  file, and no downstream consumer ever resolves into the producer run's
+  TTL-reclaimable workspace; the cache entry's dict is never mutated);
+  vanished artifact
   files re-execute the node. Cached nodes
   emit `node_status` with `"cached": true`. **Immutability contract**
   (ComfyUI model): nodes must be functional — never mutate inputs or previously

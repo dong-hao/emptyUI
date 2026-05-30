@@ -510,7 +510,36 @@ class Executor:
         re-registers the output payloads).
         """
         name = f"{rec['stem']}_{node_id}{rec['suffix']}"
-        return workspace / name if workspace is not None else None
+        return Path(workspace) / name if workspace is not None else None
+
+    @staticmethod
+    def _relocated_output(value: Any, dest_by_src: dict[str, str]) -> Any:
+        """Rewrite an artifact-valued output's ``path`` to this run's copy
+        (issues.md M4).
+
+        A cache hit copies the artifact files into the new run's workspace
+        — the stored value must point THERE, not into the producer run's
+        (TTL-reclaimable) workspace. The match is by normalized path
+        against the recorded artifact sources, so aliased outputs (the
+        same dict returned under two ports — ``_record_artifacts`` records
+        only the first) are rewritten too. Returns a **shallow copy**;
+        mutating the cache entry's dict in place would violate the §7.1
+        immutability contract and leak this run's path into later runs.
+        """
+        if not isinstance(value, dict) or not dest_by_src:
+            return value
+        p = value.get("path")
+        if not isinstance(p, str):
+            return value
+        try:
+            new_path = dest_by_src.get(str(Path(p)))
+        except (ValueError, OSError):  # unpathable string — leave untouched
+            return value
+        if new_path is None or new_path == p:
+            return value
+        relocated = dict(value)
+        relocated["path"] = new_path
+        return relocated
 
     @staticmethod
     def _coerce_param(param, value: Any) -> Any:
@@ -745,32 +774,42 @@ class Executor:
                 entry = None
             if entry is not None:
                 try:
+                    # artifact files are copied FIRST (M4): the output
+                    # dicts' paths must be rewritten to this run's copies
+                    # before they enter the store, so every downstream
+                    # consumer resolves a file in THIS run's workspace —
+                    # never the producer run's (TTL-reclaimable) one.
+                    dest_by_src: dict[str, str] = {}
+                    for rec in entry.artifacts:
+                        dest = self._artifact_dest(rec, node_id, workspace)
+                        if dest is None:
+                            # headless/CLI run without a workspace: skip the
+                            # file copy (no CWD side effect) — the output
+                            # value keeps the cache path (no copy exists)
+                            continue
+                        # a run can restore into the original run's
+                        # workspace (same-workspace partial re-runs) —
+                        # skip then
+                        if not (dest.exists()
+                                and os.path.samefile(rec["src"], dest)):
+                            shutil.copyfile(rec["src"], dest)
+                        dest_by_src[str(Path(rec["src"]))] = str(dest)
                     handles: dict[str, str] = {}
                     for port in manifest.outputs:
-                        handle = store.put(port.type, entry.outputs.get(port.name))
+                        value = self._relocated_output(
+                            entry.outputs.get(port.name), dest_by_src)
+                        handle = store.put(port.type, value)
                         handles[port.name] = handle.id
-                        summary = (_ts_summary(entry.outputs.get(port.name))
-                                   or _fc_summary(entry.outputs.get(port.name)))
+                        summary = (_ts_summary(value)
+                                   or _fc_summary(value))
                         if summary is not None:
                             emit({"event": "payload", "node": node_id,
                                   "port": port.name, "type": port.type,
                                   "summary": summary})
                     outputs_by_node[node_id] = handles
                     for rec in entry.artifacts:
-                        dest = self._artifact_dest(rec, node_id, workspace)
-                        if dest is not None:
-                            # a run can restore into the original run's
-                            # workspace (same-workspace partial re-runs) —
-                            # skip then
-                            if not (dest.exists()
-                                    and os.path.samefile(rec["src"], dest)):
-                                shutil.copyfile(rec["src"], dest)
-                            event_path = str(dest)
-                        else:
-                            # headless/CLI run without a workspace: skip the
-                            # file copy (no CWD side effect) — the artifact
-                            # event resolves to the cache entry's own file
-                            event_path = rec["src"]
+                        event_path = dest_by_src.get(
+                            str(Path(rec["src"])), rec["src"])
                         artifact_id = f"a{uuid4().hex[:8]}"
                         emit(
                             {
