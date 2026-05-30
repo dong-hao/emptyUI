@@ -286,7 +286,13 @@ def create_app(
             except Exception:  # GC hygiene must never mask the reclaim
                 logger.exception(
                     "workspace cache invalidation failed for %s", workspace)
-            shutil.rmtree(workspace, ignore_errors=True)
+            try:
+                shutil.rmtree(workspace)
+            except OSError:
+                # M17: ignore_errors=True leaked failed deletions silently —
+                # the directory is lost either way, so surface it (best
+                # effort: later workspaces are still reclaimed)
+                logger.exception("workspace reclaim failed for %s", workspace)
         return len(expired)
 
     async def cleanup_loop() -> None:
@@ -298,7 +304,14 @@ def create_app(
             interval = 60.0 if ttl is None or ttl <= 0 else max(
                 0.1, min(ttl / 4.0, 60.0))
             await asyncio.sleep(interval)
-            cleanup_expired_runs()
+            # M17: the reclaim does path resolution, cache scans and
+            # rmtree — a multi-GB MTH5 workspace would stall the loop that
+            # drives every WS broadcast; it runs on a worker thread. The
+            # pass guard keeps the reaper alive whatever one pass raises.
+            try:
+                await asyncio.to_thread(cleanup_expired_runs)
+            except Exception:  # the reaper must survive anything
+                logger.exception("workspace reclaim pass failed")
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):

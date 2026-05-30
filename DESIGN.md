@@ -1697,7 +1697,9 @@ normalize + validate identically — `../` escapes are rejected).
 
 - **Workspace retention**: optional TTL + periodic cleanup coupled with
   artifact GC; expired workspaces invalidate their artifact entries; cleanup
-  only removes worker-complete terminal runs. Disabled TTL preserves
+  only removes worker-complete terminal runs and runs on a worker thread
+  (`asyncio.to_thread` — a multi-GB reclaim never stalls the WS-broadcast
+  loop, issues.md M17), with failed deletions logged, never silent. Disabled TTL preserves
   local-dev behavior.
 - **Max concurrent runs** per instance (queued or HTTP 429), bounding
   memory/CPU in a shared platform; default unlimited for local dev.
