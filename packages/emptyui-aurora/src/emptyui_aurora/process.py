@@ -116,6 +116,8 @@ def _merge_provenance_attrs(data, logger) -> dict[str, Any]:
 
 class ComputeFC(Node):
     type = "aurora.process.compute_fc"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Compute FC"
     tooltip = "Windowed STFT: time series to Fourier coefficients over cascading decimation levels."
     description = (
@@ -502,6 +504,8 @@ def _diurnal_prior_factor(start, use_prior: bool, prior_max: float,
 
 class BuildFC(Node):
     type = "aurora.fc.build"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Build FC Database"
     tooltip = "Compute per-run FC cascades for every run of a station and merge them along time."
     description = (
@@ -1120,6 +1124,8 @@ def _fc_io_channels(fc):
 
 class CoherenceSort(Node):
     type = "aurora.process.coherence_sort"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Coherence Sort"
     tooltip = "Down-weight or drop low-coherence FC windows before TF estimation."
     description = (
@@ -1236,6 +1242,8 @@ class CoherenceSort(Node):
 
 class SelectRuns(Node):
     type = "aurora.process.select_runs"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Select Runs"
     tooltip = "Drop noise-dominated runs before TF estimation (run-level QC)."
     description = (
@@ -1485,6 +1493,8 @@ class SelectRuns(Node):
 
 class ResidualSort(Node):
     type = "aurora.process.residual_sort"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Residual Sort"
     tooltip = "Drop runs whose windows do not fit the first-pass TF model."
     description = (
@@ -1700,6 +1710,8 @@ class ResidualSort(Node):
 
 class EstimateTF(Node):
     type = "aurora.process.estimate_tf"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Estimate TF"
     tooltip = "Estimate the impedance/tipper transfer function from Fourier coefficients (OLS or robust, optional remote reference)."
     description = (
@@ -1907,6 +1919,8 @@ class EstimateTF(Node):
 
 class MergeFC(Node):
     type = "aurora.fc.merge"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Merge FC"
     tooltip = "Concatenate Fourier coefficients from several runs along time, per decimation level."
     description = (

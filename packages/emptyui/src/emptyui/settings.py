@@ -42,6 +42,13 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
         int, 256,
         "Cross-run in-memory node-result cache size (entries)",
     ),
+    "node_timeout_seconds": (
+        float, 600.0,
+        ("Per-node watchdog: a node exceeding this budget is abandoned and "
+         "the run ends with a timeout (0 = off). Each node gets the full "
+         "budget; heavy nodes declare their own larger budget in their "
+         "manifest"),
+    ),
 }
 
 #: Knobs reserved for the postponed §12.3 disk cache — defined in the schema
@@ -239,4 +246,5 @@ class RuntimeSettings:
     workspace_ttl_seconds: float | None = None
     max_concurrent_runs: int | None = None
     cache_max_entries: int = 256
+    node_timeout_seconds: float | None = 600.0
     env_baselined: frozenset[str] = frozenset()

@@ -327,6 +327,8 @@ def _largest_runs_hint(summary, limit: int = 3) -> str:
 
 class ExtractRun(Node):
     type = "mth5.io.extract_run"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Extract Run"
     tooltip = "Extract one run's — or all runs' — time series from an MTH5 archive."
     description = (
@@ -917,6 +919,8 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
 
 class AlignRuns(Node):
     type = "mth5.runs.align"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Align Runs"
     tooltip = "Crop two time series to their common acquisition overlap (remote-reference prerequisite)."
     description = (

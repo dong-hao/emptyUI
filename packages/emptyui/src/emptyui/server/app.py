@@ -104,7 +104,7 @@ def _artifact_media(kind: str, path: str) -> tuple[str, str]:
 #: late-joining pollers replay the surviving tail)
 _MAX_EVENTS_PER_RUN = 5000
 
-_TERMINAL = frozenset({"completed", "failed", "cancelled"})
+_TERMINAL = frozenset({"completed", "failed", "cancelled", "timeout"})
 
 
 def _merge_summary(current: dict, incoming: dict) -> dict:
@@ -133,6 +133,7 @@ def create_app(
     root_path: str | None = None,
     workspace_ttl_seconds: float | None = None,
     max_concurrent_runs: int | None = None,
+    node_timeout_seconds: float | None = None,
     disabled_plugins: tuple[str, ...] | None = None,
     settings_path: Path | str | None = None,
 ) -> FastAPI:
@@ -161,6 +162,11 @@ def create_app(
         max_concurrent_runs
         if max_concurrent_runs is not None
         else settings.max_concurrent_runs
+    )
+    node_timeout_seconds = (
+        node_timeout_seconds
+        if node_timeout_seconds is not None
+        else settings.node_timeout_seconds
     )
     disabled_plugins = (
         disabled_plugins if disabled_plugins is not None else settings.disabled_plugins
@@ -215,9 +221,23 @@ def create_app(
         cache_max_entries=(
             256 if file_live.get("cache_max_entries") is None
             else max(1, int(file_live["cache_max_entries"]))),
+        # per-node watchdog budget (M2): kwarg → env → file → default;
+        # 0 = off is a real value (same falsy-0 discipline as above) — an
+        # explicit None at any stage falls through to the next stage, the
+        # LIVE_KNOBS default only applies when every stage is unset
+        node_timeout_seconds=(
+            node_timeout_seconds
+            if node_timeout_seconds is not None
+            else (settings.node_timeout_seconds
+                  if settings.node_timeout_seconds is not None
+                  else (file_live["node_timeout_seconds"]
+                        if file_live.get("node_timeout_seconds") is not None
+                        else LIVE_KNOBS["node_timeout_seconds"][1]))
+        ),
         env_baselined=frozenset(
             k for k, v in (("workspace_ttl_seconds", _ttl_kwarg),
-                           ("max_concurrent_runs", _runs_kwarg))
+                           ("max_concurrent_runs", _runs_kwarg),
+                           ("node_timeout_seconds", node_timeout_seconds))
             if v is not None or getattr(settings, k) is not None
         ),
     )
@@ -244,7 +264,8 @@ def create_app(
                 summary = info["summary"]
                 if (
                     info.get("worker_done")
-                    and summary.get("status") in {"completed", "failed", "cancelled"}
+                    and summary.get("status")
+                    in {"completed", "failed", "cancelled", "timeout"}
                     and info.get("finished_at") is not None
                     and info["finished_at"] <= cutoff
                 ):
@@ -446,6 +467,10 @@ def create_app(
                 runtime.max_concurrent_runs = (
                     round(coerced["max_concurrent_runs"])
                     if coerced["max_concurrent_runs"] is not None else None)
+            if "node_timeout_seconds" in coerced:
+                # per-node watchdog budget (M2): applied live — the next
+                # worker() call reads the holder; 0 = off
+                runtime.node_timeout_seconds = coerced["node_timeout_seconds"]
         return _settings_view()
 
     @app.post("/api/runs")
@@ -544,6 +569,7 @@ def create_app(
                     cache=node_cache,
                     targets=req.targets,
                     data_root=data_root,
+                    node_timeout_seconds=runtime.node_timeout_seconds,
                 )
             except Exception as exc:  # noqa: BLE001 — reported to clients
                 # The reason is BOTH logged here and carried on run_finished
@@ -557,7 +583,7 @@ def create_app(
                     already_finished = bool(
                         info
                         and info["summary"].get("status")
-                        in {"completed", "failed", "cancelled"}
+                        in {"completed", "failed", "cancelled", "timeout"}
                     )
                 if not already_finished:
                     emit({

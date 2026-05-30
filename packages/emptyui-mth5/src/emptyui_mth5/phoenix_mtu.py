@@ -756,6 +756,8 @@ def read_phoenix_mtu(
 
 class LoadPhoenixMtu(Node):
     type = "mth5.io.phoenix_mtu"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Load Phoenix MTU-5A"
     tooltip = "Convert raw legacy Phoenix MTU-5A (TBL/TSn) data into an MTH5 archive and open it."
     description = (

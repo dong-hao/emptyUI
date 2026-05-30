@@ -33,6 +33,8 @@ class Settings:
     workspace_ttl_seconds: float | None = None
     #: Maximum queued/running runs per process. None or <= 0 means unlimited.
     max_concurrent_runs: int | None = None
+    #: Per-node watchdog budget in seconds (issues.md M2). None/<=0 = off.
+    node_timeout_seconds: float | None = None
     #: Plugin entry-point names disabled at startup (DESIGN.md §5.1) — the
     #: platform-level baseline; runtime UI toggles are in-memory only (no
     #: settings file is created by default) and the environment wins for
@@ -76,6 +78,18 @@ class Settings:
             raise ValueError(
                 "EMPTYUI_MAX_CONCURRENT_RUNS must be >= 0 "
                 "(0 or empty = unlimited)")
+        raw_node_timeout = os.environ.get("EMPTYUI_NODE_TIMEOUT", "").strip()
+        try:
+            node_timeout_seconds = (
+                float(raw_node_timeout) if raw_node_timeout else None)
+        except ValueError as exc:
+            raise ValueError(
+                "EMPTYUI_NODE_TIMEOUT must be a number") from exc
+        if (
+            node_timeout_seconds is not None
+            and not math.isfinite(node_timeout_seconds)
+        ):
+            raise ValueError("EMPTYUI_NODE_TIMEOUT must be finite")
 
         raw_disabled = os.environ.get("EMPTYUI_DISABLED_PLUGINS", "").strip()
         disabled_plugins = (
@@ -104,6 +118,7 @@ class Settings:
             root_path=raw_base or None,
             workspace_ttl_seconds=workspace_ttl_seconds,
             max_concurrent_runs=max_concurrent_runs,
+            node_timeout_seconds=node_timeout_seconds,
             disabled_plugins=disabled_plugins,
             settings_path=settings_path,
         )

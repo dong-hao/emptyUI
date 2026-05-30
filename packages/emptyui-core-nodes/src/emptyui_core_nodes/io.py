@@ -14,6 +14,8 @@ from .types import TimeSeries
 
 class LoadCsv(Node):
     type = "core.io.load_csv"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Load CSV"
     tooltip = "Load a multi-channel CSV time series with automatic channel and time-column detection."
     description = (

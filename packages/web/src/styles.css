@@ -644,6 +644,10 @@ button.primary {
   background: #ebedf0;
   color: #566573;
 }
+.run-status.timeout {
+  background: #fdebd0;
+  color: #b9770e;
+}
 
 .error-msg {
   color: #c0392b;

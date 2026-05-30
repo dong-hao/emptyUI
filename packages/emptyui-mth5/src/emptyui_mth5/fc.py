@@ -272,6 +272,8 @@ def _enrich_fc_attrs(spectra, dec, decimation_level: int,
 
 class SpectraToFCGroup(Node):
     type = "mth5.fc.write"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Write FC"
     tooltip = "Persist an fc handle into an mth5 FC group."
     description = "Persist an fc handle into an mth5 FC group."

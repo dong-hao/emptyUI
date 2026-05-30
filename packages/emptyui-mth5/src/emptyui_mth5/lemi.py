@@ -10,6 +10,8 @@ from emptyui import Node, Output, Param
 
 class LoadLemi(Node):
     type = "mth5.io.lemi"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Load LEMI-424"
     tooltip = "Convert raw LEMI-424 .INF/.TXT data into an MTH5 archive and open it."
     description = (

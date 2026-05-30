@@ -752,6 +752,20 @@ One file = one reproducible pipeline.
   cancelling during the last node reports `cancelled`); toolbar **✕ Cancel**
   enabled while queued/running. A node cannot be interrupted mid-execution —
   cancellation takes effect at the next node boundary.
+- **Watchdog (per-node deadline, issues.md M2)**: every node gets a budget —
+  default 600 s, live-editable as `node_timeout_seconds` (§7.4; 0 = off) —
+  reset at each node boundary, so a long pipeline of quick nodes is never
+  killed; only a single stuck node is. The node runs on a **daemon thread**;
+  on expiry it is *abandoned* (Python cannot kill threads — the thread dies
+  with the process and its late `ctx` calls are voided via
+  `ctx.abandoned`) and the run ends with a **`timeout` terminal status**
+  whose `error` names the node, the budget and the remedy — the admission
+  slot is released and TTL cleanup accepts the run (the M2 wedge cannot
+  recur). A node may declare its own budget via the `timeout` manifest
+  field: `None` inherits the knob, `0` opts out, `> 0` is its own budget —
+  the heavy raw-data/FC nodes declare 3600 s so genuine long computations
+  survive the default. Headless `Executor.run` callers default to no
+  watchdog.
 - **Payload summaries**: when the executor materializes a `ts.run`/`ts.channel`
   output handle (fresh or restored from cache) it emits
   `{"event": "payload", node, port, type, summary}` with a duck-typed extent
@@ -819,9 +833,12 @@ source of truth (`GET/PUT /api/settings`).
   confinement/serving semantics stay restart-level decisions.
 - **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
   `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
-  (null/0 = unlimited), `cache_max_entries` (default 256). Applied
+  (null/0 = unlimited), `cache_max_entries` (default 256),
+  `node_timeout_seconds` (per-node watchdog budget, default 600, 0 = off —
+  §7.1). Applied
   immediately (TTL loop re-reads per pass, admission check reads the live
-  holder, `NodeCache.resize()` trims). `RuntimeSettings` is the mutable holder
+  holder, `NodeCache.resize()` trims, the next worker call reads the
+  watchdog budget). `RuntimeSettings` is the mutable holder
   the app closures read.
 - **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
   `cors_origins`, `root_path` — changing confinement/serving mid-flight is an

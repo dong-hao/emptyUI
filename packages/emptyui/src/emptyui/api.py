@@ -243,6 +243,15 @@ class Node:
     #: be served to later structurally-identical runs (§7.1 immutability).
     invalidates_inputs: ClassVar[bool] = False
 
+    #: Per-node watchdog budget in seconds (issues.md M2, DESIGN.md §7.1).
+    #: The server's ``node_timeout_seconds`` setting is the default budget
+    #: every node gets; a node may declare its own: ``None`` (default)
+    #: inherits the knob, ``0`` opts out entirely (this node knows its
+    #: workload is legitimately long), ``> 0`` is this node's own budget.
+    #: Heavy raw-data/FC nodes declare a generous 3600 so genuine long
+    #: computations survive the 600 s default.
+    timeout: ClassVar[float | None] = None
+
     #: subclasses override; signature: execute(ctx, **inputs_and_params)
     execute: Callable[..., dict[str, Any]]
 
@@ -265,6 +274,7 @@ class Node:
             "inherit": {k: dict(v) for k, v in self.inherit.items()},
             "cacheable": self.cacheable,
             "invalidates_inputs": self.invalidates_inputs,
+            "timeout": self.timeout,
             # models declared but not bundled (plugin guide §"Models")
             "models": [dict(m) for m in self.models],
         }

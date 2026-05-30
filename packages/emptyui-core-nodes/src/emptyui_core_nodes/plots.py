@@ -87,6 +87,8 @@ def _plot_title(data: TimeSeries, what: str) -> str:
 
 class PlotTimeSeriesNode(Node):
     type = "core.plot.timeseries"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Plot Time Series"
     tooltip = "Plot the (stacked) channel time series as a PNG figure."
     description = (

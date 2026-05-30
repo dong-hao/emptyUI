@@ -17,6 +17,8 @@ import os
 import shutil
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,27 @@ class ExecutionError(Exception):
         self.node_id = node_id
         self.original: BaseException = original
         super().__init__(f"node '{node_id}' failed: {original}")
+
+
+class NodeDeadlineExceeded(Exception):
+    """A node exceeded its watchdog budget (issues.md M2).
+
+    Raised by :meth:`Executor._execute_with_deadline` when the node's
+    daemon thread did not finish within the budget. The node thread itself
+    cannot be killed — it is abandoned (it dies with the process); the run
+    ends with a ``timeout`` terminal status instead of wedging the
+    admission slot forever.
+    """
+
+    def __init__(self, node_id: str, deadline: float) -> None:
+        self.node_id = node_id
+        self.deadline = deadline
+        super().__init__(
+            f"node '{node_id}' exceeded its {deadline:g} s per-node "
+            "deadline and was abandoned — raise the 'node_timeout_seconds' "
+            "setting (or the node's declared timeout) for genuinely long "
+            "computations"
+        )
 
 
 def _as_float(value: Any) -> float:
@@ -500,6 +523,53 @@ class Executor:
         """
         return coerce_param(param, value)
 
+    @staticmethod
+    def _effective_deadline(manifest, node_timeout_seconds: float | None) -> float | None:
+        """The watchdog budget for one node (issues.md M2).
+
+        The node's declared ``timeout`` wins: ``0`` opts out entirely,
+        ``> 0`` is its own budget; ``None`` inherits the server knob.
+        None/0 anywhere means "no watchdog" — the exact pre-watchdog
+        behavior (inline execution, no thread).
+        """
+        declared = getattr(manifest, "timeout", None)
+        if declared is not None:
+            return float(declared) if declared > 0 else None
+        if node_timeout_seconds is not None and node_timeout_seconds > 0:
+            return float(node_timeout_seconds)
+        return None
+
+    @staticmethod
+    def _execute_with_deadline(manifest, ctx, kwargs: dict[str, Any],
+                               deadline: float) -> Any:
+        """Run the node on a daemon thread bounded by ``deadline`` seconds.
+
+        Python cannot kill threads: on expiry the node thread is
+        *abandoned* (daemon — it dies with the process, never blocks
+        interpreter exit) and :class:`NodeDeadlineExceeded` is raised; the
+        run ends terminal while the admission slot is released. The
+        abandoned node's late ``ctx`` calls are voided via
+        ``ctx.abandoned``. A ``ThreadPoolExecutor`` was deliberately not
+        used: its worker threads are joined at interpreter exit, so a
+        truly hung node would hang process shutdown.
+        """
+        future: Future = Future()
+
+        def _target() -> None:
+            try:
+                future.set_result(manifest.execute(ctx, **kwargs))
+            except BaseException as exc:  # noqa: BLE001 — relayed verbatim
+                future.set_exception(exc)
+
+        thread = threading.Thread(
+            target=_target, daemon=True, name=f"node-{ctx.node_id}")
+        thread.start()
+        try:
+            return future.result(timeout=deadline)
+        except FutureTimeout:
+            ctx.abandoned = True
+            raise NodeDeadlineExceeded(ctx.node_id, deadline) from None
+
     def run(
         self,
         workflow: Workflow,
@@ -511,6 +581,7 @@ class Executor:
         data_root=None,
         project_dir=None,
         include_store: bool = False,
+        node_timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Execute the workflow; returns a run summary.
 
@@ -531,6 +602,13 @@ class Executor:
         workspace; None keeps local-dev behavior. `project_dir` (§12.3,
         planned) is the stable user-designated directory whose relative
         layout cache keys may share; inert until the disk cache lands.
+
+        `node_timeout_seconds` (issues.md M2) is the per-node watchdog
+        budget — each node must finish within it or the run ends with a
+        ``timeout`` terminal status and the node is abandoned (its thread
+        dies with the process). None/0 = no watchdog (headless default);
+        the server passes its live ``node_timeout_seconds`` knob. A node's
+        own declared ``timeout`` overrides the knob (§7.1).
         """
         if cancel_event is None:
             cancel_event = threading.Event()
@@ -788,7 +866,51 @@ class Executor:
                     kwargs = PathPolicy(data_root, workspace).resolve_params(
                         manifest, kwargs
                     )
-                result = manifest.execute(ctx, **kwargs)
+                deadline = self._effective_deadline(
+                    manifest, node_timeout_seconds)
+                if deadline is None:
+                    result = manifest.execute(ctx, **kwargs)
+                else:
+                    try:
+                        result = self._execute_with_deadline(
+                            manifest, ctx, kwargs, deadline)
+                    except NodeDeadlineExceeded as exc:
+                        # M2 terminal path: the node is abandoned (its
+                        # daemon thread dies with the process; late ctx
+                        # calls are voided via ctx.abandoned). The run
+                        # ends NOW — the admission slot is released and
+                        # TTL cleanup accepts the run — instead of
+                        # wedging the instance (the M2 wedge). Mirrors
+                        # the cancellation path: a summary, not an
+                        # exception.
+                        emit(
+                            {
+                                "event": "node_status",
+                                "node": node_id,
+                                "status": "error",
+                                "error": str(exc),
+                            }
+                        )
+                        emit(
+                            {
+                                "event": "run_finished",
+                                "status": "timeout",
+                                "node": node_id,
+                                "error": str(exc),
+                            }
+                        )
+                        logging.getLogger("emptyui").warning(
+                            "run watchdog: %s", exc)
+                        self._sweep_run_payloads(
+                            store, outputs_by_node, cache,
+                            logging.getLogger("emptyui"))
+                        summary = {"status": "timeout",
+                                   "error": str(exc),
+                                   "node": node_id,
+                                   "outputs": outputs_by_node}
+                        if include_store:
+                            summary["store"] = store
+                        return summary
             except Exception as exc:
                 emit(
                     {

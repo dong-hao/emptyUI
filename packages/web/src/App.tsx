@@ -388,7 +388,11 @@ export default function App() {
               useRun.getState().handleEvent(e);
             }
           }
-          if (["completed", "failed", "cancelled"].includes(run.status)) {
+          if (
+            ["completed", "failed", "cancelled", "timeout"].includes(
+              run.status,
+            )
+          ) {
             stopPolling();
           }
         } catch {

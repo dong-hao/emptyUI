@@ -174,6 +174,8 @@ def _refuse_if_calibrated(data, where: str) -> None:
 
 class Calibrate(Node):
     type = "mth5.calibrate"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Calibrate"
     tooltip = "Remove the instrument response (calibration) from a time series."
     description = (

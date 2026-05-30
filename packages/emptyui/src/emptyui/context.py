@@ -27,6 +27,11 @@ class RunContext:
         self._progress_cb = progress_cb
         self.logger = logger or logging.getLogger("emptyui")
         self.published: list[dict[str, Any]] = []
+        #: Watchdog flag (issues.md M2): True once the executor abandoned
+        #: this node for exceeding its deadline. The abandoned thread keeps
+        #: running — late progress/artifact calls must not emit events for
+        #: a run that already ended. Checked, never reset.
+        self.abandoned = False
 
     def artifact_path(self, stem: str, suffix: str) -> Path:
         """Workspace artifact filename unique per node instance.
@@ -41,12 +46,18 @@ class RunContext:
                 else Path(f"{stem}_{self.node_id}{suffix}"))
 
     def progress(self, frac: float, message: str = "") -> None:
+        if self.abandoned:
+            return  # the run ended; the abandoned thread's calls are void
         frac = max(0.0, min(1.0, frac))
         if self._progress_cb:
             self._progress_cb(frac, message)
 
     def publish_artifact(self, path: str | Path, kind: str) -> dict[str, Any]:
         """Register a file produced by a node as an artifact."""
+        if self.abandoned:
+            # keep the return contract without registering (nothing reads a
+            # doomed run's published list) — the file itself still exists
+            return {"path": str(path), "kind": kind}
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(p)

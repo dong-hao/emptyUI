@@ -24,7 +24,14 @@ export type PayloadMap = Record<string, Record<string, PayloadSummary>>;
 
 interface RunState {
   runId: string | null;
-  runStatus: "idle" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  runStatus:
+    | "idle"
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "timeout";
   /** Reason of a failed run, straight from the terminal run_finished event
    *  (H3): the UI shows this in the toolbar — the status badge alone leaves
    *  a red "failed" with no explanation. */
@@ -158,10 +165,12 @@ export const useRun = create<RunState>((set) => ({
       case "run_finished":
         set({
           runStatus: event.status as RunState["runStatus"],
-          // H3: keep the reason of a failed run — the executor carries it on
-          // the terminal event; a terminal status without one clears it
+          // H3: keep the reason of a failed/timed-out run — the executor
+          // carries it on the terminal event; a terminal status without
+          // one clears it. "timeout" (M2) is a failed run whose reason
+          // names the node and the remedy, so it renders identically.
           runError:
-            event.status === "failed"
+            event.status === "failed" || event.status === "timeout"
               ? ((event.error as string | undefined) || null)
               : null,
         });

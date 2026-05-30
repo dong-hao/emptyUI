@@ -21,7 +21,7 @@ from emptyui.server.app import create_app
 MANIFEST_KEYS = {
     "type", "version", "title", "tooltip", "description", "category",
     "hidden", "viewer", "inputs", "outputs", "params", "deps", "inherit",
-    "cacheable", "invalidates_inputs", "models",
+    "cacheable", "invalidates_inputs", "models", "timeout",
 }
 PORT_KEYS = {"name", "type", "description", "label"}
 INPUT_KEYS = PORT_KEYS | {"required", "accepts", "collection_ok"}

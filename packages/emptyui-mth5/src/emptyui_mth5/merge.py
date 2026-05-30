@@ -219,6 +219,8 @@ def _rt_span(rt):
 
 class MergeRuns(Node):
     type = "mth5.runs.merge"
+    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    timeout = 3600.0
     title = "Merge Runs"
     tooltip = "Combine several acquisition runs of one station into a single time series."
     description = (
