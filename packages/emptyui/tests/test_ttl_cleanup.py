@@ -113,17 +113,20 @@ def test_failed_reclaim_is_logged_not_silent(monkeypatch, caplog):
         "emptyui.server.app.shutil.rmtree", raising_fake_rmtree)
     client = _client()
     with client:
-        run_id = _run_to_completion(client)
-        # the run entry is popped BEFORE the rmtree — a 404 proves the
-        # reclaim pass ran even though the deletion raised
-        _wait(
-            lambda: client.get(f"/api/runs/{run_id}").status_code == 404,
-            msg="the expired run was never reclaimed")
-        assert any(
-            "reclaim failed" in r.getMessage()
-            and r.levelno >= logging.WARNING
-            for r in caplog.records
-        ), "the failed deletion was swallowed silently"
+        _run_to_completion(client)
+
+        def _logged():
+            return any(
+                "reclaim failed" in r.getMessage()
+                and r.levelno >= logging.WARNING
+                for r in caplog.records
+            )
+
+        # the run entry is popped BEFORE the rmtree raises and the log is
+        # written — wait for the record itself, not for a 404 proxy (the
+        # poll could otherwise observe the 404 in that gap and race the
+        # assertion ahead of the record)
+        _wait(_logged, msg="the failed deletion was swallowed silently")
 
 
 def test_workspace_actually_removed_on_success(monkeypatch):
