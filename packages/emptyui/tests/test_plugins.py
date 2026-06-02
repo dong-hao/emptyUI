@@ -282,6 +282,19 @@ class FakeDup(Node):
         return {}
 
 
+class FakeOk(Node):
+    """A non-conflicting type registered BEFORE the duplicate."""
+    type = "fake.ok"
+    outputs = ()
+
+    def execute(self, ctx):
+        return {}
+
+
+class FakeBrokenImport:
+    """An entry point whose load() itself fails."""
+
+
 def test_disabled_plugin_type_collision_does_not_crash_discovery(monkeypatch):
     """A disabled plugin whose node type collides with an enabled plugin must
     not crash discovery (previously register() raised duplicate-type before
@@ -299,9 +312,107 @@ def test_disabled_plugin_type_collision_does_not_crash_discovery(monkeypatch):
     assert registry.plugin("third").enabled is False
     assert "fake.core" in registry.plugin("third").node_types  # learned
 
-    # and re-enabling the colliding plugin surfaces the conflict loudly
-    with pytest.raises(ValueError, match="duplicate node type"):
-        build_default_registry()
+
+def test_enabled_duplicate_plugin_degrades_with_error_row(monkeypatch):
+    """M20 (decision 2026-10-13): an ENABLED plugin declaring a duplicate
+    node type degrades like any other registration failure — the instance
+    starts, the plugin is skipped with an error, and the first
+    registration wins the type. Previously the ValueError escaped
+    discovery and bricked startup (and made every toggle 409)."""
+    core = _register(FakeCore)
+    core.bundled = True
+    eps = [
+        SimpleNamespace(name="core", load=lambda r=core: r, dist=None),
+        SimpleNamespace(name="third", load=lambda: _register(FakeDup), dist=None),
+    ]
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+
+    registry = build_default_registry()  # does not raise
+    assert registry.get("fake.core").__class__ is FakeCore  # first wins
+    info = registry.plugin("third")
+    assert info is not None
+    assert info.enabled is False
+    assert info.node_types == []
+    assert "duplicate node type" in info.error
+    assert "fake.core" in info.error
+
+
+def test_duplicate_plugin_registration_is_all_or_nothing(monkeypatch):
+    """A plugin that registers a good node and THEN hits the duplicate must
+    not leave the good node half-registered (its other types are rolled
+    back — the plugin is skipped whole, like any other failure)."""
+    core = _register(FakeCore)
+    core.bundled = True
+    eps = [
+        SimpleNamespace(name="core", load=lambda r=core: r, dist=None),
+        SimpleNamespace(
+            name="third", load=lambda: _register(FakeOk, FakeDup), dist=None
+        ),
+    ]
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+
+    registry = build_default_registry()
+    assert registry.get("fake.core").__class__ is FakeCore
+    assert registry.get("fake.ok") is None  # rolled back with the plugin
+    assert registry.plugin("third").error != ""
+    assert registry.plugin("third").node_types == []
+
+
+def test_failed_plugins_reach_the_plugins_api(monkeypatch):
+    """A failed plugin (import error OR duplicate type) is recorded in the
+    registry so GET /api/plugins shows the error row — previously the
+    info existed only in discovery's local list and the API never saw it
+    (the 'shows up disabled with a note in /api/plugins' comment was
+    aspirational)."""
+    core = _register(FakeCore)
+    core.bundled = True
+
+    def broken_register():
+        raise RuntimeError("no heavy dep")
+
+    eps = [
+        SimpleNamespace(name="core", load=lambda r=core: r, dist=None),
+        SimpleNamespace(
+            name="third", load=lambda: _register(FakeDup), dist=None
+        ),
+        SimpleNamespace(
+            name="broken",
+            load=lambda: (_ for _ in ()).throw(
+                ImportError("missing heavy dep")),
+            dist=None,
+        ),
+    ]
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+    registry = build_default_registry()
+    rows = {p["name"]: p for p in registry.plugins()}
+    assert "duplicate node type" in rows["third"]["error"]
+    assert rows["third"]["enabled"] is False
+    assert "missing heavy dep" in rows["broken"]["error"]
+    assert rows["core"]["error"] == ""
+
+
+def test_duplicate_plugin_api_surface(monkeypatch):
+    """End-to-end over HTTP: the app starts with the conflicting plugin,
+    the catalog and runs keep working, and re-enabling the plugin surfaces
+    the conflict as an error row — never a 500/409."""
+    core = _register(FakeCore)
+    core.bundled = True
+    eps = [
+        SimpleNamespace(name="core", load=lambda r=core: r, dist=None),
+        SimpleNamespace(name="third", load=lambda: _register(FakeDup), dist=None),
+    ]
+    monkeypatch.setattr("emptyui.registry.entry_points", lambda group=None: eps)
+    client = TestClient(create_app(build_default_registry()))
+    plugins = client.get("/api/plugins").json()
+    third = next(p for p in plugins if p["name"] == "third")
+    assert third["enabled"] is False and "duplicate node type" in third["error"]
+    # the catalog is intact (first registration wins)
+    assert any(n["type"] == "fake.core" for n in client.get("/api/nodes").json()["nodes"])
+    # re-enabling surfaces the conflict in the row, not as a 500/409
+    resp = client.post("/api/plugins/third/enable")
+    assert resp.status_code == 200
+    third = next(p for p in resp.json()["plugins"] if p["name"] == "third")
+    assert "duplicate node type" in third["error"]
 
 
 def test_rebuild_swaps_node_table_atomically(monkeypatch):

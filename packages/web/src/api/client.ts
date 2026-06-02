@@ -146,6 +146,9 @@ export interface PluginInfo {
   node_count: number;
   bundled: boolean;
   enabled: boolean;
+  /** present when discovery/registration failed — the plugin is skipped
+   *  and the row shows why (issues.md M20) */
+  error?: string;
 }
 
 /** API base, derived at runtime (DESIGN.md §11.3 single-origin convention):

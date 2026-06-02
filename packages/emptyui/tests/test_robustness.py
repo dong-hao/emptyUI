@@ -101,9 +101,11 @@ def test_disabled_plugin_register_crash_degrades(monkeypatch):
 
 
 def test_toggle_failure_keeps_settings_file_consistent(tmp_path, monkeypatch):
-    """M-C3: a failed rebuild (duplicate-type conflict on re-enable) must
-    not leave the settings file claiming an enable state the live registry
-    doesn't have — rebuild first, persist only on success."""
+    """M-C3: a failed re-enable (duplicate-type conflict) must not leave
+    the settings file claiming an enable state the live registry doesn't
+    have. Under the M20 degradation the rebuild no longer raises — the
+    conflict lands in the plugin's error row (200) — but the persistence
+    is still skipped, so the file keeps the plugin disabled."""
     from emptyui import Node
 
     class Shared(Node):
@@ -135,12 +137,14 @@ def test_toggle_failure_keeps_settings_file_consistent(tmp_path, monkeypatch):
     ))
     assert json.loads(settings_file.read_text())["disabled_plugins"] == ["dupb"]
 
-    # re-enable fails (duplicate type against the still-enabled dupa) —
-    # a clean 409, and the file must still say disabled (persist happens
-    # AFTER a successful rebuild only)
+    # re-enable degrades (M20): the conflict is the plugin's error row —
+    # and the file must still say disabled (persist happens only when the
+    # live registry actually has the plugin enabled, M-C3)
     resp = client.post("/api/plugins/dupb/enable")
-    assert resp.status_code == 409
-    assert "duplicate node type" in resp.json()["detail"]
+    assert resp.status_code == 200
+    dupb = next(p for p in resp.json()["plugins"] if p["name"] == "dupb")
+    assert "duplicate node type" in dupb["error"]
+    assert dupb["enabled"] is False
     assert json.loads(settings_file.read_text())["disabled_plugins"] == ["dupb"]
 
 

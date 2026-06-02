@@ -232,12 +232,17 @@ export function SettingsDialog({ onClose }: Props) {
                     <td className="plugin-meta">
                       {p.node_count} node{p.node_count === 1 ? "" : "s"}
                     </td>
-                    <td className="plugin-note">
+                    <td
+                      className="plugin-note"
+                      title={p.error || undefined}
+                    >
                       {p.bundled
                         ? "bundled"
-                        : p.enabled
-                          ? ""
-                          : "disabled"}
+                        : p.error
+                          ? p.error
+                          : p.enabled
+                            ? ""
+                            : "disabled"}
                     </td>
                   </tr>
                 ))}

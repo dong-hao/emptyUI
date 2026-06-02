@@ -361,13 +361,14 @@ def create_app(
             if info.bundled:
                 # bundled plugins are always on — the toggle is a no-op
                 return {"name": name, "enabled": True, "plugins": registry.plugins()}
-            # M-C3: rebuild BEFORE persisting — a failed rebuild (e.g. a
-            # duplicate-type contract violation on re-enable) must not
-            # leave the settings file claiming an enable state the live
-            # registry doesn't have; rebuild swaps atomically, so a raise
-            # leaves the live table untouched. The rebuild set keeps the
+            # M-C3: rebuild BEFORE persisting — the settings file must not
+            # claim an enable state the live registry doesn't have;
+            # rebuild swaps atomically, so a raise leaves the live table
+            # untouched. The rebuild set keeps the
             # env baseline (§5.1: a UI toggle cannot enable a
-            # platform-disabled plugin).
+            # platform-disabled plugin). Under the M20 degradation a
+            # duplicate-type plugin no longer raises — the guard below
+            # skips the persistence instead.
             disabled_after = plugin_store.effective_disabled(env_plugin_baseline)
             if disable or name in env_plugin_baseline:
                 disabled_after.add(name)
@@ -376,15 +377,29 @@ def create_app(
             try:
                 registry.rebuild(disabled_after)
             except ValueError as exc:
-                # a contract violation on re-enable (duplicate node type):
-                # a clean 409 beats a raw 500 — the registry stays on its
-                # old tables and the settings file is untouched (M-C3)
+                # a manual-node contract violation ("does not define
+                # 'type'"): a clean 409 beats a raw 500 — the registry
+                # stays on its old tables and the settings file is
+                # untouched (M-C3)
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            effective_info = registry.plugin(name)
+            if not disable and (
+                effective_info is None or not effective_info.enabled
+            ):
+                # M20: the rebuild degraded the plugin (e.g. a duplicate
+                # node type) — the conflict is in its error row. Do NOT
+                # persist an enable state the live registry doesn't have
+                # (M-C3): the settings file keeps the plugin disabled.
+                return {
+                    "name": name,
+                    "enabled": False,
+                    "plugins": registry.plugins(),
+                }
             plugin_store.set_disabled(name, disable)
             if disable:
                 # disabled nodes' cached results are unreachable — drop them
                 node_cache.clear()
-            effective = registry.plugin(name).enabled
+            effective = effective_info.enabled if effective_info else False
             return {
                 "name": name,
                 "enabled": effective,

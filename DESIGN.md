@@ -596,14 +596,21 @@ Rules that keep the ecosystem healthy:
   does not enforce the namespace today — it is a review-time gate; installing
   a plugin is an act of trust equal to `pip install` itself (L-C14).
 - **Trust model (L-C14)**: a plugin's code runs with the server process's full
-  privileges. The executor's guarantees are CONTRACTS, not sandboxing: nodes
-  must be functional (never mutate inputs or previously returned outputs —
-  §8.1), `Node` instances are shared across runs (instance attributes become
-  cross-run state — keep per-run state in `ctx`), and `ctx.publish_artifact`
-  may write into the current run's workspace. Anything beyond that
-  (filesystem access, network, subprocesses) is the plugin's own business and
-  the user's own risk; the settings dialog's plugin list is therefore the
-  natural place to audit what is installed.
+   privileges. The executor's guarantees are CONTRACTS, not sandboxing: nodes
+   must be functional (never mutate inputs or previously returned outputs —
+   §8.1), `Node` instances are shared across runs (instance attributes become
+   cross-run state — keep per-run state in `ctx`), and `ctx.publish_artifact`
+   may write into the current run's workspace. Anything beyond that
+   (filesystem access, network, subprocesses) is the plugin's own business and
+   the user's own risk; the settings dialog's plugin list is therefore the
+   natural place to audit what is installed.
+- **Failure degradation (issues.md M20)**: a plugin that fails to import,
+   crashes in `register()`, or declares a **duplicate node type** is skipped
+   whole (its partial registrations roll back; the first registration wins
+   the type) — the instance starts, the conflict lands in the plugin's
+   `error` row in `GET /api/plugins` (and the Settings dialog), and a
+   re-enable attempt of the conflicting plugin surfaces the row without a
+   500/409 while the settings file keeps the plugin disabled (M-C3).
 - **Open, namespaced port types**: plugins may introduce new types but must
   namespace them and declare UI metadata via the node's `port_types` ClassVar;
   reusing core tags is strongly preferred, and consumers duck-type documented

@@ -197,6 +197,36 @@ def _plugin_version(ep) -> str:
     return ""
 
 
+def _record_plugin_failure(
+    registry: Registry, infos: list[PluginInfo], ep, bundled: bool, exc: Exception
+) -> None:
+    """Degrade one failed plugin (issues.md M20): log it, and record the
+    PluginInfo BOTH in the discovery list and in the registry's plugin
+    table — ``GET /api/plugins`` must show the error row (previously the
+    info existed only in the local list and the API never saw it).
+    """
+    logger.warning(
+        "plugin '%s' failed and was skipped: %s: %s",
+        ep.name, type(exc).__name__, exc)
+    info = PluginInfo(
+        name=ep.name, version=_plugin_version(ep), bundled=bundled,
+        node_types=[], enabled=False,
+        error=f"{type(exc).__name__}: {exc}")
+    infos.append(info)
+    registry._plugins[ep.name] = info
+
+
+def _rollback_partial(registry: Registry, before: set[str]) -> None:
+    """Remove the nodes a failed register() already added (issues.md M20):
+    a plugin is skipped whole — a half-registered plugin would expose
+    nodes whose siblings vanished, and pollute the shared manual table
+    across rebuilds."""
+    added = set(registry._nodes) - before
+    for node_type in added:
+        registry._nodes.pop(node_type, None)
+        registry._manual.pop(node_type, None)
+
+
 def discover_plugins(
     registry: Registry, disabled: set[str] | None = None
 ) -> list[PluginInfo]:
@@ -221,13 +251,7 @@ def discover_plugins(
         try:
             register = ep.load()
         except Exception as exc:  # noqa: BLE001 — any import failure degrades
-            logger.warning(
-                "plugin '%s' failed to import and was skipped: %s: %s",
-                ep.name, type(exc).__name__, exc)
-            infos.append(PluginInfo(
-                name=ep.name, version=_plugin_version(ep), bundled=False,
-                node_types=[], enabled=False,
-                error=f"{type(exc).__name__}: {exc}"))
+            _record_plugin_failure(registry, infos, ep, False, exc)
             continue
         bundled = bool(getattr(register, "bundled", False))
         enabled = bundled or (disabled is None or ep.name not in disabled)
@@ -235,19 +259,19 @@ def discover_plugins(
             before = set(registry._nodes)
             try:
                 register(registry)
-            except ValueError:
-                # a packaging CONTRACT violation (duplicate node type, §3
-                # namespacing) stays loud — re-enabling must surface the
-                # conflict, not silently drop the plugin
-                raise
+            except ValueError as exc:
+                # M20 (decision 2026-10-13): a duplicate node type degrades
+                # like any other registration failure — one mis-packaged
+                # wheel must not brick startup (nor make every toggle
+                # 409). The partial adds are rolled back; the first
+                # registration wins the type; the conflict is named in
+                # the plugin's error row.
+                _rollback_partial(registry, before)
+                _record_plugin_failure(registry, infos, ep, bundled, exc)
+                continue
             except Exception as exc:  # noqa: BLE001 — degrade, never crash startup
-                logger.warning(
-                    "plugin '%s' registration failed and was skipped: %s: %s",
-                    ep.name, type(exc).__name__, exc)
-                infos.append(PluginInfo(
-                    name=ep.name, version=_plugin_version(ep), bundled=bundled,
-                    node_types=[], enabled=False,
-                    error=f"{type(exc).__name__}: {exc}"))
+                _rollback_partial(registry, before)
+                _record_plugin_failure(registry, infos, ep, bundled, exc)
                 continue
             node_types = sorted(set(registry._nodes) - before)
         else:
@@ -262,13 +286,7 @@ def discover_plugins(
             try:
                 register(scratch)
             except Exception as exc:  # noqa: BLE001 — degrade, never crash startup
-                logger.warning(
-                    "disabled plugin '%s' registration failed and was "
-                    "skipped: %s: %s", ep.name, type(exc).__name__, exc)
-                infos.append(PluginInfo(
-                    name=ep.name, version=_plugin_version(ep), bundled=False,
-                    node_types=[], enabled=False,
-                    error=f"{type(exc).__name__}: {exc}"))
+                _record_plugin_failure(registry, infos, ep, False, exc)
                 continue
             node_types = sorted(scratch._nodes)
         info = PluginInfo(
