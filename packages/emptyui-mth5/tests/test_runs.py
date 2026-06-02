@@ -802,3 +802,17 @@ def test_slice_window_handles_open_bounds():
     assert start_only["ex"].sizes["time"] == 3
 
     assert _slice_window(data_vars, None, None) is data_vars
+
+
+def test_align_runs_declares_collection_ok_inputs():
+    """M24: Align Runs aligns run COLLECTIONS member-wise (the backend has
+    for a while — test_align_runs_collections_*), but its inputs lacked
+    `collection_ok`, so the frontend's wiring check refused to connect
+    Extract Run's 'time range' output (a ts.runs payload may only be
+    wired into collection_ok inputs, DESIGN §4) — blocking the
+    burst-mode remote-reference route in the UI."""
+    from emptyui_mth5.runs import AlignRuns
+
+    node = AlignRuns()
+    assert node.inputs[0].name == "data1" and node.inputs[0].collection_ok
+    assert node.inputs[1].name == "data2" and node.inputs[1].collection_ok

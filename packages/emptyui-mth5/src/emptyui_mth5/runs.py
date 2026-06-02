@@ -941,8 +941,11 @@ class AlignRuns(Node):
     )
     category = "Processing"
     inputs = (
-        Input("data1", "ts.run", label="time series 1"),
-        Input("data2", "ts.run", label="time series 2"),
+        # collection_ok (issues.md M24): Extract Run 'time range' payloads
+        # (burst-mode corpora) align member-wise — the frontend's wiring
+        # check gates ts.runs payloads on this flag (DESIGN §4)
+        Input("data1", "ts.run", label="time series 1", collection_ok=True),
+        Input("data2", "ts.run", label="time series 2", collection_ok=True),
     )
     outputs = (
         Output("data1", "ts.run", label="time series 1"),
