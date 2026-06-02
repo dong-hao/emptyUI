@@ -176,7 +176,10 @@ def test_read_phoenix_mtu_archive(tmp_path):
     ids = [r[0] for r in res["runs"]]
     assert ids == ["sr2400_0001", "sr2400_0002",
                    "sr150_0001", "sr150_0002", "sr15_0001"]
-    assert res["warnings"] == []  # clean synthetic recording
+    # H7: the synthetic corpus carries no ASC tables — that fact must be
+    # a loud warning, never silence (the scalar chain alone is a wrong TF)
+    assert any("no ASC calibration" in w for w in res["warnings"]), (
+        res["warnings"])
 
     from mth5.mth5 import MTH5
 
@@ -817,3 +820,31 @@ def test_group_segments_subsecond_tolerance_and_out_of_order(tmp_path, caplog):
         segs2 = _group_segments(iter(blocks2))
     assert len(segs2) == 2  # fragmented (per block)
     assert any("out of order" in r.message for r in caplog.records)
+
+
+# --- H7: calibration absence must warn, never load silently --------------
+
+def test_read_phoenix_mtu_warns_when_no_asc(tmp_path):
+    """A corpus with no *.asc anywhere must WARN: the TBL scalar chain
+    applies but the frequency-dependent shape correction is missing, so
+    the TF would be silently wrong. Previously this path returned {}
+    without a word ('no ASC tables provided at all — stay silent')."""
+    _synthetic_corpus(tmp_path)
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    assert any("no ASC calibration" in w for w in res["warnings"]), (
+        res["warnings"])
+
+
+def test_read_phoenix_mtu_warns_on_unmatched_serials(tmp_path):
+    """ASC files present but matching no TBL serial -> a warning per
+    missing chain (box + each coil with a serial)."""
+    _synthetic_corpus(tmp_path)
+    _write_tbl(tmp_path / "SYNTH01.TBL", HXSN="COIL111", HYSN="COIL222")
+    # files exist but their names match no serial in the TBL
+    (tmp_path / "MTU-9999_CLB.asc").write_text("dummy\n")
+    (tmp_path / "COIL9999_CLC.asc").write_text("dummy\n")
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    joined = "\n".join(res["warnings"])
+    assert "no box calibration" in joined
+    assert "no coil calibration for hx" in joined
+    assert "no coil calibration for hy" in joined

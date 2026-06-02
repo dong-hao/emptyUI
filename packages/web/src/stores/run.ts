@@ -14,6 +14,10 @@ export interface NodeRunState {
   error?: string;
   progress?: number;
   msg?: string;
+  /** degradations the node announced via ctx.warn (issues.md H7) —
+   *  e.g. a missing calibration. Rendered on the card (⚠ marker) and in
+   *  the properties panel; deduped, order preserved. */
+  warnings?: string[];
   /** result reused from the cross-run cache (executor emitted cached: true) */
   cached?: boolean;
 }
@@ -162,6 +166,23 @@ export const useRun = create<RunState>((set) => ({
         }));
         break;
       }
+      case "node_warning":
+        // H7: append (dedupe by content — the replay can repeat events);
+        // warnings persist for the run's lifetime like artifacts
+        set((s) => ({
+          nodeStates: {
+            ...s.nodeStates,
+            [event.node as string]: {
+              ...s.nodeStates[event.node as string],
+              warnings: (() => {
+                const prev = s.nodeStates[event.node as string]?.warnings ?? [];
+                const msg = event.msg as string;
+                return prev.includes(msg) ? prev : [...prev, msg];
+              })(),
+            },
+          },
+        }));
+        break;
       case "run_finished":
         set({
           runStatus: event.status as RunState["runStatus"],

@@ -318,6 +318,16 @@ export function MTNode({ id, data, selected }: NodeProps) {
           cached
         </div>
       )}
+      {runState?.warnings && runState.warnings.length > 0 && (
+        <div
+          className="mt-warning"
+          title={runState.warnings.join("\n")}
+        >
+          ⚠ {runState.warnings.length === 1
+            ? runState.warnings[0]
+            : `${runState.warnings.length} warnings`}
+        </div>
+      )}
       {runState?.status === "error" && (
         <div className="mt-error" title={runState.error}>
           error: {runState.error}

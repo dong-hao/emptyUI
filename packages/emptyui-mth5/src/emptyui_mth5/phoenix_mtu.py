@@ -305,7 +305,15 @@ def _prepare_asc_calibration(
             "files, or clear it to look next to the recording")
     if not any(p.suffix.lower() == ".asc" for p in folder.iterdir()
                if p.is_file()):
-        return {}  # no ASC tables provided at all — stay silent
+        # H7: the total-absence case used to return {} in silence — the
+        # scalar chain applies but the shape correction is missing, which
+        # is a silently wrong TF
+        warnings.append(
+            f"no ASC calibration tables (*.asc) in {folder} — the "
+            "frequency-dependent shape correction is missing (the TBL "
+            "scalar calibration still applies)")
+        _log.warning(warnings[-1])
+        return {}
     box_serial = str(table.tbl_dict.get("SNUM", "")).strip()
     coil_serials = {c: str(table.tbl_dict.get(t, "")).strip()
                     for c, t in (("hx", "HXSN"), ("hy", "HYSN"), ("hz", "HZSN"))}
@@ -862,7 +870,9 @@ class LoadPhoenixMtu(Node):
             session_by_slot=session_by_slot,
         )
         for w in res["warnings"]:
-            ctx.logger.warning(w)
+            # H7: on the NODE (node_warning events -> the properties panel
+            # and the card marker), not only the server log
+            ctx.warn(w)
         cal = res.get("calibration") or {}
         if cal:
             ctx.logger.info(

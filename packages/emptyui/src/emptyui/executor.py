@@ -865,6 +865,11 @@ class Executor:
                 progress_cb=lambda frac, msg, _nid=node_id: emit(
                     {"event": "node_progress", "node": _nid, "frac": frac, "msg": msg}
                 ),
+                # H7: degradations surface ON THE NODE (the properties
+                # panel + a card marker), never as a silent wrong result
+                warn_cb=lambda msg, _nid=node_id: emit(
+                    {"event": "node_warning", "node": _nid, "msg": msg}
+                ),
             )
             try:
                 kwargs: dict[str, Any] = {}

@@ -119,6 +119,16 @@ export function PropertiesPanel({
           <pre className="node-error-text">{nodeState.error}</pre>
         </div>
       )}
+      {nodeState?.warnings && nodeState.warnings.length > 0 && (
+        <div className="node-warnings">
+          <strong>warnings</strong>
+          {nodeState.warnings.map((w) => (
+            <pre key={w} className="node-error-text warning-text">
+              {w}
+            </pre>
+          ))}
+        </div>
+      )}
       <p className="muted">{manifest.description}</p>
       {manifest.deps.length > 0 && (
         <p className="muted">deps: {manifest.deps.join(", ")}</p>

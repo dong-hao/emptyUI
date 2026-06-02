@@ -20,11 +20,13 @@ class RunContext:
         progress_cb=None,
         logger: logging.Logger | None = None,
         node_id: str = "",
+        warn_cb=None,
     ) -> None:
         self.workspace = Path(workspace) if workspace is not None else None
         self.store = store
         self.node_id = node_id or "node"
         self._progress_cb = progress_cb
+        self._warn_cb = warn_cb
         self.logger = logger or logging.getLogger("emptyui")
         self.published: list[dict[str, Any]] = []
         #: Watchdog flag (issues.md M2): True once the executor abandoned
@@ -51,6 +53,18 @@ class RunContext:
         frac = max(0.0, min(1.0, frac))
         if self._progress_cb:
             self._progress_cb(frac, message)
+
+    def warn(self, message: str) -> None:
+        """Surface a degradation on the node (issues.md H7): a warning the
+        UI renders on the node card and in the properties panel — not a
+        silent wrong result. Also logged, so the server log keeps the
+        full record (headless embedding has no warn callback — the log is
+        the only surface there)."""
+        self.logger.warning("%s: %s", self.node_id, message)
+        if self.abandoned:
+            return  # the run ended; the abandoned thread's calls are void
+        if self._warn_cb:
+            self._warn_cb(message)
 
     def publish_artifact(self, path: str | Path, kind: str) -> dict[str, Any]:
         """Register a file produced by a node as an artifact."""

@@ -554,6 +554,25 @@ button.primary {
   cursor: help;
 }
 
+/* H7: a node's degradation warnings (e.g. a missing calibration) — amber,
+   ellipsized on the card, full text on hover and in the properties panel */
+.mt-warning {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #b9770e;
+  background: #fdebd0;
+  border: 1px solid #b9770e;
+  border-radius: 3px;
+  padding: 0 0.4rem;
+  margin: 0.15rem 0.5rem 0;
+  align-self: flex-start;
+  max-width: calc(100% - 1rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
 /* §8.1 good-to-have: the selected node's error, copyable in the panel
    (the node card only shows an ellipsized badge) */
 .node-error {
@@ -562,6 +581,25 @@ button.primary {
   border: 1px solid #e6b0aa;
   border-radius: 6px;
   background: #fdf0ef;
+}
+
+/* H7: the selected node's degradation warnings — amber mirror of the
+   error block (readable, unlike the card's ellipsized marker) */
+.node-warnings {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border: 1px solid #b9770e;
+  border-radius: 6px;
+  background: #fdebd0;
+}
+.node-warnings strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #b9770e;
+}
+.node-warnings .warning-text {
+  color: #7d5a0b;
+  margin: 0.25rem 0 0;
 }
 .node-error-head {
   display: flex;

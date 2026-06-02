@@ -793,6 +793,7 @@ One file = one reproducible pipeline.
 { "event": "run_started",   "run_id": "r1" }
 { "event": "node_status",   "node": "n2", "status": "running" }
 { "event": "node_progress", "node": "n2", "frac": 0.42, "msg": "filtering…" }
+{ "event": "node_warning",  "node": "n2", "msg": "no box calibration …" }
 { "event": "artifact",      "node": "n3", "id": "a7", "kind": "image",
   "handle": "h12", "url": "/api/artifacts/a7/preview" }
 { "event": "payload",       "node": "n2", "port": "out", "type": "ts.run",
@@ -804,6 +805,16 @@ One file = one reproducible pipeline.
 The `artifact` event carries the output `handle` id so viewer nodes resolve
 exactly which figure arrives on which input edge, even when one node publishes
 several figures.
+
+**Node warnings ride the stream** (issues.md H7): `ctx.warn(message)` emits
+`node_warning` — a degradation the UI renders on the node card (an amber ⚠
+marker, full text on hover) and in the properties panel (a readable amber
+block, deduped). This is how the Phoenix loaders surface a missing
+calibration (the `*_CLB.asc`/`*_CLC.asc` chains, including the
+total-absence case that used to return `{}` in silence) — a silently
+missing shape correction is a silently wrong transfer function. Warnings
+are also logged; headless embedding (no event stream) keeps the log as
+the only surface.
 
 **Failure reasons ride the terminal event.** `run_finished: failed` carries
 `error` — the human-readable reason (missing input, bad param, node exception)
