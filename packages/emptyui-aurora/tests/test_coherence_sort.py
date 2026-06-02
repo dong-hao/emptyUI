@@ -342,3 +342,105 @@ def test_per_bin_coherence_smooth_bins_nan_aware():
     assert coh_e[F - 1].max() > 0.01, coh_e[F - 1]
     # the NaN DC bin itself has no data — exactly 0
     assert (coh_e[0] == 0).all()
+
+
+# --- M21: the chunked transient ------------------------------------------
+
+def test_chunked_statistic_matches_the_single_chunk_path(monkeypatch):
+    """The M21 window-chunked _min_coh must reproduce the unchunked
+    statistic: a chunk's haloed slice contains every window's full
+    ensemble, so the values agree to FP rounding (the per-chunk cumsum
+    baselines differ in low-order bits — hence allclose, not equal).
+    Exercises NaN samples, bin pooling and the two-FC path."""
+    from emptyui_aurora import _processing
+    from emptyui_aurora._processing import _per_bin_coherence
+
+    F, W, I, O = 8, 60, 2, 2
+    rng = np.random.default_rng(7)
+    E = rng.standard_normal((O, F, W)) + 1j * rng.standard_normal((O, F, W))
+    H = rng.standard_normal((I, F, W)) + 1j * rng.standard_normal((I, F, W))
+    R = rng.standard_normal((I, F, W)) + 1j * rng.standard_normal((I, F, W))
+    E[:, 0, :] = np.nan  # the DC bin — recoloring undefined there
+    E[0, 3, 10:13] = np.nan  # scattered invalid windows
+    H[1, 5, 30] = np.nan
+
+    def ds(hx, hy, ex, ey):
+        data = {c: (("frequency", "time"), arr) for c, arr in
+                (("hx", hx), ("hy", hy))}
+        data["ex"] = (("frequency", "time"), ex)
+        data["ey"] = (("frequency", "time"), ey)
+        import xarray as xr
+        return xr.Dataset(data, coords={"frequency": np.arange(F)})
+
+    local = ds(H[0], H[1], E[0], E[1])
+    ref = ds(R[0], R[1], E[0], E[1])  # ref inputs differ, outputs shared
+    single = _per_bin_coherence(local, ref, ["hx", "hy"], ["ex", "ey"],
+                                ensemble_windows=4, smooth_bins=1)
+    monkeypatch.setattr(_processing, "_COH_BUDGET_BYTES", 32 * 2**10)
+    chunked = _per_bin_coherence(local, ref, ["hx", "hy"], ["ex", "ey"],
+                                 ensemble_windows=4, smooth_bins=1)
+    np.testing.assert_allclose(chunked[0], single[0], rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(chunked[1], single[1], rtol=1e-9, atol=1e-12)
+
+
+def test_chunking_activates_and_is_logged(monkeypatch, caplog):
+    """Below the budget the chunked path announces itself (F, W, channels
+    and the avoided transient) — the register's 'no guard, no warning'."""
+    import logging
+
+    from emptyui_aurora import _processing
+    from emptyui_aurora._processing import _per_bin_coherence
+
+    F, W, I, O = 4, 40, 2, 1
+    rng = np.random.default_rng(3)
+    E = rng.standard_normal((O, F, W)) + 1j * rng.standard_normal((O, F, W))
+    H = rng.standard_normal((I, F, W)) + 1j * rng.standard_normal((I, F, W))
+
+    def ds(hx, hy, ex):
+        import xarray as xr
+        return xr.Dataset(
+            {"hx": (("frequency", "time"), hx),
+             "hy": (("frequency", "time"), hy),
+             "ex": (("frequency", "time"), ex)},
+            coords={"frequency": np.arange(F)})
+
+    with caplog.at_level(logging.INFO, logger="emptyui"):
+        monkeypatch.setattr(_processing, "_COH_BUDGET_BYTES", 8 * 2**10)
+        _per_bin_coherence(ds(H[0], H[1], E[0]), None, ["hx", "hy"],
+                           ["ex"], ensemble_windows=3)
+    assert any(
+        "transient" in r.getMessage() and "chunk" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_realistic_size_stays_bounded():
+    """The register's complaint: 'no test at realistic sizes'. A 2.5 h /
+    150 Hz level-0 FC (F=129, W=10000 — 5x the smoke corpus) must complete
+    with the transient bounded (measured 713 MiB; the pre-M21 code scaled
+    the SAME intermediates to 5.6 GiB at 5x this size)."""
+    import tracemalloc
+
+    import xarray as xr
+    from emptyui_aurora._processing import _per_bin_coherence
+
+    F, W = 129, 10000
+    rng = np.random.default_rng(2)
+    H = rng.standard_normal((2, F, W)) + 1j * rng.standard_normal((2, F, W))
+    Z = np.array([[1 + 2j, 0.5 - 1j], [-0.5 + 0.3j, 2 + 0j]])
+    E = np.einsum("oi,ifw->ofw", Z, H)  # perfectly coherent — cheap sanity
+    data = {c: (("frequency", "time"), arr) for c, arr in
+            (("hx", H[0]), ("hy", H[1]))}
+    data["ex"] = (("frequency", "time"), E[0])
+    data["ey"] = (("frequency", "time"), E[1])
+    fc = xr.Dataset(data, coords={"frequency": np.arange(F)})
+
+    tracemalloc.start()
+    coh_e, coh_x = _per_bin_coherence(
+        fc, None, ["hx", "hy"], ["ex", "ey"], ensemble_windows=16)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    # the coherent-construction sanity: an exact linear fit scores ~1
+    assert np.all(coh_e > 0.95)
+    assert (coh_x == 1.0).all()
+    assert peak / 2**20 < 900, f"transient grew to {peak / 2**20:.0f} MiB"

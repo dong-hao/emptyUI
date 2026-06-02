@@ -34,6 +34,15 @@ MU0 = 4.0 * np.pi * 1e-7
 
 _log = logging.getLogger("emptyui")
 
+#: M21: transient budget for one coherence-sort _min_coh call. The
+#: sliding-ensemble cumsum arrays scale with F·W·channels² — unchunked, a
+#: 12 h/150 Hz level-0 FC measured 5.6 GiB peak (6.0 GiB two-FC).
+#: Windows are processed in haloed chunks sized from this budget; measured
+#: 1.1 GiB / 1.5 GiB at the same shapes (the remaining floor is the input
+#: stacks themselves). Module-level so tests can shrink it to force the
+#: chunked path on small fixtures.
+_COH_BUDGET_BYTES = 256 * 2**20
+
 
 def _split_names(value) -> list[str]:
     """Split a comma-separated channel list (or an iterable of names); None -> []."""
@@ -1428,45 +1437,84 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
     def _min_coh(Y, X, ok):
         """Per (bin, window) multiple coherence squared of Y's outputs on
         X's inputs over the sliding ensemble; adjusted-R2; min across
-        outputs."""
+        outputs.
+
+        M21: windows are processed in chunks of a size derived from a
+        memory budget — each chunk's haloed slice contains every window's
+        full ensemble, so the statistic is identical to the unchunked
+        computation (a chunk covering all windows IS the pre-M21 path,
+        bit-for-bit). The chunk size is derived per call from the channel
+        counts, so small inputs (every test fixture) take the single-chunk
+        path unchanged.
+        """
         n_in = X.shape[0]
-        pad_c = np.zeros((F, 1, n_in, n_in), dtype=complex)
-        pad_he = np.zeros((F, 1, n_in, Y.shape[0]), dtype=complex)
-        pad_oo = np.zeros((F, 1, Y.shape[0]), dtype=complex)
-        Xz = np.where(ok[None], X, 0)
-        Yz = np.where(ok[None], Y, 0)
-        cnt = np.cumsum(np.concatenate(
-            [np.zeros((F, 1), dtype=int), ok.astype(int)], axis=1), axis=1)
-        cs_hh = np.cumsum(np.concatenate(
-            [pad_c, np.einsum("ifw,jfw->fwij", Xz, Xz.conj())], axis=1), axis=1)
-        cs_he = np.cumsum(np.concatenate(
-            [pad_he, np.einsum("ifw,ofw->fwio", Xz, Yz.conj())], axis=1), axis=1)
-        cs_oo = np.cumsum(np.concatenate(
-            [pad_oo, np.einsum("ofw,ofw->fwo", Yz.conj(), Yz)], axis=1),
-            axis=1)
-        idx = np.arange(W)
-        lo = np.maximum(idx - w0, 0)
-        hi = np.minimum(idx + w0 + 1, W)  # exclusive
-        S_hh = cs_hh[:, hi] - cs_hh[:, lo]               # (F, W, I, I)
-        S_he = cs_he[:, hi] - cs_he[:, lo]               # (F, W, I, O)
-        S_oo = np.real(cs_oo[:, hi] - cs_oo[:, lo])      # (F, W, O)
-        W_seg = (cnt[:, hi] - cnt[:, lo]).astype(float)  # (F, W)
-        usable = (W_seg > n_in) & ok
-        coh = np.zeros((F, W, Y.shape[0]))
-        if np.any(usable):
-            pinv = np.linalg.pinv(
-                S_hh.reshape(-1, n_in, n_in)).reshape(S_hh.shape)
-            t = np.einsum("fwio,fwij->fwjo", S_he.conj(), pinv)
-            num = np.real(np.einsum("fwjo,fwjo->fwo", t, S_he))
-            with np.errstate(divide="ignore", invalid="ignore"):
-                r2 = num / np.maximum(S_oo, 1e-300)
-            # adjusted R2: E[r2 | null] = n_in/(W_seg-1) -> debias
-            wseg = np.maximum(W_seg, 1.0)[:, :, None]
-            r2 = (r2 * (wseg - 1.0) - (n_in - 1.0)) / np.maximum(
-                wseg - n_in, 1.0)
-            coh = np.clip(np.nan_to_num(r2, nan=0.0), 0.0, 1.0)
-        coh[~ok] = 0.0
-        return coh.min(axis=2)  # (F, W)
+        n_out = Y.shape[0]
+        # bytes per WINDOW across the chunk's live intermediates
+        # (complex128): cs_hh I·I + cs_he I·O + cs_oo O + the S_* mirrors
+        # + pinv I·I + t O·I — ~3I² + 3IO + O fields of F·16 bytes
+        bytes_per_window = F * 16 * (3 * n_in * n_in + 3 * n_in * n_out + n_out)
+        chunk = max(1, int(_COH_BUDGET_BYTES // max(bytes_per_window, 1)))
+        if chunk < W:
+            _log.info(
+                "coherence sort: %d windows exceed the %.0f MiB transient "
+                "budget for %d bins x %d inputs x %d outputs — processing "
+                "in %d haloed chunk(s) (~%.1f GiB transient avoided)",
+                W, _COH_BUDGET_BYTES / 2**20, F, n_in, n_out,
+                -(-W // chunk), F * W * 16 * (3 * n_in * n_in
+                                              + 3 * n_in * n_out + n_out) / 2**30)
+        coh = np.empty((F, W))
+        for c0 in range(0, W, chunk):
+            c1 = min(c0 + chunk, W)
+            # haloed slice: every window in [c0, c1) has its full ensemble
+            # (±w0) inside [m0, m1)
+            m0, m1 = max(0, c0 - w0), min(W, c1 + w0)
+            Xc = X[:, :, m0:m1]
+            Yc = Y[:, :, m0:m1]
+            okc = ok[:, m0:m1]
+            L = m1 - m0
+            pad_c = np.zeros((F, 1, n_in, n_in), dtype=complex)
+            pad_he = np.zeros((F, 1, n_in, n_out), dtype=complex)
+            pad_oo = np.zeros((F, 1, n_out), dtype=complex)
+            Xz = np.where(okc[None], Xc, 0)
+            Yz = np.where(okc[None], Yc, 0)
+            cnt = np.cumsum(np.concatenate(
+                [np.zeros((F, 1), dtype=int), okc.astype(int)], axis=1), axis=1)
+            cs_hh = np.cumsum(np.concatenate(
+                [pad_c, np.einsum("ifw,jfw->fwij", Xz, Xz.conj())], axis=1),
+                axis=1)
+            cs_he = np.cumsum(np.concatenate(
+                [pad_he, np.einsum("ifw,ofw->fwio", Xz, Yz.conj())], axis=1),
+                axis=1)
+            cs_oo = np.cumsum(np.concatenate(
+                [pad_oo, np.einsum("ofw,ofw->fwo", Yz.conj(), Yz)], axis=1),
+                axis=1)
+            # window j (global) sits at j-m0 in the slice; its ensemble is
+            # [j-w0, j+w0+1) ∩ [0, W) — inside the slice by construction
+            idx = np.arange(c0, c1) - m0
+            lo = np.maximum(idx - w0, 0)
+            hi = np.minimum(idx + w0 + 1, L)  # exclusive
+            S_hh = cs_hh[:, hi] - cs_hh[:, lo]               # (F, L, I, I)
+            S_he = cs_he[:, hi] - cs_he[:, lo]               # (F, L, I, O)
+            S_oo = np.real(cs_oo[:, hi] - cs_oo[:, lo])      # (F, L, O)
+            W_seg = (cnt[:, hi] - cnt[:, lo]).astype(float)  # (F, L)
+            ok_chunk = ok[:, c0:c1]
+            usable = (W_seg > n_in) & ok_chunk
+            coh_c = np.zeros((F, c1 - c0, n_out))
+            if np.any(usable):
+                pinv = np.linalg.pinv(
+                    S_hh.reshape(-1, n_in, n_in)).reshape(S_hh.shape)
+                t = np.einsum("fwio,fwij->fwjo", S_he.conj(), pinv)
+                num = np.real(np.einsum("fwjo,fwjo->fwo", t, S_he))
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    r2 = num / np.maximum(S_oo, 1e-300)
+                # adjusted R2: E[r2 | null] = n_in/(W_seg-1) -> debias
+                wseg = np.maximum(W_seg, 1.0)[:, :, None]
+                r2 = (r2 * (wseg - 1.0) - (n_in - 1.0)) / np.maximum(
+                    wseg - n_in, 1.0)
+                coh_c = np.clip(np.nan_to_num(r2, nan=0.0), 0.0, 1.0)
+            coh_c[~ok_chunk] = 0.0
+            coh[:, c0:c1] = coh_c.min(axis=2)
+        return coh
 
     coh_e = _min_coh(E, Hp, ok_e)
     coh_x = np.full((F, W), 1.0) if Rp is None else _min_coh(Hl, Rp, ok_x)

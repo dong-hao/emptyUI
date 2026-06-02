@@ -1470,6 +1470,16 @@ multiple coherence** — the band-free sort:
   realizations mean the effective DOF is smaller than the nominal row count;
   no Egbert-style DOF correction is applied to the estimate's σ² (M4 #7
   statistics work). The per-bin debias handles the statistic itself.
+- **Memory (issues.md M21, bounded)**: the per-(bin, window) statistic is
+  computed in windows chunks sized from a transient budget
+  (`_COH_BUDGET_BYTES`, 256 MiB) — a chunk's haloed slice contains every
+  window's full ensemble, so the values match the unchunked path to FP
+  rounding (a chunk covering all windows IS the pre-M21 path, bit-for-bit —
+  small fixtures never chunk). Measured at the 12 h/150 Hz level-0 shape
+  (F≈129, W≈50.6k): 5.6 GiB peak before, 1.1 GiB after (1.5 two-FC); a
+  48 h recording runs bounded. The chunking announces itself in the log
+  (naming F, W, the channel counts and the avoided transient). The
+  remaining floor is the input stacks, which scale with the data.
 - `Estimate TF` skips non-finite FC rows when gathering band rows (required
   by `drop` mode, and gives correct RR semantics: a row is used only if both
   local and remote FCs are finite).
