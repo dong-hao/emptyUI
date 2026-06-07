@@ -569,8 +569,13 @@ def create_app(
                 # unbounded (per-run memory growth). The newest tail wins;
                 # late-joining pollers replay whatever remains (the
                 # frontend dedupes by content, so replays stay safe).
+                # L4: trim from the MIDDLE — the first event (run_started)
+                # and the newest tail survive, so a late poller's replay
+                # stays self-describing (index 0 is always the run's
+                # run_started; the terminal run_finished rides the tail).
                 if len(info["events"]) > _MAX_EVENTS_PER_RUN:
-                    del info["events"][:len(info["events"]) - _MAX_EVENTS_PER_RUN]
+                    excess = len(info["events"]) - _MAX_EVENTS_PER_RUN
+                    del info["events"][1:1 + excess]
                 if event["event"] == "run_started":
                     if info["summary"].get("status") == "queued":
                         info["summary"]["status"] = "running"

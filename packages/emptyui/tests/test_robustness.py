@@ -408,3 +408,41 @@ def test_events_capped_per_run():
     assert len(detail["events"]) <= 5000
     # the terminal events survive the cap (run_finished is the tail)
     assert detail["events"][-1]["event"] == "run_finished"
+
+
+def test_event_cap_keeps_the_replay_self_describing(monkeypatch):
+    """L4: when the cap trims, the FIRST event (run_started) and the
+    newest tail survive — a late poller's replay must not lose the start
+    marker (previously the trim dropped from the front, so a chatty run's
+    replay began mid-stream with no run_started)."""
+    from emptyui import Node
+
+    class Chatty(Node):
+        type = "cap.chatty2"
+        outputs = ()
+
+        def execute(self, ctx):
+            for i in range(200):
+                ctx.progress(i / 200.0, f"step {i}")
+            return {}
+
+    monkeypatch.setattr("emptyui.server.app._MAX_EVENTS_PER_RUN", 50)
+    reg = Registry()
+    reg.add(Chatty)
+    client = TestClient(create_app(reg))
+    run_id = client.post(
+        "/api/runs",
+        json={"workflow": {"nodes": [{"id": "n1", "type": "cap.chatty2"}],
+                           "edges": []}},
+    ).json()["run_id"]
+    for _ in range(500):
+        detail = client.get(f"/api/runs/{run_id}").json()
+        if detail["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.02)
+    assert detail["status"] == "completed"
+    assert len(detail["events"]) <= 50
+    assert detail["events"][0]["event"] == "run_started"
+    assert detail["events"][-1]["event"] == "run_finished"
+    # the middle was dropped, not the ends: progress events remain
+    assert any(e["event"] == "node_progress" for e in detail["events"])
