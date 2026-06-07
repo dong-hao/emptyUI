@@ -14,11 +14,51 @@ functional: never mutate inputs or previously returned outputs.
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
+
+#: Recursion guard for :func:`_approx_size` — the payloads the executor
+#: caches nest at most a few levels (RunTS -> dataset -> variables).
+_APPROX_DEPTH = 6
+
+#: A size floor per leaf so container overhead is not undercounted.
+_APPROX_FLOOR = 64
+
+
+def _approx_size(value: Any, depth: int = 0) -> int:
+    """Approximate deep size of a cached payload in bytes (issues.md L5).
+
+    The budget is a bound, not an accounting system: numpy/xarray payloads
+    dominate, and their exact ``nbytes`` is what matters — scalars and
+    small strings round up to a floor. Duck-typed so the estimator never
+    needs a plugin's classes: ``nbytes`` (numpy/xarray), ``dataset``
+    (RunTS-ish wrappers), ``variables`` (xarray datasets), pandas
+    ``memory_usage``, and plain containers recurse.
+    """
+    if depth > _APPROX_DEPTH:
+        return 0
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+        return max(_APPROX_FLOOR, sys.getsizeof(value))
+    nbytes = getattr(value, "nbytes", None)
+    if isinstance(nbytes, int):
+        return nbytes
+    dataset = getattr(value, "dataset", None)  # RunTS-ish wrapper
+    if dataset is not None:
+        return _approx_size(dataset, depth + 1)
+    variables = getattr(value, "variables", None)  # xarray dataset
+    if variables is not None:
+        return sum(_approx_size(v, depth + 1) for v in variables.values())
+    if hasattr(value, "memory_usage"):  # pandas
+        return int(value.memory_usage(index=False).sum())
+    if isinstance(value, dict):
+        return sum(_approx_size(v, depth + 1) for v in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return sum(_approx_size(v, depth + 1) for v in value)
+    return max(_APPROX_FLOOR, sys.getsizeof(value))
 
 
 @dataclass
@@ -41,12 +81,26 @@ class CacheEntry:
 
 
 class NodeCache:
-    """Thread-safe LRU of :class:`CacheEntry` keyed by structural signature."""
+    """Thread-safe LRU of :class:`CacheEntry` keyed by structural signature.
 
-    def __init__(self, max_entries: int = 256) -> None:
+    Bounded two ways (issues.md L5): by entry *count* (``max_entries``)
+    and — when ``max_bytes`` is set — by the approximate deep size of the
+    cached payloads. The byte accounting is computed once per ``put`` via
+    :func:`_approx_size`; it bounds the memory, it does not audit it.
+    """
+
+    def __init__(self, max_entries: int = 256,
+                 max_bytes: int | None = None) -> None:
         self._max = max(1, max_entries)
+        self._max_bytes = max_bytes
         self._entries: OrderedDict[str, CacheEntry] = OrderedDict()
+        self._sizes: dict[str, int] = {}
+        self._bytes = 0
         self._lock = threading.Lock()
+
+    def _pop_oldest_locked(self) -> None:
+        key, _ = self._entries.popitem(last=False)
+        self._bytes -= self._sizes.pop(key, 0)
 
     def get(self, key: str) -> CacheEntry | None:
         with self._lock:
@@ -56,11 +110,48 @@ class NodeCache:
             return entry
 
     def put(self, key: str, entry: CacheEntry) -> None:
+        size = sum(_approx_size(v) for v in (entry.outputs or {}).values())
+        size += sum(_approx_size(a) for a in entry.artifacts)
         with self._lock:
+            old = self._sizes.pop(key, 0)
             self._entries[key] = entry
+            self._sizes[key] = size
+            self._bytes += size - old
             self._entries.move_to_end(key)
             while len(self._entries) > self._max:
-                self._entries.popitem(last=False)
+                self._pop_oldest_locked()
+            # the byte budget: the newest entry always survives (evicting
+            # it would empty the cache for a payload we just computed)
+            while (
+                self._max_bytes is not None
+                and self._bytes > self._max_bytes
+                and len(self._entries) > 1
+            ):
+                self._pop_oldest_locked()
+
+    def set_budget(self, max_bytes: int | None) -> int:
+        """Change the byte bound live (§22 settings); returns evicted count.
+
+        Unlike ``put`` (which never evicts the just-stored entry), a live
+        shrink enforces the new bound against EVERYTHING — the user asked
+        for the budget; a 32 MiB payload under a 1 MiB budget goes.
+        """
+        self._max_bytes = max_bytes
+        with self._lock:
+            evicted = 0
+            while (
+                self._max_bytes is not None
+                and self._bytes > self._max_bytes
+                and self._entries
+            ):
+                self._pop_oldest_locked()
+                evicted += 1
+        return evicted
+
+    @property
+    def bytes_used(self) -> int:
+        with self._lock:
+            return self._bytes
 
     def resize(self, max_entries: int) -> int:
         """Change the LRU bound live (§22 settings); returns evicted count."""
@@ -68,7 +159,7 @@ class NodeCache:
         with self._lock:
             evicted = 0
             while len(self._entries) > self._max:
-                self._entries.popitem(last=False)
+                self._pop_oldest_locked()
                 evicted += 1
         return evicted
 
@@ -80,6 +171,7 @@ class NodeCache:
         with self._lock:
             for key in keys:
                 if self._entries.pop(key, None) is not None:
+                    self._bytes -= self._sizes.pop(key, 0)
                     n += 1
         return n
 
@@ -95,6 +187,7 @@ class NodeCache:
             ]
             for key in doomed:
                 self._entries.pop(key, None)
+                self._bytes -= self._sizes.pop(key, 0)
             return len(doomed)
 
     def cached_values(self) -> list:
@@ -107,10 +200,12 @@ class NodeCache:
             ]
 
     def clear(self) -> int:
-        """Drop all entries; returns how many were evicted."""
+        """Drop all entries; returns how many entries were removed."""
         with self._lock:
             n = len(self._entries)
             self._entries.clear()
+            self._sizes.clear()
+            self._bytes = 0
             return n
 
     def __len__(self) -> int:

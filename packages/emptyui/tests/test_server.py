@@ -368,6 +368,70 @@ def test_settings_view_and_live_edit():
     assert body["live"]["cache_max_entries"]["source"] == "ui"
 
 
+def test_cache_budget_knob_live_and_applied():
+    """L5 (decision 2026-10-13): cache_max_gb graduates from the planned
+    §12.3 scaffolding to a LIVE knob bounding the memory tier — default
+    off (unbounded local mode, §7.4 policy), PUT applies it to the live
+    NodeCache immediately."""
+    reg = Registry()
+    client = TestClient(create_app(reg))
+    view = client.get("/api/settings").json()
+    assert view["live"]["cache_max_gb"]["value"] is None
+    assert view["live"]["cache_max_gb"]["source"] == "default"
+    assert view["live"]["cache_max_gb"]["editable"]
+    assert "cache_max_gb" not in view["planned"]  # no longer reserved
+
+    resp = client.put(
+        "/api/settings", json={"values": {"cache_max_gb": 2.0}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["live"]["cache_max_gb"]["value"] == 2.0
+    assert body["live"]["cache_max_gb"]["source"] == "ui"
+
+
+def test_cache_budget_bounds_the_live_cache():
+    """The knob's byte bound reaches the cache the runs share, live: a
+    big payload is cached, a tiny budget PUT evicts it, and the next
+    structurally-identical run RE-EXECUTES instead of hitting."""
+    import numpy as np
+
+    from emptyui import Node, Output
+
+    class Big(Node):
+        type = "test.big_l5"
+        outputs = (Output("data", "any"),)
+        calls = 0
+
+        def execute(self, ctx):
+            type(self).calls += 1
+            return {"data": np.zeros(4_000_000)}  # ~32 MB
+
+    reg = Registry()
+    reg.add(Big)
+    workflow = {"nodes": [{"id": "n1", "type": "test.big_l5"}],
+                "edges": []}
+
+    def _run_to_done(client):
+        run_id = client.post("/api/runs", json={"workflow": workflow}).json()[
+            "run_id"]
+        for _ in range(300):
+            body = client.get(f"/api/runs/{run_id}").json()
+            if body.get("status") in ("completed", "failed", "timeout"):
+                return body
+            time.sleep(0.02)
+        raise AssertionError("run never finished")
+
+    client = TestClient(create_app(reg))
+    assert _run_to_done(client)["status"] == "completed"
+    assert _run_to_done(client)["status"] == "completed"
+    assert Big.calls == 1  # the second run hit the cache
+    resp = client.put(
+        "/api/settings", json={"values": {"cache_max_gb": 0.001}})
+    assert resp.status_code == 200
+    assert _run_to_done(client)["status"] == "completed"
+    assert Big.calls == 2  # the tiny budget evicted the entry
+
+
 def test_settings_put_validation():
     reg = Registry()
     client = TestClient(create_app(reg))

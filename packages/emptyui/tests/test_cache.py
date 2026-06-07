@@ -11,9 +11,10 @@ import os
 from pathlib import Path
 from typing import ClassVar
 
+import numpy as np
 import pytest
 
-from emptyui.cache import NodeCache
+from emptyui.cache import CacheEntry, NodeCache, _approx_size
 from emptyui.executor import Executor
 from emptyui.registry import Registry
 from emptyui.schema import Edge, Workflow, WorkflowNode
@@ -718,3 +719,53 @@ def test_failed_run_sweep_closes_uncached_payloads():
     with pytest.raises(ExecutionError):
         ex2.run(wf(), emit=lambda e: None, cache=cache)
     assert not cache.cached_values()[0].closed
+
+
+# --- L5: the cache budget (bytes, not just entries) -----------------------
+
+def test_budget_evicts_oldest_when_exceeded():
+    """A byte budget bounds the cache like the entry count: the oldest
+    entries go first; when the budget shrinks live, the trim keeps the
+    newest."""
+    cache = NodeCache(max_entries=8, max_bytes=2000)
+    cache.put("a", CacheEntry(outputs={"v": np.zeros(100)}))  # 800 B data
+    cache.put("b", CacheEntry(outputs={"v": np.zeros(100)}))
+    cache.put("c", CacheEntry(outputs={"v": np.zeros(100)}))
+    assert len(cache) == 2  # 3 x 800 B > 2000 B: the oldest went
+    assert cache.get("a") is None
+    assert cache.get("b") is not None
+    assert cache.get("c") is not None
+    cache.set_budget(900)  # live shrink: only one fits
+    assert len(cache) == 1
+    assert cache.get("c") is not None
+
+
+def test_budget_none_is_unbounded():
+    cache = NodeCache(max_entries=8)  # default: no byte budget
+    cache.put("a", CacheEntry(outputs={"v": np.zeros(100_000)}))
+    assert cache.get("a") is not None
+
+
+def test_oversized_entry_never_empties_the_cache():
+    """At put time a single entry larger than the budget keeps its slot
+    (the just-computed payload is never evicted) — but a live budget
+    shrink enforces against everything (see set_budget's docstring)."""
+    cache = NodeCache(max_entries=8, max_bytes=100)
+    cache.put("big", CacheEntry(outputs={"v": np.zeros(10_000)}))
+    cache.put("small", CacheEntry(outputs={"v": np.zeros(1)}))
+    assert cache.get("big") is not None or cache.get("small") is not None
+    assert len(cache) >= 1
+
+
+def test_approx_size_covers_the_payload_kinds():
+    """The estimator sees through the containers the executor actually
+    caches: numpy arrays, xarray datasets, (duck-typed) RunTS-ish
+    payloads, dicts and lists thereof."""
+    import xarray as xr
+
+    arr = np.zeros((100, 100))  # 80_000 B
+    assert _approx_size(arr) >= 80_000
+    ds = xr.Dataset({"a": (("x",), np.zeros(1000, dtype="float64"))})
+    assert _approx_size(ds) >= 8_000
+    nested = {"a": [arr, np.zeros(10)]}
+    assert _approx_size(nested) >= 80_000

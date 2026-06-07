@@ -221,6 +221,9 @@ def create_app(
         cache_max_entries=(
             256 if file_live.get("cache_max_entries") is None
             else max(1, int(file_live["cache_max_entries"]))),
+        # the memory-tier byte budget (L5, decision 2026-10-13): default
+        # off — unbounded local mode stays the default (§7.4 policy)
+        cache_max_gb=file_live.get("cache_max_gb"),
         # per-node watchdog budget (M2): kwarg → env → file → default;
         # 0 = off is a real value (same falsy-0 discipline as above) — an
         # explicit None at any stage falls through to the next stage, the
@@ -248,7 +251,15 @@ def create_app(
     hub = EventHub()
     runs: dict[str, dict] = {}
     artifacts: dict[str, dict] = {}  # artifact id -> {path, kind, run_id}
-    node_cache = NodeCache(max_entries=runtime.cache_max_entries)  # §7, §22
+    # GiB -> bytes; 0/None = unbounded (the estimator is approximate —
+    # the budget bounds the memory, it does not audit it, L5)
+    _cache_budget = runtime.cache_max_gb
+    node_cache = NodeCache(  # §7, §22
+        max_entries=runtime.cache_max_entries,
+        max_bytes=(int(_cache_budget * 2**30)
+                   if _cache_budget is not None and _cache_budget > 0
+                   else None),
+    )
     state = {"run_counter": 0, "active_runs": 0}
     lock = threading.Lock()
 
@@ -499,6 +510,14 @@ def create_app(
                 # per-node watchdog budget (M2): applied live — the next
                 # worker() call reads the holder; 0 = off
                 runtime.node_timeout_seconds = coerced["node_timeout_seconds"]
+            if "cache_max_gb" in coerced:
+                # the memory-tier byte budget (L5): applied live — the
+                # next put() evicts under the new bound; 0/None = off
+                runtime.cache_max_gb = coerced["cache_max_gb"]
+                node_cache.set_budget(
+                    int(coerced["cache_max_gb"] * 2**30)
+                    if coerced["cache_max_gb"] is not None
+                    and coerced["cache_max_gb"] > 0 else None)
         return _settings_view()
 
     @app.post("/api/runs")

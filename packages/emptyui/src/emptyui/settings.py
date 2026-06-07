@@ -42,6 +42,12 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
         int, 256,
         "Cross-run in-memory node-result cache size (entries)",
     ),
+    "cache_max_gb": (
+        float, None,
+        ("In-memory node-result cache budget in GiB (0/None = unbounded; "
+         "the bound is approximate — payloads are sized once at store "
+         "time, issues.md L5)"),
+    ),
     "node_timeout_seconds": (
         float, 600.0,
         ("Per-node watchdog: a node exceeding this budget is abandoned and "
@@ -52,15 +58,14 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
 }
 
 #: Knobs reserved for the postponed §12.3 disk cache — defined in the schema
-#: so the UI/API scaffolding is ready, without any effect yet.
+#: so the UI/API scaffolding is ready, without any effect yet. (cache_max_gb
+#: graduated to the live knobs for the MEMORY tier, issues.md L5 — the disk
+#: cache will introduce its own knob when it lands.)
 PLANNED_KNOBS: dict[str, tuple[type, object, str]] = {
     "project_dir": (
         str, None,
         ("Project directory: stable, relocatable state home "
          "(.emptyui-cache) — reserved for the §12.3 disk cache"),
-    ),
-    "cache_max_gb": (
-        float, 10.0, "Disk-cache size budget in GB — reserved (§12.3)",
     ),
     "cache_ttl_days": (
         float, 30.0, "Disk-cache entry expiry in days — reserved (§12.3)",
@@ -246,5 +251,6 @@ class RuntimeSettings:
     workspace_ttl_seconds: float | None = None
     max_concurrent_runs: int | None = None
     cache_max_entries: int = 256
+    cache_max_gb: float | None = None
     node_timeout_seconds: float | None = 600.0
     env_baselined: frozenset[str] = frozenset()
