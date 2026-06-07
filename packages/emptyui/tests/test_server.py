@@ -531,19 +531,20 @@ def test_settings_null_rejected_for_non_null_default(client):
 
 
 def test_settings_cache_zero_survives_restart_consistently(tmp_path):
-    """A 0-valued cache_max_entries must not conflate with unset: live PUT
-    clamps to 1 (the cache never runs zero) and a restart from the file
-    must restore the same bound — not silently 256."""
+    """A 0-valued cache_max_entries must not conflate with unset — and
+    under the L6 semantics (§7.4: 0 = off) it is honored and REPORTED as
+    0, live and across a restart (the M14-era clamp to 1 hid the user's
+    intent; the worker now skips the cache at 0)."""
     reg = Registry()
     client2 = TestClient(create_app(
         reg, settings_path=tmp_path / "settings.json"))
     resp = client2.put("/api/settings", json={"values": {"cache_max_entries": 0}})
     assert resp.status_code == 200
     view = resp.json()
-    assert view["live"]["cache_max_entries"]["value"] == 1
+    assert view["live"]["cache_max_entries"]["value"] == 0
     # restart: a fresh app reading the same file sees the same value
     client3 = TestClient(create_app(
         Registry(), settings_path=tmp_path / "settings.json"))
     view3 = client3.get("/api/settings").json()
-    assert view3["live"]["cache_max_entries"]["value"] == 1
+    assert view3["live"]["cache_max_entries"]["value"] == 0
     assert view3["live"]["cache_max_entries"]["source"] == "ui"

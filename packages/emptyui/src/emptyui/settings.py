@@ -131,6 +131,11 @@ class SettingsStore:
         try:
             with os.fdopen(fd, "w") as fh:
                 fh.write(payload)
+                # L6: fsync before the replace — a crash between write and
+                # rename could otherwise leave a corrupt file that load()
+                # then silently defaults away
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp, self.path)
         except BaseException:
             try:

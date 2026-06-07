@@ -220,7 +220,7 @@ def create_app(
         # silently became the 256 default)
         cache_max_entries=(
             256 if file_live.get("cache_max_entries") is None
-            else max(1, int(file_live["cache_max_entries"]))),
+            else int(file_live["cache_max_entries"])),
         # the memory-tier byte budget (L5, decision 2026-10-13): default
         # off — unbounded local mode stays the default (§7.4 policy)
         cache_max_gb=file_live.get("cache_max_gb"),
@@ -406,7 +406,15 @@ def create_app(
                     "enabled": False,
                     "plugins": registry.plugins(),
                 }
-            plugin_store.set_disabled(name, disable)
+            try:
+                plugin_store.set_disabled(name, disable)
+            except OSError as exc:
+                # L6: the memory state already rolled back (L-C8) — the
+                # client must know the file disagrees, with the reason
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"settings write failed: {exc}",
+                ) from exc
             if disable:
                 # disabled nodes' cached results are unreachable — drop them
                 node_cache.clear()
@@ -492,13 +500,21 @@ def create_app(
                     detail="set via environment/platform — restart-level "
                            f"change required: {conflicts}",
                 )
-            plugin_store.set_settings(coerced)
+            try:
+                plugin_store.set_settings(coerced)
+            except OSError as exc:
+                # L6: the merge already rolled back (L-C8) — surface the
+                # write failure with its reason, not a bare traceback
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"settings write failed: {exc}",
+                ) from exc
             if coerced.get("cache_max_entries") is not None:
-                # 0 means "cache off" in the UI; the cache itself clamps to
-                # 1 entry — clamp the reported knob identically so a
-                # restart restores the same bound (M14)
-                runtime.cache_max_entries = max(
-                    1, round(coerced["cache_max_entries"]))
+                # L6 (§7.4 policy): 0 = off — honored (the worker skips
+                # the cache) and REPORTED as 0, not clamped to 1; 1..n
+                # are real bounds. A restart restores the same value.
+                runtime.cache_max_entries = round(
+                    coerced["cache_max_entries"])
                 node_cache.resize(runtime.cache_max_entries)
             if "workspace_ttl_seconds" in coerced:
                 runtime.workspace_ttl_seconds = coerced["workspace_ttl_seconds"]
@@ -618,7 +634,10 @@ def create_app(
                     emit=emit,
                     workspace=workspace,
                     cancel_event=cancel_event,
-                    cache=node_cache,
+                    # L6: 0 = off (§7.4) — the worker skips the cache
+                    # entirely; the NodeCache itself clamps to >= 1 and
+                    # never learns about the off state
+                    cache=node_cache if runtime.cache_max_entries else None,
                     targets=req.targets,
                     data_root=data_root,
                     node_timeout_seconds=runtime.node_timeout_seconds,
