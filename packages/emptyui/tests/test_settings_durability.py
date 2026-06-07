@@ -120,3 +120,45 @@ def test_cache_max_entries_zero_truly_disables_the_cache():
     _run_to_done()
     _run_to_done()
     assert Counted.calls == 3
+
+
+# --- L3 (backend half): artifact event hygiene ----------------------------
+
+def test_artifact_events_leak_no_paths_and_normalize_handles():
+    """Artifact events carried the ABSOLUTE server-side path to every WS
+    client and emitted `handle: null` on the fresh path vs "" on the
+    cache path — the preview URL is the router (§7.2), the path is
+    internal, and the handle is normalized to ""."""
+    from emptyui import Node
+
+    class Publisher(Node):
+        type = "test.pub_l3"
+        outputs = ()  # the artifact is not an output value -> handle ""
+
+        def execute(self, ctx):
+            p = ctx.artifact_path("fig", ".txt")
+            p.write_text("figure")
+            ctx.publish_artifact(p, "image")
+            return {}
+
+    reg = Registry()
+    reg.add(Publisher)
+    client = TestClient(create_app(reg))
+    run_id = client.post("/api/runs", json={
+        "workflow": {"nodes": [{"id": "n1", "type": "test.pub_l3"}],
+                     "edges": []}}).json()["run_id"]
+    for _ in range(300):
+        detail = client.get(f"/api/runs/{run_id}").json()
+        if detail.get("status") in ("completed", "failed", "timeout"):
+            break
+        time.sleep(0.02)
+    assert detail["status"] == "completed"
+    arts = [e for e in detail["events"] if e["event"] == "artifact"]
+    assert arts, "no artifact event"
+    assert all("path" not in e for e in arts), (
+        "the absolute server-side path leaked to clients")
+    assert all(e["handle"] == "" for e in arts), (
+        [e["handle"] for e in arts])
+    # the server kept the path internally — the preview still resolves
+    preview = client.get(f"/api/artifacts/{arts[0]['id']}/preview")
+    assert preview.status_code == 200

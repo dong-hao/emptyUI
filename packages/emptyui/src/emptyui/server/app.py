@@ -594,6 +594,13 @@ def create_app(
 
         def emit(event: dict) -> None:
             event = {"run_id": run_id, **event}
+            # L3: the artifact's server-side path is routing data for the
+            # preview endpoint, not client payload — it never reaches the
+            # event list, the replay or the WS broadcast (§7.2: `handle`
+            # and `url` are the client-side routers)
+            artifact_path = None
+            if event["event"] == "artifact" and "path" in event:
+                artifact_path = event.pop("path")
             with lock:
                 info = runs.get(run_id)
                 if info is None:
@@ -621,7 +628,7 @@ def create_app(
                         info["summary"]["status"] = status
                 elif event["event"] == "artifact":
                     artifacts[event["id"]] = {
-                        "path": event["path"],
+                        "path": artifact_path,
                         "kind": event["kind"],
                         "run_id": run_id,
                     }

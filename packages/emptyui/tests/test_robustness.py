@@ -5,6 +5,7 @@ uncovered by the pre-existing suite.
 """
 
 import json
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -356,7 +357,14 @@ def test_artifact_endpoints_via_run(tmp_path):
     arts = [e for e in detail["events"] if e["event"] == "artifact"]
     assert arts, detail["events"]
     aid = arts[0]["id"]
-    path = Path(arts[0]["path"])
+    # L3: the event carries no server-side path — find the run workspace
+    # (named for the run id; the NEWEST match — stale workspaces from
+    # earlier sessions share the prefix) to manipulate the file directly
+    assert "path" not in arts[0]
+    workspace = max(
+        Path(tempfile.gettempdir()).glob(f"emptyui-{run_id}-*"),
+        key=lambda w: w.stat().st_mtime)
+    path = workspace / "report.csv"
 
     r = client.get(f"/api/artifacts/{aid}/preview")
     assert r.status_code == 200

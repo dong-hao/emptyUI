@@ -1025,7 +1025,7 @@ class Executor:
                         "id": artifact_id,
                         "kind": artifact["kind"],
                         "path": artifact["path"],
-                        "handle": value_to_handle.get(id(artifact)),
+                        "handle": value_to_handle.get(id(artifact), ""),
                         "url": f"/api/artifacts/{artifact_id}/preview",
                     }
                 )

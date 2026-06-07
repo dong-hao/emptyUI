@@ -3,8 +3,6 @@ surfaces live in test_errors.py."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -96,9 +94,15 @@ def test_two_plot_nodes_get_distinct_artifact_files(client, synthetic_csv):
     assert body["status"] == "completed", body.get("error")
     artifacts = [e for e in body["events"] if e["event"] == "artifact"]
     assert len(artifacts) == 2
-    paths = [a["path"] for a in artifacts]
-    assert len(set(paths)) == 2, f"artifact files collided: {paths}"
-    assert all(Path(p).exists() for p in paths)
+    # L3: the events carry no server-side path — the download endpoint's
+    # Content-Disposition names the backing FILE, so distinct filenames
+    # there prove the two nodes did not share one
+    names = []
+    for a in artifacts:
+        d = client.get(f"/api/artifacts/{a['id']}")
+        assert d.status_code == 200
+        names.append(d.headers["content-disposition"])
+    assert len(set(names)) == 2, f"artifact files collided: {names}"
 
 
 def test_bandpass_attenuates_low_frequency(client, synthetic_csv):
