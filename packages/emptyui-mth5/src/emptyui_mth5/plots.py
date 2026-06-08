@@ -103,7 +103,7 @@ class PlotTipper(Node):
     )
 
     def execute(self, ctx, tf, tipper_ylim: str = "auto",
-                print_params: bool = True) -> dict[str, Any]:
+                print_params: bool = False) -> dict[str, Any]:
         if not tf.has_tipper():
             raise ValueError(
                 "transfer function has no tipper data (no vertical magnetic "
@@ -153,7 +153,7 @@ class PlotPhaseTensor(Node):
                           "images."),
     )
 
-    def execute(self, ctx, tf, print_params: bool = True) -> dict[str, Any]:
+    def execute(self, ctx, tf, print_params: bool = False) -> dict[str, Any]:
         if not tf.has_impedance:
             raise ValueError("transfer function has no impedance data")
         path = ctx.artifact_path("plot_phase_tensor", ".png")

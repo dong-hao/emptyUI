@@ -501,3 +501,25 @@ def test_plot_impedance_response_all_nan_impedance(tmp_path):
     )
     with pytest.raises(ValueError, match="all NaN"):
         plotting.plot_impedance_response(tf, "off-diagonal", tmp_path / "fig.png")
+
+
+# --- L7: print_params manifest/method default agreement -------------------
+
+def test_print_params_manifest_default_matches_the_method():
+    """L7: the executor injects the manifest default, so runs were
+    correct — but a direct node.execute() call (as tests and embeddings
+    do) silently flipped the documented-off provenance line on PlotTipper
+    and PlotPhaseTensor (the method default was True)."""
+    import inspect
+
+    from emptyui_mth5.plots import PlotAppResPhase, PlotPhaseTensor, PlotTipper
+
+    for node_cls in (PlotAppResPhase, PlotTipper, PlotPhaseTensor):
+        node = node_cls()
+        manifest_default = next(
+            p.default for p in node.params if p.name == "print_params")
+        method_default = inspect.signature(
+            node.execute).parameters["print_params"].default
+        assert method_default == manifest_default, (
+            f"{node_cls.__name__}: manifest {manifest_default!r} != "
+            f"method {method_default!r}")
