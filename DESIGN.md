@@ -1332,9 +1332,11 @@ session, not wall time: ~1 h at 1 Hz with window 256 gives ~28 windows
 (too noisy for scoring at 1 Hz, fine at 512 Hz where a 10-min session
 holds thousands of windows). Rule of thumb: each session should hold
 ≥ ~20–30 FC windows at the QC reference band. The deep level bounds how
-fine is useful — one deepest-level window spans ~68 min of raw 1 Hz data
-(5 levels × factor 4), and each dropped session costs ±1 window per
-level — so finer than ~10 min mostly buys scoring noise.
+fine is useful — one deepest-level window spans ~18.2 h of raw 1 Hz data
+(window 256, 5 levels × factor 4: 256·4⁴ s — issues.md L10; a session
+finer than that still feeds the shallow QC-reference levels fine), and
+each dropped session costs ±1 window per level — so finer than ~10 min
+mostly buys scoring noise.
 
 With this, the burst and continuous instruments share one scheme: the
 same QC nodes, the same pairing (`pairing="intersect"` handles the
