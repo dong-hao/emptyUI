@@ -856,18 +856,23 @@ source of truth (`GET/PUT /api/settings`).
   confinement/serving semantics stay restart-level decisions.
 - **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
   `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
-  (null/0 = unlimited), `cache_max_entries` (default 256),
+  (null/0 = unlimited), `cache_max_entries` (default 256; **0 = off** —
+  the worker skips the cache and the view reports 0, issues.md L6),
+  `cache_max_gb` (the memory-tier byte budget, default null = off —
+  §7.4 unbounded-local policy; approximate sizing, issues.md L5),
   `node_timeout_seconds` (per-node watchdog budget, default 600, 0 = off —
   §7.1). Applied
   immediately (TTL loop re-reads per pass, admission check reads the live
   holder, `NodeCache.resize()` trims, the next worker call reads the
-  watchdog budget). `RuntimeSettings` is the mutable holder
+  watchdog budget and the cache gate). `RuntimeSettings` is the mutable holder
   the app closures read.
 - **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
   `cors_origins`, `root_path` — changing confinement/serving mid-flight is an
   architecture change; env + restart only.
-- **Planned (reserved, inert)**: `project_dir`, `cache_max_gb`,
-  `cache_ttl_days` — the §12.3 disk cache lands into this scaffolding.
+- **Planned (reserved, inert)**: `project_dir`,
+  `cache_ttl_days` — the §12.3 disk cache lands into this scaffolding
+  (`cache_max_gb` graduated to the live knobs for the memory tier,
+  issues.md L5; the disk cache will introduce its own knobs).
 - **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
   (`disabled_plugins` + `settings` sections; atomic write; unknown keys
   ignored on load — files may travel). Opt-in: unset = memory-only, no file
