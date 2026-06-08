@@ -174,3 +174,33 @@ def test_import_official_edi_rho_is_physical(tmp_path: Path):
     # import bug would show 1.1e7 instead
     assert 10.0 < rho[0] < 30.0, rho[0]
     assert rho.max() < 1e4, rho.max()
+
+
+def test_import_edi_si_opt_out_skips_the_conversion(tmp_path: Path):
+    """L8: a file already stored in SI would be double-scaled with no way
+    to say so — the EDI->SI bridge gets an explicit opt-out (default
+    unchanged: every supported format stores SEG/EMTF)."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf_in = _lemi_tf_with_errors_and_station()
+    out = tmp_path / "seg_stored.edi"
+    ExportTF().execute(ctx, tf_in, path=str(out), file_type="edi")
+
+    as_si = ImportTF().execute(ctx, str(out), impedance_units="SI (V/m, A/m)")
+    seg_stored_z = as_si["tf"].dataset["transfer_function"].sel(
+        output=as_si["tf"].ex, input=as_si["tf"].hx).values
+    # verbatim: the file's SEG values pass through UNSCALED — i.e. they
+    # are tf_in * SI_TO_EDI, NOT tf_in (which the default import yields)
+    np.testing.assert_allclose(
+        seg_stored_z,
+        tf_in.dataset["transfer_function"].sel(
+            output=tf_in.ex, input=tf_in.hx).values * SI_TO_EDI,
+        rtol=1e-6)
+
+    # the default import of the same file converts (existing contract)
+    as_seg = ImportTF().execute(ctx, str(out))["tf"]
+    np.testing.assert_allclose(
+        as_seg.dataset["transfer_function"].sel(
+            output=as_seg.ex, input=as_seg.hx).values,
+        tf_in.dataset["transfer_function"].sel(
+            output=tf_in.ex, input=tf_in.hx).values,
+        rtol=1e-5)

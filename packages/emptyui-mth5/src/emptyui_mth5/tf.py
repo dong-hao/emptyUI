@@ -207,6 +207,15 @@ class ImportTF(Node):
     outputs = (Output("tf", "tf"),)
     params = (
         Param("path", "file", label="TF file path", path_kind="in"),
+        Param("impedance_units", "select", label="Impedance units in file",
+              default="SEG/EMTF ([mV/km]/[nT])",
+              options=("SEG/EMTF ([mV/km]/[nT])", "SI (V/m, A/m)"),
+              description="The convention the FILE stores the impedance "
+                          "in. Every supported format stores SEG/EMTF "
+                          "([mV/km]/[nT]) — the default converts it to "
+                          "emptyUI's internal SI on import (issues.md L8: "
+                          "a file already stored in SI would otherwise be "
+                          "double-scaled with no way to say so)."),
         Param("sign_convention", "select", label="Sign convention",
               default="as-is",
               options=("as-is", "negate (180 deg)",
@@ -222,7 +231,7 @@ class ImportTF(Node):
                           "USArray counter-example."),
     )
 
-    def execute(self, ctx, path: str,
+    def execute(self, ctx, path: str, impedance_units: str = "SEG/EMTF ([mV/km]/[nT])",
                 sign_convention: str = "as-is") -> dict[str, Any]:
         from mt_metadata.transfer_functions.core import TF
 
@@ -235,12 +244,19 @@ class ImportTF(Node):
         # all supported formats store the impedance in the SEG/EMTF
         # convention ([mV/km]/[nT]) while emptyUI's internal TFs are SI —
         # mt_metadata copies the values verbatim, so convert here (the
-        # tipper is dimensionless and untouched)
-        tf = _scaled_impedance_copy(tf, EDI_TO_SI)
-        notes.append(
-            "impedance units converted [mV/km]/[nT] -> SI "
-            f"(x{EDI_TO_SI:.6g} on import)"
-        )
+        # tipper is dimensionless and untouched). L8: a file already
+        # stored in SI can be imported verbatim (the opt-out; the default
+        # is unchanged).
+        if impedance_units.startswith("SI"):
+            notes.append(
+                "impedance declared SI (V/m, A/m) — imported verbatim, no "
+                "unit conversion")
+        else:
+            tf = _scaled_impedance_copy(tf, EDI_TO_SI)
+            notes.append(
+                "impedance units converted [mV/km]/[nT] -> SI "
+                f"(x{EDI_TO_SI:.6g} on import)"
+            )
         if p.suffix.lower() == ".edi":
             text = p.read_text(errors="replace")
             m = _EDI_SIGNCONVENTION_RE.search(text)
