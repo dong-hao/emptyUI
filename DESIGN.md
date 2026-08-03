@@ -1517,7 +1517,10 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   own calibrated FCs) within the reference band (default 1–10 s); station-wide
   clean level per bin = a configurable percentile (default 50) over the runs'
   medians — self-calibrating (storms raise every run equally and cancel;
-  cultural noise raises single runs). **One-sided up check** (noise only ever
+  cultural noise raises single runs). The hour-of-day fed to the prior is the
+  window **start** (label − `N/(2·fs)` — the labels are centres, issues.md
+  L11 audit); the overlap guard's label deltas need no such correction
+  (same-level centre-vs-centre — the half-window shifts cancel). **One-sided up check** (noise only ever
   inflates E): drop if run/level > `deviation_max` (default 2) scaled by the
   soft diurnal prior (`prior_factor(h) = 1 + (prior_max−1)·0.5·(1 + cos(2π(h−12)/24))`,
   UTC offset default 8 h) — daytime runs are judged up to `prior_max`×

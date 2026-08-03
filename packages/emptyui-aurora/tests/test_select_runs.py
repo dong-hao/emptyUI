@@ -6,6 +6,7 @@ station-wide median — self-calibrating, both tails checked."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -161,3 +162,55 @@ def test_select_runs_does_not_mutate_input_attrs(ctx):
     for key in ("runs_kept", "runs_dropped", "select_runs_band_s"):
         assert key not in after, f"input payload gained '{key}'"
     assert after["input_channels"] == before["input_channels"]
+
+
+# --- L11 audit: the diurnal prior scores the window START, not its label --
+
+
+def test_prior_run_start_is_the_window_start_not_the_label(ctx):
+    """L11 audit (deep-level session): the fc labels are window CENTRES —
+    a run's hour-of-day for the soft prior must come from the window's
+    first SAMPLE (label - N/(2 fs)), not the label. A deep-level run whose
+    label sits at local noon but whose data starts at local night must be
+    judged by the night prior (kept at dev 1.8), not the noon prior
+    (dropped) — the pre-fix code read the label."""
+    import xarray as xr
+    from emptyui_aurora.process import SelectRuns
+
+    half_window_s = 10 * 3600  # a 20 h window at 1 Hz -> 10 h centre offset
+
+    def ds_for(rid, dev, start_utc):
+        nt = 1
+        h = np.ones((FREQS.size, nt), dtype=complex)
+        e = np.sqrt(dev) * h
+        times = np.datetime64(start_utc) + np.arange(nt) * np.timedelta64(
+            600, "s")
+        return xr.Dataset(
+            data_vars={"hx": (("frequency", "time"), h),
+                       "hy": (("frequency", "time"), h),
+                       "ex": (("frequency", "time"), e),
+                       "ey": (("frequency", "time"), e)},
+            coords={"frequency": FREQS, "time": times,
+                    "run_id": ("time", np.array([rid] * nt))},
+            attrs={"input_channels": "hx,hy", "output_channels": "ex,ey",
+                   "sample_rate": 1.0,
+                   "num_samples_window": 2 * half_window_s},
+        )
+
+    parts = [ds_for(f"clean_{k}", 1.0, f"2024-01-01T0{k}:00:00")
+             for k in range(4)]
+    # the straddler: label 04:00 UTC = local NOON (prior 2.0) but its
+    # data starts at 18:00 UTC = local 02:00 (night, prior ~1.07)
+    parts.append(ds_for("straddler", 1.8, "2024-01-02T04:00:00"))
+    merged = xr.concat(parts, dim="time")
+    merged.attrs.update(parts[0].attrs)
+
+    res = SelectRuns().execute(
+        ctx, {0: merged}, deviation_max=2.0, use_prior=True,
+        prior_max=2.0, local_utc_offset=8.0)
+    rows = json.loads(Path(res["table"]["path"]).read_text())
+    by_id = {r["run_id"]: r for r in rows}
+    straddler = by_id["straddler"]
+    assert straddler["prior"] < 1.2, (
+        f"the prior used the window LABEL (centre) hour: {straddler}")
+    assert not straddler["dropped"], straddler

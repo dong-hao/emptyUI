@@ -18,6 +18,7 @@ from emptyui_mth5.nomenclature import (
 
 from ._processing import (
     _MERGE_PROVENANCE_ATTRS,
+    _centre_to_start_s,
     build_tf,
     coherence_sort_fcs,
     compute_fc_levels,
@@ -1371,7 +1372,11 @@ class SelectRuns(Node):
                 m = runs == rid
                 med[i] = np.nanmedian(zsq[:, m], axis=1)
                 if absolute_time:
-                    t0 = times[m].min()
+                    # L11 audit: the labels are window CENTRES — the run
+                    # starts half a window before its first label, and the
+                    # hour-of-day the prior scores is the DATA's
+                    t0 = (times[m].min() - np.timedelta64(
+                        round(_centre_to_start_s(ds)), "s"))
                     if str(rid) not in run_start or t0 < run_start[str(rid)]:
                         run_start[str(rid)] = t0
             # station-wide impedance level per bin: this percentile over the
@@ -1439,6 +1444,10 @@ class SelectRuns(Node):
         # per level — deep levels have longer windows and pick up
         # correspondingly more rejected-session samples (a single shallow
         # level's duration under-covers the cascade).
+        # L11 audit: the labels are window CENTRES, but this comparison is
+        # same-level centre-vs-centre — the half-window shifts CANCEL, so
+        # the label deltas are exactly the start deltas. Do NOT "fix" this
+        # into a double shift.
         n_extra = 0
         out = {}
         for lv, ds in levels.items():
@@ -1629,7 +1638,10 @@ class ResidualSort(Node):
                     per_run_band.setdefault(str(rid), {})[(lv, b)] = \
                         float(np.median(v))
                     if absolute_time:
-                        t0 = times[m].min()
+                        # L11 audit: labels are window centres — same
+                        # correction as Select Runs' prior start
+                        t0 = (times[m].min() - np.timedelta64(
+                            round(_centre_to_start_s(ds)), "s"))
                         if str(rid) not in run_start or t0 < run_start[str(rid)]:
                             run_start[str(rid)] = t0
         if not per_run_band:
