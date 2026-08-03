@@ -769,3 +769,26 @@ def test_approx_size_covers_the_payload_kinds():
     assert _approx_size(ds) >= 8_000
     nested = {"a": [arr, np.zeros(10)]}
     assert _approx_size(nested) >= 80_000
+
+
+def test_approx_size_survives_the_mtimeseries_getattr_quirk():
+    """L5 regression (caught by the pipeline e2e): mt_timeseries converts a
+    missing-attribute AttributeError into NameError — defeating getattr's
+    default (the landmine documented at the executor's cleanup). A payload
+    class with that __getattr__ must not blow up the size probe; the cache
+    put would otherwise fail the NODE with "RunTS has no attribute nbytes"."""
+    import xarray as xr
+
+    class QuirkyRunTS:
+        """Duck-typed RunTS: has .dataset, __getattr__ raises NameError."""
+
+        def __getattr__(self, name):
+            raise NameError(f"RunTS has no attribute {name}")
+
+        def __init__(self):
+            self.dataset = xr.Dataset(
+                {"a": (("x",), np.zeros(1000, dtype="float64"))})
+
+    q = QuirkyRunTS()
+    assert _approx_size(q) >= 8_000  # seen through .dataset, no raise
+    assert _approx_size(object()) >= 64  # plain object: the floor

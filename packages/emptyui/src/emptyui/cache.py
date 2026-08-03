@@ -29,6 +29,18 @@ _APPROX_DEPTH = 6
 _APPROX_FLOOR = 64
 
 
+def _probe(value: Any, name: str) -> Any:
+    """getattr that survives the mt_timeseries quirk: its ``__getattr__``
+    converts a missing-attribute AttributeError into NameError, which
+    defeats getattr's default (the landmine documented at the executor's
+    cleanup — a RunTS payload probed for ``nbytes`` would otherwise fail
+    the whole node, caught by the pipeline e2e on 2026-10-14)."""
+    try:
+        return getattr(value, name, None)
+    except (AttributeError, NameError):
+        return None
+
+
 def _approx_size(value: Any, depth: int = 0) -> int:
     """Approximate deep size of a cached payload in bytes (issues.md L5).
 
@@ -37,19 +49,21 @@ def _approx_size(value: Any, depth: int = 0) -> int:
     small strings round up to a floor. Duck-typed so the estimator never
     needs a plugin's classes: ``nbytes`` (numpy/xarray), ``dataset``
     (RunTS-ish wrappers), ``variables`` (xarray datasets), pandas
-    ``memory_usage``, and plain containers recurse.
+    ``memory_usage``, and plain containers recurse. Attribute probes go
+    through :func:`_probe` — payloads with hostile ``__getattr__``s (the
+    mt_timeseries NameError quirk) size to their floor instead of raising.
     """
     if depth > _APPROX_DEPTH:
         return 0
     if value is None or isinstance(value, (bool, int, float, str, bytes)):
         return max(_APPROX_FLOOR, sys.getsizeof(value))
-    nbytes = getattr(value, "nbytes", None)
+    nbytes = _probe(value, "nbytes")
     if isinstance(nbytes, int):
         return nbytes
-    dataset = getattr(value, "dataset", None)  # RunTS-ish wrapper
+    dataset = _probe(value, "dataset")  # RunTS-ish wrapper
     if dataset is not None:
         return _approx_size(dataset, depth + 1)
-    variables = getattr(value, "variables", None)  # xarray dataset
+    variables = _probe(value, "variables")  # xarray dataset
     if variables is not None:
         return sum(_approx_size(v, depth + 1) for v in variables.values())
     if hasattr(value, "memory_usage"):  # pandas
