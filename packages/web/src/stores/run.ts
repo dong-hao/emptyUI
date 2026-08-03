@@ -72,13 +72,15 @@ export const useRun = create<RunState>((set) => ({
   endStart: () =>
     set((s) => ({ startingCount: Math.max(0, s.startingCount - 1) })),
   setRunId: (id) => {
+    // M12: artifacts, payloads and node states are NOT cleared here — a
+    // re-run must keep the previous figures/extents visible until the new
+    // run's events replace them (a document load / New calls reset()).
+    // Only run identity and the failure reason start fresh; a node's own
+    // stale warnings/progress clear when THAT node re-executes (below).
     set({
       runId: id,
       runStatus: id ? "queued" : "idle",
       runError: null,
-      nodeStates: {},
-      artifacts: [],
-      payloads: {},
     });
     // flush events that arrived before the id was known (they were buffered
     // precisely for this moment); the run_id filter drops foreign ones
@@ -101,16 +103,23 @@ export const useRun = create<RunState>((set) => ({
       case "run_started":
         set({ runStatus: "running" });
         break;
-      case "node_status":
+      case "node_status": {
+        // L-F8: MERGE with the prior state — a node_status replacing the
+        // object dropped the progress/msg a node_progress event had
+        // already streamed (the progress bar snapped away mid-run).
+        // M12: a fresh execution of the node (status "running" — the
+        // executor emits no per-node "queued") starts a clean sheet:
+        // stale warnings/progress/error from the earlier run must not
+        // masquerade as this run's. A cache hit (done + cached) skips
+        // "running" and keeps the prior state.
+        const nodeId = event.node as string;
+        const fresh = event.status === "running";
         set((s) => ({
           runStatus: s.runStatus === "idle" ? "running" : s.runStatus,
           nodeStates: {
             ...s.nodeStates,
-            // L-F8: MERGE with the prior state — a node_status replacing the
-            // object dropped the progress/msg a node_progress event had
-            // already streamed (the progress bar snapped away mid-run)
-            [event.node as string]: {
-              ...s.nodeStates[event.node as string],
+            [nodeId]: {
+              ...(fresh ? {} : (s.nodeStates[nodeId] ?? {})),
               status: event.status as NodeRunState["status"],
               error: event.error as string | undefined,
               cached: event.cached === true ? true : undefined,
@@ -118,6 +127,7 @@ export const useRun = create<RunState>((set) => ({
           },
         }));
         break;
+      }
       case "node_progress":
         set((s) => ({
           nodeStates: {

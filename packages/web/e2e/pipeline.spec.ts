@@ -280,15 +280,16 @@ test("unchanged rerun reports cached nodes; Run to here executes the ancestry on
 
   // Select the middle node and run only it plus its ancestry: Load CSV and
   // Plot Time Series execute (cache hits here), Preview Plot is not in the
-  // execution set — no chip for it. The restored plot artifact from Plot
-  // Time Series still flows to the viewer via the edge, so the preview keeps
-  // rendering the (still valid) figure.
+  // execution set. M12: node states persist across runs — Preview Plot
+  // KEEPS its cached chip from the earlier full run (still true: its
+  // displayed result was not recomputed) and its artifact still flows to
+  // the viewer via the edge, so the preview keeps rendering the figure.
   await node(page, "Plot Time Series").locator(".mt-node-header").click();
   await page.getByRole("button", { name: "▶ Run to here" }).click();
   await expect(page.locator(".run-status.completed")).toBeVisible({
     timeout: 90_000,
   });
-  await expect(page.locator(".mt-cached")).toHaveCount(2);
+  await expect(page.locator(".mt-cached")).toHaveCount(3);
   await expect(page.locator(".mt-preview img")).toBeVisible({ timeout: 30_000 });
 });
 

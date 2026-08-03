@@ -341,7 +341,10 @@ export default function App() {
       } else {
         setNotice(null);
       }
-      useRun.getState().reset();
+      // M12: no reset() here — a re-run keeps the previous artifacts,
+      // extents and node states visible until the new run's events replace
+      // them (stale per-node state clears when that node re-executes);
+      // wiping happens on document load / New only (handleLoad/handleNew)
       const doc = serializeWorkflow(nodes, edges);
       const { run_id } = await api.runWorkflow(doc, targets);
       useRun.getState().setRunId(run_id);
