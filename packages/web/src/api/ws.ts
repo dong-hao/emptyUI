@@ -38,18 +38,14 @@ export function ensureSocket(): WebSocket {
   };
   socket.onclose = () => {
     socket = null;
-    if (retries < MAX_RETRIES) {
-      setStatus("reconnecting");
-      setTimeout(() => {
-        retries += 1;
-        ensureSocket();
-      }, 500 * 2 ** retries);
-    } else {
-      // L-F3: the give-up is LOUD — the toolbar shows the outage; rerunning
-      // (or a page reload) calls ensureSocket() again and resets the count
-      // via onopen
-      setStatus("offline");
-    }
+    retries += 1;
+    // M15: never give up. The old code stopped after MAX_RETRIES and only a
+    // page reload recovered (nothing re-called ensureSocket). The outage
+    // stays LOUD — the badge shows "offline" once the fast retries are
+    // exhausted — but a slow capped retry keeps running underneath, so the
+    // connection self-heals when the backend comes back (no reload).
+    setStatus(retries > MAX_RETRIES ? "offline" : "reconnecting");
+    setTimeout(ensureSocket, Math.min(500 * 2 ** retries, 15_000));
   };
   socket.onopen = () => {
     retries = 0;

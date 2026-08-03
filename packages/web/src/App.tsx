@@ -316,6 +316,10 @@ export default function App() {
   };
 
   const startRun = async (targets?: string[]) => {
+    // M15: make the documented contract true — a run attempt re-arms the
+    // events socket if it is down (ensureSocket is idempotent; the slow
+    // background retry from the M15 reconnect fix continues regardless)
+    ensureSocket();
     const run = useRun.getState();
     // M-F2: gate re-entry across the POST in-flight window — runStatus is
     // still "idle" until setRunId resolves, so a second click would start a
@@ -376,6 +380,7 @@ export default function App() {
           event.cached ?? "",
         ]);
       };
+      let pollFails = 0; // M15: consecutive poll failures
       pollRef.current = window.setInterval(async () => {
         if (generation !== pollGenerationRef.current) return;
         try {
@@ -384,6 +389,7 @@ export default function App() {
             events: Record<string, unknown>[];
           };
           if (generation !== pollGenerationRef.current) return;
+          pollFails = 0;
           for (const [index, e] of run.events.entries()) {
             const key = eventKey(e, index);
             if (!seen.has(key)) {
@@ -399,7 +405,16 @@ export default function App() {
             stopPolling();
           }
         } catch {
-          // transient poll errors are non-fatal
+          // M15: a few transient blips stay silent, but a persistently dead
+          // backend must not be polled forever with no feedback — stop and
+          // say so (the M15 socket retry re-streams events when it returns)
+          pollFails += 1;
+          if (pollFails >= 5) {
+            stopPolling();
+            setMessage(
+              "Lost contact with the backend — run status may be stale. Check the server and re-run.",
+            );
+          }
         }
       }, 700);
     } catch (e) {
@@ -455,6 +470,9 @@ export default function App() {
         !window.confirm("Clear the canvas? The current workflow is not saved.")) {
       return;
     }
+    // mirror handleLoad (§8): a new working context must not keep streaming
+    // the previous run's events (M15 — handleLoad did this, handleNew didn't)
+    stopPolling();
     useRun.getState().reset();
     useWorkflow.getState().newWorkflow();
     setMessage(null);

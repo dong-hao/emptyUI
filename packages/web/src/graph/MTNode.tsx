@@ -313,6 +313,13 @@ export function MTNode({ id, data, selected }: NodeProps) {
       {runState?.status === "running" && (
         <div className="mt-progress" style={{ width: `${(runState.progress ?? 0) * 100}%` }} />
       )}
+      {/* §7.2 (M15): the node_progress text is part of the run contract —
+          render it, not just the fraction */}
+      {runState?.status === "running" && runState.msg && (
+        <div className="mt-progress-msg" title={runState.msg}>
+          {runState.msg}
+        </div>
+      )}
       {runState?.cached && (
         <div className="mt-cached" title="Result reused from cache — inputs unchanged">
           cached

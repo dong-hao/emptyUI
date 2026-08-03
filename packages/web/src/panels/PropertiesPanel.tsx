@@ -119,6 +119,12 @@ export function PropertiesPanel({
           <pre className="node-error-text">{nodeState.error}</pre>
         </div>
       )}
+      {nodeState?.status === "running" && nodeState.msg && (
+        <div className="node-warnings">
+          <strong>progress</strong>
+          <pre className="node-error-text">{nodeState.msg}</pre>
+        </div>
+      )}
       {nodeState?.warnings && nodeState.warnings.length > 0 && (
         <div className="node-warnings">
           <strong>warnings</strong>

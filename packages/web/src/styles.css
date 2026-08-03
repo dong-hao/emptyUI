@@ -544,6 +544,18 @@ button.primary {
   transition: width 0.2s ease;
 }
 
+/* M15 (§7.2): the node_progress text under the bar — ellipsized like the
+   warning/error chips, full text on hover */
+.mt-progress-msg {
+  font-size: 0.65rem;
+  color: #7f8c8d;
+  padding: 0 0.5rem 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
 .mt-error {
   font-size: 0.65rem;
   color: #c0392b;
