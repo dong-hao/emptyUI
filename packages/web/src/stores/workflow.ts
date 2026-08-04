@@ -158,6 +158,11 @@ export function validateConnection(
 interface WorkflowState {
   nodes: Node<MTNodeData>[];
   edges: Edge[];
+  /** M18: bumped on every change that alters the graph TOPOLOGY or node
+   *  params (the inputs of the inheritance walk) — position/dimension
+   *  updates (the per-frame drag path) do NOT bump, so consumers keyed on
+   *  this revision don't re-render during a drag. */
+  graphRev: number;
   selectedNodeId: string | null;
   clipboard: NodeClipboard | null;
   /** document name carried through save/load (meta.name, DESIGN.md §6) */
@@ -208,6 +213,7 @@ interface WorkflowState {
 export const useWorkflow = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
+  graphRev: 0,
   selectedNodeId: null,
   clipboard: null,
   docName: "untitled",
@@ -215,7 +221,16 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
    *  not re-stamped per save) */
   docCreated: undefined as string | undefined,
   onNodesChange: (changes) =>
-    set((s) => ({ nodes: applyNodeChanges(changes, s.nodes) })),
+    set((s) => ({
+      nodes: applyNodeChanges(changes, s.nodes),
+      // M18: position/dimension/select changes are the per-frame drag path
+      // and don't affect inheritance — only structural ones bump the rev
+      graphRev: changes.some(
+        (c) => !["position", "dimensions", "select"].includes(c.type),
+      )
+        ? s.graphRev + 1
+        : s.graphRev,
+    })),
   onEdgesChange: (changes) =>
     set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
   onConnect: (connection) => {
@@ -250,12 +265,14 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
           },
           without,
         ),
+        graphRev: s.graphRev + 1,
       };
     });
   },
   detachEdges: (edgeIds) =>
     set((s) => ({
       edges: s.edges.filter((e) => !edgeIds.includes(e.id)),
+      graphRev: s.graphRev + 1,
     })),
   reconnect: (oldEdge, connection) => {
     // re-routing an edge endpoint must satisfy the full connection rule
@@ -280,9 +297,11 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
             ),
         ),
       ),
+      graphRev: s.graphRev + 1,
     }));
   },
-  addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
+  addNode: (node) =>
+    set((s) => ({ nodes: [...s.nodes, node], graphRev: s.graphRev + 1 })),
   moveNode: (id, position) =>
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, position } : n)),
@@ -302,6 +321,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
             }
           : n,
       ),
+      graphRev: s.graphRev + 1,
     })),
   deleteSelected: () =>
     set((s) => {
@@ -319,6 +339,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
           (e) => !nodeIds.has(e.source) && !nodeIds.has(e.target) && !e.selected,
         ),
         selectedNodeId: null,
+        graphRev: s.graphRev + 1,
       };
     }),
   deleteNode: (id) =>
@@ -326,6 +347,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       nodes: s.nodes.filter((n) => n.id !== id),
       edges: s.edges.filter((e) => e.source !== id && e.target !== id),
       selectedNodeId: s.selectedNodeId === id ? null : s.selectedNodeId,
+      graphRev: s.graphRev + 1,
     })),
   revalidateEdges: () => {
     const { nodes, edges } = get();
@@ -405,6 +427,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
       edges: [...s.edges, ...newEdges].map((e) => ({ ...e, selected: newEdgeIds.has(e.id) })),
       selectedNodeId: newNodes[0].id,
       clipboard: { ...clip, pasteCount },
+      graphRev: s.graphRev + 1,
     }));
   },
   duplicateSelection: () => {
@@ -413,6 +436,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   },
   loadDocument: (nodes, edges, name, created) =>
     set({
+      graphRev: get().graphRev + 1,
       nodes,
       // the runs→data remap happens exactly once, inside
       // deserializeWorkflow — every document crosses that boundary; the
@@ -425,6 +449,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     }),
   newWorkflow: () =>
     set({
+      graphRev: get().graphRev + 1,
       nodes: [],
       edges: [],
       selectedNodeId: null,

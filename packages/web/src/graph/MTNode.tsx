@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
@@ -104,15 +104,18 @@ function useInputPlotArtifact(nodeId: string) {
  * body. The right-hand panel keeps metadata (id, version, ports,
  * description, deps) and a Delete action (see PropertiesPanel).
  */
-export function MTNode({ id, data, selected }: NodeProps) {
+function MTNodeBase({ id, data, selected }: NodeProps) {
   const catalog = useCatalog((s) => s.catalog);
   const manifest = catalog?.nodes.find((m) => m.type === data.nodeType);
   const d = data as MTNodeData;
   const runState = useRun((s) => s.nodeStates[id]);
-  // L-F10: full arrays are needed for the chain-walking inheritance walk
-  // (edges don't mutate during node drags, so this is not the hot path);
-  // the hot per-render work — the per-param walk — is memoized below.
-  const nodes = useWorkflow((s) => s.nodes);
+  // M18: the `nodes` array mutates on every drag frame (position-only
+  // updates), so subscribing to it re-rendered EVERY node per pointermove.
+  // The inheritance walk now keys on the structure revision — bumped only
+  // when topology or params change — and reads the arrays via getState()
+  // inside the memo. `edges` keeps its subscription (it doesn't mutate
+  // during node drags — not the hot path).
+  const graphRev = useWorkflow((s) => s.graphRev);
   const edges = useWorkflow((s) => s.edges);
 
   const inputs = manifest?.inputs ?? [];
@@ -124,8 +127,15 @@ export function MTNode({ id, data, selected }: NodeProps) {
   // any other declared params) auto-fill from the upstream chain, flowing
   // through intermediate nodes.
   const inheritCtx = useMemo(
-    () => makeInheritContext(catalog?.nodes, nodes, edges),
-    [catalog, nodes, edges],
+    () => {
+      void graphRev; // cache key only — topology/params changes bump it (M18)
+      return makeInheritContext(
+        catalog?.nodes,
+        useWorkflow.getState().nodes,
+        edges,
+      );
+    },
+    [catalog, graphRev, edges],
   );
   // L-F10: ONE walk per graph change (not per render per param) — the
   // inherited candidates for every declared param, memoized together.
@@ -214,8 +224,9 @@ export function MTNode({ id, data, selected }: NodeProps) {
         }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, catalog, manifest, edges, nodes]);
+    // M18: graphRev stands in for the nodes array (position drags skip it)
+    void graphRev;
+  }, [id, catalog, manifest, edges, graphRev, inheritable, params]);
 
   // Conditional-UX rules are manifest-driven (DESIGN.md §4 `enabled_when`):
   // a param is editable only when its named sibling param holds one of the
@@ -672,5 +683,13 @@ function HandleOutTable() {
     />
   );
 }
+
+// M18: React Flow's NodeWrapper re-renders whenever its internal node
+// object is replaced — which position-only drag changes do every frame
+// ({...n, position}) — and re-invokes a plain-function node component. The
+// memo keeps that from reaching us: through a drag every MTNode prop stays
+// referentially stable (data is not touched by position updates), so only
+// the dragged node (dragging/positionAbsolute prop flips) re-renders.
+export const MTNode = memo(MTNodeBase);
 
 export const nodeTypes = { mt: MTNode };
