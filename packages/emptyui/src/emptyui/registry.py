@@ -23,7 +23,10 @@ CORE_PORT_TYPES: dict[str, dict[str, str]] = {
     "plot": {"color": "#d81b8c", "label": "Plot"},
     "mth5": {"color": "#9b59b6", "label": "MTH5 Archive"},
     "calibration": {"color": "#af7ac5", "label": "Calibration / Instrument Response"},
-    "selection": {"color": "#8e44ad", "label": "Run Selection"},
+    # NB: "selection" is intentionally absent (issues.md L2, decision
+    # 2026-10-14): no bundled node produces it (the Kernel Dataset surface
+    # is M4-deferred) — the type returns together with its producer.
+    # ViewSelection (mth5.table.selection) stays registered but hidden.
     "decimation": {"color": "#a569bd", "label": "Decimation Level"},
     "config": {"color": "#6c3483", "label": "Processing Config"},
     "bands": {"color": "#d2b4de", "label": "Frequency Bands"},

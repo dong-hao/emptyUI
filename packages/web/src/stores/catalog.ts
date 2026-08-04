@@ -22,7 +22,6 @@ export const PORT_COLORS: Record<string, string> = {
   plot: "#d81b8c",
   mth5: "#9b59b6",
   calibration: "#af7ac5",
-  selection: "#8e44ad",
   decimation: "#a569bd",
   config: "#6c3483",
   bands: "#d2b4de",

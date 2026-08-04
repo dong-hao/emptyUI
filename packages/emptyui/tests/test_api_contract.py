@@ -104,6 +104,15 @@ def test_display_nodes_declare_terminal():
     assert offenders == []
 
 
+def test_port_types_has_no_producer_less_selection(client: TestClient):
+    """L2 (decision 2026-10-14: hide until a producer exists): the palette
+    ecosystem must not advertise a port type nothing can feed. The
+    `selection` type returns with its producer (the M4-deferred Kernel
+    Dataset surface); ViewSelection stays registered but hidden."""
+    catalog = client.get("/api/nodes").json()
+    assert "selection" not in catalog["port_types"]
+
+
 def test_nodes_catalog_shape(client: TestClient):
     catalog = client.get("/api/nodes").json()
     assert set(catalog) == {"nodes", "port_types"}
