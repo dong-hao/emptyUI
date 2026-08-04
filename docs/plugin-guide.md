@@ -93,6 +93,7 @@ frontend renders:
 | `category` | palette grouping; unknown categories are appended alphabetically |
 | `hidden` | utility/test nodes excluded from the palette (still executable) |
 | `viewer` | inline canvas-body renderer the frontend mounts in the node card: `"plot"` or `"table"` (L-F12: the frontend never switches on node types); omit for ordinary nodes |
+| `terminal` | `True` when running this node produces something the user can see (issues.md M13) — the frontend's "results won't be visible" notice tests this flag and `outputs == ()`, **never the category string**; declare it on display nodes |
 | `version` | bump on behavior changes; workflows record versions for reproducibility |
 | `deps` | human-readable dependency notes surfaced in the properties panel |
 | `inherit` | params auto-filled (as dropdowns) from the upstream chain — see DESIGN §4 |

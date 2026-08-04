@@ -1,6 +1,6 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { memo, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
+import { Fragment, memo, useEffect, useMemo, useState } from "react";
+import { api, type NodeManifest } from "../api/client";
 import { useCatalog, portColor } from "../stores/catalog";
 import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
@@ -375,8 +375,11 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
                 ? Array.from(new Set(sum.runs.map((r) => r.sample_rate)))
                 : undefined);
               if (rates?.length) {
+                // M13: the manifest default leads the suggestions (the old
+                // literal hardcoded "auto" even for params whose default
+                // is something else)
                 sel = Array.from(new Set([
-                  "auto",
+                  ...(p.default != null ? [String(p.default)] : []),
                   ...(p.options ?? []).map(String),
                   ...(opts ?? []),
                   ...rates.map((r) => String(r)),
@@ -426,9 +429,9 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
 
       {/* body renderer declared by the manifest's viewer flag (L-F12) */}
       {manifest?.viewer === "plot" ? (
-        <PreviewBody nodeId={id} />
+        <PreviewBody nodeId={id} manifest={manifest} />
       ) : manifest?.viewer === "table" ? (
-        <TableBody nodeId={id} />
+        <TableBody nodeId={id} manifest={manifest} />
       ) : (
         <div className="mt-node-ports">
         {rows > 0 ? (
@@ -493,22 +496,9 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
 }
 
 /** Inline figure viewer: fills the node body; node drag-resize scales it. */
-function PreviewBody({ nodeId }: { nodeId: string }) {
+function PreviewBody({ nodeId, manifest }: { nodeId: string; manifest: NodeManifest }) {
   const artifact = useInputPlotArtifact(nodeId);
-  const ports = (
-    <div className="mt-node-ports mt-preview-ports">
-      <div className="mt-row">
-        <span className="mt-port-label in">
-          <HandleInPlot />
-          <span>plot</span>
-        </span>
-        <span className="mt-port-label out">
-          <span>plot</span>
-          <HandleOutPlot />
-        </span>
-      </div>
-    </div>
-  );
+  const ports = <ViewerPorts manifest={manifest} />;
   return (
     <>
       <div className="mt-preview">
@@ -537,36 +527,53 @@ function PreviewBody({ nodeId }: { nodeId: string }) {
   );
 }
 
-function HandleInPlot() {
+/** M13: viewer port rows come from the manifest — a viewer plugin declaring
+ *  other port names renders handles matching its own edges (the hardcoded
+ *  plot/table literals rendered a card that rejected its own edge). */
+function ViewerPorts({ manifest }: { manifest: NodeManifest }) {
   const catalog = useCatalog((s) => s.catalog);
   return (
-    <Handle
-      id="plot"
-      type="target"
-      position={Position.Left}
-      className="mt-port"
-      style={{ background: portColor("plot", catalog) }}
-      title="plot: plot"
-    />
-  );
-}
-
-function HandleOutPlot() {
-  const catalog = useCatalog((s) => s.catalog);
-  return (
-    <Handle
-      id="plot"
-      type="source"
-      position={Position.Right}
-      className="mt-port"
-      style={{ background: portColor("plot", catalog) }}
-      title="plot: plot"
-    />
+    <div className="mt-node-ports mt-preview-ports">
+      <div className="mt-row">
+        <span className="mt-port-label in">
+          {manifest.inputs.map((p) => (
+            <Fragment key={p.name}>
+              <Handle
+                id={p.name}
+                type="target"
+                position={Position.Left}
+                className="mt-port"
+                style={{ background: portColor(p.type, catalog) }}
+                title={`${p.label ?? p.name}: ${p.type}`}
+              />
+              <span title={`${p.label ?? p.name}: ${p.type}`}>
+                {p.label ?? p.name}
+              </span>
+            </Fragment>
+          ))}
+        </span>
+        <span className="mt-port-label out">
+          {manifest.outputs.map((p) => (
+            <Fragment key={p.name}>
+              <span>{p.label ?? p.name}</span>
+              <Handle
+                id={p.name}
+                type="source"
+                position={Position.Right}
+                className="mt-port"
+                style={{ background: portColor(p.type, catalog) }}
+                title={`${p.label ?? p.name}: ${p.type}`}
+              />
+            </Fragment>
+          ))}
+        </span>
+      </div>
+    </div>
   );
 }
 
 /** Inline table viewer: fills the node body; fetches the JSON artifact. */
-function TableBody({ nodeId }: { nodeId: string }) {
+function TableBody({ nodeId, manifest }: { nodeId: string; manifest: NodeManifest }) {
   const artifact = useInputPlotArtifact(nodeId);
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -595,20 +602,7 @@ function TableBody({ nodeId }: { nodeId: string }) {
   const cols = rows?.length
     ? Array.from(new Set(rows.flatMap((r) => Object.keys(r))))
     : [];
-  const ports = (
-    <div className="mt-node-ports mt-preview-ports">
-      <div className="mt-row">
-        <span className="mt-port-label in">
-          <HandleInTable />
-          <span>table</span>
-        </span>
-        <span className="mt-port-label out">
-          <span>table</span>
-          <HandleOutTable />
-        </span>
-      </div>
-    </div>
-  );
+  const ports = <ViewerPorts manifest={manifest} />;
 
   return (
     <>
@@ -656,33 +650,7 @@ function TableBody({ nodeId }: { nodeId: string }) {
   );
 }
 
-function HandleInTable() {
-  const catalog = useCatalog((s) => s.catalog);
-  return (
-    <Handle
-      id="table"
-      type="target"
-      position={Position.Left}
-      className="mt-port"
-      style={{ background: portColor("table", catalog) }}
-      title="table: table"
-    />
-  );
-}
 
-function HandleOutTable() {
-  const catalog = useCatalog((s) => s.catalog);
-  return (
-    <Handle
-      id="table"
-      type="source"
-      position={Position.Right}
-      className="mt-port"
-      style={{ background: portColor("table", catalog) }}
-      title="table: table"
-    />
-  );
-}
 
 // M18: React Flow's NodeWrapper re-renders whenever its internal node
 // object is replaced — which position-only drag changes do every frame

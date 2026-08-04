@@ -14,6 +14,15 @@ import { useCatalog, portColor } from "./catalog";
 import { useRun, type PayloadMap } from "./run";
 import type { NodeManifest } from "../api/client";
 
+/** M13: the one legacy-edge migration that keys on a node type — declared
+ *  once instead of a string literal drifting from the plugin's id. */
+export const EXTRACT_RUN_NODE_TYPE = "mth5.io.extract_run";
+
+/** M13: the card-size pair, declared once (deserializeWorkflow sizes new
+ *  nodes; App re-centering subtracts half the default width). */
+export const DEFAULT_NODE_SIZE = { width: 280, height: 0 } as const;
+export const VIEWER_NODE_SIZE = { width: 340, height: 260 } as const;
+
 /** RFC-4122 v4 UUID: crypto.randomUUID is secure-context-only (HTTPS or
  *  localhost) — the remote single-origin serving mode is plain HTTP on the
  *  ZeroTier LAN, so fall back to getRandomValues (available everywhere). */
@@ -465,7 +474,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
 function extractRunIds(nodes: Node<MTNodeData>[]): Set<string> {
   return new Set(
     nodes
-      .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === "mth5.io.extract_run")
+      .filter((n) => (n.data as MTNodeData | undefined)?.nodeType === EXTRACT_RUN_NODE_TYPE)
       .map((n) => n.id));
 }
 
@@ -591,8 +600,8 @@ export function deserializeWorkflow(
       // viewer sizing is manifest-driven (L-F12) — a load that races the
       // catalog falls back to the default box (reload after it arrives)
       style: manifest?.viewer
-        ? { width: 340, height: 260 }
-        : { width: 280, height: "auto" },
+        ? { width: VIEWER_NODE_SIZE.width, height: VIEWER_NODE_SIZE.height }
+        : { width: DEFAULT_NODE_SIZE.width, height: "auto" as const },
     };
   });
   const manifestOfType = (type: string) =>

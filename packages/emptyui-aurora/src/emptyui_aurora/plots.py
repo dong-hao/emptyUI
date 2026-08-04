@@ -115,6 +115,7 @@ class PlotCoherency(Node):
         "plots as its own series."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (
         Input("fc", "fc"),
         Input("ref_fc", "fc", label="ref fc (remote)", required=False),
@@ -349,6 +350,7 @@ class PlotSpectrogramFC(Node):
         "nomenclature; empty = first electric channel)."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("fc", "fc"),)
     outputs = (Output("plot", "plot"),)
     params = (

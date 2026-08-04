@@ -20,8 +20,8 @@ from emptyui.server.app import create_app
 
 MANIFEST_KEYS = {
     "type", "version", "title", "tooltip", "description", "category",
-    "hidden", "viewer", "inputs", "outputs", "params", "deps", "inherit",
-    "cacheable", "invalidates_inputs", "models", "timeout",
+    "hidden", "viewer", "terminal", "inputs", "outputs", "params", "deps",
+    "inherit", "cacheable", "invalidates_inputs", "models", "timeout",
 }
 PORT_KEYS = {"name", "type", "description", "label"}
 INPUT_KEYS = PORT_KEYS | {"required", "accepts", "collection_ok"}
@@ -87,6 +87,21 @@ def client():
 def _manifest_of(client: TestClient, node_type: str) -> dict:
     catalog = client.get("/api/nodes").json()
     return next(m for m in catalog["nodes"] if m["type"] == node_type)
+
+
+def test_display_nodes_declare_terminal():
+    """M13: "the run produces something visible" is a manifest-declared flag
+    (terminal), never the category string used as semantics. Every
+    Display-category node in the REAL registry must declare it explicitly."""
+    from emptyui.registry import build_default_registry
+
+    reg = build_default_registry()
+    offenders = [
+        node.type
+        for node in reg.table().values()
+        if node.category == "Display" and not node.terminal
+    ]
+    assert offenders == []
 
 
 def test_nodes_catalog_shape(client: TestClient):

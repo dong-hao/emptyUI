@@ -200,6 +200,11 @@ class Node:
     #: switches on this manifest flag — never on node-type literals
     #: (L-F12, plugin guide §"Manifest fields").
     viewer: ClassVar[str | None] = None
+    #: M13: "this run produces something the user can see" — a manifest-
+    #: declared flag the frontend tests instead of the category string
+    #: (never a category used as semantics). Display/viewer nodes declare
+    #: ``terminal = True``; a node with no outputs counts too.
+    terminal: ClassVar[bool] = False
     category: ClassVar[str] = "Processing"
     version: ClassVar[str] = "0.1.0"
     inputs: ClassVar[tuple[Input, ...]] = ()
@@ -267,6 +272,7 @@ class Node:
             "category": self.category,
             "hidden": self.hidden,
             "viewer": self.viewer,
+            "terminal": self.terminal,
             "inputs": [p.to_dict() for p in self.inputs],
             "outputs": [p.to_dict() for p in self.outputs],
             "params": [p.to_dict() for p in self.params],

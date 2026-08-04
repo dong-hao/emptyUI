@@ -98,6 +98,7 @@ class PlotTimeSeriesNode(Node):
         "15 Hz Phoenix / 1 Hz LEMI/NIMS), and all runs of that family plot "
         "as segments on the shared time axis (gaps stay visible).")
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("data", "ts.run", label="time series", collection_ok=True),)
     outputs = (Output("plot", "plot"),)
     params = (
@@ -309,6 +310,7 @@ class PlotSpectrogramNode(Node):
     )
     hidden = True
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("data", "ts.run", label="time series"),)
     outputs = (Output("plot", "plot"),)
     params = (

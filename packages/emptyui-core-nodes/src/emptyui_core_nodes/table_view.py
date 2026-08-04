@@ -16,6 +16,7 @@ class ViewTableNode(Node):
         "to resize."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     viewer = "table"
     inputs = (Input("table", "table"),)
     outputs = (Output("table", "table"),)

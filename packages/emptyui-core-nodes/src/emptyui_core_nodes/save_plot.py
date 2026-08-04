@@ -24,6 +24,7 @@ class SavePlotNode(Node):
     # plots are figures, not data — Display category (ComfyUI's Save Image
     # pattern sits with the preview viewers, DESIGN.md §3 Display nodes)
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("plot", "plot"),)
     outputs = ()
     params = (

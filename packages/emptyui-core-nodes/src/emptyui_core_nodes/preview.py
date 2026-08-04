@@ -16,6 +16,7 @@ class PreviewPlotNode(Node):
         "to resize the figure."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     viewer = "plot"
     inputs = (Input("plot", "plot"),)
     outputs = (Output("plot", "plot"),)

@@ -106,6 +106,9 @@ export interface NodeManifest {
    *  the frontend never switches on node types, L-F12): "plot" | "table",
    *  absent = the standard port rows */
   viewer?: "plot" | "table" | null;
+  /** M13: "this run produces something the user can see" — declared on the
+   *  node class, never inferred from the category string */
+  terminal?: boolean;
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];

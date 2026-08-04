@@ -19,6 +19,7 @@ import { NodePalette } from "./panels/NodePalette";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { SettingsDialog } from "./panels/SettingsDialog";
 import {
+  DEFAULT_NODE_SIZE,
   deserializeWorkflow,
   serializeWorkflow,
   uniqueNodeId,
@@ -269,7 +270,11 @@ export default function App() {
       const cx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
       const cy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
       const p = inst.screenToFlowPosition({ x: cx, y: cy });
-      position = { x: p.x - 140, y: p.y - 40 };
+      // M13: half the declared default card size (one source of truth)
+      position = {
+        x: p.x - DEFAULT_NODE_SIZE.width / 2,
+        y: p.y - 40,
+      };
     }
     addNode({
       id,
@@ -334,7 +339,8 @@ export default function App() {
         const m = catalog?.nodes.find(
           (m) => m.type === (n.data as MTNodeData).nodeType,
         );
-        return !!m && (m.outputs.length === 0 || m.category === "Display");
+        // M13: manifest-declared, never the category string as semantics
+        return !!m && (m.outputs.length === 0 || m.terminal === true);
       });
       if (!hasOutputNode) {
         // L-F12 (§8.1): don't enumerate concrete node names (they vary by

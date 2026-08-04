@@ -26,6 +26,7 @@ class PlotAppResPhase(Node):
         "folded into (0, 90°), error bars, colorblind-safe markers."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("tf", "tf", label="tf"),)
     outputs = (Output("plot", "plot"),)
     params = (
@@ -84,6 +85,7 @@ class PlotTipper(Node):
         "exceed 1, so the y-axis is fixed to [-1, 1]."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("tf", "tf", label="tf"),)
     outputs = (Output("plot", "plot"),)
     params = (
@@ -142,6 +144,7 @@ class PlotPhaseTensor(Node):
         "(Z_err → PT covariance propagation is nontrivial, DESIGN.md §10.6)."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("tf", "tf", label="tf"),)
     outputs = (Output("plot", "plot"),)
     params = (

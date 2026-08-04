@@ -47,6 +47,7 @@ class ViewSelection(Node):
         "viewed by saved workflows."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("selection", "selection"),)
     outputs = (Output("table", "table"),)
     params = ()
@@ -70,6 +71,7 @@ class ViewTF(Node):
         "and phase for the off-diagonal (zxy, zyx) components."
     )
     category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("tf", "tf"),)
     outputs = (Output("table", "table"),)
     params = ()
