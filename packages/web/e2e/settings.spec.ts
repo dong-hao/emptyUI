@@ -52,7 +52,10 @@ test("settings dialog toggles third-party plugins live", async ({ page }) => {
   await expect(rms).toBeVisible();
   await expect(example).not.toContainText("disabled");
 
-  await page.getByRole("button", { name: "Close" }).click();
+  await page
+    .locator(".settings-dialog .modal-foot")
+    .getByRole("button", { name: "Close" })
+    .click();
   await expect(dialog).toBeHidden();
 });
 

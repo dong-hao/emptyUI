@@ -38,6 +38,7 @@ function CommitInput({
   max,
   step,
   ariaLabel,
+  id,
 }: {
   value: unknown;
   onCommit: (v: unknown) => void;
@@ -51,6 +52,8 @@ function CommitInput({
   step?: number | string;
   /** L-F11 (§8.1): compact-node inputs have no <label> element */
   ariaLabel?: string;
+  /** L1: the visible param label points here via htmlFor */
+  id?: string;
 }) {
   const [draft, setDraftState] = useState<string | null>(null);
   // mirror ref: the blur/keydown handlers must see the CURRENT draft even
@@ -102,6 +105,7 @@ function CommitInput({
 
   return (
     <input
+      id={id}
       list={list}
       type={type}
       value={editing ? draft : current}
@@ -139,11 +143,14 @@ function CodeInput({
   onCommit,
   disabled,
   placeholder,
+  id,
 }: {
   value: unknown;
   onCommit: (v: unknown) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** L1: the visible param label points here via htmlFor */
+  id?: string;
 }) {
   const [draft, setDraftState] = useState<string | null>(null);
   const draftRef = useRef<string | null>(null);
@@ -160,6 +167,7 @@ function CodeInput({
   };
   return (
     <textarea
+      id={id}
       className="code-input"
       value={draft !== null ? draft : current}
       disabled={disabled}
@@ -187,6 +195,9 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
   const set = (v: unknown) => onChange(v);
   const str = value === null || value === undefined ? "" : String(value);
   const domScope = instanceId ?? "global";
+  // L1: every param control is labeled — the visible label is a real
+  // <label htmlFor> (the radio group carries the name via aria-label)
+  const fieldId = `pf-${domScope}-${param.name}`;
 
   let field: JSX.Element;
   if (selectOptions && selectOptions.length > 0) {
@@ -224,6 +235,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       case "boolean":
         field = (
           <input
+            id={fieldId}
             type="checkbox"
             // L-F4 (§8.1): string/number values round-trip through JSON and
             // text inputs — "false"/0 must not render as checked
@@ -248,7 +260,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
           ]),
         );
         field = (
-          <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
+          <select id={fieldId} value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
             {opts.map((o) => (
               <option key={o}>{o}</option>
             ))}
@@ -258,7 +270,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       }
       case "radio":
         field = (
-          <span className="radio-group">
+          <span className="radio-group" role="radiogroup" aria-label={param.label ?? param.name}>
             {(param.options ?? []).map((o) => (
               <label key={String(o)} className="radio-option">
                 <input
@@ -278,6 +290,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       case "number":
         field = (
           <CommitInput
+            id={fieldId}
             type="number"
             value={value}
             onCommit={set}
@@ -294,6 +307,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         field = (
           <span className="path-field">
             <CommitInput
+              id={fieldId}
               value={value}
               onCommit={set}
               widget={param.widget}
@@ -302,6 +316,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
             />
             <button
               className="browse-btn"
+              aria-label={`Browse server filesystem for a ${param.widget}`}
               title={`Browse server filesystem for a ${param.widget}`}
               onClick={() => setBrowsing(true)}
             >
@@ -324,6 +339,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       case "code":
         field = (
           <CodeInput
+            id={fieldId}
             value={value}
             onCommit={set}
             disabled={disabled}
@@ -336,6 +352,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
         // generic string fallback committed a raw string into an array param)
         field = (
           <CommitInput
+            id={fieldId}
             value={value}
             onCommit={set}
             widget="list"
@@ -347,6 +364,7 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       default:
         field = (
           <CommitInput
+            id={fieldId}
             value={value}
             onCommit={set}
             widget={param.widget}
@@ -363,7 +381,13 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
       className={`param-field${compact ? " compact" : ""}${disabled ? " disabled" : ""} nodrag nopan`}
       title={param.description || param.label}
     >
-      <span className="param-label">{param.label}</span>
+      {param.widget === "radio" ? (
+        <span className="param-label">{param.label}</span>
+      ) : (
+        <label htmlFor={fieldId} className="param-label">
+          {param.label}
+        </label>
+      )}
       {field}
     </div>
   );

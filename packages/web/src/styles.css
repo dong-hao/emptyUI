@@ -484,7 +484,9 @@ button.primary {
 
 .muted-small {
   font-size: 0.7rem;
-  opacity: 0.5;
+  /* L1: 0.5 opacity of the text color on light ground lands near 3:1 —
+     WCAG AA needs 4.5:1 for text this small */
+  opacity: 0.75;
   justify-content: center;
 }
 
@@ -737,7 +739,9 @@ button.primary {
 
 .mt-preview .muted-small {
   padding: 0.6rem;
-  color: #aaa;
+  /* L1: #aaa at the old 0.5 opacity on dark ground measured ~3:1 */
+  color: #a0a0a0;
+  opacity: 1;
 }
 
 /* inline table viewer (View Table node) */
@@ -752,7 +756,8 @@ button.primary {
 
 .mt-table .muted-small {
   padding: 0.6rem;
-  color: #aaa;
+  color: #a0a0a0;
+  opacity: 1;
   display: block;
 }
 

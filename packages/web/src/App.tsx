@@ -565,11 +565,16 @@ export default function App() {
         <button onClick={() => setShowSettings(true)} title="Enable/disable plugins">
           ⚙ Settings
         </button>
-        <span className={`run-status ${runStatus}`}>{runStatus}</span>
-        {notice && <span className="notice-msg">{notice}</span>}
+        <span className={`run-status ${runStatus}`} role="status">{runStatus}</span>
+        {notice && (
+          <span className="notice-msg" role="status">
+            {notice}
+          </span>
+        )}
         {(message ?? runError ?? catalogError) && (
           <span
             className="error-msg"
+            role="alert"
             title={message ?? runError ?? catalogError ?? undefined}
           >
             {message ?? runError ?? catalogError}

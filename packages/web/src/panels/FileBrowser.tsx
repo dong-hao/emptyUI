@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type FileEntry } from "../api/client";
+import { useDialogFocus } from "./dialogA11y";
 
 interface Props {
   kind: "file" | "directory";
@@ -10,6 +11,8 @@ interface Props {
 
 /** Server-side file browser (backend GET /api/files) for path widgets. */
 export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, onClose);
   const [path, setPath] = useState(initialPath ?? "");
   const [parent, setParent] = useState<string | null>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -51,12 +54,15 @@ export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={`Select ${kind}`}
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
           <strong>Select {kind}</strong>
           <span className="muted modal-path">{path || "…"}</span>
-          <button onClick={onClose}>✕</button>
+          <button onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         {error && <div className="error-msg modal-error" title={error}>{error}</div>}
         <div className="modal-list">

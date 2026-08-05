@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type SettingsView } from "../api/client";
+import { useDialogFocus } from "./dialogA11y";
 import { usePlugins } from "../stores/plugins";
 
 interface Props {
@@ -120,6 +121,9 @@ export function SettingsDialog({ onClose }: Props) {
       })
     : false;
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -127,11 +131,14 @@ export function SettingsDialog({ onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
           <strong>Settings</strong>
-          <button onClick={onClose}>✕</button>
+          <button onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         {(error || loadErr) && (
           <div className="error-msg modal-error" title={error ?? loadErr ?? undefined}>

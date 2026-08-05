@@ -273,7 +273,28 @@ test("click an edge and press Delete removes it", async ({ page }) => {
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
   const eb = must(await page.locator(".react-flow__edge").first().boundingBox(), "the edge");
-  await page.mouse.click(eb.x + eb.width / 2, eb.y + eb.height / 2);
+  // L1 regression note: the bbox midpoint can land on a node card's param
+  // label when the edge crosses a card — the label (correctly) forwards the
+  // click to its input and the Delete goes to the input, not the canvas.
+  // Probe the bbox for a point that hit-tests to the edge path itself.
+  const pt = await page.evaluate(
+    ({ x, y, width, height }) => {
+      const hits = (px: number, py: number) =>
+        !!document.elementFromPoint(px, py)?.closest(".react-flow__edge");
+      // dense grid: a bezier can hug the bbox edges and miss a sparse grid
+      for (let gx = 1; gx < 20; gx++) {
+        for (let gy = 1; gy < 12; gy++) {
+          const px = x + (width * gx) / 20;
+          const py = y + (height * gy) / 12;
+          if (hits(px, py)) return [px, py];
+        }
+      }
+      return null;
+    },
+    { x: eb.x, y: eb.y, width: eb.width, height: eb.height },
+  );
+  const click = must(pt, "a point on the edge path");
+  await page.mouse.click(click[0], click[1]);
   await page.keyboard.press("Delete");
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 });
