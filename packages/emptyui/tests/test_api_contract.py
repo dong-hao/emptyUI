@@ -113,6 +113,23 @@ def test_port_types_has_no_producer_less_selection(client: TestClient):
     assert "selection" not in catalog["port_types"]
 
 
+def test_no_select_param_offers_a_blank_option():
+    """A blank dropdown option is an unnamed choice (issues.md, user report
+    2026-10-14: Compute FC's prewhitening showed "first difference" and a
+    blank). Empty-string options carry honest labels now — "none" / "same
+    as shallow" — aliased to the canonical internals at execution."""
+    from emptyui.registry import build_default_registry
+
+    reg = build_default_registry()
+    blanks = []
+    for node in reg.table().values():
+        for p in node.params:
+            if p.widget == "select" and any(
+                    o is None or str(o).strip() == "" for o in (p.options or ())):
+                blanks.append(f"{node.type}:{p.name}")
+    assert blanks == []
+
+
 def test_nodes_catalog_shape(client: TestClient):
     catalog = client.get("/api/nodes").json()
     assert set(catalog) == {"nodes", "port_types"}

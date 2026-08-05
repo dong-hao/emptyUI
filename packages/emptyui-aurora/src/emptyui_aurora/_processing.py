@@ -311,6 +311,17 @@ def compute_fc_levels(
     """
     import xarray as xr
 
+    # the select options carry honest labels ("none", "same as shallow") —
+    # alias them to the canonical off/inherit internals here so saved
+    # documents from before the relabeling ("") and the labeled sentinels
+    # behave identically (user report 2026-10-14: blank dropdown options)
+    if window_type_deep == "same as shallow":
+        window_type_deep = ""
+    if prewhitening == "none":
+        prewhitening = ""
+    if per_window_detrend == "none":
+        per_window_detrend = ""
+
     # review item B13: overlap >= 1 reaches scipy.signal.stft as
     # noverlap >= nperseg and crashes mid-node — reject with an actionable
     # message up front (the manifest max is frontend-only)
@@ -323,7 +334,7 @@ def compute_fc_levels(
     if prewhitening and prewhitening != "first difference":
         raise ValueError(
             f"unknown prewhitening {prewhitening!r} (supported: "
-            "'first difference' or '' for off)"
+            "'first difference', 'none', or '' for off)"
         )
     channels, sample_rate, start_s, start_dt = to_channels(value, check_finite=False)
     if start_datetime is None:

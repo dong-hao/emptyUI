@@ -189,13 +189,14 @@ class ComputeFC(Node):
                           "suppress line-spectra leakage (day-scale "
                           "windows)"),
         Param("window_type_deep", "select", label="Deep-level taper",
-              default="", options=("", "hamming", "hanning", "boxcar"),
+              default="same as shallow",
+              options=("same as shallow", "hamming", "hanning", "boxcar"),
               optional=True,
               description="Taper override for the deep decimation levels "
                           "(see 'from level'): zero-endpoint tapers (hamming/"
                           "hanning) suppress diurnal-line leakage through the "
-                          "day-scale windows; boxcar maximizes dof. Empty = "
-                          "same as the base taper."),
+                          "day-scale windows; boxcar maximizes dof. 'Same as "
+                          "shallow' keeps the base taper."),
         Param("deep_from_level", "integer", label="Deep taper from level",
               default=None, optional=True, min=0,
               description="Decimation level from which 'Deep-level taper' "
@@ -215,19 +216,20 @@ class ComputeFC(Node):
                           "mode); empty anchors at each run's start (legacy). "
                           "Needs an absolute start time."),
         Param("prewhitening", "select", label="Prewhitening",
-              default="first difference", options=("", "first difference"),
+              default="first difference",
+              options=("none", "first difference"),
               description="Leakage-reduction prewhitening before the STFT "
                           "(default: 'first difference' — aurora/EMTF-style, "
                           "differences each channel in time and recolors the "
                           "FCs by the exact inverse filter; required to reap "
-                          "boxcar's full dof). Empty = off (the legacy "
+                          "boxcar's full dof). 'None' = off (the legacy "
                           "emptyUI behavior)."),
         Param("per_window_detrend", "select", label="Per-window detrend",
-              default="", options=("", "linear"),
+              default="none", options=("none", "linear"),
               description="Detrend each STFT window (linear) before "
                           "tapering — keeps window-level trends out of the "
                           "low-frequency bins (aurora's per-window default); "
-                          "off (default) = global Detrend node only."),
+                          "'none' (default) = global Detrend node only."),
         Param("reject_saturated", "boolean", label="Reject saturated windows",
               default=True,
               description="Zero-weight (NaN) every FC window whose flagged "
@@ -571,7 +573,8 @@ class BuildFC(Node):
         Param("window_type", "select",
               options=("hamming", "hanning", "boxcar"), default="boxcar"),
         Param("window_type_deep", "select", label="Deep-level taper",
-              default="", options=("", "hamming", "hanning", "boxcar"),
+              default="same as shallow",
+              options=("same as shallow", "hamming", "hanning", "boxcar"),
               optional=True),
         Param("deep_from_level", "integer", label="Deep taper from level",
               default=None, optional=True, min=0),
@@ -584,9 +587,9 @@ class BuildFC(Node):
                           "what pairs remote-reference slots across "
                           "stations (history §24.8)."),
         Param("prewhitening", "select", label="Prewhitening",
-              default="first difference", options=("", "first difference")),
+              default="first difference", options=("none", "first difference")),
         Param("per_window_detrend", "select", label="Per-window detrend",
-              default="", options=("", "linear")),
+              default="none", options=("none", "linear")),
         Param("reject_saturated", "boolean", label="Reject saturated windows",
               default=True,
               description="Zero-weight (NaN) every FC window whose flagged "

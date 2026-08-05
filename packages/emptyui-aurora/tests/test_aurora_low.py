@@ -11,6 +11,7 @@ from emptyui_aurora._processing import (
     _pair_remote_times,
     _resolve_cross_level_claims,
     coherence_sort_fc,
+    compute_fc_levels,
 )
 
 
@@ -192,3 +193,38 @@ def test_build_fc_dipole_from_run_metadata(tmp_path):
     # the lookup found the metadata length (the archive convention is m)
     assert fc and all(
         float(lv.attrs["e_dipole_length_m"]) > 0 for lv in fc.values())
+
+
+def test_blank_option_sentinels_alias_to_off():
+    """The select options carry honest labels ("none", "same as shallow");
+    they must behave EXACTLY like the canonical off/inherit internals
+    ("") — a saved pre-sentinel document (options with "") keeps working,
+    and the labeled values are not silently unknown settings."""
+    from mt_timeseries import ChannelTS, RunTS
+
+    rng = np.random.default_rng(2)
+    chs = []
+    for name in ("hx", "hy", "ex", "ey"):
+        ch = ChannelTS("magnetic" if name.startswith("h") else "electric",
+                       data=rng.standard_normal(2048),
+                       start="2024-01-01", sample_rate=150.0)
+        ch.component = name
+        chs.append(ch)
+    runts = RunTS(array_list=chs)
+    kw = {
+        "input_channels": ["hx", "hy"], "output_channels": ["ex", "ey"],
+        "num_decimations": 2, "num_samples_window": 256, "overlap": 0.5,
+        "window_type": "hanning", "prewhitening": "",
+        "per_window_detrend": "", "window_type_deep": "",
+    }
+    base = compute_fc_levels(runts, **kw)
+    sent = compute_fc_levels(
+        runts, **{**kw, "prewhitening": "none",
+                  "per_window_detrend": "none",
+                  "window_type_deep": "same as shallow"})
+    assert set(sent) == set(base)
+    for lv in base:
+        for ch in base[lv].data_vars:
+            np.testing.assert_allclose(
+                np.asarray(sent[lv][ch].values),
+                np.asarray(base[lv][ch].values))

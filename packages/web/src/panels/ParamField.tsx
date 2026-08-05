@@ -235,15 +235,27 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
           />
         );
         break;
-      case "select":
+      case "select": {
+        // L-F9: an explicitly-set value renders even when it is not among
+        // the declared options (documents saved before a relabeling — the
+        // pre-sentinel "" options). A blank value is NOT injected: the
+        // browser then displays the first option, which post-aliasing is
+        // exactly what the stored "" means.
+        const opts = Array.from(
+          new Set([
+            ...(param.options ?? []).map(String),
+            ...(str ? [str] : []),
+          ]),
+        );
         field = (
           <select value={str} disabled={disabled} onChange={(e) => set(e.target.value)}>
-            {(param.options ?? []).map((o) => (
-              <option key={String(o)}>{String(o)}</option>
+            {opts.map((o) => (
+              <option key={o}>{o}</option>
             ))}
           </select>
         );
         break;
+      }
       case "radio":
         field = (
           <span className="radio-group">

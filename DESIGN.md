@@ -1384,6 +1384,11 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   detrends globally via the upstream `Detrend` node, and per-window
   detrending was ablated as NOT a lever for the long-period tail
   (history §24.3 E2).
+- **Select options carry honest labels** (user report 2026-10-14): no
+  dropdown offers a blank option — the off/inherit choices are spelled
+  ("none", "same as shallow") and aliased to the canonical `""` internals
+  in `compute_fc_levels`, so pre-relabel documents (saved with `""`) and
+  the labeled sentinels behave identically.
 - **No clock-zero truncation by default**: `clock_zero` ("" = run-start
   anchoring, "epoch" = Unix epoch, or explicit ISO) anchors each level's
   windows to `t0 + k·step` and drops the head partial window, so per-run FCs
