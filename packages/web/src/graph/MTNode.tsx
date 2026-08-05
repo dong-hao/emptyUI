@@ -6,6 +6,7 @@ import { useRun } from "../stores/run";
 import { useWorkflow, type MTNodeData } from "../stores/workflow";
 import { ParamField } from "../panels/ParamField";
 import { parseIsoGmt, TimeBar, type TimeExtent } from "../panels/TimeBar";
+import { resolveInputArtifact } from "./artifacts";
 import type { ParamSpec, PayloadSummary, PortSpec } from "../api/client";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
@@ -82,18 +83,17 @@ function tsExtent(
   return { startSec: a, endSec: b, absolute: false };
 }
 
-/** Resolve the artifact flowing into a Preview node's `plot` input:
- *  input edge → source node + source handle → matching artifact. */
-function useInputPlotArtifact(nodeId: string) {
+/** Resolve the artifact flowing into a viewer node's body: the input edge
+ *  (matched on the node's declared input port — M13) names a source node +
+ *  handle; only the artifact whose handle names that same output port
+ *  feeds it (issues.md L3 — the old "last artifact of the source"
+ *  fallback showed the wrong figure for multi-output sources). */
+function useInputPlotArtifact(nodeId: string, inputPort?: string) {
   const edges = useWorkflow((s) => s.edges);
   const artifacts = useRun((s) => s.artifacts);
-  const edge = edges.find((e) => e.target === nodeId);
-  if (!edge) return null;
-  const candidates = artifacts.filter((a) => a.nodeId === edge.source);
-  if (candidates.length === 0) return null;
-  return (
-    candidates.find((a) => a.handle && a.handle === edge.sourceHandle) ??
-    candidates[candidates.length - 1]
+  return useMemo(
+    () => resolveInputArtifact(edges, artifacts, nodeId, inputPort),
+    [edges, artifacts, nodeId, inputPort],
   );
 }
 
@@ -497,7 +497,10 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
 
 /** Inline figure viewer: fills the node body; node drag-resize scales it. */
 function PreviewBody({ nodeId, manifest }: { nodeId: string; manifest: NodeManifest }) {
-  const artifact = useInputPlotArtifact(nodeId);
+  const artifact = useInputPlotArtifact(
+    nodeId,
+    manifest.inputs[0]?.name,
+  );
   const ports = <ViewerPorts manifest={manifest} />;
   return (
     <>
@@ -574,7 +577,10 @@ function ViewerPorts({ manifest }: { manifest: NodeManifest }) {
 
 /** Inline table viewer: fills the node body; fetches the JSON artifact. */
 function TableBody({ nodeId, manifest }: { nodeId: string; manifest: NodeManifest }) {
-  const artifact = useInputPlotArtifact(nodeId);
+  const artifact = useInputPlotArtifact(
+    nodeId,
+    manifest.inputs[0]?.name,
+  );
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 

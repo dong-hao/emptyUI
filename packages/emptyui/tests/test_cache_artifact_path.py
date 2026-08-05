@@ -155,3 +155,24 @@ def test_consumer_survives_ttl_reclaim_mid_run():
     store = summary["store"]
     text = store.get(summary["outputs"]["n2"]["text"]).value
     assert text == "figure-data-r2"
+
+
+def test_artifact_handle_names_the_output_port():
+    """L3 (frontend half): the artifact event's ``handle`` must be the
+    OUTPUT PORT NAME — the router key the frontend matches against an
+    edge's sourceHandle (SS 7.2). The fresh-run path emitted the store's
+    handle id ("h2"), which never matches a port name, so every viewer
+    silently fell back to "the source's last artifact" — the wrong-figure
+    bug for multi-output sources. Cache restores already emitted the port
+    name; this pins the fresh path to the same contract."""
+    reg = _registry()
+    wf = Workflow(nodes=[
+        WorkflowNode(id="src", type="test.plot_source", params={}),
+    ], edges=[])
+    cache = NodeCache()
+    _summary, fresh = _run(reg, wf, cache)
+    _summary2, restored = _run(reg, wf, cache)  # same signature -> cache hit
+    for tag, events in (("fresh", fresh), ("restored", restored)):
+        arts = [e for e in events if e.get("event") == "artifact"]
+        assert arts, f"no artifact event emitted ({tag})"
+        assert arts[0]["handle"] == "plot", (tag, arts[0])

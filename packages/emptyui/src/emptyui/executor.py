@@ -818,7 +818,10 @@ class Executor:
                                 "id": artifact_id,
                                 "kind": rec["kind"],
                                 "path": event_path,
-                                "handle": handles.get(rec["port"], ""),
+                                # L3: the port NAME (the frontend's router
+                                # key) — the store's internal handle id
+                                # never matches an edge's sourceHandle
+                                "handle": rec["port"],
                                 "url": f"/api/artifacts/{artifact_id}/preview",
                             }
                         )
@@ -983,7 +986,13 @@ class Executor:
                     value = (result or {}).get(port.name)
                     handle = store.put(port.type, value)
                     handles[port.name] = handle.id
-                    value_to_handle[id(value)] = handle.id
+                    # the artifact event's `handle` is the OUTPUT PORT NAME
+                    # (the router key the frontend matches against an edge's
+                    # sourceHandle, SS 7.2 / L3) — the store's internal
+                    # handle id ("h2") never matches a port name and forced
+                    # every viewer onto its wrong-figure last-artifact
+                    # fallback; cache restores already emitted the port name
+                    value_to_handle[id(value)] = port.name
                     # time-series extent summary for the frontend time selector
                     # (§23.4) — lightweight, duck-typed, emitted per ts output
                     summary = _ts_summary(value) or _fc_summary(value)

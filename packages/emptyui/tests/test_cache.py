@@ -260,9 +260,10 @@ def test_artifacts_restored_into_new_workspace(tmp_path: Path):
     restored = Path(artifacts[0]["path"])
     assert restored.exists()
     assert restored.name == "plot_test_n1.png"  # renamed for this run's instance
-    # the restored artifact event carries the fresh store handle of the port
-    # whose value is the artifact dict (viewer edge resolution, §7)
-    assert artifacts[0]["handle"].startswith("h")
+    # L3: the restored artifact event carries the OUTPUT PORT NAME whose
+    # value is the artifact dict (the frontend's edge router key — the old
+    # store-handle-id contract never matched a sourceHandle)
+    assert artifacts[0]["handle"] == "plot"
     cached_status = [e for e in events if e["event"] == "node_status" and e.get("cached")]
     assert cached_status and cached_status[-1]["node"] == "n1"
 
