@@ -58,7 +58,7 @@ export function FileBrowser({ kind, initialPath, onSelect, onClose }: Props) {
           <span className="muted modal-path">{path || "…"}</span>
           <button onClick={onClose}>✕</button>
         </div>
-        {error && <div className="error-msg modal-error">{error}</div>}
+        {error && <div className="error-msg modal-error" title={error}>{error}</div>}
         <div className="modal-list">
           {parent && path && (
             <button className="modal-row" onClick={() => setPath(parent)}>

@@ -4,8 +4,10 @@ import type { NodeManifest, PortSpec } from "../api/client";
 import type { PayloadMap } from "./run";
 import {
   connectionCreatesCycle,
+  deserializeWorkflow,
   enforceWiringRules,
   portTypesCompatible,
+  serializeWorkflow,
   validateConnection,
   type MTNodeData,
 } from "./workflow";
@@ -149,5 +151,31 @@ describe("enforceWiringRules", () => {
     const kept = enforceWiringRules([wire("ea", "a", "b"), wire("eb", "b", "a")], nodes, manifestOf);
     expect(kept.map((e) => e.id)).toEqual(["ea", "eb"]);
     expect(warn.mock.calls.some(([m]) => String(m).includes("directed cycle"))).toBe(true);
+  });
+});
+
+describe("document envelope (L12)", () => {
+  it("deserialize names the missing arrays instead of a generic TypeError", () => {
+    expect(() =>
+      deserializeWorkflow({ format: "emptyui/workflow", version: 1 } as never),
+    ).toThrow(/nodes.*edges|edges.*nodes/i);
+    expect(() =>
+      deserializeWorkflow({
+        format: "emptyui/workflow",
+        version: 1,
+        nodes: [{ id: "a", type: "x" }],
+      } as never),
+    ).toThrow(/edges/i);
+  });
+
+  it("serialize refuses to invent a 'data' handle for a handle-less edge", () => {
+    const bad = edge("e1", "a", "b") as unknown as Edge;
+    (bad as unknown as { sourceHandle: null }).sourceHandle = null;
+    expect(() =>
+      serializeWorkflow(
+        [node("a", "x"), node("b", "y")] as unknown as Node<MTNodeData>[],
+        [bad],
+      ),
+    ).toThrow(/handle/);
   });
 });

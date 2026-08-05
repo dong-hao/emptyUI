@@ -88,7 +88,15 @@ export function SettingsDialog({ onClose }: Props) {
       for (const [k, s] of Object.entries(view?.live ?? {})) {
         if (!s.editable) continue;
         const raw = (drafts[k] ?? "").trim();
-        values[k] = raw === "" ? null : Number(raw);
+        // L12: Number("") is NaN and JSON.stringify(NaN) is null — a typo
+        // silently cleared the knob instead of being named
+        const n = raw === "" ? null : Number(raw);
+        if (n !== null && Number.isNaN(n)) {
+          throw new Error(
+            `'${s.description || k}' is not a number — fix it before saving`,
+          );
+        }
+        values[k] = n;
       }
       const updated = await api.putSettings(values);
       setView(updated);
@@ -126,7 +134,9 @@ export function SettingsDialog({ onClose }: Props) {
           <button onClick={onClose}>✕</button>
         </div>
         {(error || loadErr) && (
-          <div className="error-msg modal-error">{error ?? loadErr}</div>
+          <div className="error-msg modal-error" title={error ?? loadErr ?? undefined}>
+            {error ?? loadErr}
+          </div>
         )}
         <div className="modal-list">
           <h3 className="settings-section">Server &amp; retention</h3>
@@ -251,7 +261,7 @@ export function SettingsDialog({ onClose }: Props) {
           )}
         </div>
         <div className="modal-foot">
-          {saveErr && <span className="error-msg">{saveErr}</span>}
+          {saveErr && <span className="error-msg" title={saveErr}>{saveErr}</span>}
           <button
             className="primary"
             disabled={!dirty || saving || !!view && Object.values(view.live).every((s) => !s.editable)}

@@ -85,8 +85,11 @@ export function NodePalette({ manifests, onAdd, pending, error, onRetry }: Props
             <button
               key={m.type}
               // hover protocol: one sentence + the type tag; the full
-              // description is in the properties panel (click the node)
-              title={`${m.tooltip || m.description}\n${m.type}`}
+              // description is in the properties panel (click the node).
+              // L12: no || description fallback here — the server already
+              // derives tooltip from the description's first sentence, so
+              // a duplicated untruncated fallback just diverges in shape.
+              title={`${m.tooltip}\n${m.type}`}
               onClick={() => onAdd(m)}
             >
               {m.title}

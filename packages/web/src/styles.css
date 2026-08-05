@@ -114,23 +114,6 @@ button.danger:disabled {
   cursor: default;
 }
 
-.properties label {
-  display: block;
-  margin-bottom: 0.6rem;
-  font-size: 0.85em;
-}
-
-.properties label span {
-  display: block;
-  margin-bottom: 0.2rem;
-}
-
-.properties label input,
-.properties label select {
-  width: 100%;
-  padding: 0.3rem;
-}
-
 .ports {
   list-style: none;
   padding: 0;
@@ -173,13 +156,6 @@ button.danger:disabled {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.mt-node-body {
-  flex: 1;
-  font-size: 0.7rem;
-  opacity: 0.55;
-  padding: 0.25rem 0.5rem;
 }
 
 /* inline params on node body (ComfyUI-style) */
@@ -706,6 +682,12 @@ button.primary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* L12: modal errors (422 details can be long) wrap instead of truncating
+     blind — the inline ones keep the ellipsis and gain a title tooltip */
+  word-break: break-word;
+}
+.error-msg.modal-error {
+  white-space: normal;
 }
 
 .notice-msg {

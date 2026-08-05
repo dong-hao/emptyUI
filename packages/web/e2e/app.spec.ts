@@ -1,9 +1,8 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+import { addNode } from "./_flow";
 
 /** Palette buttons are grouped by category; click by exact visible name. */
-async function addNode(page: Page, name: string) {
-  await page.getByRole("button", { name, exact: true }).click();
-}
+
 
 /** Params render inline: label span + control inside .param-field (no <label>). */
 function param(node: Locator, label: string): Locator {

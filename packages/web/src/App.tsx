@@ -68,6 +68,14 @@ export default function App() {
       hadNodes.current = false;
     }
   }, [nodes.length]);
+  // L12: a SECOND document load (nodes already on screen) skipped fitView
+  // entirely — the graph landed wherever the old viewport was looking
+  const docRev = useWorkflow((s) => s.docRev);
+  useEffect(() => {
+    if (docRev > 0) {
+      rfInstance.current?.fitView({ maxZoom: 1, padding: 0.1 });
+    }
+  }, [docRev]);
 
   const stopPolling = useCallback(() => {
     pollGenerationRef.current += 1;
@@ -335,13 +343,17 @@ export default function App() {
       stopPolling();
       setMessage(null);
       // Reminder: without a Display/output node the run produces nothing visible
-      const hasOutputNode = nodes.some((n) => {
-        const m = catalog?.nodes.find(
-          (m) => m.type === (n.data as MTNodeData).nodeType,
-        );
-        // M13: manifest-declared, never the category string as semantics
-        return !!m && (m.outputs.length === 0 || m.terminal === true);
-      });
+      // L12: while the catalog is still loading every lookup misses — that
+      // must not read as "no terminal node" (a false warning on startup)
+      const hasOutputNode = !catalog
+        ? true
+        : nodes.some((n) => {
+            const m = catalog.nodes.find(
+              (m) => m.type === (n.data as MTNodeData).nodeType,
+            );
+            // M13: manifest-declared, never the category string as semantics
+            return !!m && (m.outputs.length === 0 || m.terminal === true);
+          });
       if (!hasOutputNode) {
         // L-F12 (§8.1): don't enumerate concrete node names (they vary by
         // catalog) — describe the property the check looks for
@@ -450,7 +462,9 @@ export default function App() {
     a.href = URL.createObjectURL(blob);
     a.download = `${doc.meta.name || "workflow"}.emptyui.json`;
     a.click();
-    URL.revokeObjectURL(a.href);
+    // L12: revoking synchronously could cancel the download mid-flight in
+    // some browsers — the browser has read the blob by the time this fires
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
   };
 
   const handleLoad = async (file: File) => {

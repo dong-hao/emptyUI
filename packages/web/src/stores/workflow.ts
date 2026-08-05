@@ -172,6 +172,9 @@ interface WorkflowState {
    *  updates (the per-frame drag path) do NOT bump, so consumers keyed on
    *  this revision don't re-render during a drag. */
   graphRev: number;
+  /** L12: bumped by loadDocument so the canvas re-fits on EVERY document
+   *  load (the empty->non-empty transition only covered the first one). */
+  docRev: number;
   selectedNodeId: string | null;
   clipboard: NodeClipboard | null;
   /** document name carried through save/load (meta.name, DESIGN.md §6) */
@@ -223,6 +226,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
   graphRev: 0,
+  docRev: 0,
   selectedNodeId: null,
   clipboard: null,
   docName: "untitled",
@@ -446,6 +450,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
   loadDocument: (nodes, edges, name, created) =>
     set({
       graphRev: get().graphRev + 1,
+      docRev: get().docRev + 1,
       nodes,
       // the runs→data remap happens exactly once, inside
       // deserializeWorkflow — every document crosses that boundary; the
@@ -552,13 +557,24 @@ export function serializeWorkflow(
       params: n.data.params,
       position: n.position,
     })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      source_port: e.sourceHandle ?? "data",
-      target: e.target,
-      target_port: e.targetHandle ?? "data",
-    })),
+    edges: edges.map((e) => {
+      // L12: defaulting a missing handle to "data" silently INVENTED wiring
+      // on save (the loaded document then connects ports that were never
+      // connected) — fail loudly instead
+      if (e.sourceHandle == null || e.targetHandle == null) {
+        throw new Error(
+          `edge '${e.id}' (${e.source} -> ${e.target}) has no port handle — `
+          + "refusing to save invented 'data' wiring",
+        );
+      }
+      return {
+        id: e.id,
+        source: e.source,
+        source_port: e.sourceHandle,
+        target: e.target,
+        target_port: e.targetHandle,
+      };
+    }),
   };
 }
 
@@ -584,6 +600,14 @@ export function deserializeWorkflow(
   }
   if (doc.version !== 1) {
     throw new Error(`unsupported workflow version: ${String(doc.version)}`);
+  }
+  // L12: a document missing either array died as "Cannot read properties
+  // of undefined (reading 'map')" behind the generic Load failed message —
+  // name the actual defect
+  if (!Array.isArray(doc.nodes) || !Array.isArray(doc.edges)) {
+    throw new Error(
+      "malformed workflow document: 'nodes' and 'edges' arrays are required",
+    );
   }
   const { catalog } = useCatalog.getState();
   const nodes: Node<MTNodeData>[] = doc.nodes.map((n) => {

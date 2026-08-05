@@ -1,14 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { must, node, placeNode, settleViewport } from "./_flow";
+import { addNode, must, node, placeNode, settleViewport } from "./_flow";
 
 /** Deterministic geometry: room for three spread-out nodes on the canvas. */
 test.use({ viewport: { width: 1600, height: 1000 } });
 
 /** Palette buttons are grouped by category; click by exact visible name. */
-async function addNode(page: Page, name: string) {
-  await page.getByRole("button", { name, exact: true }).click();
-}
+
 
 /** Let React Flow's fitView settle before measuring element boxes. */
 async function settle(page: Page) {
