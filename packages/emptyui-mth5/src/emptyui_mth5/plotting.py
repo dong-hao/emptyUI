@@ -30,6 +30,8 @@ MU0 = 4.0 * np.pi * 1e-7
 
 #: USArray convention: XY = circle, YX = "x"; shapes + linestyles so
 #: components stay distinguishable without color (colorblind-safe).
+from emptyui_core_nodes._plotstyle import apply_style
+
 MARKERS = {"xy": "o", "yx": "x", "xx": "s", "yy": "D"}
 COLORS = {"xy": "#1f77b4", "yx": "#d62728", "xx": "#1f77b4", "yy": "#d62728"}
 LINESTYLES = {"xy": "-", "yx": "--", "xx": ":", "yy": "-."}
@@ -40,21 +42,7 @@ MARKER_FACES = {"xy": "white"}
 DPI = 150
 
 
-def apply_style(fig, axes=()):
-    """Apply the shared publication style to a figure and its axes.
 
-    Grids follow the EMTF reference figure: solid major gridlines with
-    dotted minor gridlines (the USArray MT figures show the fine minor
-    grid on the log axes).
-    """
-    fig.patch.set_facecolor("white")
-    for ax in axes:
-        ax.tick_params(labelsize=9, which="both")
-        ax.grid(True, which="major", alpha=0.30, linewidth=0.6)
-        ax.grid(True, which="minor", alpha=0.20, linewidth=0.5,
-                linestyle=":")
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
 
 
 def station_title(tf) -> str:
@@ -289,18 +277,26 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
     if not comps:
         raise ValueError("transfer function has no impedance data")
     period = comps[0]["period"]
+
+    def _panel_curve(z):
+        """Per-panel rho/phase/finite-mask — computed ONCE (M5: the axis
+        fit and the draw used to run two near-identical loops that could
+        drift apart and make the limits disagree with the plotted data)."""
+        rho = (np.abs(z) ** 2) / (MU0 * (2.0 * np.pi / period))
+        phase = np.angle(z, deg=True)
+        ok = np.isfinite(rho) & (rho > 0) & np.isfinite(phase)
+        return rho, phase, ok
+
     rho_all = []
     # NB: only rho drives the axis fit — the phase panel's limits are fixed
     # by the convention, so nothing phase-shaped is collected here (the fold
     # itself is applied once, at draw time, below).
+    curves = {}
     for c in comps:
-        z = c["z"]
-        rho = (np.abs(z) ** 2) / (MU0 * (2.0 * np.pi / period))
-        phase = np.angle(z, deg=True)
-        ok = np.isfinite(rho) & (rho > 0) & np.isfinite(phase)
-        if not np.any(ok):
-            continue
-        rho_all.append(rho[ok])
+        rho, phase, ok = _panel_curve(c["z"])
+        curves[c["label"]] = (rho, phase, ok)
+        if np.any(ok):
+            rho_all.append(rho[ok])
 
     x_min, x_max = _decade_limits(period)
     if rho_ylim is not None:
@@ -324,12 +320,10 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
 
     clipped: dict[str, tuple[int, float, float]] = {}
     for c in comps:
-        z = c["z"]
-        rho = (np.abs(z) ** 2) / (MU0 * (2.0 * np.pi / period))
-        phase = np.angle(z, deg=True)
-        ok = np.isfinite(rho) & (rho > 0) & np.isfinite(phase)
+        rho, phase, ok = curves[c["label"]]
         if not np.any(ok):
             continue
+        z = c["z"]
         label = key = c["label"][1:]
         label = label.upper()
         rho_se, phi_se = rho_phase_errors(z, c["z_std"], period, rho)

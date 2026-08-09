@@ -80,3 +80,17 @@ def test_timeseries_standard_names_resolve(tmp_path):
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     out = PlotTimeSeriesNode().execute(ctx, ts, channels="ex,ey", seconds=10)
     assert out["plot"]["path"].endswith("plot_timeseries_node.png")
+
+
+def test_fallback_maps_match_mt_metadata():
+    """M5: the plugin-free _FALLBACK_MAPS mirrors mt_metadata's canonical
+    CHANNEL_MAPS (v1.0.10) for standalone use — when the library IS
+    importable the pin makes an upstream map change flag the fallback
+    instead of drifting silently."""
+    from emptyui_core_nodes import _channels
+
+    maps = _channels._maps()
+    assert maps is not _channels._FALLBACK_MAPS, (
+        "mt_metadata importable — the fallback must not be in use")
+    for kw, mapping in _channels._FALLBACK_MAPS.items():
+        assert maps[kw] == mapping, f"stale fallback for {kw!r}"

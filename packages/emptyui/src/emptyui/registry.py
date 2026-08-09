@@ -118,10 +118,13 @@ class Registry:
         # backend decides the colors (the frontend table is only a fallback).
         # The core tags ship here; node-declared ``port_types`` (plugin guide
         # §"Port types") override per tag, first declaration wins among nodes.
+        # L13: "first" is by SORTED node type — raw insertion order follows
+        # entry-point iteration and flipped the winner across installs.
         port_types: dict[str, dict[str, str]] = {
             tag: dict(meta) for tag, meta in CORE_PORT_TYPES.items()
         }
-        for node in self._nodes.values():
+        for node_type in self.types():
+            node = self._nodes[node_type]
             for ptype, meta in getattr(node, "port_types", {}).items():
                 port_types.setdefault(ptype, dict(meta))
         return {"nodes": [node.manifest() for node in self._nodes.values()],

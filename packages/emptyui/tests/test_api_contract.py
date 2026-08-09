@@ -204,3 +204,14 @@ def test_settings_shape(client: TestClient):
 
 def test_health_shape(client: TestClient):
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_executor_epoch_mirror_matches_core_nodes():
+    """M5: executor's placeholder-epoch list is a DOCUMENTED mirror of
+    core-nodes' canonical (emptyui cannot import its plugins) — the pin
+    makes the mirror drift loudly instead of silently."""
+    from emptyui_core_nodes.types import UNKNOWN_EPOCH_STARTS
+
+    from emptyui import executor
+
+    assert executor.UNKNOWN_EPOCH_STARTS == UNKNOWN_EPOCH_STARTS

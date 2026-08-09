@@ -103,6 +103,20 @@ def write_fc_geometry(dec, attrs: dict[str, Any]) -> None:
             _log.debug("fc geometry attr %s not written: %s", key, exc)
 
 
+#: The station-identity attr keys an fc carries (DESIGN.md §10.6) — the ONE
+#: list; builders filter through it so the key sets cannot drift apart
+#: (issues.md M5: three sites used to hardcode their own copies).
+FC_IDENTITY_KEYS = (
+    "survey_id",
+    "station_id",
+    "run_id",
+    "station_latitude",
+    "station_longitude",
+    "station_elevation",
+    "start_datetime",
+)
+
+
 def _fc_identity_attrs(dec, station_obj) -> dict[str, Any]:
     """Station identity attrs resolved from the archive hierarchy (the
     mth5-idiomatic source — the FC group sits under the station, whose

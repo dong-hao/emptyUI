@@ -16,11 +16,18 @@ DPI = 150
 
 
 def apply_style(fig, axes=()):
-    """Apply the shared core publication style to a figure and its axes."""
+    """Apply the shared publication style to a figure and its axes.
+
+    Grids follow the EMTF reference figure: solid major gridlines with
+    dotted minor gridlines (the USArray MT figures show the fine minor
+    grid on the log axes). M5: the ONE copy — mth5's plotting used to
+    carry its own, which had already drifted from this one."""
     fig.patch.set_facecolor("white")
     for ax in axes:
         ax.tick_params(labelsize=9, which="both")
-        ax.grid(True, which="both", alpha=0.25, linewidth=0.5)
+        ax.grid(True, which="major", alpha=0.30, linewidth=0.6)
+        ax.grid(True, which="minor", alpha=0.20, linewidth=0.5,
+                linestyle=":")
         for spine in ax.spines.values():
             spine.set_linewidth(0.8)
 

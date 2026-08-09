@@ -60,6 +60,13 @@ class NodeDeadlineExceeded(Exception):
         )
 
 
+#: Placeholder epochs (mt_timeseries' 1980 default, digitizers' 1970 —
+#: core-nodes UNKNOWN_EPOCH_STARTS, mirrored here because emptyui cannot
+#: import its plugins) mean "start unknown": degrade to relative bounds.
+#: Pinned to the canonical by test_executor_epoch_mirror_matches_core_nodes.
+UNKNOWN_EPOCH_STARTS = ("1980-01-01T00:00:00", "1970-01-01T00:00:00")
+
+
 def _as_float(value: Any) -> float:
     """Degrading float coercion — 0.0 for non-numeric/None (M-C4: the
     summarizer must never crash the run; the bar merely goes unusable)."""
@@ -198,10 +205,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
                     "%Y-%m-%dT%H:%M:%S")
             except ValueError:
                 start_iso = ""
-    # Placeholder epochs (mt_timeseries' 1980 default, digitizers' 1970 —
-    # core-nodes UNKNOWN_EPOCH_STARTS, mirrored here because core cannot
-    # import its plugins) mean "start unknown": degrade to relative bounds.
-    if start_iso[:19] in ("1980-01-01T00:00:00", "1970-01-01T00:00:00"):
+    if start_iso[:19] in UNKNOWN_EPOCH_STARTS:
         start_iso = ""
     if channels is None:
         return None

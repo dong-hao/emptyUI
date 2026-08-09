@@ -2948,11 +2948,13 @@ def estimate_tf_levels(
 
 
 def _identity_attrs(fc):
-    """Station identity attrs carried on an fc (set by ComputeFC)."""
+    """Station identity attrs carried on an fc (set by ComputeFC) — the
+    key list is the canonical FC_IDENTITY_KEYS (issues.md M5)."""
+    from emptyui_mth5.fc import FC_IDENTITY_KEYS
+
     return {
         k: fc.attrs[k]
-        for k in ("survey_id", "station_id", "run_id", "station_latitude",
-                  "station_longitude", "station_elevation", "start_datetime")
+        for k in FC_IDENTITY_KEYS
         if fc.attrs.get(k) not in (None, "")
     }
 

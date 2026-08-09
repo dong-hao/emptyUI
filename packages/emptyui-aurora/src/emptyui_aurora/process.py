@@ -61,11 +61,10 @@ def _station_identity_attrs(data, survey: str, station: str, run: str) -> dict[s
     persistence), and missing values are omitted so downstream nodes can tell
     "unknown" apart from a default.
     """
-    attrs: dict[str, Any] = {
-        "survey_id": survey,
-        "station_id": station,
-        "run_id": run,
-    }
+    from emptyui_mth5.fc import FC_IDENTITY_KEYS
+
+    attrs: dict[str, Any] = dict(
+        zip(FC_IDENTITY_KEYS[:3], (survey, station, run)))
     lat, lon, elev = _station_location(data)
     if lat is not None:
         attrs["station_latitude"] = lat
@@ -410,13 +409,8 @@ class ComputeFC(Node):
         containers = []
         for i, (member, ext) in enumerate(zip(members, extents), 1):
             r = rates[i - 1]
-            lower = [x for x in family_rates if x < r * (1 - 1e-9)]
-            if not lower:
-                dec_of_member = decimation_levels
-            else:
-                d_max = max(0, int(np.ceil(np.log2(r / max(lower))
-                                           / np.log2(factor))) - 1)
-                dec_of_member = min(decimation_levels, d_max)
+            dec_of_member = _family_decimation(
+                r, family_rates, decimation_levels, factor)
             levels = compute_fc_levels(
                 member, input_channels, output_channels,
                 num_decimations=dec_of_member, factor=factor,
@@ -1001,13 +995,8 @@ class BuildFC(Node):
                     filters=registry,
                 )
                 r = sample_rate
-                lower = [x for x in family_rates if x < r * (1 - 1e-9)]
-                if not lower:
-                    dec_of_span = decimation_levels
-                else:
-                    d_max = max(0, int(np.ceil(np.log2(r / max(lower))
-                                               / np.log2(factor))) - 1)
-                    dec_of_span = min(decimation_levels, d_max)
+                dec_of_span = _family_decimation(
+                    r, family_rates, decimation_levels, factor)
                 levels = compute_fc_levels(
                     run_ts, input_channels, output_channels,
                     num_decimations=dec_of_span, factor=factor,
@@ -1107,6 +1096,29 @@ class BuildFC(Node):
             f"{len(merged)} level(s), {n_win} window(s)",
         )
         return {"fc": merged}
+
+
+def _family_decimation(r: float, family_rates: list[float],
+                       decimation_levels: int, factor: int) -> int:
+    """Per-family decimation trim (Build FC's rule, history §24.8).
+
+    On a mixed-rate corpus the lowest-rate family carries the FULL
+    ``decimation_levels`` cascade; a higher-rate family decimates only until
+    its rate would reach the next family's native rate — the lower family's
+    cascade covers those frequencies, and same-rate levels computed from
+    different families would double-cover the same acquisition windows.
+    E.g. 2400/150/15 Hz with factor 4: 2400 Hz slots decimate once (-> 600),
+    150 Hz slots once (-> 37.5), the 15 Hz stream takes the full parameter.
+    (M5: was computed inline at two sites that could drift apart.)
+    """
+    import numpy as np
+
+    lower = [x for x in family_rates if x < r * (1 - 1e-9)]
+    if not lower:
+        return decimation_levels
+    d_max = max(0, int(np.ceil(np.log2(r / max(lower))
+                               / np.log2(factor))) - 1)
+    return min(decimation_levels, d_max)
 
 
 def _fc_io_channels(fc):
@@ -1854,18 +1866,10 @@ class EstimateTF(Node):
         # container {level: fc}.
         levels = fc if isinstance(fc, dict) else {0: fc}
         sample_fc = next(iter(levels.values()))
-        kw = sample_fc.attrs.get("channel_nomenclature") or None
-        ins_raw = sample_fc.attrs.get("input_channels")
-        outs_raw = sample_fc.attrs.get("output_channels")
-        if ins_raw and outs_raw:
-            ins = [c.strip() for c in ins_raw.split(",") if c.strip()]
-            outs = [c.strip() for c in outs_raw.split(",") if c.strip()]
-        else:
-            # fc without attrs (e.g. read back from an mth5 archive): classify
-            # the channels through the nomenclature instead of assuming names.
-            ins, outs, _ = classify_channels(
-                [str(c) for c in sample_fc.data_vars], kw
-            )
+        # M5: the SAME classification the QC nodes use — an inline copy here
+        # diverged silently from _fc_io_channels and made the estimator
+        # disagree with QC about which channels are inputs
+        ins, outs, kw = _fc_io_channels(sample_fc)
         if not ins or not outs:
             raise ValueError(
                 "could not determine input/output channels from the fc — "

@@ -11,6 +11,7 @@ import json
 import threading
 import time
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -476,3 +477,34 @@ def test_broken_plugin_degrades_gracefully():
     assert "ImportError" in by_name["broken_plugin"].error
     assert by_name["broken_plugin"].to_dict()["error"]
     assert by_name["broken_plugin"].to_dict()["node_count"] == 0
+
+
+def test_port_type_declaration_is_install_order_independent():
+    """L13: two plugins declaring the same port-type tag must resolve to the
+    SAME winner regardless of entry-point iteration order — the first
+    declaration used to flip with dict insertion order (sorted node types
+    now iterate)."""
+    from emptyui import Output
+
+    class Aaa(Node):
+        type = "aaa.node"
+        outputs = (Output("o", "x.kind"),)
+        port_types: ClassVar[dict] = {
+            "x.kind": {"color": "#111111", "label": "A"}}
+        def execute(self, ctx):
+            return {}
+
+    class Bbb(Node):
+        type = "bbb.node"
+        outputs = (Output("o", "x.kind"),)
+        port_types: ClassVar[dict] = {
+            "x.kind": {"color": "#222222", "label": "B"}}
+        def execute(self, ctx):
+            return {}
+
+    winner = "#111111"  # aaa.node sorts first -> its declaration wins
+    for order in ((Aaa, Bbb), (Bbb, Aaa)):
+        reg = Registry()
+        for cls in order:
+            reg.add(cls)
+        assert reg.manifests()["port_types"]["x.kind"]["color"] == winner
