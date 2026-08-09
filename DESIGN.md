@@ -1614,7 +1614,9 @@ nodes — no combined plot.
   `σ_ρ/ρ = 2·σ_|Z|/|Z|`; `σ_φ(rad) = σ_|Z|/|Z|`; tipper per Re/Im panel:
   `σ_component = σ_T/√2`.
 - **Phase display**: off-diagonal components folded into (0°, 90°) by ±180°
-  (full `mod 180`, both directions), ylim 0–90°, ticks every 15°; **diagonal
+  (full `mod 180`, both directions), ylim 0–90°, ticks every 20°
+  (`np.arange(0, 91, 20)` — the shipped grid since the restyle; the
+  diagonal keeps 45° steps); **diagonal
   components keep signed phase in [-180°, 180°]**. A value no ±180° fold can
   place inside (0°, 90°) is **reported, not silently dropped**: one loud
   warning names the component, the clipped point count and their value range

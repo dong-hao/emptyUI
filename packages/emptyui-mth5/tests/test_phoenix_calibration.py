@@ -156,7 +156,7 @@ def test_find_asc_calibrations(cal_dir):
 
 def test_real_files_structure():
     """The real manufacturer tables parse with the documented layout
-    (skipped when the corpus is absent; §24.12 parsed facts)."""
+    (skipped when the corpus is absent; history §24.12 parsed facts)."""
     from pathlib import Path
 
     base = Path(__file__).resolve().parents[3] / "examples" / "data" / \
@@ -176,6 +176,6 @@ def test_real_files_structure():
         assert coil.normalizing == {"factor_mv_per_nt": 1000.0}
         assert sorted(coil.channels) == [CLC_PLACEHOLDER_CHANNEL]
         assert len(coil.channels[1].frequencies) == n
-    # channel numbering matches the TBL channel_keys (§24.12)
+    # channel numbering matches the TBL channel_keys (history §24.12)
     assert PHOENIX_CHANNEL_NUMBERS == {1: "ex", 2: "ey", 3: "hx", 4: "hy",
                                        5: "hz"}

@@ -273,7 +273,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
       : base;
   };
 
-  // Time-selector bars (§23.4): params bound via `time_bar` are grouped by
+  // Time-selector bars (history §23.4): params bound via `time_bar` are grouped by
   // their input port (start/end pair per port) and rendered as a draggable
   // acquisition bar once the upstream run streamed the payload extent.
   // (The full map is needed: barExtent/suggest_from read CONNECTED
@@ -357,7 +357,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
           {params.map((p) => {
             const opts = inheritedByParam[p.name] ?? [];
             let sel = opts.length > 0 ? opts : undefined;
-            // select-option suggestions (§20.1): the suggest_from port's
+            // select-option suggestions (history §20.1): the suggest_from port's
             // payload summary EXTENDS the options after a run (e.g. an fc
             // database's sample-rate tiers) — union of static ∪ inherited ∪
             // suggested, "auto" first. The old replacement semantics
@@ -406,7 +406,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
               />
             );
           })}
-          {/* time-selector bars (§23.4): one per bound input port, rendered
+          {/* time-selector bars (history §23.4): one per bound input port, rendered
               under the paired Start/End boxes once the upstream has run and
               streamed its extent */}
           {barGroups.map((g) => {

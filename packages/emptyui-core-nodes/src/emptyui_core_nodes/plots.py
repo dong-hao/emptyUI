@@ -52,7 +52,7 @@ def _time_window(data: TimeSeries, start: str, end: str,
                  seconds) -> tuple[int, int]:
     """Resolve the time-selector params to sample indices [n0, n1).
 
-    Guards live in the shared :mod:`._timewindow` (§23.4): bounds clamped
+    Guards live in the shared :mod:`._timewindow` (history §23.4): bounds clamped
     into the record (warn, never reject), explicitly bounded slot > 1 s.
     The legacy ``seconds`` duration caps the slot from its start and keeps
     its old no-minimum behavior (a 1 s waveform view of a 500 Hz run is

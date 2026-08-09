@@ -202,7 +202,7 @@ def test_channel_calibration_drops_unresolvable_refs(caplog):
     assert any("missing_filter" in r.message for r in caplog.records)
 
 
-# --- §24.12 saturation QC: saturated FC windows are zero-weighted ---------
+# --- history §24.12 saturation QC: saturated FC windows are zero-weighted ---------
 # The NaN checks in this section pin prewhitening='' (see the note in
 # test_compute_fc_zero_dc_response_sets_nan).
 
@@ -232,7 +232,7 @@ def test_compute_fc_rejects_saturated_windows():
                                overlap=overlap, window_type="boxcar",
                                prewhitening="")
     # level 0: exactly the windows whose flagged fraction exceeds the
-    # threshold are NaN (fraction-based §24.12: a few clipped samples out
+    # threshold are NaN (fraction-based history §24.12: a few clipped samples out
     # of a long window are tolerated, not deleted)
     step = int(nperseg * (1 - overlap))
     n_win = levels[0]["hx"].values.shape[1]

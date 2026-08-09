@@ -140,7 +140,7 @@ def test_merge_fc_requires_input():
 
 
 def test_burst_mode_gapped_runs_rr(tmp_path):
-    """Flagship §24.5 P1 v2 e2e: two burst-synchronized stations, two runs
+    """Flagship history §24.5 P1 v2 e2e: two burst-synchronized stations, two runs
     ~28 s apart (a wall-clock gap). Per-run FCs computed with
     clock_zero='epoch' share one absolute window grid; Merge FC
     concatenates them; the strict identical-grid check passes and RME_RR

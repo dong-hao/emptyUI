@@ -40,7 +40,7 @@ class RunRequest(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    """PUT /api/settings payload (§22): partial update of live knobs."""
+    """PUT /api/settings payload (history §22): partial update of live knobs."""
     values: dict[str, float | int | None]
 
 
@@ -190,7 +190,7 @@ def create_app(
     plugin_store = SettingsStore(settings_path)
     env_plugin_baseline = set(disabled_plugins)
 
-    # runtime settings (§22): kwarg → env → settings file → default.
+    # runtime settings (history §22): kwarg → env → settings file → default.
     # Knobs arriving from kwarg/env are platform-baselined (not UI-editable,
     # §5.1 precedent); file-section values are the recorded UI tier.
     file_settings = plugin_store.ui_settings()
@@ -254,7 +254,7 @@ def create_app(
     # GiB -> bytes; 0/None = unbounded (the estimator is approximate —
     # the budget bounds the memory, it does not audit it, L5)
     _cache_budget = runtime.cache_max_gb
-    node_cache = NodeCache(  # §7, §22
+    node_cache = NodeCache(  # §7, history §22
         max_entries=runtime.cache_max_entries,
         max_bytes=(int(_cache_budget * 2**30)
                    if _cache_budget is not None and _cache_budget > 0
@@ -307,7 +307,7 @@ def create_app(
         return len(expired)
 
     async def cleanup_loop() -> None:
-        # retention (§22) is live-editable: re-read the TTL each pass; the
+        # retention (history §22) is live-editable: re-read the TTL each pass; the
         # loop idles at 60 s when disabled and picks up an enable/change on
         # the next pass
         while True:
@@ -435,7 +435,7 @@ def create_app(
         """Hot-reload without the plugin; clear the cross-run cache (§5.1)."""
         return _toggle_plugin(name, disable=True)
 
-    # --- runtime settings (§22) -------------------------------------------
+    # --- runtime settings (history §22) -------------------------------------------
 
     def _settings_view() -> dict:
         """Effective settings with sources: platform (env/kwarg — read-only),
@@ -474,13 +474,13 @@ def create_app(
 
     @app.get("/api/settings")
     def get_settings() -> dict:
-        """Effective runtime settings (§22): live-editable knobs, read-only
+        """Effective runtime settings (history §22): live-editable knobs, read-only
         deployment rows and the reserved (planned) §12.3 cache knobs."""
         return _settings_view()
 
     @app.put("/api/settings")
     def put_settings(req: SettingsUpdate) -> dict:
-        """Live-edit whitelisted runtime knobs (§22).
+        """Live-edit whitelisted runtime knobs (history §22).
 
         Validated + coerced against LIVE_KNOBS; knobs baselined by the
         environment/platform are rejected with 409 (platform wins, §5.1
@@ -562,7 +562,7 @@ def create_app(
                 )
 
         with lock:
-            limit = runtime.max_concurrent_runs or 0  # live-editable (§22)
+            limit = runtime.max_concurrent_runs or 0  # live-editable (history §22)
             if limit > 0 and state["active_runs"] >= limit:
                 raise HTTPException(
                     status_code=429,

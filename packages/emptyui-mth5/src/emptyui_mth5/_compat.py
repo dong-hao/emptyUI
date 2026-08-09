@@ -189,7 +189,7 @@ def apply_metadata_class_cache() -> None:
 
 def apply_channel_rate_fix() -> None:
     """Idempotently replace ``ChannelTS.compute_sample_rate``'s endpoint
-    method with the median of the time diffs (§24.8).
+    method with the median of the time diffs (history §24.8).
 
     The endpoint method (``size / (t[-1] - t[0])``) is biased by
     ``n / (n - 1)``: a 2-second 2400 Hz slot (4800 samples) derives
@@ -233,7 +233,7 @@ def apply_channel_rate_fix() -> None:
 
 
 def ensure_h5_openable(path, log=None) -> None:
-    """Detect and clear a stale HDF5 write flag before opening (§24.8).
+    """Detect and clear a stale HDF5 write flag before opening (history §24.8).
 
     A process killed while a loader/Save handle had the archive open for
     write leaves the superblock's consistency flags set — every later open

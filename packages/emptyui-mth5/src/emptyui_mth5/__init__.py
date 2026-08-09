@@ -13,7 +13,7 @@ from ._compat import (
 # times per pass (history §24.8 performance note)
 apply_crs_cache()
 # ChannelTS's endpoint sample-rate method is biased for short high-rate
-# runs (a 2-s 2400 Hz slot derives 2401 — §24.8 performance note)
+# runs (a 2-s 2400 Hz slot derives 2401 — history §24.8 performance note)
 apply_channel_rate_fix()
 # mth5 builds a new pydantic model class per group/channel init — an
 # ~80 s tax on a ~1300-run burst ingest (history §24.8 performance note)

@@ -144,7 +144,7 @@ class NodeCache:
                 self._pop_oldest_locked()
 
     def set_budget(self, max_bytes: int | None) -> int:
-        """Change the byte bound live (§22 settings); returns evicted count.
+        """Change the byte bound live (history §22 settings); returns evicted count.
 
         Unlike ``put`` (which never evicts the just-stored entry), a live
         shrink enforces the new bound against EVERYTHING — the user asked
@@ -168,7 +168,7 @@ class NodeCache:
             return self._bytes
 
     def resize(self, max_entries: int) -> int:
-        """Change the LRU bound live (§22 settings); returns evicted count."""
+        """Change the LRU bound live (history §22 settings); returns evicted count."""
         self._max = max(1, int(max_entries))
         with self._lock:
             evicted = 0

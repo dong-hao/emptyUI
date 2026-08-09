@@ -164,7 +164,7 @@ export const useRun = create<RunState>((set) => ({
         });
         break;
       case "payload": {
-        // time-series extent summary (§23.4) — last run wins (poll replays
+        // time-series extent summary (history §23.4) — last run wins (poll replays
         // can repeat it; same summary, so overwrite is harmless)
         const node = event.node as string;
         const port = event.port as string;

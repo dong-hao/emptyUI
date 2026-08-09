@@ -50,7 +50,7 @@ class PathPolicy:
 
     def _resolve_output(self, name: str, value: str) -> Path:
         if value in (None, ""):
-            # no explicit output dir → the run workspace itself (§17.2:
+            # no explicit output dir → the run workspace itself (history §17.2:
             # writable outputs live there; local dev keeps its defaults)
             return self.workspace if self.workspace is not None else Path("")
         p = Path(value).expanduser()

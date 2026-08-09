@@ -1,11 +1,13 @@
 """DAG executor (DESIGN.md §7).
 
-M0: sequential topological execution over validated workflows. Cancellation
-is supported via a threading.Event polled between nodes. M3: results are
+Sequential topological execution over validated workflows. Cancellation
+is supported via a threading.Event polled between nodes. Results are
 content-addressed in a cross-run :class:`NodeCache` (structural signatures
 propagate upstream changes), and runs can be restricted to a target node's
-ancestral closure ("execute to here"). Concurrency (thread-pool branches)
-remains future work.
+ancestral closure ("execute to here"); per-node watchdog deadlines
+(issues.md M2) bound each node's budget. Concurrency (thread-pool
+branches) remains future work. (The M0/M3 milestone tags are history —
+docs/history/.)
 """
 
 from __future__ import annotations
@@ -384,7 +386,7 @@ class Executor:
 
         ``data_root`` + ``path_kind="in"``: a RELATIVE input path is
         resolved under the data root before statting (execution resolves
-        the same way, §17.2) — without this the stat silently missed for
+        the same way, history §17.2) — without this the stat silently missed for
         remote-mode workflows and external modifications never
         invalidated the cache.
         """
@@ -395,7 +397,7 @@ class Executor:
             # stat at key time says nothing about what the node will
             # write, and an empty out-path stat()s the server CWD
             # (Path("") == Path(".")): a spurious cross-run
-            # invalidation trigger on every CWD-affecting event (§17.2
+            # invalidation trigger on every CWD-affecting event (history §17.2
             # resolves out-paths per-run into the workspace anyway)
             return value
         p = Path(value).expanduser()
@@ -447,7 +449,7 @@ class Executor:
                 continue
             # §7 hashes the EFFECTIVE params — coerce first, so the string
             # combobox value "4" and the number 4 share one cache entry
-            # (execution coerces identically, §18 review fix). The numeric
+            # (execution coerces identically, history §18 review fix). The numeric
             # canonicalization here normalizes the KEY form only (int 4 vs
             # float 4.0); execution keeps its own semantics.
             value = self._coerce_param(param, raw)
@@ -898,7 +900,7 @@ class Executor:
                     elif param.default is not None:
                         kwargs.setdefault(param.name, param.default)
 
-                # stale params (§24.9): a saved workflow may carry params a
+                # stale params (history §24.9): a saved workflow may carry params a
                 # node no longer declares (removed/refactored options) —
                 # they are ignored, but silently, so warn once per node
                 stale = sorted(set(wnode.params) - {p.name for p in manifest.params})
@@ -911,7 +913,7 @@ class Executor:
                                f"'{wnode.type}': {', '.join(stale)}",
                     })
 
-                # remote-mode path confinement (§17.2): inputs stay inside
+                # remote-mode path confinement (history §17.2): inputs stay inside
                 # the data root, outputs resolve into this run's workspace
                 if data_root is not None:
                     kwargs = PathPolicy(data_root, workspace).resolve_params(
@@ -998,7 +1000,7 @@ class Executor:
                     # fallback; cache restores already emitted the port name
                     value_to_handle[id(value)] = port.name
                     # time-series extent summary for the frontend time selector
-                    # (§23.4) — lightweight, duck-typed, emitted per ts output
+                    # (history §23.4) — lightweight, duck-typed, emitted per ts output
                     summary = _ts_summary(value) or _fc_summary(value)
                     if summary is not None:
                         emit({"event": "payload", "node": node_id,

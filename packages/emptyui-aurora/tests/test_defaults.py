@@ -1,8 +1,8 @@
 """Default-surface regression tests.
 
-History: the 2026-09-14 default flip (§24.5) set the per-bin statistic and
+History: the 2026-09-14 default flip (history §24.5) set the per-bin statistic and
 the 3-periods/octave / 20-min-bins SDG31-recipe values. The 2026-09-15
-simplification (§24.9) removed banding from the sort entirely — the sort's
+simplification (history §24.9) removed banding from the sort entirely — the sort's
 surface is now band-free and the estimator keeps the SDG31-recipe banding
 defaults; the internal helpers (``_period_bands``, ``_l2u_band_table``,
 ``_resolve_period_bands``) keep their historical defaults, every call site
@@ -32,7 +32,7 @@ def test_coherence_sort_node_defaults():
     d = _param_defaults(CoherenceSort)
     assert d["ensemble_windows"] == 16
     assert d["smooth_bins"] == 0
-    # §24.9: no banding or statistic params on the sort node
+    # history §24.9: no banding or statistic params on the sort node
     for gone in ("statistic", "periods_per_octave", "band_style",
                  "min_bins_per_band", "t_short", "coherence_trim"):
         assert gone not in d
@@ -48,7 +48,7 @@ def test_plot_coherency_node_defaults():
     d = _param_defaults(PlotCoherency)
     assert d["ensemble_windows"] == 16
     assert d["smooth_bins"] == 0
-    # §24.9: the plot renders the per-bin statistic — no banding params
+    # history §24.9: the plot renders the per-bin statistic — no banding params
     for gone in ("periods_per_octave", "band_style", "min_bins_per_band",
                  "t_short"):
         assert gone not in d

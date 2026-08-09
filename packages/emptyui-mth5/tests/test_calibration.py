@@ -137,7 +137,7 @@ def test_default_unit_by_nomenclature():
     """Default units come from the nomenclature, not a name-prefix guess:
     standard-named magnetic channels (hx/hy/hz) are nanoTesla — the old
     startswith("b") check stamped them mV/km, silently skipping aurora's
-    nT→A/m conversion downstream (Z off by mu0*1e9, the §16.3 bug class)."""
+    nT→A/m conversion downstream (Z off by mu0*1e9, the history §16.3 bug class)."""
     from emptyui_mth5.calibration import _default_unit
 
     for ch in ("hx", "hy", "hz", "bx", "by", "bz", "h1", "H2"):

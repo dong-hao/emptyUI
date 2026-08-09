@@ -207,7 +207,7 @@ def test_build_fc_per_family_decimation_trim(tmp_path):
 
 
 def test_build_fc_carries_run_id_coordinate(tmp_path):
-    """§24.13: each merged FC window knows its run — Select Runs groups by
+    """history §24.13: each merged FC window knows its run — Select Runs groups by
     the per-window 'run_id' coordinate (merge attrs alone can't)."""
     archive = _two_run_archive(tmp_path)
     ctx = RunContext(workspace=tmp_path, store=DataStore())
@@ -305,7 +305,7 @@ def test_build_fc_regroup_keeps_gaps_separate(tmp_path):
 
 
 def test_build_fc_select_runs_drops_noisy_session(tmp_path):
-    """Hour-level QC now lives in Select Runs (§24.13): the inflated run is
+    """Hour-level QC now lives in Select Runs (history §24.13): the inflated run is
     dropped from the merged span while clean runs keep their ids — no
     pre-cascade read of the time series anywhere."""
     from emptyui_aurora.process import SelectRuns

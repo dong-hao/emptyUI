@@ -146,7 +146,7 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
   });
 
   // The bar appears on Plot Time Series once the upstream streamed its
-  // payload extent (§23.4). The sample CSV has no time column ⇒ the bar
+  // payload extent (history §23.4). The sample CSV has no time column ⇒ the bar
   // renders relative seconds.
   const plotNode = node(page, "Plot Time Series");
   const bar = plotNode.locator(".time-bar");
@@ -205,7 +205,7 @@ test("time selector bar: drag updates boxes, box edit moves handle", async ({
   await expect(bar).toBeVisible(); // never crossed → slot stays valid
 });
 
-test("Extract Run offers the collection's sample rates as select suggestions (§20.1)", async ({
+test("Extract Run offers the collection's sample rates as select suggestions (history §20.1)", async ({
   page,
 }) => {
   const H5 = path.resolve(
@@ -241,7 +241,7 @@ test("Extract Run offers the collection's sample rates as select suggestions (§
   });
 
   // The sample_rate param's datalist gains the collection's distinct rates
-  // once the payload extent arrives — "auto" first, then the rates (§20.1).
+  // once the payload extent arrives — "auto" first, then the rates (history §20.1).
   // NB: a <datalist> is display:none by spec — assert on its options.
   const datalist = node(page, "Plot Time Series").locator("datalist");
   await expect(datalist).toHaveCount(1, { timeout: 15_000 });
@@ -282,7 +282,7 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
   });
 
   // Default 'time range' mode: the bar shows the UNION extent over every
-  // run of the station (§23.4 — the collection's full coverage). Switch to
+  // run of the station (history §23.4 — the collection's full coverage). Switch to
   // 'run id' mode so the bar shows one run's extent (the assertions below
   // are tuned to sr150_0001, the first run of the smoke archive's summary);
   // rerun so the payload event reflects the new selection.

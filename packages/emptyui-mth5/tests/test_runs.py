@@ -506,7 +506,7 @@ def test_align_runs_collections_no_overlap_error(tmp_path):
 
 
 def test_align_runs_collections_window_params(tmp_path):
-    """The time-selector window (§23.4) narrows the overlap member-wise."""
+    """The time-selector window (history §23.4) narrows the overlap member-wise."""
     from emptyui_mth5.runs import AlignRuns, RunCollection
 
     a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 160, station="A", run="a1")

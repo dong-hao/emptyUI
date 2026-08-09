@@ -73,7 +73,7 @@ def _param_value_problems(wnode: WorkflowNode, manifest) -> list[str]:
     declared ``min``/``max`` (number/integer), the declared ``options``
     (select/radio) and the ``optional`` flag. Manifest defaults are not
     re-checked (plugin-declared, not client-supplied), and stale params a
-    node no longer declares stay tolerated per the §24.9 policy (the
+    node no longer declares stay tolerated per the history §24.9 policy (the
     executor warns about them).
 
     Option checks are skipped for params whose option set is extended at
@@ -180,7 +180,7 @@ def validate_workflow(workflow: Workflow, registry) -> None:
                 )
             continue
 
-        # Stale params (§24.9) are deliberately tolerated here: a saved
+        # Stale params (history §24.9) are deliberately tolerated here: a saved
         # workflow may carry params a node no longer declares. The executor
         # resolves only manifest params and emits a node-level progress
         # note naming them — validation must not hard-reject what the

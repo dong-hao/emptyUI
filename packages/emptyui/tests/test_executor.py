@@ -445,7 +445,7 @@ def test_ts_summary_kind_field_and_mt_getattr_safety():
 
 
 def test_stale_params_warn_and_are_ignored():
-    """§24.9: saved workflows may carry params a node no longer declares —
+    """history §24.9: saved workflows may carry params a node no longer declares —
     execution proceeds with the manifest params only, and the stale ones
     surface as a node-level progress note (not a silent no-op)."""
     from emptyui import Input, Node, Output, Param

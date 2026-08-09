@@ -108,11 +108,11 @@ class Param:
     #: options (§4): an upstream ``output_channels="e1,e2,bz"`` offers e1 /
     #: e2 / bz as separate choices. Rendering-only.
     split_inherited: bool = False
-    #: Time-selector bar binding (§23.4): the *input port name* whose
+    #: Time-selector bar binding (history §23.4): the *input port name* whose
     #: payload summary (extent streamed via `payload` run events) drives the
     #: frontend time bar for this param pair. Rendering-only.
     time_bar: str = ""
-    #: Select-option suggestions (§20.1): the *input port name* whose
+    #: Select-option suggestions (history §20.1): the *input port name* whose
     #: payload summary offers the option list (e.g. an fc database's
     #: sample-rate tiers streamed via `payload` run events). The frontend
     #: extends the static options with the summary's values; rendering-only.

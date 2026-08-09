@@ -116,7 +116,7 @@ def test_fc_provenance_round_trip(writable_archive, tmp_path):
     """Write FC -> Read FC restores the window/decimation geometry (mth5's
     native FC metadata model), the station identity (archive hierarchy) and
     the nomenclature/magnetic-unit derivations — so the merge_fc window
-    warnings and the §23.3 provenance line work for read-back FCs.
+    warnings and the history §23.3 provenance line work for read-back FCs.
 
     Note: attrs the FC metadata model cannot express (electric_scaling,
     calibration_applied) deliberately stay in-memory provenance — unknown

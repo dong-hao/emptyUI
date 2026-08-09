@@ -12,7 +12,7 @@ depending on the magnetic-unit param — all wrong. Now:
   them on its RunTS outputs;
 - Compute FC hard-rejects raw instrument counts ("digital counts") with
   an actionable message instead of warn+passthrough (FDSN-built mth5
-  archives store raw counts — a Calibrate step is mandatory, §16.4).
+  archives store raw counts — a Calibrate step is mandatory, history §16.4).
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ def test_counts_impedance_would_be_meaningless(tmp_path):
                           factor=4, num_samples_window=128)
 
 
-# --- §24.12: instrument response chains survive the payload path ----------
+# --- history §24.12: instrument response chains survive the payload path ----------
 
 def _fap(name="t_fap"):
     import numpy as np

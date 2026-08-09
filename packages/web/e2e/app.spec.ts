@@ -90,7 +90,7 @@ test("Estimate TF's remote reference is enabled only for the robust estimator", 
   await expect(remote).toBeEnabled();
 });
 
-test("Coherence Sort is band-free and Estimate TF keeps its own banding (§24.9)", async ({
+test("Coherence Sort is band-free and Estimate TF keeps its own banding (history §24.9)", async ({
   page,
 }) => {
   await page.goto("/");
@@ -118,7 +118,7 @@ test("Coherence Sort is band-free and Estimate TF keeps its own banding (§24.9)
   await page.mouse.move(th.x + th.width / 2, th.y + th.height / 2, { steps: 8 });
   await page.mouse.up();
 
-  // §24.9: the sort is band-free — no banding widget on its surface; the
+  // history §24.9: the sort is band-free — no banding widget on its surface; the
   // estimator owns banding and keeps its own defaults (the old sort→TF
   // banding inherit was deliberately removed and must stay removed)
   for (const label of ["Band style", "Periods per octave", "Min bins per band"]) {

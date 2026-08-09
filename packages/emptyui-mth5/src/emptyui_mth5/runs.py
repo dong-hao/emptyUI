@@ -39,7 +39,7 @@ class RunCollection:
     :attr:`extents` carries each member's identity/extent row
     (survey/station/run/start/end/sample_rate) so downstream nodes can
     stamp per-run identity and the executor can summarize the collection
-    for the time selector (§23.4).
+    for the time selector (history §23.4).
     """
 
     runs: list[Any] = field(default_factory=list)
@@ -94,7 +94,7 @@ def read_run_channels(run_obj):
 
 def resolve_filter_registry(survey_obj, data_vars) -> dict:
     """Resolve the response-chain filter objects once from the archive
-    (§24.12): the channel attrs carry filter *names*, the objects live in
+    (history §24.12): the channel attrs carry filter *names*, the objects live in
     /Survey/Filters — a duck payload needs the objects for the FC-level
     calibration to divide by."""
     filter_names: set = set()
@@ -143,7 +143,7 @@ def _slice_window(data_vars: dict, lo, hi) -> dict:
 
 
 class _CachedRunTS(RunTS):
-    """RunTS with channel attribute caching (§24.8).
+    """RunTS with channel attribute caching (history §24.8).
 
     ``RunTS.__getattr__`` constructs a fresh ChannelTS on every attribute
     access (``run_metadata.copy()`` + validation ≈ 2 s per channel) — the
@@ -168,7 +168,7 @@ class _CachedRunTS(RunTS):
         return super().__getattr__(name)
 
     def clear_channel_cache(self) -> None:
-        """Drop the cached per-channel ChannelTS objects (§24.8).
+        """Drop the cached per-channel ChannelTS objects (history §24.8).
 
         ``attach_filters`` re-stamps a channel's dataset attrs (the
         applied-filter refs) in place; a cached ChannelTS resolved its
@@ -181,7 +181,7 @@ class _CachedRunTS(RunTS):
 def _group_id(group_obj) -> str:
     """The group's id from its HDF5 path (cheap) — ``group_obj.metadata``
     is a property that rebuilds the FULL station/survey metadata through
-    pydantic (all 145 runs of a burst archive ≈ 30-40 s, §24.8)."""
+    pydantic (all 145 runs of a burst archive ≈ 30-40 s, history §24.8)."""
     try:
         return str(group_obj.hdf5_group.name.split("/")[-1])
     except Exception:  # noqa: BLE001 — identity only, never blocks
@@ -190,7 +190,7 @@ def _group_id(group_obj) -> str:
 
 def _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
                 sample_rate: float, registry: dict):
-    """Build a real ``RunTS`` from the fast channel read (§24.8).
+    """Build a real ``RunTS`` from the fast channel read (history §24.8).
 
     ``RunTS(dataset)`` construction is ~0.2 s vs ``to_runts``'s ~7-19 s
     mt_metadata deepcopy/validation storm. The archive's survey/station/
@@ -214,7 +214,7 @@ def _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
     # NB: per-channel ChannelTS objects are NOT pre-built — RunTS resolves
     # response chains lazily from the dataset attrs + ``.filters`` registry
     # (``_get_channel_response``), and eager ``getattr(runts, name)`` would
-    # pay the full ChannelTS-construction storm right here (§24.8).
+    # pay the full ChannelTS-construction storm right here (history §24.8).
     return runts
 
 
@@ -407,7 +407,7 @@ class ExtractRun(Node):
         if not str(run).strip():
             # the silent first-row fallback is a burst-archive footgun
             # (the first summary row is a 16 s slot, not the continuous
-            # stream the user wants) — degrade loudly (§23.3)
+            # stream the user wants) — degrade loudly (history §23.3)
             summary = station_obj.run_summary
             if summary is not None and len(summary) > 1:
                 hint = _largest_runs_hint(summary)
@@ -418,7 +418,7 @@ class ExtractRun(Node):
                     "explicitly, or use 'time range' selection")
         start_dt = end_dt = None
         if str(start).strip() or str(end).strip():
-            # time-selector guards (§23.4): clamp into the run's extent.
+            # time-selector guards (history §23.4): clamp into the run's extent.
             # The extent's time axis is used as-is — even a placeholder
             # epoch (1980/1970 synthetic/digitized record) is a valid
             # within-record selection axis (the bar shows the same axis).
@@ -589,7 +589,7 @@ class ExtractRun(Node):
         for i, (rid, rs, re_, clo, chi) in enumerate(kept, 1):
             run_obj = _resolve_run(station_obj, rid)
             payload = _run_duck_payload(survey_obj, run_obj, lo=clo, hi=chi)
-            # §24.12: the response-chain filters are the same few objects
+            # history §24.12: the response-chain filters are the same few objects
             # across members of one survey — resolve each name-set once
             names = tuple(sorted(getattr(payload, "filters", {}) or {}))
             if names and names not in registry_cache:
@@ -704,7 +704,7 @@ def _get_channel(data, name: str):
     pairs = channel_calibration(data).get(str(name)) or []
     if pairs:
         # keep the response chain on the wrapper so Merge Channels rebuilds
-        # a RunTS that still carries it (§24.12)
+        # a RunTS that still carries it (history §24.12)
         ch.channel_response = ChannelResponse(
             filters_list=[obj for obj, _ in pairs])
         ch.channel_metadata.filters = [
@@ -762,7 +762,7 @@ class MergeChannels(Node):
         else:
             runts = RunTS(array_list=channels)
         if str(start).strip() or str(end).strip():
-            # time-selector window (§23.4): crop the merged run; all
+            # time-selector window (history §23.4): crop the merged run; all
             # channels share the run's time base
             ch, sr = _payload(runts)
             n = max(len(v) for v in ch.values())
@@ -896,7 +896,7 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
             ch.channel_metadata.units = u
         pairs = calibration.get(str(name)) or []
         if pairs:
-            # carry the response chain across the crop (§24.12): objects
+            # carry the response chain across the crop (history §24.12): objects
             # via channel_response (RunTS registers them), refs via channel
             # metadata (the archive round trip restores them). The refs are
             # set AFTER channel_response — the setter would clobber flags.
@@ -1036,7 +1036,7 @@ class AlignRuns(Node):
         if n_common < 1:
             raise ValueError("runs have no overlapping samples")
 
-        # time-selector window (§23.4): one slot within the aligned overlap
+        # time-selector window (history §23.4): one slot within the aligned overlap
         # (both outputs must keep the identical interval). Absolute ISO
         # bounds anchor at the overlap start when the runs carry GPS time;
         # without GPS time only relative seconds are accepted (the shared
@@ -1067,7 +1067,7 @@ class AlignRuns(Node):
         _warn_merge_gaps_in_overlap(
             ctx, (data1, data2), (out1, out2),
             (start_iso, n_common, sr))
-        # §24.3 E1b: aligning against a partial remote silently discards
+        # history §24.3 E1b: aligning against a partial remote silently discards
         # local data (the official SDG31 comparison lost 29% of the local
         # run this way) — warn when the overlap leaves a large share of an
         # input out.
@@ -1203,7 +1203,7 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
             f"{ba[1]:%Y-%m-%d %H:%M}] vs [{bb[0]:%Y-%m-%d %H:%M}, "
             f"{bb[1]:%Y-%m-%d %H:%M}] — check the stations' coverage")
 
-    # §23.4 window params narrow the overlap (both outputs identical)
+    # history §23.4 window params narrow the overlap (both outputs identical)
     if str(start).strip() or str(end).strip():
         s0, s1 = resolve_window_s(
             start, end, rec_len=(t1 - t0).total_seconds(),
@@ -1280,7 +1280,7 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
         else:
             out[f"data{idx}"] = RunCollection(runs=members, extents=extents)
 
-    # M4 #2 / §24.3 E1b: the collection route is Extract Run's DEFAULT
+    # M4 #2 / history §24.3 E1b: the collection route is Extract Run's DEFAULT
     # output — it must run the same warning chain as the single-run body
     # (gap provenance inside the overlap, cross-station coherence). Partial
     # coverage is already reported by the per-side drop warning above (the

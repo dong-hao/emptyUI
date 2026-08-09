@@ -5,7 +5,7 @@ log-uniform window-starvation coarsening — and ``band_style="uniform"``
 merge-based level combination. The retired ``"emtf"`` value is accepted as
 a legacy alias of ``"l2u"`` (the auto-derived disjoint EMTF-style table was
 replaced 2026-09-11); the ``"index"`` mode was removed after the 2026-09-09
-assessment; see history §14.6/§14.9.
+assessment; see history §14.6/history §14.9.
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ def test_l2u_skips_levels_without_window_metadata():
 def test_l2u_head_clip_drops_short_periods():
     """t_short clips the head: no evaluated band center is shorter, and the
     head level loses its shortest bands (the official USArray grid clips at
-    ~7.3 s for the 1 Hz NIMS band — data-driven, §14.9)."""
+    ~7.3 s for the 1 Hz NIMS band — data-driven, history §14.9)."""
     fc = _fake_levels()
     table = _l2u_band_table(fc, min_bins_per_band=40.0, t_short=30.0)
     assert 0 not in table  # L0 (8.3-25.6 s) fully clipped
@@ -323,7 +323,7 @@ def test_l2u_is_the_default_style():
 
 
 def test_coherence_sort_fc_no_band_geometry():
-    """§24.9: the sort's API is band-free — legacy band-geometry kwargs are
+    """history §24.9: the sort's API is band-free — legacy band-geometry kwargs are
     rejected rather than silently accepted."""
     source = synthetic_source(2)
     runts = synthetic_runts(source, seed=2)
@@ -356,14 +356,14 @@ def test_node_estimate_tf_accepts_band_style(tmp_path):
     source = synthetic_source(3)
     cs_runts = synthetic_runts(source, seed=3)
     cs_fc = synthetic_fc(cs_runts, ["hx", "hy"], ["ex", "ey"])
-    # §24.9: the sort node declares no banding params — passing the removed
+    # history §24.9: the sort node declares no banding params — passing the removed
     # kwarg is a signature error (the executor ignores stale params from
     # saved workflows, but the node API itself is band-free)
     with pytest.raises(TypeError):
         CoherenceSort().execute(ctx, cs_fc, band_style="uniform")
 
 
-# --- §14.9 frequency-grid determination: l2u coarsening + head clip ---
+# --- history §14.9 frequency-grid determination: l2u coarsening + head clip ---
 
 def test_l2u_estimate_grid_matches_table():
     """estimate_tf_levels with the l2u scheme evaluates exactly the
@@ -379,7 +379,7 @@ def test_l2u_estimate_grid_matches_table():
 
 
 def test_node_estimate_tf_adaptive_params(tmp_path):
-    """The Estimate TF node exposes the §14.9 refinements and they reach the
+    """The Estimate TF node exposes the history §14.9 refinements and they reach the
     grid: the coarsened+clipped node result has fewer periods than the
     plain default and its processing notes record the params."""
     from emptyui.context import RunContext
@@ -468,7 +468,7 @@ def test_head_clip_zero_is_noop_for_both_schemes():
 
 
 def test_manual_bands_geometry():
-    """§24.5 P4: manual_bands reproduces the parity harness's
+    """history §24.5 P4: manual_bands reproduces the parity harness's
     exact_official_bands reconstruction exactly (geometric-midpoint edges,
     level 0 = highest frequencies, order-normalized input)."""
     from emptyui_aurora._processing import manual_bands

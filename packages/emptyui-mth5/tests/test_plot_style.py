@@ -458,7 +458,7 @@ def test_notes_wrapped_to_axes_width(tmp_path: Path):
             probe = fig.text(0, 0, line, fontsize=note.get_fontsize())
             assert probe.get_window_extent(renderer).width <= ax_w + 1.0
             probe.remove()
-        # wrapped note no longer inflates the saved canvas (§23.3: the old
+        # wrapped note no longer inflates the saved canvas (history §23.3: the old
         # single-line note rendered ~1100px wide on a ~310px figure)
         import io
 
@@ -481,7 +481,7 @@ def test_notes_below_xlabel(tmp_path: Path):
         renderer = fig.canvas.get_renderer()
         xlabel_bb = fig.axes[1].xaxis.label.get_window_extent(renderer)
         note_bb = note.get_window_extent(renderer)
-        # anchored 5px below the x-label — never overlapping (§23.3); when
+        # anchored 5px below the x-label — never overlapping (history §23.3); when
         # the wrapped block needs more room than the canvas has,
         # bbox_inches="tight" extends the saved image downward to include it
         assert note_bb.y1 <= xlabel_bb.y0 + 0.6

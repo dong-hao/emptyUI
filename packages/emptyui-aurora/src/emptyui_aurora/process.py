@@ -34,7 +34,7 @@ def _attr_float(group_obj, key: str):
     """A float from an mth5 group's HDF5 attrs (dotted key), or None.
 
     The group ``.metadata`` properties rebuild the FULL hierarchy through
-    pydantic on every access (~30-40 s on a burst archive, §24.8) — the
+    pydantic on every access (~30-40 s on a burst archive, history §24.8) — the
     attrs carry the same scalars (location.*, time_period.*, ...) for free.
     """
     try:
@@ -233,7 +233,7 @@ class ComputeFC(Node):
               default=True,
               description="Zero-weight (NaN) every FC window whose flagged "
                           "sample fraction exceeds 'saturated max' (MTU-5A "
-                          "block tags byte 15, §24.12 QC). No effect on "
+                          "block tags byte 15, history §24.12 QC). No effect on "
                           "payloads without a 'saturated' mask."),
         Param("saturated_max", "number", label="Saturated max",
               default=0.01, min=0.0, max=1.0,
@@ -398,7 +398,7 @@ class ComputeFC(Node):
                 "grid anchors at its own start — remote-reference pairing "
                 "across separately-computed runs needs clock_zero='epoch' "
                 "(or an explicit ISO datetime)", len(members))
-        # per-family decimation trim (Build FC's rule, §24.8): on a
+        # per-family decimation trim (Build FC's rule, history §24.8): on a
         # mixed-rate collection the lowest-rate family carries the full
         # 'decimation_levels' cascade; higher-rate families decimate only
         # until their rate would reach the next family's native rate.
@@ -461,7 +461,7 @@ class ComputeFC(Node):
                 i / len(members),
                 f"FC {i}/{len(members)}: run {rid} ({len(levels)} level(s))")
         merged = merge_fc_containers(containers)
-        # the native rate families travel with the database (§20.1): the
+        # the native rate families travel with the database (history §20.1): the
         # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
         # (the continuous stream), not the deepest cascade tier — cascade
         # tiers extend below the stream's native rate. The database is a
@@ -480,7 +480,7 @@ class ComputeFC(Node):
 def _diurnal_prior_factor(start, use_prior: bool, prior_max: float,
                           local_utc_offset: float,
                           absolute_time: bool = True) -> float:
-    """Soft diurnal prior for run QC (§24.13): the natural-signal envelope
+    """Soft diurnal prior for run QC (history §24.13): the natural-signal envelope
     varies smoothly over the day (Szarka 1988; Garcia & Jones 2002), so a
     daytime run must be cleaner than a night run to pass the same score.
     The factor peaks at local noon (1 + (prior_max-1)) and is 1 at local
@@ -559,7 +559,7 @@ class BuildFC(Node):
               description="Deepest decimation level: 0 = native rate only; "
                           "on a mixed-rate burst archive each family's "
                           "cascade is trimmed to stop at the next family's "
-                          "native rate (§24.8)."),
+                          "native rate (history §24.8)."),
         Param("factor", "integer", label="Decimation factor", default=4, min=2),
         Param("window_samples", "integer", label="Window (samples)",
               default=256, min=8),
@@ -588,7 +588,7 @@ class BuildFC(Node):
               default=True,
               description="Zero-weight (NaN) every FC window whose flagged "
                           "sample fraction exceeds 'saturated max' (MTU-5A "
-                          "block tags byte 15, §24.12 QC). No effect on "
+                          "block tags byte 15, history §24.12 QC). No effect on "
                           "payloads without a 'saturated' mask."),
         Param("saturated_max", "number", label="Saturated max",
               default=0.01, min=0.0, max=1.0,
@@ -608,7 +608,7 @@ class BuildFC(Node):
         Param("regroup_contiguous", "boolean", label="Regroup contiguous runs",
               default=False,
               description="Cascade maximal contiguous spans of same-rate "
-                          "runs as ONE payload (§24.13): hourly sessions "
+                          "runs as ONE payload (history §24.13): hourly sessions "
                           "cannot form a level below ~0.23 Hz per slice, but "
                           "the underlying stream is unbroken — cascading the "
                           "kept contiguous span restores the long-period "
@@ -712,7 +712,7 @@ class BuildFC(Node):
 
         # survey/station ids from the HDF5 group paths (free) — the group
         # .metadata properties rebuild the FULL hierarchy through pydantic
-        # (~30-40 s per access on a burst archive; §24.8). Location comes
+        # (~30-40 s per access on a burst archive; history §24.8). Location comes
         # from the station's HDF5 attrs (dotted keys) the same way.
         surv = _group_id(survey_obj)
         stat = _group_id(station_obj)
@@ -786,14 +786,14 @@ class BuildFC(Node):
 
         # (the former _read_channels/_resolve_registry closures are the
         # shared emptyui_mth5.runs helpers — one implementation for Build
-        # FC and Extract Run 'time range', §24.12 filter resolution
+        # FC and Extract Run 'time range', history §24.12 filter resolution
         # included)
 
         # cascade spans: singletons by default; with regroup_contiguous,
         # maximal contiguous spans of same-rate runs (adjacency within two
         # samples) — the physically right processing unit for unbroken
         # acquisitions. Built from ALL sessions: hour-level QC lives in
-        # Select Runs (§24.13), so spans never depend on QC outcomes and
+        # Select Runs (history §24.13), so spans never depend on QC outcomes and
         # the time series is read exactly once.
         import pandas as pd
 
@@ -886,7 +886,7 @@ class BuildFC(Node):
                     spans.append(cur)
 
         unit_by_id = {u[0]: u for u in units}
-        # one workspace handle for the whole execution (§24.8): the
+        # one workspace handle for the whole execution (history §24.8): the
         # per-level open/close is quadratic — every close re-summarizes all
         # summary tables (the fc summary recursively walks every persisted
         # FC level)
@@ -1032,7 +1032,7 @@ class BuildFC(Node):
                                 "run %s level %d has no absolute time axis — "
                                 "skipping persistence", span_id, level)
                             break
-                # §24.13: per-window run identity at SESSION granularity — the
+                # history §24.13: per-window run identity at SESSION granularity — the
                 # merged FC database keeps only the first contributor's attrs,
                 # so the QC nodes need an explicit coordinate to group windows
                 # by run. Windows straddling an internal boundary follow the
@@ -1081,7 +1081,7 @@ class BuildFC(Node):
             if persist:
                 close_workspace_mth5(ctx)
         merged = merge_fc_containers(containers)
-        # the native rate families travel with the database (§20.1): the
+        # the native rate families travel with the database (history §20.1): the
         # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
         # (the continuous stream), not the deepest cascade tier — cascade
         # tiers extend below the stream's native rate. The database is a
@@ -1308,7 +1308,7 @@ class SelectRuns(Node):
                           "percentile over the runs' per-run medians. The "
                           "plain median (50) empirically reproduces the "
                           "official Phoenix TF best on the test corpus "
-                          "(§24.13 sweep); lower percentiles select the "
+                          "(history §24.13 sweep); lower percentiles select the "
                           "low-|Z| tail and bias yx up by ~+0.03 decades."),
         Param("use_prior", "boolean", label="Daytime soft prior",
               default=True,
@@ -1323,7 +1323,7 @@ class SelectRuns(Node):
         Param("local_utc_offset", "number", label="Local UTC offset (h)",
               default=8.0, min=-12.0, max=14.0,
               description="Site timezone offset used by the prior (Tibet "
-                          "= UTC+8, §24.11)."),
+                          "= UTC+8, history §24.11)."),
     )
 
     def execute(self, ctx, fc, period_min: float = 1.0,
@@ -1950,7 +1950,7 @@ class MergeFC(Node):
         "series cascade cannot decimate across slot boundaries; per-run "
         "cascades are fine and starved deep levels are skipped). Inputs are "
         "matched per level keyed by their ACTUAL sample rate — mixing rate "
-        "families is the point (§24.8: levels are re-keyed to consecutive "
+        "families is the point (history §24.8: levels are re-keyed to consecutive "
         "ints in descending rate order); window settings should agree "
         "(warning), frequency grids are intersected and channels missing "
         "in some input are dropped (warnings). The FCs must share one "

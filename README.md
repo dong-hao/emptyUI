@@ -23,7 +23,7 @@ examples/
 └── plugin-template/      # working plugin template
 
 test/verification/        # recorded parity/metrics JSONs + the verification
-                          #   scripts that reproduce them (DESIGN history)
+                          #   scripts that reproduce them (DESIGN history sections)
 ```
 
 ## Development
@@ -83,7 +83,7 @@ message-only/docs chores + why).
 subject under ~72 characters where possible; the DESIGN.md section
 reference anchors the change to the design record. The message must
 describe the diff it accompanies — a message narrating changes that are
-not in the commit falsifies the decision record. Historical references (§13
+not in the commit falsifies the decision record. Historical references (history §13
 and above) are written `history §N` and resolve in `docs/history/`, which
 preserves the original numbering verbatim; current-contract references are
 written `DESIGN.md §<n>` against DESIGN.md's living numbering (§1–§12).
@@ -163,5 +163,5 @@ ranked in DESIGN.md §12.2.
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.
 - [docs/deployment.md](docs/deployment.md) — remote/embedded deployment.
 - `docs/history/` — verbatim delivery records (M2/M3/M4) preserving the
-  original §13–§24 numbering; write references to them as `history §N`
+  original history §13–history §24 numbering; write references to them as `history §N`
   in code docstrings and commit messages.

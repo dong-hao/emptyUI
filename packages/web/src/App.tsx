@@ -378,7 +378,7 @@ export default function App() {
       const eventKey = (event: Record<string, unknown>, index: number) => {
         if (event.event === "artifact") return `artifact:${event.id ?? index}`;
         if (event.event === "payload") {
-          // port + summary identify the event (§23.4): multi-output nodes
+          // port + summary identify the event (history §23.4): multi-output nodes
           // (e.g. Align Runs data1/data2) each carry their own extent
           return `payload:${event.node ?? ""}:${event.port ?? ""}:${
             JSON.stringify(event.summary ?? "")}`;

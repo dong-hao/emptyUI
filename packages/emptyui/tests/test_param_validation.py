@@ -176,7 +176,7 @@ def test_optional_param_none_passes():
 
 
 def test_stale_params_still_tolerated():
-    # §24.9 policy: params a node no longer declares are warned about by
+    # history §24.9 policy: params a node no longer declares are warned about by
     # the executor, never hard-rejected by validation.
     validate_workflow(_wf(removed_param=3, order=4, path="x.h5"),
                       _registry())  # no exception

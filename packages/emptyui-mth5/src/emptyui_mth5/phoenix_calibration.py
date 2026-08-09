@@ -176,7 +176,7 @@ def find_asc_calibrations(directory: str | Path,
                           box_serial: str = "",
                           coil_serials: dict[str, str] | None = None,
                           ) -> dict[str, Path]:
-    """Auto-pick Phoenix ASC calibration files by TBL serial (§24.12).
+    """Auto-pick Phoenix ASC calibration files by TBL serial (history §24.12).
 
     ``coil_serials`` maps standard magnetic components (hx/hy/hz) to the
     TBL coil serial (``HXSN``/``HYSN``/``HZSN``). A CLB file matches when
@@ -214,7 +214,7 @@ def _extend_below(table: PhoenixChannelTable, mode: str) -> tuple[np.ndarray, np
     """Prepend a synthetic row below the measured range so interpolation
     behaves at deep decimation levels.
 
-    ``"linear"`` (default, §24.12): amplitude scaled proportional to
+    ``"linear"`` (default, history §24.12): amplitude scaled proportional to
     ``f / f_min`` at ``f_min / 1000`` with the lowest phase held — the exact
     shape of both a dB/dt induction coil and an AC-coupled box below their
     measured range, and it makes the subsequent linear extrapolation of the

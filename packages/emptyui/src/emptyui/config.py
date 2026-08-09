@@ -16,11 +16,11 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
-    #: Read-only input confinement (§17.2): /api/files and input path params
+    #: Read-only input confinement (history §17.2): /api/files and input path params
     #: resolve only inside this directory. None = unrestricted (local dev).
     data_root: Path | None = None
     #: Directory of the built web frontend (dist/) to serve same-origin;
-    #: None = don't serve (dev runs Vite separately). See §17.3.
+    #: None = don't serve (dev runs Vite separately). See history §17.3.
     serve_dist: str | None = None
     #: CORS origins ("" disables the middleware; default "*" keeps the
     #: dev/local behavior — same-origin serving needs no CORS at all).

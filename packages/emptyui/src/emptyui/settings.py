@@ -1,7 +1,7 @@
 """Runtime settings persistence (DESIGN.md §5.1, §7.4).
 
 The ``EMPTYUI_DISABLED_PLUGINS`` environment variable is the platform-level
-plugin baseline (env wins at startup; in embedded mode §17 the platform
+plugin baseline (env wins at startup; in embedded mode history §17 the platform
 decides plugin availability). All runtime settings follow the same
 precedence: **env/platform baseline wins**, UI edits are recorded on top.
 
@@ -11,7 +11,7 @@ write, sectioned: ``disabled_plugins`` + ``settings``); no file is created
 unless configured. Unknown names/keys are ignored when loading (config
 files may travel between machines). Deployment-level knobs (data root,
 serve dist, CORS, root path) are deliberately NOT UI-editable — they shape
-confinement/serving semantics and change only via env + restart (§22).
+confinement/serving semantics and change only via env + restart (history §22).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from pathlib import Path
 KEY_DISABLED = "disabled_plugins"
 KEY_SETTINGS = "settings"
 
-#: Live-editable runtime knobs (whitelist for PUT /api/settings, §22):
+#: Live-editable runtime knobs (whitelist for PUT /api/settings, history §22):
 #: name -> (type, default, description). Values may be None (= "off").
 LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
     "workspace_ttl_seconds": (
@@ -172,7 +172,7 @@ class SettingsStore:
         """
         return set(env_baseline) | self._disabled
 
-    # --- runtime settings section (§22) -----------------------------------
+    # --- runtime settings section (history §22) -----------------------------------
 
     def ui_settings(self) -> dict[str, object]:
         """UI/file-recorded settings (may be overridden by the env baseline)."""
@@ -207,7 +207,7 @@ class SettingsStore:
                     f"unknown or not live-editable setting: '{key}'")
             vtype, default, _desc = spec
             if value is None:
-                # §22: null = "off" only for knobs whose default is None
+                # history §22: null = "off" only for knobs whose default is None
                 # (off by design); a knob with a non-null default (e.g.
                 # cache_max_entries = 256) does not accept null
                 if default is not None:

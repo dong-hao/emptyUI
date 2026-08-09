@@ -1,4 +1,4 @@
-"""Time-selector window resolution shared by TS-consuming nodes (§23.4).
+"""Time-selector window resolution shared by TS-consuming nodes (history §23.4).
 
 Bounds come from the frontend time-selector bar / the paired edit boxes and
 are clamped into the record with a warning — out-of-range selection

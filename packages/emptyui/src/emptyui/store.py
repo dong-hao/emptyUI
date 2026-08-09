@@ -1,7 +1,9 @@
 """Handle-based data store (DESIGN.md §3).
 
-Nodes exchange opaque handles; payloads live in this in-process store.
-Serialization to the MTH5-backed workspace arrives with M2.
+Nodes exchange opaque handles; payloads live in this in-process store,
+serialized to the MTH5-backed workspace (Compute FC's ``persist``) — the
+M2 "arrives later" note is history: persistence shipped with the FC
+database and per-run workspaces (DESIGN.md §9).
 """
 
 from __future__ import annotations

@@ -46,7 +46,7 @@ class _MappedCollection:
 
 def _member_runts(member, rid: str):
     """Wrap a collection member as a real RunTS WITHOUT losing its response
-    chain or true start (§24.12): the duck payload's dataset carries the
+    chain or true start (history §24.12): the duck payload's dataset carries the
     per-channel applied-filter refs and units, and the member's ``.filters``
     registry resolves them — the same wiring Extract Run's ``_wrap_runts``
     produces. The old ChannelTS rebuild (``_to_runts``) dropped both: empty
@@ -80,7 +80,7 @@ def _to_runts(source):
     # the payload's true start: ISO strings carry ``start_datetime``, duck
     # payloads (Extract Run) carry ``.start`` (datetime64) — probing only
     # ``start_datetime`` silently re-anchored the wrapped run at the
-    # mt_timeseries default 1980 epoch (§24.12)
+    # mt_timeseries default 1980 epoch (history §24.12)
     start_dt = getattr(source, "start_datetime", "") or ""
     start_iso = (start_dt if start_dt
                  else _iso_start(getattr(source, "start", None)))
@@ -201,7 +201,7 @@ class Calibrate(Node):
         """Element-wise calibration (backlog #21 Tier 2): each member is
         calibrated through ITS OWN response chain — the duck payloads carry
         the per-channel applied-filter refs + the resolved registry, and the
-        dataset-passthrough wrapper keeps both (§24.12). The collection
+        dataset-passthrough wrapper keeps both (history §24.12). The collection
         shape is preserved (extents rows unchanged — identity is not the
         recipe's business). Explicit-filter collection mapping is M4
         backlog."""

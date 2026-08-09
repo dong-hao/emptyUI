@@ -273,7 +273,7 @@ def compute_fc_levels(
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
-    ``saturated_max`` (§24.12 QC): an FC window is zero-weighted when the
+    ``saturated_max`` (history §24.12 QC): an FC window is zero-weighted when the
     flagged fraction of its sample span exceeds this threshold (the original
     any-overlap rule deleted the long-period tail whenever saturation is
     frequent — see :func:`_saturated_window_mask`).
@@ -288,13 +288,13 @@ def compute_fc_levels(
     ``window_type_deep`` + ``deep_from_level``: per-level taper override
     (DESIGN.md §10.1) — levels >= ``deep_from_level`` are STFT'd with
     ``window_type_deep`` instead of ``window_type``. Physically motivated
-    (§24.3): the dominant contamination differs by scale — white-ish
+    (history §24.3): the dominant contamination differs by scale — white-ish
     fluxgate noise (post-prewhitening) at the short-period levels, where
     boxcar maximizes effective dof, vs line-spectra (diurnal Sq) leakage
     through boxcar sidelobes at the day-scale deep windows, where a
     zero-endpoint taper wins.
 
-    ``clock_zero`` (§24.5 P1 v2b): "" (default) anchors windows at the run
+    ``clock_zero`` (history §24.5 P1 v2b): "" (default) anchors windows at the run
     start; ``"epoch"`` or an explicit ISO datetime anchors windows on
     the grid ``t0 + k·step`` per level (head partial window dropped; the time
     labels are window CENTRES — issues.md L11 — so each window's first sample
@@ -397,7 +397,7 @@ def compute_fc_levels(
         win = win_deep if deep_from is not None and level >= deep_from else window_type
         nperseg = max(8, int(num_samples_window))
         noverlap = int(nperseg * overlap)
-        # clock-zero anchoring (§24.5 P1 v2b): drop the head partial window so
+        # clock-zero anchoring (history §24.5 P1 v2b): drop the head partial window so
         # window starts sit on the common t0 + k·step grid (per level — the
         # step grows with the decimation level); next level decimates the
         # UNSLICED series (aurora truncates per level too)
@@ -704,7 +704,7 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
 def _decimate_channels(channels, factor):
     """Cascade-decimate every channel by an integer factor (scipy decimate).
 
-    The binary "saturated" auxiliary channel (§24.12 QC) is max-pooled
+    The binary "saturated" auxiliary channel (history §24.12 QC) is max-pooled
     instead: a group survives decimation flagged iff any of its samples was
     flagged — scipy's IIR decimate would blur the 0/1 mask and could let a
     saturated block fade below any threshold.
@@ -725,7 +725,7 @@ def _decimate_channels(channels, factor):
     return out
 
 
-#: Reference instants accepted by the ``clock_zero`` option (§24.5 P1 v2b).
+#: Reference instants accepted by the ``clock_zero`` option (history §24.5 P1 v2b).
 CLOCK_ZERO_EPOCH = "1970-01-01T00:00:00"
 
 
@@ -742,7 +742,7 @@ def _clock_zero_head_skip(data_start_abs, sample_rate, nperseg, noverlap,
     the sample the data really starts on. With ``clock_zero`` "" (default)
     nothing is dropped and the current run-start anchoring is kept.
 
-    The point (§24.5 P1 v2b): remote-reference pairing matches FC rows by
+    The point (history §24.5 P1 v2b): remote-reference pairing matches FC rows by
     window position with an identical-grid check, so separately-computed
     runs/stations must share one absolute window grid. A run-independent
     ``t0`` (Unix epoch) guarantees coincidence for any run starts; anchoring
@@ -873,7 +873,7 @@ def _window(name: str) -> str:
 
 def _saturated_window_mask(sat, nperseg, noverlap, n_win,
                            saturated_max: float = 0.01) -> np.ndarray:
-    """Per-FC-window saturation flags (§24.12 QC).
+    """Per-FC-window saturation flags (history §24.12 QC).
 
     ``sat`` is the binary per-sample mask at the CURRENT level's rate; an FC
     window is flagged iff the flagged FRACTION of its sample span exceeds
@@ -896,7 +896,7 @@ def _saturated_window_mask(sat, nperseg, noverlap, n_win,
 
 
 def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
-    """Divide the per-channel FCs by their instrument response (§24.12).
+    """Divide the per-channel FCs by their instrument response (history §24.12).
 
     Frequency-domain calibration inside Compute FC, aurora-style: after the
     STFT, each channel's Fourier coefficients are divided by the chained
@@ -1552,7 +1552,7 @@ def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
     """The per-frequency sort body (DESIGN.md §10.3): per-(bin, window)
     weights from :func:`_per_bin_coherence` — banding-independent weighting,
     per-frequency-bin diagnostic rows (one row per bin). The period scope
-    and NaN-row grammar follow §24.5 P3."""
+    and NaN-row grammar follow history §24.5 P3."""
     import numpy as np
 
     freq_vals = np.asarray(local["frequency"].values, dtype=float)
@@ -1583,7 +1583,7 @@ def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,
             for ic in ins:
                 ref_out[ic].values[:] = ref_out[ic].values * scale
     # diagnostics: one row per frequency bin — banding is Estimate TF's
-    # concern (§24.9); the sort reports exactly what it weighted
+    # concern (history §24.9); the sort reports exactly what it weighted
     rows = []
     W = coh.shape[1]
     for i, fv in enumerate(freq_vals):
@@ -1632,9 +1632,9 @@ def coherence_sort_fc(local, ref, input_channels, output_channels,
     with optional ±``smooth_bins`` frequency pooling; the sample-coherence
     bias is adjusted-R²-corrected. Banding is deliberately absent — the
     weights are per (bin, window), so band construction belongs to
-    ``Estimate TF`` alone (§24.9): the sort's diagnostics are one row per
+    ``Estimate TF`` alone (history §24.9): the sort's diagnostics are one row per
     frequency bin. The legacy band-aggregated statistic was removed with
-    the per-bin flip (§24.6): no consumer ever weighted with it after the
+    the per-bin flip (history §24.6): no consumer ever weighted with it after the
     default flip, and its banding parameters duplicated the estimator's.
     """
     if int(ensemble_windows) < 1:
@@ -1679,7 +1679,7 @@ def coherence_sort_fcs(levels, ref_levels, input_channels, output_channels,
     same-shaped container (or a single fc) for the remote station. Returns
     ``(levels_out, ref_levels_out, rows)`` where the rows carry the
     decimation level for the diagnostics table (one row per frequency bin
-    per level — no band geometry: banding belongs to Estimate TF, §24.9).
+    per level — no band geometry: banding belongs to Estimate TF, history §24.9).
     """
     out_levels: dict[int, object] = {}
     out_ref: dict[int, object] = {} if ref_levels is not None else None
@@ -1755,7 +1755,7 @@ def estimate_tf(
     The omission is **warned loudly**: an operator must never believe remote
     reference is in effect when it is not (review 2026-09-28, E2).
 
-    ``t_short`` (head clip, §14.9) is honored for BOTH schemes: the primary
+    ``t_short`` (head clip, history §14.9) is honored for BOTH schemes: the primary
     l2u table clips upstream (:func:`_clip_head_bands`), and the uniform /
     l2u-fallback paths clip in :func:`_resolve_period_bands`.
 
@@ -2172,7 +2172,7 @@ def _resolve_cross_level_claims(out, levels):
 
 
 def _clip_head_bands(owned, t_short):
-    """Head clip (§14.9): drop bands whose center period is shorter than
+    """Head clip (history §14.9): drop bands whose center period is shorter than
     ``t_short`` seconds (no-op for None/0 — legacy behavior)."""
     if not t_short or t_short <= 0:
         return owned
@@ -2389,7 +2389,7 @@ def manual_bands(freqs, counts) -> dict[int, list[tuple[float, float]]]:
     """Per-level ``(f_hi, f_lo)`` band table from band-center frequencies.
 
     The EMTF band-table reconstruction used by the SDG31 parity harness
-    (`exact_official_bands`, history §24.4 item 5 / §24.5 P4): ``freqs`` is
+    (`exact_official_bands`, history §24.4 item 5 / history §24.5 P4): ``freqs`` is
     the flat list of band-center frequencies (any order — normalized to
     descending), ``counts`` the number of bands per decimation level as a
     comma string or sequence (level 0 = the highest frequencies, e.g.
@@ -2559,7 +2559,7 @@ def _resolve_period_bands(fc, periods_per_octave=4, band_style="l2u",
     container-level table, e.g. for fcs without metadata; each level then
     walks its own bin grid).
 
-    ``t_short`` (head clip, §14.9) is applied to BOTH schemes here —
+    ``t_short`` (head clip, history §14.9) is applied to BOTH schemes here —
     including the l2u fallback — so a shortest-period bound is honored
     identically to the primary l2u table path (which clips upstream via
     :func:`_clip_head_bands`); the criterion is the same geometric-mean
@@ -2896,7 +2896,7 @@ def estimate_tf_levels(
         else:
             # No container-level table (uniform style, or the l2u fallback
             # for metadata-less fcs): resolve the SAME table estimate_tf
-            # will use internally (§23.5 choke point) and pass it
+            # will use internally (history §23.5 choke point) and pass it
             # explicitly, so the recorded band_intervals align 1:1 with
             # the Z rows — Residual Sort's pooling key (DESIGN.md §10.4).
             fc_n = _normalize_fc_layout(fc)

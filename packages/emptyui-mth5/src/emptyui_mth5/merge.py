@@ -1,4 +1,4 @@
-"""Merge Runs node (DESIGN.md §3 'Merging multiple runs'; §24.5 P1 rebuild).
+"""Merge Runs node (DESIGN.md §3 'Merging multiple runs'; history §24.5 P1 rebuild).
 
 Combines several acquisition runs of one station (e.g. SDH28 'b' + 'c') into
 a single ``ts.run`` so a downstream Align Runs sees the station's full
@@ -65,7 +65,7 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     comp_sets = [_rt_channels(rt) for rt in run_ts_list]
     union = set.union(*comp_sets)
     # the 'saturated' aux QC mask exists only on runs with flagged samples
-    # (§24.12) — a station's sessions split into masked and unmasked runs,
+    # (history §24.12) — a station's sessions split into masked and unmasked runs,
     # and merging them (the documented E1b remedy: "merge the remote
     # station's runs first") must not hard-fail on QC metadata: pad the
     # missing members with zeros (no saturation there)
@@ -284,7 +284,7 @@ class MergeRuns(Node):
         )
         for run_id in wanted:
             run_obj = _resolve_run(station_obj, run_id)
-            # fast channel read (§24.8): to_runts's mt_metadata
+            # fast channel read (history §24.8): to_runts's mt_metadata
             # deepcopy/validation storm costs ~7-19 s PER RUN — the merge
             # of a burst archive's slots would pay it for every run
             data_vars, sample_rate, _start = read_run_channels(run_obj)
@@ -296,7 +296,7 @@ class MergeRuns(Node):
                              new_run_id=new_run_id, logger=ctx.logger)
         # RunTS.merge rebuilds its result from channel arrays — the filter
         # registry does not travel; re-resolve it from the merged dataset's
-        # channel attrs (§24.12: the calibration association must survive)
+        # channel attrs (history §24.12: the calibration association must survive)
         try:
             merged.filters = resolve_filter_registry(
                 survey_obj, {n: merged.dataset[n]

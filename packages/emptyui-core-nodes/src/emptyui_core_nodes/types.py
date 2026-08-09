@@ -120,7 +120,7 @@ def ensure_finite(channels, where: str) -> None:
 
 
 def channel_calibration(value) -> dict[str, list]:
-    """Per-channel instrument response chains from a ts.run payload (§24.12).
+    """Per-channel instrument response chains from a ts.run payload (history §24.12).
 
     Returns ``{channel: [(filter_object, applied: bool), ...]}`` in stage
     order. Sources:

@@ -37,7 +37,7 @@ _SLOT_TAGS = {3: "L3NS", 4: "L4NS"}
 
 @dataclass
 class _BlockTag:
-    """Decoded 32-byte per-block tag (layout verified on 1690C16C, §24.8)."""
+    """Decoded 32-byte per-block tag (layout verified on 1690C16C, history §24.8)."""
 
     start: pd.Timestamp  # UTC time of the block's first scan
     rate: int
@@ -130,7 +130,7 @@ class Segment:
     chunks: list[np.ndarray] = field(default_factory=list)
     #: per-block saturated flags (tag byte 15) — a saturated block marks all
     #: its scans (clipped ADC samples); the per-sample mask derived from this
-    #: rides the archive as the "saturated" auxiliary channel (§24.12 QC)
+    #: rides the archive as the "saturated" auxiliary channel (history §24.12 QC)
     saturated: list[bool] = field(default_factory=list)
 
 
@@ -185,7 +185,7 @@ def _file_rate(path: Path) -> int:
 def _split_segments(segs: list[Segment],
                     session_seconds: float) -> list[Segment]:
     """Cut segments longer than ``session_seconds`` into consecutive
-    fixed-length sessions on block boundaries (§24.13): the continuous
+    fixed-length sessions on block boundaries (history §24.13): the continuous
     stream otherwise forms one giant run whose run-level QC (Select Runs)
     could only be dropped or kept whole. Blocks are assigned greedily — a
     block starts a new session when it would push the current session past
@@ -218,7 +218,7 @@ def _split_segments(segs: list[Segment],
 def _window_bounds(start: str | float | None,
                    end: str | float | None) -> tuple[pd.Timestamp | None,
                                                      pd.Timestamp | None]:
-    """Parse the ingest time window (§24.11): UTC ISO datetime or epoch
+    """Parse the ingest time window (history §24.11): UTC ISO datetime or epoch
     seconds; naive stamps are localized to UTC (the block tags are UTC).
     Returns ``(start, end)`` as tz-aware UTC timestamps or ``None``.
     """
@@ -264,7 +264,7 @@ def _ts_files(data_path: Path, sample_rates: list[int] | None) -> list[Path]:
 def _apply_tbl_calibration(
     comp: str, x: np.ndarray, table,
 ) -> tuple[np.ndarray, str]:
-    """Multiply the TBL scalar calibration into the counts (§24.8 decision
+    """Multiply the TBL scalar calibration into the counts (history §24.8 decision
     (c): calibration at ingest — scalar AND FAP shape response, applied
     together: the chains ride the channel metadata with ``applied=True``
     (aurora semantics — the recorded data already carries them, and a
@@ -280,7 +280,7 @@ def _apply_tbl_calibration(
 def _prepare_asc_calibration(
     data_path: Path, calibration_folder: str | Path, table, warnings: list[str],
 ) -> dict[str, list]:
-    """Resolve + parse the ASC box/coil calibration tables (§24.12).
+    """Resolve + parse the ASC box/coil calibration tables (history §24.12).
 
     The TBL serials are the match keys (``SNUM`` -> ``*_CLB.asc``,
     ``HXSN``/``HYSN``/``HZSN`` -> ``*_CLC.asc``); an empty folder means the
@@ -456,11 +456,11 @@ def read_phoenix_mtu(
     mth5 archive with one run per maximal contiguous segment.
 
     Run ids follow the mth5/aurora convention ``sr{rate}_{NNNN:04d}``
-    (§24.7); run time periods come from the per-block tag timestamps —
+    (history §24.7); run time periods come from the per-block tag timestamps —
     never the TBL's placeholder STIM/ETIM. TBL scalar calibrations are
     applied at ingest and units stamped (mV/km, nT).
 
-    ``start``/``end`` (§24.11) restrict the ingest to a time window
+    ``start``/``end`` (history §24.11) restrict the ingest to a time window
     (UTC ISO datetime or epoch seconds; naive stamps read as UTC): blocks
     are filtered by their per-block tag start *before* segment grouping —
     per-second granularity (every MTU-5A block is ≤ 1 s of data), so slots
@@ -468,7 +468,7 @@ def read_phoenix_mtu(
     slots become short runs with tag-truth time periods. Use this to
     extract a quiet night window for fast smoke tests.
 
-    ``calibration_folder`` (§24.12): directory holding the manufacturer ASC
+    ``calibration_folder`` (history §24.12): directory holding the manufacturer ASC
     tables (``*_CLB.asc`` box + ``*_CLC.asc`` coils). Empty searches the
     data directory itself. Files are matched by the TBL serials (``SNUM``,
     ``HXSN``/``HYSN``/``HZSN``) and registered in the archive's
@@ -477,7 +477,7 @@ def read_phoenix_mtu(
     complex response (frequency-domain calibration); unmatched tables only
     warn.
 
-    ``stream_session_hours`` (§24.13): split runs longer than this many
+    ``stream_session_hours`` (history §24.13): split runs longer than this many
     hours into consecutive fixed-length sessions on block boundaries
     (0 = off, default). The continuous stream otherwise forms one giant
     run whose run-level QC (Select Runs) could only be dropped or kept
@@ -514,7 +514,7 @@ def read_phoenix_mtu(
 
     # session length: slot-grid sessions (session_by_slot) cut the
     # continuous stream every HSMP seconds — slot-granular QC preserves
-    # longer contiguous spans than fixed-hour splitting (§24.13/§9.3)
+    # longer contiguous spans than fixed-hour splitting (history §24.13/§9.3)
     session_seconds = stream_session_hours * 3600.0
     if session_by_slot:
         hsmp = float((table.tbl_dict or {}).get("HSMP", 0) or 0)
@@ -596,13 +596,13 @@ def read_phoenix_mtu(
             # exclusive segment end (deliberate: ChannelTS anchors its time
             # index on time_period.start, and from_channel_ts propagates
             # channel periods — changing the channel end would perturb the
-            # §24.12-verified ingest behavior).
+            # history §24.12-verified ingest behavior).
             run_meta.time_period.start = seg.start.isoformat()
             run_meta.time_period.end = (seg.end - pd.to_timedelta(
                 1.0 / seg.rate, unit="s")).isoformat()
             array_list = []
             if any(seg.saturated):
-                # per-sample saturation mask (§24.12 QC): a saturated block
+                # per-sample saturation mask (history §24.12 QC): a saturated block
                 # marks all its scans. Rides the archive as the "saturated"
                 # auxiliary channel; Compute FC rejects every FC window
                 # overlapping a flagged sample (zero weight in the sort chain)
@@ -803,7 +803,7 @@ class LoadPhoenixMtu(Node):
               optional=True, path_kind="out"),
         Param("start", "string", label="Start (UTC)", default="", optional=True,
               placeholder="empty = recording start",
-              description="Ingest window start (§24.11): UTC ISO datetime "
+              description="Ingest window start (history §24.11): UTC ISO datetime "
                           "or epoch seconds; blocks are filtered by their "
                           "per-block tag start before segment grouping — "
                           "use a quiet night window for fast smoke tests."),
@@ -820,7 +820,7 @@ class LoadPhoenixMtu(Node):
                           "are matched by the TBL serials (SNUM, HXSN/HYSN/"
                           "HZSN) and registered as FAP shape corrections — "
                           "Compute FC removes them frequency-domain-wise "
-                          "(§24.12). Unmatched tables only warn."),
+                          "(history §24.12). Unmatched tables only warn."),
         Param("stream_session_hours", "number",
               label="Stream session length (h)", default=0.0, min=0,
               optional=True,
@@ -829,7 +829,7 @@ class LoadPhoenixMtu(Node):
                           "boundaries (0 = off). The continuous stream "
                           "otherwise forms one giant run whose run-level "
                           "QC (Select Runs) could only be dropped or kept "
-                          "whole (§24.13)."),
+                          "whole (history §24.13)."),
         Param("session_by_slot", "boolean", label="Session by slot",
               default=False,
               description="Cut the continuous stream into sessions at the "

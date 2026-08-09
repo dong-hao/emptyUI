@@ -137,7 +137,7 @@ def _slot_delta(minutes: int):
 
 def test_block_tag_decode(tmp_path):
     """The per-block 32-byte tag decodes time/rate/quality fields (the
-    layout verified byte-level on the official recording, §24.8)."""
+    layout verified byte-level on the official recording, history §24.8)."""
     import pandas as pd
 
 
@@ -216,7 +216,7 @@ def test_read_phoenix_mtu_archive(tmp_path):
             first_sample(2) * table.magnetic_calibration)  # CHHX = 3
         assert ex[0] == pytest.approx(
             first_sample(0) * table.ex_calibration)  # CHEX = 1
-        # tag-truth time anchors (§24.12 regression): every archived channel
+        # tag-truth time anchors (history §24.12 regression): every archived channel
         # dataset must start at its segment's block-tag time — NOT the TBL
         # STIM placeholder. ChannelTS anchors its time index on the channel
         # metadata's time_period.start; the ingest used to set an
@@ -242,7 +242,7 @@ def test_read_phoenix_mtu_sample_rate_filter(tmp_path):
 
 def test_read_phoenix_mtu_quality_warnings(tmp_path):
     """Mixed clock status, saturated blocks and clock error surface as
-    warnings — never rejections (§24.8)."""
+    warnings — never rejections (history §24.8)."""
     _write_tbl(tmp_path / "SYNTH01.TBL")
     rng = np.random.default_rng(9)
     t = datetime(2009, 12, 16, 7, 46, 52, tzinfo=timezone.utc)
@@ -297,7 +297,7 @@ def test_read_phoenix_mtu_no_tbl(tmp_path):
         read_phoenix_mtu(tmp_path, save_path=tmp_path)
 
 
-# --- ingest time window (§24.11 night-window smoke tests) ----------------
+# --- ingest time window (history §24.11 night-window smoke tests) ----------------
 
 def test_window_full_matches_unfiltered(tmp_path):
     """A window spanning the whole recording is identical to no filter."""
@@ -312,7 +312,7 @@ def test_window_full_matches_unfiltered(tmp_path):
 def test_window_crops_blocks_by_tag_time(tmp_path):
     """Blocks are filtered by per-block tag start BEFORE grouping: slots
     inside the window stay full, streams crop at the edges, outside slots
-    vanish (§24.11)."""
+    vanish (history §24.11)."""
     _synthetic_corpus(tmp_path)
     res = read_phoenix_mtu(tmp_path, save_path=tmp_path,
                            start="2009-12-16T07:47:00",
@@ -363,7 +363,7 @@ def test_window_invalid_args_raise(tmp_path):
                          end="2009-12-16T07:00:00")
 
 
-# --- real-corpus test (user station 1690618B; §24.11) --------------------
+# --- real-corpus test (user station 1690618B; history §24.11) --------------------
 
 @pytest.mark.skipif(
     not all((REAL_DIR / f"1690618B.{ext}").exists()
@@ -390,14 +390,14 @@ def test_real_corpus_structure(tmp_path):
     res = read_phoenix_mtu(REAL_DIR, sample_rates=[15], save_path=tmp_path)
     assert [r[0] for r in res["runs"]] == ["sr15_0001"]
     assert res["runs"][0][2] == 303742 * 15
-    # the ingest window (§24.11): a 2 h night sub-window crops the stream
+    # the ingest window (history §24.11): a 2 h night sub-window crops the stream
     res_w = read_phoenix_mtu(REAL_DIR, sample_rates=[15], save_path=tmp_path,
                              start="2026-06-18T12:00:00",
                              end="2026-06-18T14:00:00")
     assert res_w["runs"][0][2] == 2 * 3600 * 15
 
 
-# --- ASC calibration ingest (§24.12) --------------------------------------
+# --- ASC calibration ingest (history §24.12) --------------------------------------
 
 _CLB_MIN = """\
 C:\\test\\new\\MTU-1234_CLB : Instrument Calibrations
@@ -520,7 +520,7 @@ def test_read_phoenix_mtu_asc_calibration_explicit_folder(tmp_path):
     assert not any("calibration" in w for w in res["warnings"])
 
 
-# --- saturation-flag QC (§24.12) ------------------------------------------
+# --- saturation-flag QC (history §24.12) ------------------------------------------
 
 def test_read_phoenix_mtu_saturated_mask(tmp_path):
     """Saturated blocks produce a per-sample 'saturated' auxiliary channel
@@ -575,7 +575,7 @@ def test_read_phoenix_mtu_clean_no_mask(tmp_path):
 
 
 def test_read_phoenix_mtu_stream_split(tmp_path):
-    """§24.13: stream_session_hours cuts a long continuous run into
+    """history §24.13: stream_session_hours cuts a long continuous run into
     fixed-length sessions on block boundaries, with tag-truth periods and
     continued run numbering."""
     from emptyui_mth5.runs import _resolve_station, _resolve_survey

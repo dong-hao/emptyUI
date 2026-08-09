@@ -19,7 +19,7 @@ _log = logging.getLogger("emptyui")
 #: Name of the workspace archive inside ``ctx.workspace``.
 WORKSPACE_MTH5_NAME = "workspace.mth5"
 
-#: Cached open workspace handles keyed by archive path (§24.8): opening and
+#: Cached open workspace handles keyed by archive path (history §24.8): opening and
 #: closing the workspace PER PERSISTED LEVEL is quadratic — every
 #: ``MTH5.close_mth5()`` re-summarizes ALL summary tables (the fc summary
 #: recursively walks every FC level in the archive — ~96 s when persisting
@@ -119,7 +119,7 @@ def persist_fc_level(
     ``fc`` must carry a ``datetime64`` ``time`` coordinate (i.e. an absolute
     start time), which mth5's ``from_xarray`` requires. Pass a cached
     handle (``get_workspace_mth5``) to persist many levels through one
-    open/close cycle — the per-call open/close is quadratic (§24.8).
+    open/close cycle — the per-call open/close is quadratic (history §24.8).
     """
     if "datetime64" not in str(fc.time.dtype):
         raise ValueError(

@@ -85,7 +85,7 @@ def test_calibrate_mth5_runts_path(test12rr_path: Path, tmp_path: Path):
 
 def test_calibrate_collection_applies_own_responses(tmp_path: Path):
     """Collection members are calibrated through their OWN response chain and
-    keep their true start (H2/§24.12): the old ChannelTS rebuild dropped the
+    keep their true start (H2/history §24.12): the old ChannelTS rebuild dropped the
     per-channel applied-filter refs + registry — calibration was a silent
     identity — and probed ``start_datetime`` (absent on the duck payload),
     re-anchoring members at the mt_timeseries default 1980 epoch while the

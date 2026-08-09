@@ -91,7 +91,7 @@ def test_node_renders_png_single_and_two_fc(tmp_path):
 
 
 def test_plot_has_no_banding_params():
-    """§24.9: no band-geometry params (or inherit-from-sort) on the plot —
+    """history §24.9: no band-geometry params (or inherit-from-sort) on the plot —
     it renders the sort's per-bin statistic, not a band aggregation."""
     from emptyui_aurora.plots import PlotCoherency
 

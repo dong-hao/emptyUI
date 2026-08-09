@@ -263,7 +263,7 @@ def test_merge_summary_terminal_status_is_monotonic():
 
 
 def test_stale_params_accepted_with_warning(client):
-    """§24.9 policy end-to-end: a saved workflow carrying params a node no
+    """history §24.9 policy end-to-end: a saved workflow carrying params a node no
     longer declares must run (schema does not hard-reject) and surface a
     node-level progress note naming the stale params — not a silent
     no-op, not a 422."""
@@ -351,7 +351,7 @@ def test_ws_delivers_run_events_under_the_lifespan():
 
 def test_settings_view_and_live_edit():
     """GET shows effective values with sources; PUT applies whitelisted
-    live knobs immediately (cache resize) — §22."""
+    live knobs immediately (cache resize) — history §22."""
     reg = Registry()
     client = TestClient(create_app(reg))
     view = client.get("/api/settings").json()
@@ -359,7 +359,7 @@ def test_settings_view_and_live_edit():
     assert view["live"]["cache_max_entries"]["editable"]
     assert view["live"]["workspace_ttl_seconds"]["source"] == "default"
     assert view["deployment"]["cors_origins"] == ["*"]
-    assert "project_dir" in view["planned"]  # reserved §21 scaffolding
+    assert "project_dir" in view["planned"]  # reserved history §21 scaffolding
 
     resp = client.put("/api/settings", json={"values": {"cache_max_entries": 32}})
     assert resp.status_code == 200
@@ -517,10 +517,10 @@ def test_settings_live_ttl_effect(tmp_path):
     assert cleaned == 1
 
 
-# --- M14: settings null/0 policy (§22) ------------------------------------
+# --- M14: settings null/0 policy (history §22) ------------------------------------
 
 def test_settings_null_rejected_for_non_null_default(client):
-    """§22: 'null not allowed for knobs with a non-null default' —
+    """history §22: 'null not allowed for knobs with a non-null default' —
     cache_max_entries (default 256) must reject null with 422."""
     resp = client.put("/api/settings", json={"values": {"cache_max_entries": None}})
     assert resp.status_code == 422

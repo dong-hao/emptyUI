@@ -185,7 +185,7 @@ def test_node_execute_returns_table(tmp_path: Path):
 
 
 def test_node_has_no_banding_params():
-    """§24.9: banding is Estimate TF's concern — the sort node declares no
+    """history §24.9: banding is Estimate TF's concern — the sort node declares no
     band-geometry or statistic params anymore."""
     from emptyui_aurora.process import CoherenceSort
 
@@ -210,7 +210,7 @@ def test_mode_off_is_passthrough():
 
 
 def test_apply_below_period_scope():
-    """§24.5 P3: bins at/above apply_below_period pass through unsorted
+    """history §24.5 P3: bins at/above apply_below_period pass through unsorted
     (bit-identical to the input FC) while bins below the threshold are
     sorted as usual — the head-scoped remedy."""
     source = synthetic_source(12)

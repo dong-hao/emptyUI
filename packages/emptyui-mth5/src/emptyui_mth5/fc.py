@@ -63,7 +63,7 @@ def write_fc_geometry(dec, attrs: dict[str, Any]) -> None:
     The geometry attrs are computed directly from the payload (same
     serialization mth5's model produces: overlap in samples, the hann
     type mapping, ``none`` for missing) — going through the model
-    (``dec.metadata``) costs a pydantic rebuild per level (§24.8).
+    (``dec.metadata``) costs a pydantic rebuild per level (history §24.8).
     """
     n = int(attrs.get("num_samples_window") or 0)
     ov = attrs.get("overlap")
@@ -124,7 +124,7 @@ def _fc_identity_attrs(dec, station_obj) -> dict[str, Any]:
 
     Read from the HDF5 group paths/attrs (free) — the station
     ``.metadata`` property rebuilds the FULL hierarchy through pydantic
-    (~30-40 s per access on a burst archive, §24.8).
+    (~30-40 s per access on a burst archive, history §24.8).
     """
     attrs: dict[str, Any] = {}
     try:

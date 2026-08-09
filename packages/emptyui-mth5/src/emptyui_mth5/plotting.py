@@ -271,7 +271,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
     (``(min, max)``) instead of the auto whole-decade fit — used to match an
     external reference figure's axis range exactly (DESIGN.md §10.6, the
     SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m). ``show_params=False``
-    drops the processing-provenance line for production images (§23.3).
+    drops the processing-provenance line for production images (history §23.3).
     """
     comps = impedance_panels(tf, mode)
     if not comps:
@@ -408,7 +408,7 @@ def plot_tipper(tf, path, ylim=None, show_params: bool = True):
     (``_decade_limits``). ``ylim`` = (min, max) pins the y-axis on both
     panels; None keeps the smart default ([-1, 1], auto-expanded when the
     data legitimately exceeds 1 near 2D/3D contrasts). ``show_params=False``
-    drops the processing-provenance line for production images (§23.3).
+    drops the processing-provenance line for production images (history §23.3).
     """
     panels = tipper_panels(tf)
     if not panels:
@@ -523,8 +523,8 @@ def plot_phase_tensor(tf, path, show_params: bool = True):
     standard 3D-structure indicator. Ellipses are constructed in display
     space so the log x-axis cannot distort them (_ellipse_outline). No PT
     error bars in this MVP (Z_err → PT covariance propagation is
-    nontrivial; §20.2). ``show_params=False`` drops the
-    processing-provenance line for production images (§23.3).
+    nontrivial; history §20.2). ``show_params=False`` drops the
+    processing-provenance line for production images (history §23.3).
     """
     from .phase_tensor import phase_tensor, pt_ellipse_params
 

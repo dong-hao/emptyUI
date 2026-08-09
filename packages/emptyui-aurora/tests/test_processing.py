@@ -539,7 +539,7 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
 def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
     """Manifest-level contracts (DESIGN.md §10.3 + §4 `enabled_when`):
     - Estimate TF declares NO chain-walking inherit of banding params from
-      the fc chain (§24.9 — the sort is band-free; the estimator owns
+      the fc chain (history §24.9 — the sort is band-free; the estimator owns
       banding);
     - remote_reference declares its estimator condition instead of the
       frontend string-sniffing the engine value."""

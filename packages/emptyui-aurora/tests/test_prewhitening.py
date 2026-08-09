@@ -117,7 +117,7 @@ def test_per_window_detrend_removes_trend():
 
 def test_options_threaded_through_levels_and_attrs():
     """compute_fc_levels passes the options to every level and records them
-    in the fc attrs (provenance, §24 protocol)."""
+    in the fc attrs (provenance, history §24 protocol)."""
     tone, _ = _tone(n=8192)
     levels = compute_fc_levels(
         _payload(tone), ["hx", "hy"], ["hx", "hy"],
@@ -144,7 +144,7 @@ def test_unknown_prewhitening_rejected():
 
 
 def test_per_level_taper_override():
-    """§24.5 P2: levels >= deep_from_level use the deep taper; the override
+    """history §24.5 P2: levels >= deep_from_level use the deep taper; the override
     equals computing that level with the deep taper directly (the cascade's
     decimation is taper-independent)."""
     tone, _ = _tone(n=8192)

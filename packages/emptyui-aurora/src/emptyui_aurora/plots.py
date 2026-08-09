@@ -21,7 +21,7 @@ from .process import _fc_io_channels
 
 
 def _resolve_rate_tiers(levels: dict, sample_rate: str):
-    """Resolve which decimation tier(s) to plot, burst-mode aware (§20.1).
+    """Resolve which decimation tier(s) to plot, burst-mode aware (history §20.1).
 
     A merged burst FC database is rate-keyed (`merge_fc_containers` re-keys
     to descending actual sample rates — the cascade indices of mixed-rate
@@ -244,7 +244,7 @@ class PlotCoherency(Node):
                 lfc, ref = _pair_remote_fc(
                     lfc, _normalize_fc_layout(ref),
                     pairing="intersect", tol_s=0.0, level=level)
-            # the exact statistic the sort applies (shared helper, §20.1)
+            # the exact statistic the sort applies (shared helper, history §20.1)
             coh_e, coh_x = _per_bin_coherence(
                 lfc, ref, ins, outs, ensemble_windows=ensemble_windows,
                 smooth_bins=smooth_bins)
@@ -473,7 +473,7 @@ class PlotSpectrogramFC(Node):
 
 
 def station_title_from_fc(fc) -> str:
-    """Station title from an fc's identity attrs (§15 convention)."""
+    """Station title from an fc's identity attrs (history §15 convention)."""
     station = fc.attrs.get("station_id") or ""
     survey = fc.attrs.get("survey_id") or ""
     parts = [p for p in (station, survey) if p]

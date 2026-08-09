@@ -223,7 +223,7 @@ class ImportTF(Node):
               description="Convert the imported TF to emptyUI's exp(-i "
                           "omega t) convention. 'negate' multiplies Z and "
                           "the tipper by -1 (the empirically verified "
-                          "conversion for Phoenix MT-Editor EDIs, §24.12); "
+                          "conversion for Phoenix MT-Editor EDIs, history §24.12); "
                           "'conjugate' flips the sign of the imaginary "
                           "parts (the literal exp(+i omega t) -> exp(-i "
                           "omega t) mapping). EDI headers cannot be "
@@ -340,7 +340,7 @@ def _rotate_arrays(tf, angle_deg: float):
 
     ``Z' = R(angle) Z R(angle)ᵀ``; the tipper rotates as a vector
     ``T' = R(angle) T``; per-element error stds rotate with ``|R|`` (the
-    §16.3-validated conservative bound — the stored errors carry no
+    history §16.3-validated conservative bound — the stored errors carry no
     covariance). Every other entry (e.g. the zero rows of a 5×5 EDI TF) is
     untouched. Returns ``(transfer_function, transfer_function_error)`` as
     new arrays (the error is None when the TF has none).

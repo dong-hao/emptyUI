@@ -125,10 +125,10 @@ def test_merge_runs_node_missing_run(tmp_path: Path):
 
 
 def test_merge_runs_rides_fast_read_and_keeps_registry(tmp_path: Path):
-    """Merge Runs reads each run via the fast channel path (§24.8 — the
+    """Merge Runs reads each run via the fast channel path (history §24.8 — the
     per-run to_runts storm would cost ~7-19 s per run) and re-resolves the
     filter registry on the merged output (RunTS.merge rebuilds from
-    channel arrays; the §24.12 calibration association must survive)."""
+    channel arrays; the history §24.12 calibration association must survive)."""
     from emptyui_core_nodes.types import channel_calibration
     from mt_metadata.timeseries.filters import CoefficientFilter
 
