@@ -26,6 +26,7 @@ import {
   useWorkflow,
   validateConnection,
   type MTNodeData,
+  type SaveAnchors,
 } from "./stores/workflow";
 import type { NodeManifest } from "./api/client";
 import { useRun } from "./stores/run";
@@ -328,6 +329,26 @@ export default function App() {
     }
   };
 
+  /** M23: the document builder shared by Run and Save — stamps the
+   *  plugin-version record and stores input paths anchor-relative (M19
+   *  decision: relativize on save). Settings unavailable → paths are
+   *  saved as-is (the record still stamps; degradation is silent only in
+   *  the sense that nothing was relativized). */
+  const buildDoc = async (name?: string) => {
+    let anchors: SaveAnchors | undefined;
+    try {
+      const view = await api.settings();
+      const dep = view.deployment as Record<string, unknown>;
+      anchors = {
+        projectDir: typeof dep.project_dir === "string" ? dep.project_dir : null,
+        dataRoot: typeof dep.data_root === "string" ? dep.data_root : null,
+      };
+    } catch {
+      anchors = undefined;
+    }
+    return serializeWorkflow(nodes, edges, name, anchors);
+  };
+
   const startRun = async (targets?: string[]) => {
     // M15: make the documented contract true — a run attempt re-arms the
     // events socket if it is down (ensureSocket is idempotent; the slow
@@ -367,7 +388,7 @@ export default function App() {
       // extents and node states visible until the new run's events replace
       // them (stale per-node state clears when that node re-executes);
       // wiping happens on document load / New only (handleLoad/handleNew)
-      const doc = serializeWorkflow(nodes, edges);
+      const doc = await buildDoc();
       const { run_id } = await api.runWorkflow(doc, targets);
       useRun.getState().setRunId(run_id);
 
@@ -455,8 +476,8 @@ export default function App() {
     }
   };
 
-  const handleSave = () => {
-    const doc = serializeWorkflow(nodes, edges, docName);
+  const handleSave = async () => {
+    const doc = await buildDoc(docName);
     const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

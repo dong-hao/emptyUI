@@ -707,6 +707,14 @@ One file = one reproducible pipeline.
 - Edges reference ports by name → resilient to port reordering.
 - `position` is UI-only → headless/batch execution ignores it cleanly.
 - `plugin_version` (per node, optional, M23) is informational — see §5.
+- **Path portability (M19/M23, 2026-10-15)**: the frontend relativizes
+  input-path params (`path_kind: "in"`, file/directory widgets) that live
+  under the project directory or data root when saving — the document
+  stores them anchor-relative — and the executor resolves relative inputs
+  against `project_dir` at run time (the data root takes precedence in
+  remote mode; unset `project_dir` means the server CWD, the status quo).
+  Cache signatures use the anchor-relative form, so a relocated project
+  stays a cache hit (§7.1). Output paths are never relativized.
 - Executor validates against current manifests at load time with actionable
   messages — structure (types, edges, cycles) **and param values** (M1):
   declared `min`/`max`, `select`/`radio` `options` and required

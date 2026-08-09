@@ -538,16 +538,50 @@ export function enforceWiringRules<E extends { id: string; source: string; sourc
 }
 
 
+/** Anchor directories for save-time path portability (issues.md M19/M23):
+ *  an absolute input path living under one of these is STORED anchor-relative
+ *  — the workflow then loads on any machine whose server resolves the
+ *  relative path against the same anchor (project_dir, default server CWD).
+ *  The settings view supplies the effective values. */
+export interface SaveAnchors {
+  projectDir?: string | null;
+  dataRoot?: string | null;
+}
+
+/** Rewrite `value` anchor-relative when it is an absolute path under one
+ *  of the anchors (longest match wins). POSIX separators; untouched
+ *  otherwise. Case-sensitive: the values come from the same server that
+ *  reported the anchors (the file browser), so they agree verbatim. */
+export function relativizeToAnchor(
+  value: string,
+  anchors: SaveAnchors,
+): string {
+  const norm = value.replace(/\\/g, "/");
+  if (!norm.startsWith("/")) return value; // relative / bare — nothing to do
+  const candidates = [anchors.dataRoot, anchors.projectDir]
+    .filter((a): a is string => !!a)
+    .map((a) => a.replace(/\\/g, "/").replace(/\/+$/, ""));
+  // longest anchor wins: a path under both the data root and a nested
+  // project dir must relativize against the deeper one
+  for (const a of candidates.sort((x, y) => y.length - x.length)) {
+    if (norm.startsWith(`${a}/`)) return norm.slice(a.length + 1);
+  }
+  return value;
+}
+
 /** Serialize the workflow document (DESIGN.md §6 format).
  *
  *  M23: each node records its plugin's distribution version (from the
  *  catalog manifest) — the executor compares it at run time and warns
- *  about drift.
+ *  about drift. Input paths (path_kind "in", file/directory widgets)
+ *  under an anchor directory are stored anchor-relative (M19 decision:
+ *  relativize on save).
  */
 export function serializeWorkflow(
   nodes: Node<MTNodeData>[],
   edges: Edge[],
   name?: string,
+  anchors?: SaveAnchors,
 ) {
   const { catalog } = useCatalog.getState();
   const manifestOf = (type: string) =>
@@ -559,13 +593,31 @@ export function serializeWorkflow(
       name: name ?? useWorkflow.getState().docName ?? "untitled",
       created: useWorkflow.getState().docCreated ?? new Date().toISOString(),
     },
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      type: n.data.nodeType,
-      params: n.data.params,
-      position: n.position,
-      plugin_version: manifestOf(n.data.nodeType)?.plugin_version,
-    })),
+    nodes: nodes.map((n) => {
+      const manifest = manifestOf(n.data.nodeType);
+      const params: Record<string, unknown> = { ...n.data.params };
+      if (anchors && manifest) {
+        for (const spec of manifest.params) {
+          if (
+            spec.path_kind === "in" &&
+            (spec.widget === "file" || spec.widget === "directory") &&
+            typeof params[spec.name] === "string"
+          ) {
+            params[spec.name] = relativizeToAnchor(
+              params[spec.name] as string,
+              anchors,
+            );
+          }
+        }
+      }
+      return {
+        id: n.id,
+        type: n.data.nodeType,
+        params,
+        position: n.position,
+        plugin_version: manifest?.plugin_version,
+      };
+    }),
     edges: edges.map((e) => {
       // L12: defaulting a missing handle to "data" silently INVENTED wiring
       // on save (the loaded document then connects ports that were never

@@ -8,6 +8,7 @@ import {
   deserializeWorkflow,
   enforceWiringRules,
   portTypesCompatible,
+  relativizeToAnchor,
   serializeWorkflow,
   validateConnection,
   type MTNodeData,
@@ -181,7 +182,7 @@ describe("document envelope (L12)", () => {
   });
 });
 
-describe("M23: plugin-version record", () => {
+describe("M23: plugin-version record + save-time path relativization", () => {
   const withCatalog = (manifests: NodeManifest[]) => {
     const prev = useCatalog.getState().catalog;
     useCatalog.setState({ catalog: { nodes: manifests } });
@@ -204,5 +205,66 @@ describe("M23: plugin-version record", () => {
     const doc = serializeWorkflow([node("a", "ghost.type")], []);
     restore();
     expect(doc.nodes[0].plugin_version).toBeUndefined();
+  });
+
+  it("relativizes in-kind path params under the anchor; nothing else", () => {
+    const m = manifest("plug.node", [], []);
+    m.params = [
+      { name: "path", widget: "file", path_kind: "in" },
+      { name: "dest", widget: "file", path_kind: "out" },
+      { name: "rate", widget: "number" },
+    ];
+    const restore = withCatalog([m]);
+    const n = {
+      ...node("a", "plug.node"),
+      data: {
+        label: "a",
+        nodeType: "plug.node",
+        params: {
+          path: "/srv/proj/data/x.csv",
+          dest: "/tmp/workspace/out.png",
+          rate: 15,
+        },
+      },
+    } as unknown as Node<MTNodeData>;
+    const doc = serializeWorkflow([n], [], "t", { projectDir: "/srv/proj" });
+    restore();
+    expect(doc.nodes[0].params.path).toBe("data/x.csv");
+    expect(doc.nodes[0].params.dest).toBe("/tmp/workspace/out.png");
+    expect(doc.nodes[0].params.rate).toBe(15);
+  });
+
+  it("relativizeToAnchor: longest anchor wins; relative values untouched", () => {
+    const anchors = { projectDir: "/srv/proj", dataRoot: "/srv/proj/data" };
+    expect(relativizeToAnchor("/srv/proj/data/x.csv", anchors)).toBe("x.csv");
+    expect(relativizeToAnchor("/srv/proj/other/x.csv", anchors)).toBe(
+      "other/x.csv",
+    );
+    expect(relativizeToAnchor("/elsewhere/x.csv", anchors)).toBe(
+      "/elsewhere/x.csv",
+    );
+    expect(relativizeToAnchor("data/x.csv", anchors)).toBe("data/x.csv");
+    expect(relativizeToAnchor("C:\\srv\\proj\\x.csv", anchors)).toBe(
+      "C:\\srv\\proj\\x.csv",
+    );
+    expect(relativizeToAnchor("/srv/proj/x.csv", {})).toBe("/srv/proj/x.csv");
+  });
+
+  it("serializes unchanged without anchors (paths saved as-is)", () => {
+    const restore = withCatalog([
+      { ...manifest("plug.node", [], []), plugin_version: "0.6.8" },
+    ]);
+    const n = {
+      ...node("a", "plug.node"),
+      data: {
+        label: "a",
+        nodeType: "plug.node",
+        params: { path: "/srv/proj/data/x.csv" },
+      },
+    } as unknown as Node<MTNodeData>;
+    const doc = serializeWorkflow([n], []);
+    restore();
+    expect(doc.nodes[0].params.path).toBe("/srv/proj/data/x.csv");
+    expect(doc.nodes[0].plugin_version).toBe("0.6.8"); // record still stamps
   });
 });
