@@ -60,13 +60,10 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
 #: Knobs reserved for the postponed §12.3 disk cache — defined in the schema
 #: so the UI/API scaffolding is ready, without any effect yet. (cache_max_gb
 #: graduated to the live knobs for the MEMORY tier, issues.md L5 — the disk
-#: cache will introduce its own knob when it lands.)
+#: cache will introduce its own knob when it lands. project_dir graduated to
+#: the deployment rows — it is live as the relative-path anchor since
+#: issues.md M23, user decision 2026-10-15; the disk cache will reuse it.)
 PLANNED_KNOBS: dict[str, tuple[type, object, str]] = {
-    "project_dir": (
-        str, None,
-        ("Project directory: stable, relocatable state home "
-         "(.emptyui-cache) — reserved for the §12.3 disk cache"),
-    ),
     "cache_ttl_days": (
         float, 30.0, "Disk-cache entry expiry in days — reserved (§12.3)",
     ),

@@ -538,12 +538,20 @@ export function enforceWiringRules<E extends { id: string; source: string; sourc
 }
 
 
-/** Serialize the workflow document (DESIGN.md §6 format). */
+/** Serialize the workflow document (DESIGN.md §6 format).
+ *
+ *  M23: each node records its plugin's distribution version (from the
+ *  catalog manifest) — the executor compares it at run time and warns
+ *  about drift.
+ */
 export function serializeWorkflow(
   nodes: Node<MTNodeData>[],
   edges: Edge[],
   name?: string,
 ) {
+  const { catalog } = useCatalog.getState();
+  const manifestOf = (type: string) =>
+    catalog?.nodes.find((m) => m.type === type);
   return {
     format: "emptyui/workflow",
     version: 1,
@@ -556,6 +564,7 @@ export function serializeWorkflow(
       type: n.data.nodeType,
       params: n.data.params,
       position: n.position,
+      plugin_version: manifestOf(n.data.nodeType)?.plugin_version,
     })),
     edges: edges.map((e) => {
       // L12: defaulting a missing handle to "data" silently INVENTED wiring

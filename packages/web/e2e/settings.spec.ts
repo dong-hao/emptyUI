@@ -88,8 +88,14 @@ test("settings dialog: live knobs editable, deployment rows read-only", async ({
   await expect(deployRow.locator("code")).toContainText("*");
   await expect(deployRow.locator("input")).toHaveCount(0);
 
+  // M23: project_dir is a DEPLOYMENT row now (the effective relative-path
+  // anchor) — read-only code value, never an editable input
+  const projectRow = dialog.locator("tr", { hasText: "project dir" });
+  await expect(projectRow.locator("code")).not.toContainText("planned");
+  await expect(projectRow.locator("input")).toHaveCount(0);
+
   // Planned (history §21) rows are disabled with a planned tag
-  const plannedRow = dialog.locator("tr", { hasText: "project dir" });
+  const plannedRow = dialog.locator("tr", { hasText: "cache ttl" });
   await expect(plannedRow.locator("input")).toBeDisabled();
   await expect(plannedRow).toContainText("planned");
 });

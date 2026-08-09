@@ -619,8 +619,20 @@ Rules that keep the ecosystem healthy:
 - **Models declared, not bundled**: `models` in the manifest
   (id/filename/sha256/url/license); binaries live in a configured model
   directory (platform-provisioned in remote mode, §11) — never inside the wheel.
-- Manifests include `version`; workflows record plugin versions for
-  reproducibility. The full authoring contract (immutable-input execute
+  **Planned (M23 decision 2026-10-15)**: no knob or sha256 verification is
+  implemented — no plugin ships model weights yet; the surface returns when
+  one does.
+- **Plugin versions are recorded (M23, 2026-10-15)**: every catalog manifest
+  carries its plugin's distribution version (`plugin_version`); the frontend
+  stamps it per node when saving a workflow. The record is informational —
+  a loaded workflow ALWAYS runs on the installed codebase — but the
+  executor compares record vs installed at run time and a mismatch
+  surfaces as a `node_warning` (amber card marker + properties panel) and
+  a server-log line, naming both versions and the remedy (re-save the
+  workflow to update the record). Documents saved before the field existed
+  carry no record and warn nothing; per-node-definition versions were
+  deliberately not recorded (a plugin version is what a user can keep
+  track of). The full authoring contract (immutable-input execute
   contract, packaging layout, publishing checklist) is **`docs/plugin-guide.md`**
   with a working template in `examples/plugin-template/`.
 - A future `emptyui plugin publish/index` flow can distribute community plugins
@@ -678,6 +690,7 @@ One file = one reproducible pipeline.
   "nodes": [
     { "id": "n1", "type": "core.io.load_csv",
       "params": { "path": "/data/station01.csv" },
+      "plugin_version": "0.1.0",
       "position": { "x": 80, "y": 120 } },        // UI-only, ignored by executor
     { "id": "n2", "type": "core.filter.bandpass", "params": { "order": 4 } },
     { "id": "n3", "type": "core.plot.spectrogram", "params": {} }
@@ -693,6 +706,7 @@ One file = one reproducible pipeline.
 
 - Edges reference ports by name → resilient to port reordering.
 - `position` is UI-only → headless/batch execution ignores it cleanly.
+- `plugin_version` (per node, optional, M23) is informational — see §5.
 - Executor validates against current manifests at load time with actionable
   messages — structure (types, edges, cycles) **and param values** (M1):
   declared `min`/`max`, `select`/`radio` `options` and required
@@ -866,13 +880,16 @@ source of truth (`GET/PUT /api/settings`).
   holder, `NodeCache.resize()` trims, the next worker call reads the
   watchdog budget and the cache gate). `RuntimeSettings` is the mutable holder
   the app closures read.
-- **Deployment rows (read-only display)**: `data_root`, `serve_dist`,
-  `cors_origins`, `root_path` — changing confinement/serving mid-flight is an
-  architecture change; env + restart only.
-- **Planned (reserved, inert)**: `project_dir`,
-  `cache_ttl_days` — the §12.3 disk cache lands into this scaffolding
-  (`cache_max_gb` graduated to the live knobs for the memory tier,
-  issues.md L5; the disk cache will introduce its own knobs).
+- **Deployment rows (read-only display)**: `data_root`,
+  `project_dir` (M23 — shown as the effective anchor: the configured
+  directory, or the server CWD when unset),
+  `serve_dist`, `cors_origins`, `root_path` — changing
+  confinement/serving mid-flight is an architecture change; env + restart only.
+- **Planned (reserved, inert)**: `cache_ttl_days` — the §12.3 disk cache
+  lands into this scaffolding (`cache_max_gb` graduated to the live knobs
+  for the memory tier, issues.md L5; the disk cache will introduce its own
+  knobs; `project_dir` graduated to the deployment rows — it is live as the
+  relative-path anchor since M23).
 - **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
   (`disabled_plugins` + `settings` sections; atomic write; unknown keys
   ignored on load — files may travel). Opt-in: unset = memory-only, no file
@@ -1716,9 +1733,13 @@ achieved by construction (one process per user/team).
 - **Output workspace (writable)**: per-run workspaces hold artifacts, plots
   and TF/export files — served through the artifact endpoints; nothing outside
   the output workspace is writable.
-- **Project directory (stable, planned §12.3)**: a user-designated writable
-  directory holding long-lived, relocatable state — the `.emptyui-cache/` disk
-  cache. `EMPTYUI_PROJECT_DIR` designates it (unset → disk cache disabled).
+- **Project directory (stable — live since M23, 2026-10-15)**: a
+  user-designated directory anchoring long-lived, relocatable state. Since
+  M23 it is LIVE as the relative-path anchor: input paths saved relative to
+  it resolve on any machine (§6), and the settings view exposes the
+  effective anchor (the server CWD when unset). The `.emptyui-cache/` disk
+  cache (§12.3) will live here when it lands.
+  `EMPTYUI_PROJECT_DIR` designates it.
 
 Local development keeps unrestricted behavior (no data root — the
 whole filesystem is browsable and addressable; the files browser merely
@@ -1737,6 +1758,9 @@ normalize + validate identically — `../` escapes are rejected).
 - **Proxy compatibility**: standard `X-Forwarded-*` handling; WS upgrade
   proxying with generous idle timeouts; the polling fallback is a deliberate
   asset — the UI keeps working when proxies drop WS connections.
+  **Planned (M23 decision 2026-10-15)**: the `X-Forwarded-*` handling itself
+  is not implemented — there is no deployment web server yet (uvicorn behind
+  a platform gateway covers §11.1); it lands when one exists.
 
 ### 11.4 Operational policy (config knobs)
 
@@ -1749,8 +1773,8 @@ normalize + validate identically — `../` escapes are rejected).
 - **Max concurrent runs** per instance (queued or HTTP 429), bounding
   memory/CPU in a shared platform; default unlimited for local dev.
 - **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`,
-  `EMPTYUI_SERVE_DIST`, `EMPTYUI_CORS_ORIGINS`, `EMPTYUI_BASE_PATH`,
-  `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`,
+  `EMPTYUI_PROJECT_DIR`, `EMPTYUI_SERVE_DIST`, `EMPTYUI_CORS_ORIGINS`,
+  `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`,
   `EMPTYUI_DISABLED_PLUGINS`, `EMPTYUI_SETTINGS_PATH`) mirrored as
   `create_app(...)` keyword arguments for module embedding (kwargs win).
 
@@ -1834,7 +1858,9 @@ the ephemeral per-run workspaces — a third storage realm (§11.2).
 - **Project directory**: `EMPTYUI_PROJECT_DIR` (env) / `create_app(project_dir=…)`
   — a stable, writable directory the user designates, typically where the
   survey data lives. Cache root: `<project_dir>/.emptyui-cache/`. Unset →
-  disk cache disabled (no silent `~` writes).
+  disk cache disabled (no silent `~` writes). **Live since M23** (2026-10-15)
+  as the relative-path anchor (§6/§11.2) — the knob and its plumbing exist;
+  only the disk-cache layer remains to be built.
 - **Key design (relocation-friendly)**: the executor's structural sha256 (§7.1)
   plus payload-format version, node plugin version, emptyui version — version
   bumps invalidate cleanly. File params become relocatable: the signature uses

@@ -136,6 +136,7 @@ def create_app(
     node_timeout_seconds: float | None = None,
     disabled_plugins: tuple[str, ...] | None = None,
     settings_path: Path | str | None = None,
+    project_dir=None,
 ) -> FastAPI:
     """Build the application (DESIGN.md §7.3, remote-mode knobs §11/§11.2).
 
@@ -146,6 +147,8 @@ def create_app(
     tuple disables the middleware — same-origin serving needs no CORS).
     ``disabled_plugins`` sets the plugin baseline (§5.1: env/platform wins)
     and ``settings_path`` overrides where UI plugin toggles persist.
+    ``project_dir`` (M23) is the anchor for portable relative input paths
+    (and the future §12.3 disk cache home); None = the server CWD.
     """
     if settings is None:
         settings = Settings.from_env()
@@ -176,6 +179,11 @@ def create_app(
     )
     if isinstance(settings_path, str):
         settings_path = Path(settings_path)
+    project_dir = (
+        project_dir if project_dir is not None else settings.project_dir
+    )
+    if isinstance(project_dir, str):
+        project_dir = Path(project_dir).expanduser() if project_dir else None
 
     app = FastAPI(title="emptyui", version=emptyui.__version__, root_path=root_path or "")
     if cors_origins:
@@ -460,6 +468,11 @@ def create_app(
                 }
             deployment = {
                 "data_root": str(data_root) if data_root else None,
+                # M23: the effective relative-path anchor — the configured
+                # project dir, or the server CWD when unset (what relative
+                # paths resolve against today). The frontend relativizes
+                # saved input paths against it.
+                "project_dir": str(project_dir or Path.cwd()),
                 "serve_dist": serve_dist,
                 "cors_origins": list(cors_origins),
                 "root_path": root_path or None,
@@ -647,6 +660,7 @@ def create_app(
                     cache=node_cache if runtime.cache_max_entries else None,
                     targets=req.targets,
                     data_root=data_root,
+                    project_dir=project_dir,
                     node_timeout_seconds=runtime.node_timeout_seconds,
                 )
             except Exception as exc:  # noqa: BLE001 — reported to clients

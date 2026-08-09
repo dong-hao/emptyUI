@@ -44,6 +44,11 @@ class Settings:
     #: None = memory-only for now — no file is created unless configured
     #: (config-file persistence is deferred to the configure/env file work).
     settings_path: Path | None = None
+    #: Stable project directory (issues.md M23, user decision 2026-10-15):
+    #: the anchor for portable relative input paths — a saved workflow may
+    #: carry paths relative to it, and execution resolves them here.
+    #: None = the server process CWD is the implicit anchor (status quo).
+    project_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -99,6 +104,8 @@ class Settings:
         )
         raw_settings = os.environ.get("EMPTYUI_SETTINGS_PATH", "").strip()
         settings_path = Path(raw_settings).expanduser() if raw_settings else None
+        raw_project = os.environ.get("EMPTYUI_PROJECT_DIR", "").strip()
+        project_dir = Path(raw_project).expanduser() if raw_project else None
         raw_base = os.environ.get("EMPTYUI_BASE_PATH", "").strip()
         if raw_base and (
             not raw_base.startswith("/")
@@ -121,4 +128,5 @@ class Settings:
             node_timeout_seconds=node_timeout_seconds,
             disabled_plugins=disabled_plugins,
             settings_path=settings_path,
+            project_dir=project_dir,
         )

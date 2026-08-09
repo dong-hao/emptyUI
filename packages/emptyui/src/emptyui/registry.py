@@ -127,8 +127,18 @@ class Registry:
             node = self._nodes[node_type]
             for ptype, meta in getattr(node, "port_types", {}).items():
                 port_types.setdefault(ptype, dict(meta))
-        return {"nodes": [node.manifest() for node in self._nodes.values()],
-                "port_types": port_types}
+        # M23: each manifest carries its plugin's distribution version —
+        # the frontend records it per node when saving, and the executor
+        # compares it at run time (the drift warning). Manual/test nodes
+        # outside any plugin carry no key (nothing to compare).
+        manifests = []
+        for node_type, node in self._nodes.items():
+            m = node.manifest()
+            pv = self.plugin_version_of(node_type)
+            if pv:
+                m["plugin_version"] = pv
+            manifests.append(m)
+        return {"nodes": manifests, "port_types": port_types}
 
     # --- plugin management (§5.1) -----------------------------------------
 
@@ -162,6 +172,16 @@ class Registry:
             if node_type in info.node_types:
                 return name
         return None
+
+    def plugin_version_of(self, node_type: str) -> str | None:
+        """Distribution version of the plugin providing ``node_type``
+        (issues.md M23) — the drift-warning comparison key. None for
+        manual/test nodes registered outside any plugin."""
+        name = self._plugin_of.get(node_type)
+        if name is None:
+            return None
+        info = self._plugins.get(name)
+        return info.version if info else None
 
     def rebuild(self, disabled: Iterable[str] = ()) -> list[PluginInfo]:
         """In-place hot reload (§5.1): re-discover plugins and rebuild the

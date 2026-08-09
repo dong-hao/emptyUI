@@ -196,10 +196,23 @@ def test_settings_shape(client: TestClient):
     for knob in view["live"].values():
         assert {"value", "type", "default", "description", "editable",
                 "source"} <= set(knob)
-    assert {"data_root", "serve_dist", "cors_origins", "root_path"} <= set(
-        view["deployment"])
+    assert {"data_root", "project_dir", "serve_dist", "cors_origins",
+            "root_path"} <= set(view["deployment"])
     for knob in view["planned"].values():
         assert {"value", "type", "default", "description"} <= set(knob)
+
+
+def test_plugin_manifest_carries_plugin_version():
+    """M23: a plugin-attributed manifest exposes ``plugin_version`` — the
+    frontend records it per node on save and the executor compares it at
+    run time (the drift warning). Manual/test nodes carry no key."""
+    reg = _registry()
+    reg._plugins["test"] = PluginInfo(
+        name="test", version="2.5.0", bundled=False, node_types=["test.full"])
+    reg._plugin_of["test.full"] = "test"
+    app = create_app(reg)
+    manifest = TestClient(app).get("/api/nodes").json()["nodes"][0]
+    assert manifest["plugin_version"] == "2.5.0"
 
 
 def test_health_shape(client: TestClient):

@@ -38,6 +38,9 @@ export interface ParamSpec {
   /** Time-selector bar binding (DESIGN.md §8.3): input port name whose
    *  payload summary (extent, via `payload` run events) drives the bar. */
   time_bar?: string;
+  /** M19/M23: "in" reads data (relativized on save against the project
+   *  dir / data root); "out" writes a product (never relativized). */
+  path_kind?: string;
   /** Select-option suggestions (DESIGN.md §8.3): input port name whose
    *  payload summary offers the options (e.g. an fc database's sample-rate
    *  tiers) — the static options are extended after a run. */
@@ -109,6 +112,10 @@ export interface NodeManifest {
   /** M13: "this run produces something the user can see" — declared on the
    *  node class, never inferred from the category string */
   terminal?: boolean;
+  /** M23: the plugin distribution version — recorded per node when the
+   *  workflow is saved; the executor compares it at run time and warns
+   *  on the node about version drift. */
+  plugin_version?: string;
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];

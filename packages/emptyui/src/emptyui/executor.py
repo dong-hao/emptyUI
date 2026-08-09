@@ -388,7 +388,8 @@ class Executor:
         resolved under the data root before statting (execution resolves
         the same way, history §17.2) — without this the stat silently missed for
         remote-mode workflows and external modifications never
-        invalidated the cache.
+        invalidated the cache. ``project_dir`` (M23) anchors the same way
+        when no data root takes precedence.
         """
         if not isinstance(value, str) or widget not in ("file", "directory"):
             return value
@@ -401,8 +402,14 @@ class Executor:
             # resolves out-paths per-run into the workspace anyway)
             return value
         p = Path(value).expanduser()
-        if path_kind == "in" and data_root is not None and not p.is_absolute():
-            p = Path(data_root) / p
+        if path_kind == "in" and not p.is_absolute():
+            if data_root is not None:
+                p = Path(data_root) / p
+            elif project_dir is not None:
+                # M23: a relative input anchors to the project dir the same
+                # way execution resolves it — the stat must not miss for
+                # project-relative workflows
+                p = Path(project_dir) / p
         try:
             st = p.stat()
         except (OSError, ValueError):
@@ -422,6 +429,38 @@ class Executor:
             except (OSError, ValueError):
                 continue
         return [str(p), st.st_size, st.st_mtime_ns]
+
+    def _version_drift_warning(
+        self, wnode: WorkflowNode, manifest
+    ) -> str | None:
+        """Drift message when the document records a different plugin
+        version than this server runs (issues.md M23, user decision
+        2026-10-15: the record is informational — the run always uses the
+        installed codebase, loudly). None when there is nothing to compare
+        (no record, a manual/test node outside any plugin, or an exact
+        match)."""
+        recorded = (getattr(wnode, "plugin_version", "") or "").strip()
+        if not recorded:
+            return None
+        current = self.registry.plugin_version_of(wnode.type)
+        if not current or recorded == current:
+            return None
+        name = self.registry.plugin_name_of(wnode.type) or wnode.type
+        return (
+            f"saved with plugin '{name}' version {recorded}; this server "
+            f"has {current} — the run uses the installed version; re-save "
+            "the workflow to update the record"
+        )
+
+    def _warn_version_drift(
+        self, wnode: WorkflowNode, manifest, node_id: str, emit
+    ) -> None:
+        msg = self._version_drift_warning(wnode, manifest)
+        if msg is None:
+            return
+        emit({"event": "node_warning", "node": node_id, "msg": msg})
+        logging.getLogger("emptyui").warning(
+            "node '%s' (%s): %s", node_id, wnode.type, msg)
 
     def _node_key(
         self,
@@ -634,9 +673,10 @@ class Executor:
 
         `data_root` (DESIGN.md §11.2) confines input path params to a
         read-only root and resolves output path params into the run
-        workspace; None keeps local-dev behavior. `project_dir` (§12.3,
-        planned) is the stable user-designated directory whose relative
-        layout cache keys may share; inert until the disk cache lands.
+        workspace; None keeps local-dev behavior. `project_dir` (§11.2,
+        M23) anchors relative input paths in local mode (data root takes
+        precedence) and makes cache keys project-relative; None resolves
+        relative inputs against the process CWD (status quo).
 
         `node_timeout_seconds` (issues.md M2) is the per-node watchdog
         budget — each node must finish within it or the run ends with a
@@ -863,9 +903,17 @@ class Executor:
                         "cached": True,
                     }
                 )
+                # the drift record is a document fact, not a computation
+                # result — it surfaces on cache hits too (the frontend
+                # keeps warnings on cached nodes: no "running" clears them)
+                self._warn_version_drift(wnode, manifest, node_id, emit)
                 continue
 
             emit({"event": "node_status", "node": node_id, "status": "running"})
+            # M23: version drift surfaces ON THE NODE (amber marker + right
+            # panel via the H7 channel) and in the log — after "running"
+            # so a re-execution clears the previous warning first
+            self._warn_version_drift(wnode, manifest, node_id, emit)
 
             ctx = RunContext(
                 workspace=workspace,
@@ -914,11 +962,12 @@ class Executor:
                     })
 
                 # remote-mode path confinement (history §17.2): inputs stay inside
-                # the data root, outputs resolve into this run's workspace
-                if data_root is not None:
-                    kwargs = PathPolicy(data_root, workspace).resolve_params(
-                        manifest, kwargs
-                    )
+                # the data root, outputs resolve into this run's workspace;
+                # local mode (M23): relative inputs anchor to the project dir
+                if data_root is not None or project_dir is not None:
+                    kwargs = PathPolicy(
+                        data_root, workspace, project_dir=project_dir
+                    ).resolve_params(manifest, kwargs)
                 deadline = self._effective_deadline(
                     manifest, node_timeout_seconds)
                 if deadline is None:

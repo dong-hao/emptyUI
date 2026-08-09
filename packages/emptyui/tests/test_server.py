@@ -359,7 +359,11 @@ def test_settings_view_and_live_edit():
     assert view["live"]["cache_max_entries"]["editable"]
     assert view["live"]["workspace_ttl_seconds"]["source"] == "default"
     assert view["deployment"]["cors_origins"] == ["*"]
-    assert "project_dir" in view["planned"]  # reserved history §21 scaffolding
+    # M23 (2026-10-15): project_dir graduated from planned to a deployment
+    # row — the effective relative-path anchor (server CWD when unset)
+    assert "cache_ttl_days" in view["planned"]  # remaining §21 scaffolding
+    assert isinstance(view["deployment"]["project_dir"], str)
+    assert Path(view["deployment"]["project_dir"]).is_absolute()
 
     resp = client.put("/api/settings", json={"values": {"cache_max_entries": 32}})
     assert resp.status_code == 200

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import type { Connection, Edge, Node } from "@xyflow/react";
 import type { NodeManifest, PortSpec } from "../api/client";
 import type { PayloadMap } from "./run";
+import { useCatalog } from "./catalog";
 import {
   connectionCreatesCycle,
   deserializeWorkflow,
@@ -177,5 +178,31 @@ describe("document envelope (L12)", () => {
         [bad],
       ),
     ).toThrow(/handle/);
+  });
+});
+
+describe("M23: plugin-version record", () => {
+  const withCatalog = (manifests: NodeManifest[]) => {
+    const prev = useCatalog.getState().catalog;
+    useCatalog.setState({ catalog: { nodes: manifests } });
+    return () => useCatalog.setState({ catalog: prev });
+  };
+
+  afterEach(() => useCatalog.setState({ catalog: undefined }));
+
+  it("stamps each node's plugin_version from the catalog manifest", () => {
+    const restore = withCatalog([
+      { ...manifest("plug.node", [], []), plugin_version: "0.6.8" },
+    ]);
+    const doc = serializeWorkflow([node("a", "plug.node")], []);
+    restore();
+    expect(doc.nodes[0].plugin_version).toBe("0.6.8");
+  });
+
+  it("omits the record for nodes the catalog does not know", () => {
+    const restore = withCatalog([]);
+    const doc = serializeWorkflow([node("a", "ghost.type")], []);
+    restore();
+    expect(doc.nodes[0].plugin_version).toBeUndefined();
   });
 });

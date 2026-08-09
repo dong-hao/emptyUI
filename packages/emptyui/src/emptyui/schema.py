@@ -19,6 +19,12 @@ class WorkflowNode(BaseModel):
     type: str
     params: dict[str, Any] = Field(default_factory=dict)
     position: Position = Field(default_factory=Position)
+    #: The plugin distribution version recorded when the document was
+    #: saved (issues.md M23, DESIGN §5). Informational only — the run
+    #: always uses the installed codebase; a mismatch surfaces as a
+    #: node_warning (executor._warn_version_drift), never an error.
+    #: Tolerated absent (documents saved before the field existed).
+    plugin_version: str | None = None
 
     @field_validator("id")
     @classmethod
