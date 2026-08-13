@@ -816,3 +816,67 @@ def test_align_runs_declares_collection_ok_inputs():
     node = AlignRuns()
     assert node.inputs[0].name == "data1" and node.inputs[0].collection_ok
     assert node.inputs[1].name == "data2" and node.inputs[1].collection_ok
+
+
+def test_read_run_channels_matches_slow_path(archive):
+    """The fast channel read is faithful to get_channel().to_xarray():
+    values, dtype, the time axis, and every attr the duck payload path
+    consumes (filters for the response registry, units/type for channel
+    classification, sample_rate, time_period.start for the time-base
+    cross-check). issues.md L21."""
+    import numpy as np
+    from emptyui_mth5.runs import read_run_channels
+
+    survey_obj = _resolve_survey(archive, "")
+    station_obj = _resolve_station(survey_obj, "")
+    run_obj = _resolve_run(station_obj, "")
+    slow = {name: run_obj.get_channel(name).to_xarray()
+            for name in run_obj.groups_list}
+    fast, sr, start = read_run_channels(run_obj)
+    assert set(fast) == set(slow)
+    first = run_obj.groups_list[0]
+    assert sr == float(slow[first].attrs["sample_rate"])
+    assert start is not None
+    for name, da in fast.items():
+        ref = slow[name]
+        assert da.dtype == ref.dtype, name
+        np.testing.assert_array_equal(da.values, ref.values)
+        np.testing.assert_array_equal(da.time.values, ref.time.values)
+        for key in ("filters", "units", "type", "sample_rate",
+                    "time_period.start", "component"):
+            assert da.attrs.get(key) == ref.attrs.get(key), (name, key)
+
+
+def test_full_extraction_avoids_metadata_storms(archive, tmp_path,
+                                                monkeypatch):
+    """Full-collection extraction from a burst archive must not pay the
+    per-channel metadata storm: RunGroup.get_channel is never called and
+    the station run summary is built at most once (issues.md L21 — the
+    day_12h profile: 347k HDF5 attr reads + 146 run_summary walks for
+    145 runs made a 15.6 s extraction)."""
+    from mth5.groups import run as run_mod
+    from mth5.groups import station as station_mod
+
+    def _forbidden(self, *args, **kwargs):
+        raise AssertionError(
+            "get_channel called during extraction — the fast path must "
+            "read channel datasets directly")
+
+    monkeypatch.setattr(run_mod.RunGroup, "get_channel", _forbidden)
+
+    orig = station_mod.StationGroup.run_summary
+    count = {"n": 0}
+
+    @property
+    def counted(self):
+        count["n"] += 1
+        return orig.fget(self)
+
+    monkeypatch.setattr(station_mod.StationGroup, "run_summary", counted)
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    res = ExtractRun().execute(ctx, archive, selection="time range",
+                               start="1980-01-01", end="1990-01-01")
+    coll = res["data"]
+    assert len(coll.runs) >= 1
+    assert count["n"] <= 1  # once per execute, not once per run

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -47,22 +48,46 @@ class RunCollection:
 
 
 def read_run_channels(run_obj):
-    """Fast channel read for one archive run (Build FC's data path).
+    """Fast channel read for one archive run (the one TS->FC data path).
 
-    Returns ``(data_vars, sample_rate, start)`` — reading channels via
-    ``to_xarray`` avoids ``RunGroup.to_runts``'s mt_metadata
-    deepcopy/validation storm (~7 s per run, ~40x the data read itself;
-    history §24.8 performance note). The caller wraps the result in a duck
-    payload (``SimpleNamespace(dataset=..., sample_rate=..., start=...,
-    filters=...)``).
+    Returns ``(data_vars, sample_rate, start)`` — channels are read
+    straight from their HDF5 datasets and reassembled as xarray
+    DataArrays. ``get_channel().to_xarray()`` pays mth5's mt_metadata
+    validation storm per channel (~6 ms each, ~40x the data read itself;
+    history §24.8 performance note) for metadata the duck payload never
+    consumes — on a burst archive that made full-collection extraction
+    metadata-bound (issues.md L21). The fast result is pinned bit-identical
+    to the slow path (``test_read_run_channels_matches_slow_path``).
     """
+
+    import h5py
+    import xarray as xr
+    from mt_timeseries.channel_ts import make_dt_coordinates
 
     data_vars = {}
     sample_rate = 0.0
     start = None
     for name in run_obj.groups_list:
-        da = run_obj.get_channel(name).to_xarray()
-        sample_rate = float(da.attrs.get("sample_rate", sample_rate))
+        hdf5_ds = run_obj.hdf5_group.get(str(name))
+        if not isinstance(hdf5_ds, h5py.Dataset):
+            continue
+        attrs = dict(hdf5_ds.attrs)
+        filters = attrs.get("filters")
+        if isinstance(filters, (str, bytes)):
+            # the archive stores the applied-filter list as a JSON
+            # string; mth5's validated metadata carries it as dicts
+            try:
+                attrs["filters"] = json.loads(filters)
+            except ValueError:
+                attrs["filters"] = []
+        sr = float(attrs.get("sample_rate", 0.0) or 0.0)
+        da = xr.DataArray(
+            hdf5_ds[()],
+            coords=[("time", make_dt_coordinates(
+                attrs.get("time_period.start"), sr, hdf5_ds.shape[0]))],
+            attrs=attrs,
+        )
+        sample_rate = sr or sample_rate
         if start is None and "time" in da.coords:
             start = da.coords["time"].values[0]
         data_vars[str(name)] = da
@@ -70,26 +95,31 @@ def read_run_channels(run_obj):
         # defensive: a division by zero deep in the STFT is worse than a
         # loud error naming the run
         raise ValueError(
-            f"run '{run_obj.metadata.id}' carries no sample_rate in "
+            f"run '{_hdf5_id(run_obj)}' carries no sample_rate in "
             "its channel metadata — cannot build FCs")
     # time-base cross-check: a channel whose time period contradicts the
     # run's (e.g. a pre-fix artifact whose channel axes anchor on the TBL
     # STIM placeholder while the run carries the tag truth) silently mixes
     # time bases — warn loudly; re-ingest with the current reader
-    run_tp = getattr(getattr(run_obj, "metadata", None), "time_period", None)
-    if run_tp is not None:
-        run_start = str(getattr(run_tp, "start", "") or "")
+    run_start = str(
+        run_obj.hdf5_group.attrs.get("time_period.start", "") or "")
+    if run_start:
         for name, da in data_vars.items():
-            ch_start = str(getattr(da, "attrs", {}).get(
-                "time_period.start", "") or "")
-            if ch_start and run_start and ch_start[:19] != run_start[:19]:
+            ch_start = str(da.attrs.get("time_period.start", "") or "")
+            if ch_start and ch_start[:19] != run_start[:19]:
                 _log.warning(
                     "run '%s': channel '%s' time_period.start (%s) "
                     "contradicts the run's (%s) — the archive mixes time "
                     "bases (a stale pre-fix artifact?); re-ingest with the "
                     "current reader",
-                    run_obj.metadata.id, name, ch_start, run_start)
+                    _hdf5_id(run_obj), name, ch_start, run_start)
     return data_vars, sample_rate, start
+
+
+def _hdf5_id(group_obj) -> str:
+    """The object's id from its HDF5 attrs — free, vs the ``.metadata``
+    property's mt_metadata validation storm (history §24.8)."""
+    return str(group_obj.hdf5_group.attrs.get("id", ""))
 
 
 def resolve_filter_registry(survey_obj, data_vars) -> dict:
@@ -191,18 +221,23 @@ def _group_id(group_obj) -> str:
 def _dipole_length_m(run_obj) -> float:
     """First positive electric-channel dipole length (issues.md L-A4).
 
-    Read from the channel metadata (free — no mt_metadata storm);
+    Read from the channel's HDF5 attrs (free — no mt_metadata storm);
     0.0 when the archive carries none. Compute FC falls back to this
     payload attr when its explicit param is unset, so externally-built
     archives with proper metadata get the correct mV -> V/m scaling
     without a manual parameter.
     """
     for comp in run_obj.groups_list:
+        comp = str(comp)
         if not comp.startswith("e"):
             continue
+        hdf5_ds = run_obj.hdf5_group.get(comp)
+        attrs = getattr(hdf5_ds, "attrs", None)
+        if attrs is None:  # a subgroup, or a name that isn't a channel
+            continue
         try:
-            dl = float(run_obj.get_channel(comp).metadata.dipole_length or 0.0)
-        except (AttributeError, TypeError, ValueError):
+            dl = float(attrs.get("dipole_length") or 0.0)
+        except (TypeError, ValueError):
             dl = 0.0
         if dl > 0:
             return dl
@@ -306,12 +341,18 @@ def _resolve_station(survey_obj, station: str):
 
 def _resolve_run(station_obj, run: str):
     """Return a Run object for ``run`` (or the first in the run summary)."""
+    if str(run).strip():
+        # direct HDF5 resolution — the run summary is a per-station walk
+        # (~30 ms on a burst archive) and paying it per resolved run made
+        # full-collection extraction metadata-bound (issues.md L21)
+        name = str(run).strip()
+        try:
+            return station_obj.get_run(name)
+        except Exception:  # noqa: BLE001
+            ids = [str(x) for x in station_obj.run_summary["id"]]
+            raise ValueError(f"run '{name}' not in station {ids}") from None
     summary = station_obj.run_summary
     ids = [str(x) for x in summary["id"]] if summary is not None and len(summary) else []
-    if run:
-        if run in ids:
-            return station_obj.get_run(run)
-        raise ValueError(f"run '{run}' not in station {ids}")
     if not ids:
         raise ValueError("station has no runs — set 'run'")
     return station_obj.get_run(ids[0])
