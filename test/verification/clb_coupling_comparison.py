@@ -13,9 +13,10 @@ variants:
                 (amp 1, phase 0 — the DC-coupled input is flat there).
 
 Both variants share everything else: night window 2026-06-18 11:00-23:00
-UTC, all three rates, BuildFC (window 256, factor 4, 8 decimation levels,
-clock zero epoch), per-bin coherence sort (defaults), self-reference
-Estimate TF (defaults).
+UTC, all three rates, the uniform TS->FC route (Extract Run 'time range'
+-> Compute FC's collection cascades — the route the retired Build FC node
+owned; window 256, factor 4, 8 decimation levels, clock zero epoch),
+per-bin coherence sort (defaults), self-reference Estimate TF (defaults).
 
 Run:  .venv/bin/python test/verification/clb_coupling_comparison.py
 Outputs: test/verification/plot_appres_phase_asis.png / _dropped.png
@@ -84,17 +85,27 @@ def ingest(tag: str, neutralize: bool):
 def process(archive_path: Path, tag: str, decimation_levels: int = 8):
     from emptyui.context import RunContext
     from emptyui.store import DataStore
-    from emptyui_aurora.process import BuildFC, CoherenceSort, EstimateTF
+    from emptyui_aurora.process import CoherenceSort, ComputeFC, EstimateTF
     from emptyui_mth5.plots import PlotAppResPhase
+    from emptyui_mth5.runs import ExtractRun
     from mth5.mth5 import MTH5
 
     ctx = RunContext(workspace=OUT, store=DataStore(), node_id=tag)
     m = MTH5()
     m.open_mth5(str(archive_path), "r")
     try:
+        # the uniform route (the Build FC node is retired): Extract Run
+        # 'time range' (empty window = every run, whole) -> Compute FC's
+        # collection cascades — the same per-run cascades merged along
+        # time Build FC performed (parity-pinned), epoch clock zero
         t0 = time.time()
-        fc = BuildFC().execute(ctx, m, decimation_levels=decimation_levels)["fc"]
-        print(f"[{tag}] BuildFC {time.time() - t0:.1f} s: " + ", ".join(
+        coll = ExtractRun().execute(
+            ctx, mth5=m, selection="time range")["data"]
+        fc = ComputeFC().execute(
+            ctx, data=coll, decimation_levels=decimation_levels,
+            clock_zero="epoch", persist=False)["fc"]
+        print(f"[{tag}] ExtractRun+ComputeFC {time.time() - t0:.1f} s: " +
+              ", ".join(
             f"L{k}:{v.sizes['frequency']}fx{v.sizes['time']}w"
             for k, v in sorted(fc.items())))
         t0 = time.time()

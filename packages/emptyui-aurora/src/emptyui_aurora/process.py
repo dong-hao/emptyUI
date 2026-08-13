@@ -114,6 +114,165 @@ def _merge_provenance_attrs(data, logger) -> dict[str, Any]:
         return {}
 
 
+def _tile_sessions(entries, session_seconds: float):
+    """Tile runs into fixed-length QC sessions (§9.4) — the universal
+    session-label mechanism, extracted from the retired Build FC
+    (history §24.13).
+
+    ``entries``: ``(rid, rate, start, end)`` with tz-aware or naive
+    pandas-compatible bounds. Returns units
+    ``(unit_id, rate, u_start, u_end, rid, lo, hi)`` — ``lo``/``hi`` are
+    the exclusive-ish slice bounds (``hi`` trimmed half a sample so the
+    boundary sample is not doubled by the inclusive crop). Sessions never
+    cross run boundaries; the summary end is the last SAMPLE, so the
+    tiled interval is ``[start, end + one sample)``.
+    """
+    import pandas as pd
+
+    units = []
+    for rid, rate, start, end in entries:
+        half = pd.to_timedelta(0.5 / rate, unit="s")
+        run_hi = end + pd.to_timedelta(1.0 / rate, unit="s")
+        k = 0
+        t = start
+        while t < run_hi:
+            t2 = min(t + pd.to_timedelta(session_seconds, unit="s"), run_hi)
+            units.append((f"{rid}_s{k + 1:04d}", rate, t, t2, rid, t, t2 - half))
+            t = t2
+            k += 1
+    return units
+
+
+def _contiguous_spans(units):
+    """Group units into cascade spans — the retired Build FC's criterion,
+    verbatim: maximal contiguous same-rate spans (adjacency within two
+    samples), deepest rate first; units without a parseable period each
+    form their own span (they cannot be adjacency-tested).
+
+    One guard beyond the original: OVERLAPPING units never join a span.
+    Aligned collections crop every member to the same overlap — joining
+    them would concatenate parallel views of the same samples and
+    fabricate data. The original only tested the gap upper bound.
+    """
+    u_start = {u[0]: u[2] for u in units}
+    u_end = {u[0]: u[3] for u in units}
+    spans: list[list[str]] = []
+    per_rate: dict[float, list] = {}
+    for u in units:
+        per_rate.setdefault(u[1], []).append(u[0])
+    for rate in sorted(per_rate, reverse=True):
+        datable = [r for r in per_rate[rate] if u_start[r] is not None]
+        for r in per_rate[rate]:
+            if u_start[r] is None:
+                spans.append([r])
+        ordered = sorted(datable, key=lambda r: u_start[r])
+        cur: list[str] = []
+        prev_end = None
+        for uid in ordered:
+            start, end = u_start[uid], u_end[uid]
+            gap = (start - prev_end).total_seconds() if prev_end is not None else None
+            if prev_end is not None and (
+                    gap > 2.0 / rate or gap < 0.0):
+                spans.append(cur)
+                cur = []
+            cur.append(uid)
+            prev_end = end
+        if cur:
+            spans.append(cur)
+    return spans
+
+
+def _concat_span_channels(parts, span_id: str, logger) -> dict:
+    """Concatenate a span's member channel dicts along time — the retired
+    Build FC's union, verbatim: the ``saturated`` aux QC mask is
+    zero-padded for members without it (no saturation there); a member
+    missing a REAL channel is dropped from the span with a loud warning
+    (fabricating an all-zero series would silently corrupt the estimate;
+    ``merge_fc_containers`` drops such channels per run the same way).
+
+    ``parts``: ``[(uid, {name: DataArray}), ...]`` in span order.
+    """
+    import xarray as xr
+
+    keys = list(parts[0][1])
+    for _, mv in parts[1:]:
+        for name in mv:
+            if name not in keys:
+                keys.append(name)
+    aux = {"saturated"}
+    real_missing = [
+        n for n in keys
+        if n not in aux and any(n not in mv for _, mv in parts)]
+    if real_missing:
+        logger.warning(
+            "span %s: run(s) lack channel(s) %s — dropped from "
+            "the cascaded span (fabricating zeros would corrupt "
+            "the estimate; process the runs separately or fix "
+            "the ingestion)", span_id, real_missing)
+        keys = [n for n in keys if n not in real_missing]
+    data_vars = {}
+    for name in keys:
+        chans = []
+        for _, mv in parts:
+            if name in mv:
+                chans.append(mv[name])
+            else:
+                # zeros_like copies the template channel's attrs
+                # (incl. `filters` refs) — a fabricated channel
+                # must not carry them (RunTS.calibrate divides
+                # every channel by its response chain)
+                pad = xr.zeros_like(next(iter(mv.values())))
+                if name in aux:
+                    pad.attrs = {"type": "auxiliary", "units": "1"}
+                chans.append(pad)
+        data_vars[name] = xr.concat(chans, dim="time")
+    return data_vars
+
+
+def _stamp_span_run_ids(levels, span, member_lens, sample_rate: float,
+                        span_t0) -> None:
+    """Per-window run identity at session granularity (history §24.13) —
+    the retired Build FC's attribution, verbatim.
+
+    A single-unit span stamps its unit id everywhere. A multi-unit span
+    attributes each window to the unit its START falls in: the fc time
+    coordinate is the scipy window CENTRE, so it is shifted back half a
+    window of THIS level before the membership test (§10.4 — a straddling
+    window follows the session its start falls in; Select Runs drops
+    rejected sessions downstream, conservatively including the overlap
+    neighbors that picked up their samples through the cascade).
+
+    ``member_lens``: sample counts per member, span order; ``span_t0``:
+    the span's first sample time (naive datetime64).
+    """
+    import numpy as np
+    import pandas as pd
+
+    if len(span) == 1:
+        for level, fc in levels.items():
+            levels[level] = fc.assign_coords(run_id=(
+                "time", np.full(int(fc.sizes["time"]), span[0])))
+        return
+    bnds = np.concatenate(([0.0], np.cumsum(member_lens)[:-1])) / sample_rate
+    for level, fc in levels.items():
+        t = np.asarray(fc["time"].values)
+        half_win = (float(fc.attrs.get("num_samples_window", 0)) / 2.0
+                    / float(fc.attrs.get("sample_rate", 0) or sample_rate))
+        if np.issubdtype(t.dtype, np.datetime64):
+            t0 = span_t0
+            if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
+                t0 = t0.tz_convert("UTC").tz_localize(None)
+            t0 = np.asarray(t0, dtype="datetime64[ns]")
+            off = ((t - t0) / np.timedelta64(1, "s")).astype(float) - half_win
+        else:
+            off = t.astype(float) - half_win
+        k = np.minimum(
+            np.searchsorted(bnds[1:], off, side="right"),
+            len(span) - 1)
+        levels[level] = fc.assign_coords(run_id=(
+            "time", np.asarray(span)[k]))
+
+
 class ComputeFC(Node):
     type = "aurora.process.compute_fc"
     # raw-data/FC-scale work: a generous own budget (issues.md M2)
@@ -245,6 +404,34 @@ class ComputeFC(Node):
                           "whenever saturation is frequent (a 73-minute "
                           "window almost always overlaps one clipped "
                           "sample out of 65536)."),
+        Param("session_hours", "number", label="Session length (h)",
+              default=0.0, min=0, optional=True,
+              description="Cut every run of a collection into fixed-length "
+                          "sessions (0 = off) before cascading — the "
+                          "universal session-label mechanism (§9.4): "
+                          "Select Runs / Residual Sort score and reject at "
+                          "session granularity, so a noisy hour no longer "
+                          "condemns an entire acquisition day (LEMI/NIMS "
+                          "runs are whole days). The statistical unit is "
+                          "FC windows per session: ~1 h at 1 Hz with "
+                          "window 256 gives ~28 windows (the validated "
+                          "MTU-5A stream recipe). Sessions are labelled "
+                          "'{run id}_sNNNN' and never cross run "
+                          "boundaries; a single ts.run input is treated as "
+                          "a one-run collection. Use with 'Regroup "
+                          "contiguous runs' to keep the deep levels "
+                          "(per-session cascades starve them)."),
+        Param("regroup_contiguous", "boolean",
+              label="Regroup contiguous runs", default=False,
+              description="Cascade maximal contiguous spans of same-rate "
+                          "runs as ONE payload (history §24.13): hourly sessions "
+                          "cannot form a level below ~0.23 Hz per slice, but "
+                          "the underlying stream is unbroken — cascading the "
+                          "kept contiguous span restores the long-period "
+                          "tail. Built from ALL sessions: hour-level QC "
+                          "lives in Select Runs, so spans never depend on "
+                          "QC outcomes and each window is stamped with the "
+                          "session it came from."),
         Param("persist", "boolean", label="Persist to workspace", default=True,
               description="Write each level's FC into the workspace MTH5 FC layer"),
         Param("survey", "string", label="Survey id", default="", optional=True),
@@ -269,6 +456,8 @@ class ComputeFC(Node):
                 per_window_detrend: str = "",
                 reject_saturated: bool = True,
                 saturated_max: float = 0.01,
+                session_hours: float = 0.0,
+                regroup_contiguous: bool = False,
                 persist: bool = True, survey: str = "", station: str = "",
                 run: str = "") -> dict[str, Any]:
         if data is None:
@@ -283,7 +472,19 @@ class ComputeFC(Node):
         # __getattr__ invocation) instead of try/getattr
         names = dir(data)
         extents = data.extents if "extents" in names else None
-        if (isinstance(extents, list) and "runs" in names):
+        is_collection = isinstance(extents, list) and "runs" in names
+        sessioning = (
+            (session_hours is not None and float(session_hours) > 0.0)
+            or bool(regroup_contiguous))
+        if not is_collection and sessioning:
+            # §9.4: session QC works on the classic single-run flow too —
+            # a lone ts.run is a one-run collection (its identity resolved
+            # the same way the single route would)
+            data = self._wrap_single_collection(
+                ctx, data, survey, station, run)
+            extents = data.extents
+            is_collection = True
+        if is_collection:
             try:
                 return self._execute_collection(
                     ctx, data, input_channels, output_channels,
@@ -291,13 +492,27 @@ class ComputeFC(Node):
                     decimation_levels, factor, window_samples, overlap,
                     window_type, window_type_deep, deep_from_level, clock_zero,
                     prewhitening, per_window_detrend, reject_saturated,
-                    saturated_max, persist, survey, station, run)
+                    saturated_max, session_hours, regroup_contiguous,
+                    persist, survey, station, run)
             finally:
                 # M3: a failure while persisting a member must not leak the
                 # write-open workspace archive (the success path closes too)
                 if persist:
                     from emptyui_mth5.persist import close_workspace_mth5
                     close_workspace_mth5(ctx)
+        # L-A4 dipole fallback: the explicit param wins; otherwise the attr
+        # Extract Run stamps from the archive's electric-channel metadata
+        if e_dipole_length_m is None and "dataset" in dir(data):
+            try:
+                dl = float((data.dataset.attrs or {}).get(
+                    "e_dipole_length_m", 0.0) or 0.0)
+            except Exception:  # noqa: BLE001 — duck payloads
+                dl = 0.0
+            if dl > 0:
+                e_dipole_length_m = dl
+                ctx.logger.info(
+                    "Compute FC: E dipole length %.6g m from the payload's "
+                    "archived channel metadata", dl)
         levels = compute_fc_levels(
             data, input_channels, output_channels,
             num_decimations=decimation_levels, factor=factor,
@@ -368,6 +583,24 @@ class ComputeFC(Node):
         ctx.progress(1.0, f"computed FC levels [{summary}]")
         return {"fc": levels}
 
+    @staticmethod
+    def _wrap_single_collection(ctx, data, survey: str, station: str,
+                                run: str):
+        """Wrap one ts.run as a one-member collection so session QC
+        (§9.4) works on the classic single-run flow — identity resolved
+        exactly as the single route would resolve it."""
+        from emptyui_mth5.persist import runts_context
+        from emptyui_mth5.runs import RunCollection
+
+        surv, stat, rid = runts_context(data, survey, station, run,
+                                        logger=ctx.logger)
+        return RunCollection(
+            runs=[data],
+            extents=[{"survey": surv, "station": stat, "run": rid,
+                      "start": "", "end": "",
+                      "sample_rate": float(getattr(data, "sample_rate", 0.0)
+                                           or 0.0)}])
+
     def _execute_collection(
         self, ctx, collection, input_channels: str, output_channels: str,
         channel_nomenclature: str, magnetic_unit: str, e_dipole_length_m,
@@ -375,16 +608,22 @@ class ComputeFC(Node):
         overlap: float, window_type: str, window_type_deep: str,
         deep_from_level, clock_zero: str, prewhitening: str,
         per_window_detrend: str, reject_saturated: bool,
-        saturated_max: float, persist: bool, survey: str, station: str,
+        saturated_max: float, session_hours: float,
+        regroup_contiguous: bool, persist: bool, survey: str, station: str,
         run: str,
     ) -> dict[str, Any]:
-        """Build FC's route on already-extracted runs ('time range' mode):
-        per-run cascades merged along time, per level (DESIGN §9.3)."""
+        """Per-run (or per-session) cascades merged along time, per level —
+        the route the retired Build FC owned (DESIGN §9.3): 'time range'
+        collections cascade member-wise, with optional §9.4 session
+        tiling and contiguous-span regrouping."""
         import numpy as np
+        import pandas as pd
+        import xarray as xr
         from emptyui_mth5.persist import (
             get_workspace_mth5,
             persist_fc_level,
         )
+        from emptyui_mth5.runs import _slice_window
 
         members = list(collection.runs)
         extents = list(collection.extents)
@@ -398,26 +637,142 @@ class ComputeFC(Node):
                 "grid anchors at its own start — remote-reference pairing "
                 "across separately-computed runs needs clock_zero='epoch' "
                 "(or an explicit ISO datetime)", len(members))
-        # per-family decimation trim (Build FC's rule, history §24.8): on a
-        # mixed-rate collection the lowest-rate family carries the full
-        # 'decimation_levels' cascade; higher-rate families decimate only
-        # until their rate would reach the next family's native rate.
+        # per-family decimation trim (history §24.8): on a mixed-rate collection the
+        # lowest-rate family carries the full 'decimation_levels' cascade;
+        # higher-rate families decimate only until their rate would reach
+        # the next family's native rate.
         rates = [float(getattr(m, "sample_rate", 0.0) or 0.0)
                  for m in members]
         family_rates = sorted(set(rates))
         coll_prov = _merge_provenance_attrs(collection, ctx.logger)
+        # L-A4 dipole fallback: the explicit param wins; otherwise the
+        # attr Extract Run stamps from the archive's electric-channel
+        # metadata rides the payload
+        dipole = e_dipole_length_m or None
+        if dipole is None:
+            for m in members:
+                try:
+                    dl = float((m.dataset.attrs or {}).get(
+                        "e_dipole_length_m", 0.0) or 0.0)
+                except Exception:  # noqa: BLE001 — duck payloads
+                    dl = 0.0
+                if dl > 0:
+                    dipole = dl
+                    ctx.logger.info(
+                        "Compute FC: E dipole length %.6g m from the "
+                        "payload's archived channel metadata", dl)
+                    break
+
+        # member spans in absolute time: the payload's own time axis is the
+        # ground truth of the data being cascaded; the extent rows are the
+        # fallback. Units without an absolute axis pass through whole.
+        def _member_bounds(i):
+            m = members[i]
+            try:
+                t = np.asarray(m.dataset["time"].values)
+            except Exception:  # noqa: BLE001 — duck payloads
+                return None, None
+            if not np.issubdtype(t.dtype, np.datetime64) or not len(t):
+                return None, None
+            # the LAST SAMPLE time (inclusive — the convention _tile_sessions
+            # inherits from the run summary, which adds one sample itself)
+            start = pd.Timestamp(t[0])
+            end = pd.Timestamp(t[-1])
+            if start.tzinfo is None:
+                start = start.tz_localize("UTC")
+            if end.tzinfo is None:
+                end = end.tz_localize("UTC")
+            return start, end
+
+        session_seconds = float(session_hours or 0.0) * 3600.0
+        units: list[tuple] = []
+        for i in range(len(members)):
+            ext = extents[i] if i < len(extents) else {}
+            rid = str(ext.get("run", "") or f"member{i + 1}")
+            m_start, m_end = _member_bounds(i)
+            if m_start is None:
+                if session_seconds > 0:
+                    ctx.logger.warning(
+                        "run %s has no absolute time axis — it cannot be "
+                        "session-split and passes through whole", rid)
+                units.append((rid, rates[i], None, None, rid, i, None, None))
+                continue
+            if session_seconds <= 0:
+                units.append((rid, rates[i], m_start, m_end, rid, i,
+                              None, None))
+            else:
+                for (uid, r, us, ue, _rid, lo, hi) in _tile_sessions(
+                        [(rid, rates[i], m_start, m_end)], session_seconds):
+                    units.append((uid, r, us, ue, rid, i, lo, hi))
+        spans = (
+            _contiguous_spans(units) if regroup_contiguous
+            else [[u[0]] for u in units])
+        unit_by_id = {u[0]: u for u in units}
+        # one workspace handle for the whole execution (history §24.8): the
+        # per-level open/close is quadratic — every close re-summarizes all
+        # summary tables (the fc summary recursively walks every persisted
+        # FC level)
+        wm = get_workspace_mth5(ctx) if persist else None
         containers = []
-        for i, (member, ext) in enumerate(zip(members, extents), 1):
-            r = rates[i - 1]
-            dec_of_member = _family_decimation(
+        for i, span in enumerate(spans, 1):
+            span_id = (span[0] if len(span) == 1
+                       else f"sr{unit_by_id[span[0]][1]:g}_span{i:04d}")
+            parts = []
+            span_t0 = None
+            for uid in span:
+                _uid, rate, _u_start, _u_end, rid, mi, lo, hi = unit_by_id[uid]
+                m = members[mi]
+                if lo is None:
+                    channels = {name: m.dataset[name]
+                                for name in m.dataset.data_vars}
+                else:
+                    channels = _slice_window(
+                        {name: m.dataset[name]
+                         for name in m.dataset.data_vars}, lo, hi)
+                    sample = next(iter(channels.values()))
+                    if not sample.sizes.get("time", 0):
+                        continue  # empty slice — nothing to contribute
+                first = next(iter(channels.values()))
+                t0 = np.asarray(first["time"].values)[0]
+                if span_t0 is None:
+                    span_t0 = t0
+                parts.append((uid, channels, rate, t0))
+            if not parts:
+                raise ValueError(
+                    f"span {span_id} is empty — its runs carry no samples")
+            sample_rate = parts[0][2]
+            if len(parts) == 1 and unit_by_id[span[0]][6] is None:
+                # the whole-member fast path: the payload itself (its
+                # filter registry and dataset attrs ride along untouched)
+                run_ts = members[unit_by_id[span[0]][5]]
+            else:
+                data_vars = (
+                    parts[0][1] if len(parts) == 1
+                    else _concat_span_channels(
+                        [(uid, ch) for uid, ch, _, _ in parts],
+                        span_id, ctx.logger))
+                filters = {}
+                first_m = members[unit_by_id[span[0]][5]]
+                if "filters" in dir(first_m):
+                    filters = getattr(first_m, "filters", {}) or {}
+                from types import SimpleNamespace
+
+                run_ts = SimpleNamespace(
+                    dataset=xr.Dataset(data_vars),
+                    sample_rate=sample_rate,
+                    start=span_t0,
+                    filters=filters,
+                )
+            r = sample_rate
+            dec_of_span = _family_decimation(
                 r, family_rates, decimation_levels, factor)
             levels = compute_fc_levels(
-                member, input_channels, output_channels,
-                num_decimations=dec_of_member, factor=factor,
+                run_ts, input_channels, output_channels,
+                num_decimations=dec_of_span, factor=factor,
                 num_samples_window=window_samples, overlap=overlap,
                 window_type=window_type,
                 magnetic_unit=magnetic_unit,
-                e_dipole_length_m=e_dipole_length_m,
+                e_dipole_length_m=dipole,
                 channel_nomenclature=channel_nomenclature,
                 prewhitening=prewhitening,
                 per_window_detrend=per_window_detrend,
@@ -427,39 +782,49 @@ class ComputeFC(Node):
                 reject_saturated=reject_saturated,
                 saturated_max=saturated_max,
             )
-            surv = str(ext.get("survey", "")) or survey
-            stat = str(ext.get("station", "")) or station
-            rid = str(ext.get("run", "")) or run
-            identity = _station_identity_attrs(member, surv, stat, rid)
-            # M4 #2: the member's own gap provenance (Align Runs carried it
-            # through the crop), falling back to the collection's — the fc
-            # must keep every interpolated interval, or the remote-reference
-            # pairing stays silent about fabricated samples.
+            # station identity travels in the attrs (DESIGN.md §10.6) —
+            # the first member's extent row names the survey/station; the
+            # run key is the span id (the session id when tiled — the QC
+            # label the per-window run_id coordinate carries)
+            ext0 = extents[unit_by_id[span[0]][5]] if extents else {}
+            surv = str(ext0.get("survey", "")) or survey
+            stat = str(ext0.get("station", "")) or station
+            identity = _station_identity_attrs(
+                members[unit_by_id[span[0]][5]], surv, stat, span_id)
+            # M4 #2: every contributing member's gap provenance (Align
+            # Runs carried it through the crop), plus the collection's —
+            # the fc must keep every interpolated interval, or the
+            # remote-reference pairing stays silent about fabricated
+            # samples.
             prov = dict(coll_prov)
-            prov.update(_merge_provenance_attrs(member, ctx.logger))
+            for uid in span:
+                prov.update(_merge_provenance_attrs(
+                    members[unit_by_id[uid][5]], ctx.logger))
             identity.update(prov)
             for level, fc in levels.items():
                 fc.attrs.update(identity)
-            wm = get_workspace_mth5(ctx) if persist else None
             if persist:
                 for level, fc in levels.items():
                     if "datetime64" in str(fc.time.dtype):
                         persist_fc_level(
                             ctx, fc, level, fc.attrs["sample_rate"],
-                            survey=surv, station=stat, run=rid, m=wm)
+                            survey=surv, station=stat, run=span_id, m=wm)
                     else:
                         ctx.logger.warning(
                             "run %s level %d has no absolute time axis — "
-                            "skipping persistence", rid, level)
+                            "skipping persistence", span_id, level)
                         break
-            # per-window run identity (§9.3): QC nodes group windows by run
-            for level, fc in levels.items():
-                levels[level] = fc.assign_coords(run_id=(
-                    "time", np.full(int(fc.sizes["time"]), rid)))
+            # per-window run identity (§9.3/§9.4): QC nodes group windows by
+            # run — session ids when tiled, the run id otherwise
+            _stamp_span_run_ids(
+                levels, span,
+                [len(next(iter(ch.values()))) for _, ch, _, _ in parts],
+                sample_rate, span_t0)
             containers.append(levels)
             ctx.progress(
-                i / len(members),
-                f"FC {i}/{len(members)}: run {rid} ({len(levels)} level(s))")
+                i / len(spans),
+                f"FC {i}/{len(spans)}: {span_id} "
+                f"({len(levels)} level(s), {len(span)} run(s))")
         merged = merge_fc_containers(containers)
         # the native rate families travel with the database (history §20.1): the
         # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
@@ -472,8 +837,8 @@ class ComputeFC(Node):
         n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
         ctx.progress(
             1.0,
-            f"run collection: {len(members)} run(s) -> {len(merged)} "
-            f"level(s), {n_win} window(s)")
+            f"run collection: {len(members)} run(s) in {len(spans)} "
+            f"span(s) -> {len(merged)} level(s), {n_win} window(s)")
         return {"fc": merged}
 
 
@@ -497,605 +862,6 @@ def _diurnal_prior_factor(start, use_prior: bool, prior_max: float,
         return 1.0
     return 1.0 + (prior_max - 1.0) * 0.5 * (
         1.0 + np.cos(2 * np.pi * (h - 12.0) / 24.0))
-
-
-class BuildFC(Node):
-    type = "aurora.fc.build"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
-    timeout = 3600.0
-    title = "Build FC Database"
-    tooltip = "Compute per-run FC cascades for every run of a station and merge them along time."
-    description = (
-        "Iterate the listed runs of one station, compute each run's "
-        "cascading-decimation FC levels, and merge them along time (Merge "
-        "FC's route) — the per-run cascade builder for archives with many "
-        "runs: burst-mode recordings (scheduled high-rate slots + "
-        "continuous low-rate streams, history §24.8) or gapped continuous "
-        "acquisitions. A merged-time-series cascade cannot decimate across "
-        "slot/run boundaries; per-run cascades are fine and starved deep "
-        "levels are skipped with warnings. Clock zero defaults to 'epoch' "
-        "here — staggered slot schedules make run-start anchoring useless "
-        "and the absolute grid is what lets remote-reference slots pair "
-        "across stations. FC persistence per run is available but off by "
-        "default."
-    )
-    category = "Processing"
-    inputs = (Input("mth5", "mth5"),)
-    outputs = (Output("fc", "fc"),)
-    params = (
-        Param("survey", "string", label="Survey id", default="", optional=True),
-        Param("station", "string", label="Station id", default="",
-              optional=True, placeholder="auto (first available)"),
-        Param("runs", "string", label="Runs", default="", optional=True,
-              placeholder="e.g. sr2400_0001,... (empty = all runs)"),
-        Param("start", "string", label="Start (UTC)", default="", optional=True,
-              time_bar="mth5",
-              description="Keep only runs overlapping this UTC window "
-                          "(ISO datetime or epoch seconds; empty = all "
-                          "runs). Slot-aware for burst archives: whole "
-                          "runs are kept, never cropped — the slot grid "
-                          "in the loader's slot-schedule table maps UTC "
-                          "windows to slots. The same window on two "
-                          "stations' Build FC nodes is the coarse "
-                          "remote-reference pairing (§9.3)."),
-        Param("end", "string", label="End (UTC)", default="", optional=True,
-              time_bar="mth5",
-              description="Window end (empty = no bound)."),
-        Param("input_channels", "string", default="", optional=True),
-        Param("output_channels", "string", default="", optional=True),
-        Param("channel_nomenclature", "select", label="Channel nomenclature",
-              options=_NOMENCLATURE_OPTIONS, default="auto",
-              description="mt_metadata CHANNEL_MAPS keyword: maps standard "
-                          "components (ex/ey/hx/hy/hz) to the instrument's "
-                          "actual channel names and derives magnetic units",
-              cascade={k: list(v) for k, v in _NOMENCLATURE_PRESETS.items()}),
-        Param("magnetic_unit", "select", label="Magnetic unit",
-              options=("auto", "h", "b"), default="auto"),
-        Param("e_dipole_length_m", "number", label="E dipole length (m)",
-              default=0.0, optional=True, min=0,
-              description="0 = take from the run metadata when present"),
-        Param("decimation_levels", "integer", label="Decimation levels",
-              default=4, min=0,
-              description="Deepest decimation level: 0 = native rate only; "
-                          "on a mixed-rate burst archive each family's "
-                          "cascade is trimmed to stop at the next family's "
-                          "native rate (history §24.8)."),
-        Param("factor", "integer", label="Decimation factor", default=4, min=2),
-        Param("window_samples", "integer", label="Window (samples)",
-              default=256, min=8),
-        Param("overlap", "number", default=0.5, min=0.0, max=0.99),
-        Param("window_type", "select",
-              options=("hamming", "hanning", "boxcar"), default="boxcar"),
-        Param("window_type_deep", "select", label="Deep-level taper",
-              default="same as shallow",
-              options=("same as shallow", "hamming", "hanning", "boxcar"),
-              optional=True),
-        Param("deep_from_level", "integer", label="Deep taper from level",
-              default=None, optional=True, min=0),
-        Param("clock_zero", "string", label="Clock zero", default="epoch",
-              optional=True,
-              placeholder='"epoch" or ISO datetime; empty = run starts',
-              description="Defaults to 'epoch' (absolute grid): staggered "
-                          "slot schedules make run-start anchoring useless "
-                          "for burst archives, and the absolute grid is "
-                          "what pairs remote-reference slots across "
-                          "stations (history §24.8)."),
-        Param("prewhitening", "select", label="Prewhitening",
-              default="first difference", options=("none", "first difference")),
-        Param("per_window_detrend", "select", label="Per-window detrend",
-              default="none", options=("none", "linear")),
-        Param("reject_saturated", "boolean", label="Reject saturated windows",
-              default=True,
-              description="Zero-weight (NaN) every FC window whose flagged "
-                          "sample fraction exceeds 'saturated max' (MTU-5A "
-                          "block tags byte 15, history §24.12 QC). No effect on "
-                          "payloads without a 'saturated' mask."),
-        Param("saturated_max", "number", label="Saturated max",
-              default=0.01, min=0.0, max=1.0,
-              enabled_when=("reject_saturated", (True,)),
-              description="Flagged-fraction threshold: a window is "
-                          "zero-weighted when more than this share of its "
-                          "samples is flagged saturated. The original "
-                          "any-overlap rule deleted the long-period tail "
-                          "whenever saturation is frequent (a 73-minute "
-                          "window almost always overlaps one clipped "
-                          "sample out of 65536)."),
-        Param("persist", "boolean", label="Persist per-run FCs", default=False,
-              description="Write each run's FC levels into the workspace "
-                          "MTH5 keyed by run (aurora's FC-layer pattern) — "
-                          "off by default; turn on once the procedure is "
-                          "settled (history §24.8 decision (b))."),
-        Param("regroup_contiguous", "boolean", label="Regroup contiguous runs",
-              default=False,
-              description="Cascade maximal contiguous spans of same-rate "
-                          "runs as ONE payload (history §24.13): hourly sessions "
-                          "cannot form a level below ~0.23 Hz per slice, but "
-                          "the underlying stream is unbroken — cascading the "
-                          "kept contiguous span restores the long-period "
-                          "tail. Built from ALL sessions: hour-level QC "
-                          "lives in Select Runs, so spans never depend on "
-                          "QC outcomes and each window is stamped with the "
-                          "session it came from."),
-        Param("session_hours", "number", label="Session length (h)",
-              default=0.0, min=0, optional=True,
-              description="Cut every run into fixed-length sessions "
-                          "(0 = off) before cascading — the universal "
-                          "session-label mechanism (§9.3): Select Runs / "
-                          "Residual Sort score and reject at session "
-                          "granularity, so a noisy hour no longer condemns "
-                          "an entire acquisition day (LEMI/NIMS runs are "
-                          "whole days). The statistical unit is FC windows "
-                          "per session: ~1 h at 1 Hz with window 256 gives "
-                          "~28 windows (the validated MTU-5A stream "
-                          "recipe); higher-rate data supports shorter "
-                          "sessions. Whole runs are tiled — sessions never "
-                          "cross run boundaries, and the cascade spans "
-                          "(regroup_contiguous) are built from ALL "
-                          "sessions, never from QC outcomes. Sessions are "
-                          "labelled '{run id}_sNNNN'. Use with "
-                          "regroup_contiguous to keep the deep levels "
-                          "(per-session cascades starve them)."),
-    )
-
-    def execute(self, ctx, mth5, survey: str = "", station: str = "",
-                runs: str = "", start: str = "", end: str = "",
-                input_channels: str = "",
-                output_channels: str = "", channel_nomenclature: str = "auto",
-                magnetic_unit: str = "auto", e_dipole_length_m=None,
-                decimation_levels: int = 4, factor: int = 4,
-                window_samples: int = 256, overlap: float = 0.5,
-                window_type: str = "boxcar", window_type_deep: str = "",
-                deep_from_level=None, clock_zero: str = "epoch",
-                prewhitening: str = "first difference",
-                per_window_detrend: str = "",
-                reject_saturated: bool = True,
-                saturated_max: float = 0.01,
-                persist: bool = False,
-                regroup_contiguous: bool = False,
-                session_hours: float = 0.0) -> dict[str, Any]:
-        from emptyui_mth5.phoenix_mtu import _window_bounds
-        from emptyui_mth5.runs import _resolve_run, _resolve_station, _resolve_survey
-
-        survey_obj = _resolve_survey(mth5, survey)
-        station_obj = _resolve_station(survey_obj, station)
-        available = [str(x) for x in station_obj.run_summary["id"]]
-        wanted = ([r.strip() for r in str(runs).split(",") if r.strip()]
-                  if str(runs).strip() else available)
-        missing = [r for r in wanted if r not in available]
-        if missing:
-            raise ValueError(
-                f"run(s) {missing} not in station archive {available}")
-        # slot-aware run selection (§9.3): a UTC window keeps every run
-        # whose time period intersects it — whole runs, never cropped (a
-        # burst slot is either in or out). The same window on two
-        # stations' Build FC nodes is the coarse remote-reference pairing.
-        win = _window_bounds(start, end)
-        if win[0] is not None or win[1] is not None:
-            import pandas as pd
-
-            summ = station_obj.run_summary.set_index("id")
-
-            def _utc(value):
-                ts = pd.Timestamp(str(value))
-                return (ts.tz_localize("UTC") if ts.tzinfo is None
-                        else ts.tz_convert("UTC"))
-
-            kept, dropped = [], []
-            for r in wanted:
-                try:
-                    rs, re_ = _utc(summ.loc[r, "start"]), _utc(summ.loc[r, "end"])
-                except (KeyError, TypeError, ValueError):
-                    ctx.logger.warning(
-                        "run %s has no parseable time period — dropped "
-                        "from the window selection", r)
-                    continue
-                lo = win[0] or rs
-                hi = win[1] or re_
-                (kept if (rs < hi and re_ > lo) else dropped).append(r)
-            if not kept:
-                raise ValueError(
-                    "no runs fall within the requested window "
-                    f"[{win[0]}, {win[1]}) — the archive spans "
-                    f"{_utc(summ['start'].min())} .. "
-                    f"{_utc(summ['end'].max())}")
-            if dropped:
-                ctx.logger.warning(
-                    "Build FC window [%s, %s): dropped %d run(s) outside "
-                    "the window (%s kept)", win[0], win[1], len(dropped),
-                    len(kept))
-            wanted = kept
-        from emptyui_mth5.runs import (
-            _group_id,
-            read_run_channels,
-            resolve_filter_registry,
-        )
-
-        # survey/station ids from the HDF5 group paths (free) — the group
-        # .metadata properties rebuild the FULL hierarchy through pydantic
-        # (~30-40 s per access on a burst archive; history §24.8). Location comes
-        # from the station's HDF5 attrs (dotted keys) the same way.
-        surv = _group_id(survey_obj)
-        stat = _group_id(station_obj)
-
-        # per-family decimation trim (history §24.8): on a mixed-rate burst
-        # archive the continuous (lowest-rate) family carries the full
-        # 'decimation_levels' cascade; higher-rate families decimate only
-        # until their rate would reach the next family's native rate — the
-        # lower family's cascade covers those frequencies, and same-rate
-        # levels computed from different families would double-cover the
-        # same acquisition windows. E.g. 2400/150/15 Hz with factor 4:
-        # 2400 Hz slots decimate once (-> 600), 150 Hz slots once
-        # (-> 37.5), the 15 Hz stream takes the full parameter.
-        import numpy as np
-
-        summary = station_obj.run_summary
-        rate_of = dict(zip(summary["id"].astype(str),
-                           summary["sample_rate"].astype(float)))
-        family_rates = sorted({rate_of[r] for r in wanted})
-        dipole = e_dipole_length_m or None
-        if dipole is None:
-            # L-A4: honor the documented promise — take the E dipole length
-            # from the run's electric channel metadata when present
-            # (emptyUI-built archives carry none; externally-built archives
-            # with proper metadata get the correct mV -> V/m scaling)
-            for rid in wanted:
-                dl = 0.0
-                try:
-                    r_obj = _resolve_run(station_obj, rid)
-                except ValueError:
-                    continue
-                for comp in r_obj.groups_list:
-                    if not comp.startswith("e"):
-                        continue
-                    try:
-                        dl = float(
-                            r_obj.get_channel(comp).metadata.dipole_length
-                            or 0.0)
-                    except (AttributeError, TypeError, ValueError):
-                        dl = 0.0
-                    if dl > 0:
-                        break
-                if dl > 0:
-                    dipole = dl
-                    ctx.logger.info(
-                        "Build FC: E dipole length %.6g m from run '%s' "
-                        "channel metadata", dl, rid)
-                    break
-        containers = []
-        # fast per-run data path (shared with Extract Run 'time range'):
-        # reading channels via to_xarray and wrapping in a duck payload
-        # avoids RunGroup.to_runts — whose mt_metadata deepcopy/validation
-        # storm costs ~7 s per run (40x the data read itself; history §24.8
-        # performance note). The same storm lives in the group .metadata
-        # properties (~20 s per access on a burst archive) — access station
-        # metadata ONCE and derive per-run rate/start from the channel
-        # attrs/coords.
-        from types import SimpleNamespace
-
-        import xarray as xr
-
-
-        station_md = SimpleNamespace(
-            station_metadata=SimpleNamespace(
-                location=SimpleNamespace(
-                    latitude=_attr_float(station_obj, "location.latitude"),
-                    longitude=_attr_float(station_obj, "location.longitude"),
-                    elevation=_attr_float(station_obj, "location.elevation"))))
-        identity_base = _station_identity_attrs(
-            station_md, surv, stat, "")
-
-        # (the former _read_channels/_resolve_registry closures are the
-        # shared emptyui_mth5.runs helpers — one implementation for Build
-        # FC and Extract Run 'time range', history §24.12 filter resolution
-        # included)
-
-        # cascade spans: singletons by default; with regroup_contiguous,
-        # maximal contiguous spans of same-rate runs (adjacency within two
-        # samples) — the physically right processing unit for unbroken
-        # acquisitions. Built from ALL sessions: hour-level QC lives in
-        # Select Runs (history §24.13), so spans never depend on QC outcomes and
-        # the time series is read exactly once.
-        import pandas as pd
-
-        # session units (§9.3 universal session labels): with
-        # session_hours > 0, every run is tiled into fixed-length
-        # contiguous time intervals, each an independent QC unit with a
-        # generated id '{run id}_sNNNN'. Whole runs pass through as one
-        # unit. Sessions are read lazily (sliced by time when their span
-        # is processed — each source run is read at most once per span).
-        session_seconds = float(session_hours) * 3600.0
-        units: list[tuple] = []  # (unit_id, rate, start, end, run_id, lo, hi)
-        starts_raw = dict(zip(summary["id"].astype(str), summary["start"]))
-        ends_raw = dict(zip(summary["id"].astype(str), summary["end"]))
-
-        def _parse_period(rid):
-            try:
-                r_start = pd.Timestamp(str(starts_raw[rid]))
-                r_end = pd.Timestamp(str(ends_raw[rid]))
-            except (KeyError, TypeError, ValueError):
-                return None, None
-            for attr in ("start", "end"):
-                ts = r_start if attr == "start" else r_end
-                fixed = (ts.tz_localize("UTC") if ts.tzinfo is None
-                         else ts.tz_convert("UTC"))
-                if attr == "start":
-                    r_start = fixed
-                else:
-                    r_end = fixed
-            return r_start, r_end
-
-        if session_seconds > 0:
-            for rid in wanted:
-                rate = rate_of[rid]
-                r_start, r_end = _parse_period(rid)
-                if r_start is None:
-                    ctx.logger.warning(
-                        "run %s has no parseable time period — it cannot "
-                        "be session-split and passes through whole", rid)
-                    units.append((rid, rate, None, None, rid, None, None))
-                    continue
-                # the summary end is the last SAMPLE (inclusive) — tile the
-                # exclusive interval [start, end + one sample)
-                run_hi = r_end + pd.to_timedelta(1.0 / rate, unit="s")
-                half = pd.to_timedelta(0.5 / rate, unit="s")
-                k = 0
-                t = r_start
-                while t < run_hi:
-                    t2 = min(t + pd.to_timedelta(session_seconds, unit="s"),
-                             run_hi)
-                    units.append((f"{rid}_s{k + 1:04d}", rate, t, t2, rid,
-                                  t, t2 - half))
-                    t = t2
-                    k += 1
-        else:
-            for rid in wanted:
-                r_start, r_end = _parse_period(rid)
-                units.append((rid, rate_of[rid], r_start, r_end, rid,
-                              None, None))
-
-        spans: list[list[str]] = []
-        if not regroup_contiguous:
-            spans = [[u[0]] for u in units]
-        else:
-            u_start = {u[0]: u[2] for u in units}
-            u_end = {u[0]: u[3] for u in units}
-            per_rate: dict[float, list[str]] = {}
-            for u in units:
-                per_rate.setdefault(u[1], []).append(u[0])
-            for rate in sorted(per_rate, reverse=True):
-                # runs with no parseable time period pass through whole
-                # (u_start None) — they cannot be adjacency-tested, so
-                # each forms its own span (mixing None with Timestamps in
-                # the sort key raised TypeError after the reads)
-                datable = [r for r in per_rate[rate] if u_start[r] is not None]
-                for r in per_rate[rate]:
-                    if u_start[r] is None:
-                        spans.append([r])
-                ordered = sorted(datable, key=lambda r: u_start[r])
-                cur: list[str] = []
-                prev_end = None
-                for uid in ordered:
-                    start, end = u_start[uid], u_end[uid]
-                    if prev_end is not None and (
-                            start - prev_end).total_seconds() > 2.0 / rate:
-                        spans.append(cur)
-                        cur = []
-                    cur.append(uid)
-                    prev_end = end
-                if cur:
-                    spans.append(cur)
-
-        unit_by_id = {u[0]: u for u in units}
-        # one workspace handle for the whole execution (history §24.8): the
-        # per-level open/close is quadratic — every close re-summarizes all
-        # summary tables (the fc summary recursively walks every persisted
-        # FC level)
-        if persist:
-            from emptyui_mth5.persist import close_workspace_mth5, get_workspace_mth5
-
-            wm = get_workspace_mth5(ctx)
-        try:
-            for i, span in enumerate(spans, 1):
-                members = []
-                memo: dict[str, dict] = {}
-                for uid in span:
-                    _uid, rate, u_start, u_end, rid, lo, hi = unit_by_id[uid]
-                    if lo is None:  # whole run (no session split, or unsplit)
-                        data_vars, sample_rate, start = read_run_channels(
-                            _resolve_run(station_obj, rid))
-                    else:
-                        if rid not in memo:
-                            memo[rid] = read_run_channels(_resolve_run(station_obj,
-                                                                    rid))[0]
-                        base = memo[rid]
-                        sample = next(iter(base.values()))
-                        t_arr = np.asarray(sample["time"].values)
-                        if np.issubdtype(t_arr.dtype, np.datetime64):
-                            idx = pd.DatetimeIndex(t_arr)
-                            if idx.tz is None:  # naive archive, aware bounds
-                                blo, bhi = lo.tz_localize(None), hi.tz_localize(None)
-                            else:  # aware archive: localize naive bounds
-                                blo = (lo.tz_localize("UTC") if lo.tzinfo is None
-                                       else lo)
-                                bhi = (hi.tz_localize("UTC") if hi.tzinfo is None
-                                       else hi)
-                            data_vars = {
-                                name: da.sel(time=slice(blo, bhi))
-                                for name, da in base.items()}
-                        else:
-                            ctx.logger.warning(
-                                "run %s has no absolute time axis — its "
-                                "sessions cannot be sliced by UTC window and "
-                                "the whole run is used", rid)
-                            data_vars = base
-                        sample_rate = rate
-                        # naive-UTC numpy datetime64: matches what the channel
-                        # coords provide (the archive convention — aware stamps
-                        # would make the merged fc time coordinate an object
-                        # array downstream)
-                        ts = u_start.tz_convert("UTC").tz_localize(None) \
-                            if u_start.tzinfo is not None else u_start
-                        start = ts.to_datetime64()
-                    members.append((uid, data_vars, sample_rate, start))
-                sample_rate = members[0][2]
-                span_id = (span[0] if len(span) == 1
-                           else f"sr{sample_rate:g}_span{i:04d}")
-                if len(span) == 1:
-                    data_vars = members[0][1]
-                    start = members[0][3]
-                else:
-                    # union of channels across members: the 'saturated' aux
-                    # QC mask exists only on runs with flagged samples — pad
-                    # the others with zeros (no saturation there) instead of
-                    # silently dropping the mask or crashing on concat. A run
-                    # missing a REAL channel is dropped from the span with a
-                    # loud warning: fabricating an all-zero series would
-                    # silently corrupt the estimate (merge_fc_containers
-                    # drops such channels per run the same way)
-                    keys = list(members[0][1])
-                    for mv in members[1:]:
-                        for name in mv[1]:
-                            if name not in keys:
-                                keys.append(name)
-                    aux = {"saturated"}
-                    real_missing = [
-                        n for n in keys
-                        if n not in aux and any(n not in mv[1] for mv in members)]
-                    if real_missing:
-                        ctx.logger.warning(
-                            "span %s: run(s) lack channel(s) %s — dropped from "
-                            "the cascaded span (fabricating zeros would corrupt "
-                            "the estimate; process the runs separately or fix "
-                            "the ingestion)", span_id, real_missing)
-                        keys = [n for n in keys if n not in real_missing]
-                    data_vars = {}
-                    for name in keys:
-                        parts = []
-                        for mv in members:
-                            if name in mv[1]:
-                                parts.append(mv[1][name])
-                            else:
-                                # zeros_like copies the template channel's attrs
-                                # (incl. `filters` refs) — a fabricated channel
-                                # must not carry them (RunTS.calibrate divides
-                                # every channel by its response chain)
-                                pad = xr.zeros_like(next(iter(mv[1].values())))
-                                if name in aux:
-                                    pad.attrs = {"type": "auxiliary",
-                                                 "units": "1"}
-                                parts.append(pad)
-                        data_vars[name] = xr.concat(parts, dim="time")
-                    start = members[0][3]
-                registry = resolve_filter_registry(survey_obj, data_vars)
-                ds = xr.Dataset(data_vars)
-                run_ts = SimpleNamespace(
-                    dataset=ds,
-                    sample_rate=sample_rate,
-                    start=start,
-                    filters=registry,
-                )
-                r = sample_rate
-                dec_of_span = _family_decimation(
-                    r, family_rates, decimation_levels, factor)
-                levels = compute_fc_levels(
-                    run_ts, input_channels, output_channels,
-                    num_decimations=dec_of_span, factor=factor,
-                    num_samples_window=window_samples, overlap=overlap,
-                    window_type=window_type,
-                    magnetic_unit=magnetic_unit,
-                    e_dipole_length_m=dipole,
-                    channel_nomenclature=channel_nomenclature,
-                    prewhitening=prewhitening,
-                    per_window_detrend=per_window_detrend,
-                    window_type_deep=window_type_deep,
-                    deep_from_level=deep_from_level,
-                    clock_zero=clock_zero,
-                    reject_saturated=reject_saturated,
-                    saturated_max=saturated_max,
-                )
-                # the station identity travels in the attrs (DESIGN.md §10.6);
-                # run_id is per-span, the rest comes from the hoisted station md
-                identity = dict(identity_base, run_id=span_id)
-                for level, fc in levels.items():
-                    fc.attrs.update(identity)
-                if persist:
-                    from emptyui_mth5.persist import persist_fc_level
-
-                    for level, fc in levels.items():
-                        if "datetime64" in str(fc.time.dtype):
-                            persist_fc_level(ctx, fc, level,
-                                             fc.attrs["sample_rate"],
-                                             survey=surv, station=stat,
-                                             run=span_id, m=wm)
-                        else:
-                            ctx.logger.warning(
-                                "run %s level %d has no absolute time axis — "
-                                "skipping persistence", span_id, level)
-                            break
-                # history §24.13: per-window run identity at SESSION granularity — the
-                # merged FC database keeps only the first contributor's attrs,
-                # so the QC nodes need an explicit coordinate to group windows
-                # by run. Windows straddling an internal boundary follow the
-                # session their start falls in; Select Runs drops rejected
-                # sessions downstream, conservatively including the overlap
-                # neighbors that picked up their samples through the cascade.
-                if len(span) == 1:
-                    for level, fc in levels.items():
-                        levels[level] = fc.assign_coords(run_id=(
-                            "time", np.full(int(fc.sizes["time"]), span[0])))
-                else:
-                    lens = [len(next(iter(mv[1].values()))) for mv in members]
-                    bnds = np.concatenate(
-                        ([0.0], np.cumsum(lens)[:-1])) / sample_rate
-                    for level, fc in levels.items():
-                        t = np.asarray(fc["time"].values)
-                        # the fc time coordinate is the scipy window CENTER
-                        # (t = step·k + nperseg/2/fs); attribution must follow
-                        # the window START (§10.4: a straddling window follows
-                        # the session its start falls in) — shift the center
-                        # back by half a window of THIS level
-                        half_win = (float(fc.attrs.get("num_samples_window", 0))
-                                    / 2.0
-                                    / float(fc.attrs.get("sample_rate", 0)
-                                            or sample_rate))
-                        if np.issubdtype(t.dtype, np.datetime64):
-                            t0 = members[0][3]
-                            if isinstance(t0, pd.Timestamp) and t0.tzinfo is not None:
-                                t0 = t0.tz_convert("UTC").tz_localize(None)
-                            t0 = np.asarray(t0, dtype="datetime64[ns]")
-                            off = ((t - t0) / np.timedelta64(1, "s")).astype(float) - half_win
-                        else:
-                            off = t.astype(float) - half_win
-                        k = np.minimum(
-                            np.searchsorted(bnds[1:], off, side="right"),
-                            len(span) - 1)
-                        levels[level] = fc.assign_coords(run_id=(
-                            "time", np.asarray(span)[k]))
-                containers.append(levels)
-                ctx.progress(
-                    (i) / len(spans),
-                    f"FC {i}/{len(spans)}: span {span_id} "
-                    f"({len(levels)} level(s), {len(span)} run(s))",
-                )
-        finally:
-            if persist:
-                close_workspace_mth5(ctx)
-        merged = merge_fc_containers(containers)
-        # the native rate families travel with the database (history §20.1): the
-        # plot nodes' 'auto' sample-rate selection means the lowest FAMILY
-        # (the continuous stream), not the deepest cascade tier — cascade
-        # tiers extend below the stream's native rate. The database is a
-        # plain dict; the attr rides every tier's Dataset attrs (so any
-        # tier lookup finds it).
-        for ds in merged.values():
-            ds.attrs["family_rates"] = sorted(family_rates)
-        n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
-        ctx.progress(
-            1.0,
-            f"FC database: {len(wanted)} run(s) in {len(spans)} span(s) -> "
-            f"{len(merged)} level(s), {n_win} window(s)",
-        )
-        return {"fc": merged}
 
 
 def _family_decimation(r: float, family_rates: list[float],
@@ -1934,48 +1700,6 @@ class EstimateTF(Node):
     #: an upstream Coherence Sort — the sort's per-(bin, window) weights are
     #: band-independent, so there is no banding parameter to auto-fill (and
     #: no duplicated banding param set on the sort node).
-
-
-class MergeFC(Node):
-    type = "aurora.fc.merge"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
-    timeout = 3600.0
-    title = "Merge FC"
-    tooltip = "Concatenate Fourier coefficients from several runs along time, per decimation level."
-    description = (
-        "Merge Fourier coefficients from several runs of one station along "
-        "the time axis (per decimation level) — the FC-database route for "
-        "runs that must not be concatenated in the time domain: physically "
-        "non-adjacent runs (gaps) or burst-mode acquisition (a merged time-"
-        "series cascade cannot decimate across slot boundaries; per-run "
-        "cascades are fine and starved deep levels are skipped). Inputs are "
-        "matched per level keyed by their ACTUAL sample rate — mixing rate "
-        "families is the point (history §24.8: levels are re-keyed to consecutive "
-        "ints in descending rate order); window settings should agree "
-        "(warning), frequency grids are intersected and channels missing "
-        "in some input are dropped (warnings). The FCs must share one "
-        "absolute window grid for remote-reference pairing — compute with "
-        "Compute FC's 'clock zero' anchor when the runs were computed "
-        "separately."
-    )
-    category = "Processing"
-    inputs = (
-        Input("fc1", "fc"),
-        Input("fc2", "fc", required=False),
-        Input("fc3", "fc", required=False),
-        Input("fc4", "fc", required=False),
-    )
-    outputs = (Output("fc", "fc"),)
-    params = ()
-
-    def execute(self, ctx, fc1, fc2=None, fc3=None, fc4=None) -> dict[str, Any]:
-        merged = merge_fc_containers([fc1, fc2, fc3, fc4])
-        n_win = sum(int(ds.sizes["time"]) for ds in merged.values())
-        ctx.progress(
-            1.0,
-            f"merged FC: {len(merged)} level(s), {n_win} window(s)",
-        )
-        return {"fc": merged}
 
 
 class MergeTFLevels(Node):

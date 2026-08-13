@@ -292,7 +292,7 @@ def test_compute_fc_node_forwards_saturated_max(tmp_path):
     """Regression: the ComputeFC node declared ``saturated_max`` (its only
     UI surface for the fraction threshold) but dropped it when calling
     ``compute_fc_levels`` — the helper default always applied, silently
-    (BuildFC forwarded it; the two nodes disagreed). The param must reach
+    (the collection route forwards it the same way). The param must reach
     the fc attrs."""
     from emptyui_aurora.process import ComputeFC
 

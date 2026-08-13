@@ -188,6 +188,27 @@ def _group_id(group_obj) -> str:
         return ""
 
 
+def _dipole_length_m(run_obj) -> float:
+    """First positive electric-channel dipole length (issues.md L-A4).
+
+    Read from the channel metadata (free — no mt_metadata storm);
+    0.0 when the archive carries none. Compute FC falls back to this
+    payload attr when its explicit param is unset, so externally-built
+    archives with proper metadata get the correct mV -> V/m scaling
+    without a manual parameter.
+    """
+    for comp in run_obj.groups_list:
+        if not comp.startswith("e"):
+            continue
+        try:
+            dl = float(run_obj.get_channel(comp).metadata.dipole_length or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            dl = 0.0
+        if dl > 0:
+            return dl
+    return 0.0
+
+
 def _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
                 sample_rate: float, registry: dict):
     """Build a real ``RunTS`` from the fast channel read (history §24.8).
@@ -203,6 +224,9 @@ def _wrap_runts(run_obj, station_obj, survey_obj, data_vars,
     import xarray as xr
 
     ds = xr.Dataset(data_vars)
+    dl = _dipole_length_m(run_obj)
+    if dl > 0:
+        ds.attrs["e_dipole_length_m"] = dl
     runts = _CachedRunTS(
         ds,
         run_metadata={"id": _group_id(run_obj),
@@ -230,8 +254,12 @@ def _run_duck_payload(survey_obj, run_obj, lo=None, hi=None):
         if sample.sizes.get("time", 0):
             _start = sample["time"].values[0]
     filters = resolve_filter_registry(survey_obj, data_vars)
+    ds = xr.Dataset(data_vars)
+    dl = _dipole_length_m(run_obj)
+    if dl > 0:
+        ds.attrs["e_dipole_length_m"] = dl
     return SimpleNamespace(
-        dataset=xr.Dataset(data_vars),
+        dataset=ds,
         sample_rate=sample_rate,
         start=_start,
         filters=filters,

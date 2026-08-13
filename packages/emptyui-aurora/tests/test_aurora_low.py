@@ -139,10 +139,11 @@ def test_magnetic_only_fc_rejected():
 # --- L-A4: the documented "0 = dipole from run metadata" promise --------------
 
 
-def test_build_fc_dipole_from_run_metadata(tmp_path):
+def test_dipole_from_run_metadata_rides_the_payload(tmp_path):
     """When e_dipole_length_m is 0/empty, the E dipole length is taken from
     the run's electric channel metadata (mt_metadata Electric.dipole_length)
-    — the documented-but-unimplemented promise."""
+    — Extract Run stamps it on the payload; Compute FC's collection route
+    picks it up (the L-A4 promise)."""
     import warnings
 
     warnings.filterwarnings("ignore")
@@ -182,14 +183,17 @@ def test_build_fc_dipole_from_run_metadata(tmp_path):
 
     from emptyui.context import RunContext
     from emptyui.store import DataStore
-    from emptyui_aurora.process import BuildFC
+    from emptyui_aurora.process import ComputeFC
+    from emptyui_mth5.runs import ExtractRun
 
     ctx = RunContext(workspace=tmp_path, store=DataStore())
-    fc = BuildFC().execute(
-        ctx, archive, runs="a",
+    coll = ExtractRun().execute(
+        ctx, mth5=archive, selection="time range")["data"]
+    fc = ComputeFC().execute(
+        ctx, data=coll,
         decimation_levels=0, factor=4, window_samples=16, overlap=0.5,
         window_type="boxcar", clock_zero="epoch", persist=False,
-        e_dipole_length_m=0.0)["fc"]
+        e_dipole_length_m=None)["fc"]
     # the lookup found the metadata length (the archive convention is m)
     assert fc and all(
         float(lv.attrs["e_dipole_length_m"]) > 0 for lv in fc.values())

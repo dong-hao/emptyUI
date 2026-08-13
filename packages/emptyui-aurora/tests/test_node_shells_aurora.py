@@ -7,13 +7,11 @@ from __future__ import annotations
 import inspect
 
 import numpy as np
-import pandas as pd
 import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_aurora._processing import estimate_tf_levels
-from emptyui_aurora.process import MergeFC, MergeTFLevels
-from test_fc_merge import _fc, _freqs
+from emptyui_aurora.process import MergeTFLevels
 from test_sort_drop_grammar import _container
 
 pytestmark = pytest.mark.filterwarnings("ignore")
@@ -43,30 +41,7 @@ def _assert_shell(node, *, viewer=None) -> None:
 
 
 def test_shells():
-    _assert_shell(MergeFC(), viewer=None)
     _assert_shell(MergeTFLevels(), viewer=None)
-    # the optional fc2..fc4 inputs must line up with execute's defaults
-    fc_inputs = [p["name"] for p in MergeFC().manifest()["inputs"]]
-    assert fc_inputs == ["fc1", "fc2", "fc3", "fc4"]
-
-
-def test_merge_fc_node_merges_two_inputs(tmp_path):
-    """The node shell around merge_fc_containers: two fc inputs in,
-    one merged container out (per-level window concatenation)."""
-    ctx = RunContext(workspace=tmp_path, store=DataStore())
-    t1 = pd.date_range("2024-01-01", periods=3, freq="s")
-    t2 = pd.date_range("2024-01-01T00:01:00", periods=4, freq="s")
-    f = _freqs()
-    a = _fc(t1, f, seed=1)
-    b = _fc(t2, f, seed=2)
-    fcs = {"fc1": a, "fc2": b}  # executor-style: keyed by port NAME
-    out = MergeFC().execute(ctx, **fcs)
-    assert set(out) == {"fc"}
-    merged = out["fc"]
-    assert list(merged) == [0]
-    assert merged[0].sizes["time"] == 7
-    np.testing.assert_array_equal(
-        merged[0]["time"].values[:3], t1.values)
 
 
 def test_merge_tf_levels_node_builds_the_broadband_tf(tmp_path):

@@ -38,7 +38,8 @@ def build_fc():
     import pandas as pd  # noqa: F401
     from emptyui.context import RunContext
     from emptyui.store import DataStore
-    from emptyui_aurora.process import BuildFC
+    from emptyui_aurora.process import ComputeFC
+    from emptyui_mth5.runs import ExtractRun
     from mth5.mth5 import MTH5
 
     ctx = RunContext(workspace=OUT, store=DataStore(), node_id=TAG)
@@ -46,8 +47,13 @@ def build_fc():
     m.open_mth5(str(OUT / f"mtu_clb_{TAG}.mth5"), "r")
     try:
         t0 = time.time()
-        fc = BuildFC().execute(ctx, m, decimation_levels=10)["fc"]
-        print(f"BuildFC {time.time() - t0:.1f} s", flush=True)
+        # the uniform route (Build FC retired): collection cascades
+        coll = ExtractRun().execute(
+            ctx, mth5=m, selection="time range")["data"]
+        fc = ComputeFC().execute(
+            ctx, data=coll, decimation_levels=10, clock_zero="epoch",
+            persist=False)["fc"]
+        print(f"ExtractRun+ComputeFC {time.time() - t0:.1f} s", flush=True)
         return fc
     finally:
         m.close_mth5()

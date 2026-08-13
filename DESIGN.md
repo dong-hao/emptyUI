@@ -149,7 +149,7 @@ are open-ended strings so plugins can add their own):
 | Category | Role | Examples |
 |----------|------|----------|
 | **Data I/O** | Bring data in/out of the graph; convert formats | Load MTH5, Load CSV, Save MTH5, Load Calibration, Import TF, Export TF, Read FC, Write FC |
-| **Processing** | Transform data; produce new typed outputs | Detrend, Bandpass Filter, Calibrate, Align Runs, Compute FC, Build FC Database, Coherence Sort, Estimate TF, Merge TF Levels |
+| **Processing** | Transform data; produce new typed outputs | Detrend, Bandpass Filter, Calibrate, Align Runs, Compute FC, Coherence Sort, Estimate TF, Merge TF Levels |
 | **Display** | Render data to `plot` outputs (no data deps downstream) | PlotTimeSeries, PlotSpectrogram, PlotAppResPhase, PlotTipper, PlotCoherency, PlotPhaseTensor |
 
 Display nodes emit a **`plot` output port** (rendered-figure reference), not
@@ -168,7 +168,7 @@ so a node boundary ≈ an aurora pipeline stage:
 |-----|--------------|--------------------|---------------|
 | `mth5` | MTH5 Archive | `mth5.MTH5` | HDF5 archive; stateful source of runs/FCs/TFs. *(was `mt.archive`)* |
 | `ts.run` | Run Time Series | `mth5.timeseries.RunTS` (= `mt_timeseries.RunTS`) | Multi-channel time series — the main signal-processing currency; wrap the `RunTS` object directly (emptyUI is mth5-native) |
-| `ts.runs` | Run Collection | list of `mth5.timeseries.RunTS` | Extract Run's `time range` mode: ALL runs intersecting a UTC window (the inclusive burst-mode selection); consumed by Compute FC (Build FC's route, §9.3) |
+| `ts.runs` | Run Collection | list of `mth5.timeseries.RunTS` | Extract Run's `time range` mode: ALL runs intersecting a UTC window (the inclusive burst-mode selection); consumed by Compute FC's collection route (§9.3) |
 | `ts.channel` | Channel Time Series | `mth5.timeseries.ChannelTS` | Single channel (ex/ey/hx/hy/hz); split/merge nodes convert ⇄ `ts.run` |
 | `calibration` | Calibration / Instrument Response | `mt_metadata.filters.*` (Coefficient/PoleZero/FIR/TimeDelay/FAP) | `Calibrate` takes `ts.run` + `calibration` → calibrated `ts.run`. *(was `mt.response`)* |
 | `selection` | Run Selection | `mth5.processing.KernelDataset` (DataFrame) | Which stations/runs/intervals process; local+remote roles. *Plugin-tier / M4-deferred — superseded by ExtractRun → ComputeFC* |
@@ -242,7 +242,7 @@ LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ ComputeFC ─fc─▶ Estimate
 
 LoadMTH5 ─mth5─▶ ExtractRun(selection=time range) ─ts.runs─▶ ComputeFC ─fc─▶ ...
                 (all runs intersecting the UTC window — the inclusive
-                 burst-mode selection; Build FC's route, §9.3)
+                 burst-mode selection; the collection route, §9.3)
 
 LoadMTH5 ─mth5─▶ ExtractRun ─ts.run─▶ Detrend ─ts.run─▶ ComputeFC ─fc─▶ PlotSpectrogram
 
@@ -358,11 +358,14 @@ to interpret names:
 A single TF estimate is often built from **several acquisition runs** (e.g.
 Phoenix MTU-5 segments). aurora's canonical mechanism allows multiple
 `KernelDataset` rows and **concatenates their STFTs at the FC level** — it
-does *not* merge in the time domain. emptyUI delivers this route through the
-aurora plugin's **`Merge FC` node / `Build FC Database`** (§9.3), which
-concatenate the per-run Fourier coefficients along time, per decimation
-level — no fabricated samples; the idiomatic route for burst archives and
-for building one TF from many runs.
+does *not* merge in the time domain. emptyUI delivers this route through
+Compute FC's **run-collection cascades** (§9.3): a `ts.runs` collection
+(e.g. Extract Run 'time range') is cascaded member-wise and the per-run
+Fourier coefficients are concatenated along time, per decimation level —
+no fabricated samples; the idiomatic route for burst archives and for
+building one TF from many runs. (The former `Merge FC` / `Build FC
+Database` nodes were retired into this route — their engine
+`merge_fc_containers` is the shared library call.)
 
 The **`Merge Runs` node** (`mth5.runs.merge`) is the *physical* counterpart:
 it combines the raw series of one station via `RunTS.merge()` into a new mth5
@@ -394,14 +397,15 @@ it on the fc attrs on **both** routes (the FC merge unions the contributors'
 attrs instead of keeping only the first contributor's), and the RR pairing
 sites
 (`Estimate TF`, two-FC `Coherence Sort`) warn naming the affected windows —
-with the remedy (Merge FC concatenates Fourier coefficients without
-fabrication; or exclude the gap interval via the time-selector window).
+with the remedy (the collection cascades concatenate Fourier
+coefficients without fabrication; or exclude the gap interval via the
+time-selector window).
 `Align Runs` also warns when the overlap crop discards >10% of an input
 (the E1b partial-remote silent loss).
 
 **Burst-mode caveat.** For burst archives (scheduled high-rate slots +
 continuous streams) inter-slot gaps are normal acquisition geometry, not
-defects — the gap warning does not apply to the `Build FC` / `Merge FC`
+defects — the gap warning does not apply to the collection-cascade
 route (which never fabricates samples; the epoch-anchored window grid pairs
 slots across stations by design). A burst-mode generalization — per-slot
 coverage QC derived from the per-window `run_id` coordinate — is a recorded
@@ -1018,7 +1022,7 @@ to days:
   matched run (the clamp would extract a useless 0-sample slot; history §24.12 L-M3
   keeps this one hard reject deliberately). Boundary convention (L-M10,
   deliberate): Extract Run's ISO crop is END-INCLUSIVE (`xarray.sel(slice)`)
-  while the windowed processors (Align Runs / Build FC) use half-open
+  while the windowed processors (Align Runs / the collection cascades) use half-open
   `[t0, t1)` arithmetic — parity holds for fully-contained windows; the
   boundary sample differs by convention. Merge Runs is
   deliberately skipped: its per-run windows live in the selection table rows,
@@ -1181,15 +1185,15 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   end, n_samples`); continuous families leave the slot columns empty and
   report one row per run (sessions included). This is the pairing
   foundation: two stations' runs pair by slot, and a slot *range*
-  selection feeds Extract Run / Build FC directly.
+  selection feeds Extract Run directly (and maps UTC windows to slots).
 - **Macro flow (current stage)**: `Load Phoenix MTU-5A → Extract Run →
-  Align Runs → Compute FC` is the plausible path today — Extract Run
-  exposes `ts.run` for any run (each burst slot, or the continuous
-  stream as one run), so the classic single-rate alignment/cropping flow
-  works on burst archives. For the burst-native route
-  (`Load → Build FC`), the **slot-based selection layer** is delivered:
-  the loader's `slot_schedule` table + Build FC's UTC window (whole-slot
-  selection) — the same window on two stations is the coarse pairing.
+  Compute FC` — Extract Run's 'time range' mode exposes ALL runs of the
+  station (each burst slot, or the continuous stream) as a collection
+  cropped to the window, and Compute FC cascades member-wise and merges
+  along time. The **slot-based selection layer**: the loader's
+  `slot_schedule` table maps UTC windows to slots (via `sample_rates`
+  family scoping and the time bar) — the same window on two stations'
+  chains is the coarse pairing.
   **Remote reference with burst slots is FC-level**: although a 1-s slot
   is too short for meaningful time-domain RR, the pairing happens in the
   frequency domain — as long as the local and remote FCs from the time
@@ -1213,66 +1217,55 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   "drop the slot whose clocks cannot match" semantics (never
   interpolate). The default flip is safe: identical grids take the fast
   no-op path, so the Align Runs and parity workflows behave exactly as
-  before. Not a mandatory feature — the slot-level Build FC window (the
+  before. Not a mandatory feature — the slot-level window selection (the
   coarse layer above) remains the de-facto workflow; the fine layer only
   trims the residual coverage differences that whole-slot selection
   cannot remove.
 
-#### Build FC Database (`aurora.fc.build`)
+#### The collection route (Compute FC on `ts.runs`)
 
-Input `mth5` (+ the ComputeFC STFT parameter set + `survey`/`station`/`runs`);
-iterates the listed runs, `compute_fc_levels` per run (epoch-anchored
-`clock_zero` default **"epoch"** — staggered slot schedules make run-start
-anchoring useless), `merge_fc_containers` per station → output `fc` container.
-Optional `persist` writes each run's FC levels into the archive's FC layer
-keyed by run (off by default).
+Compute FC is the ONE TS→FC node: a `ts.run` input cascades directly; a
+`ts.runs` collection (Extract Run 'time range', Align Runs, or a lone
+`ts.run` when sessioning is requested) cascades member-wise and merges
+along time per decimation level (`merge_fc_containers`) — the engine the
+former `Build FC Database` / `Merge FC` nodes drove (retired 2026-10-15;
+their orchestration lives in Compute FC's collection route, and the
+parity was pinned while both existed).
 
-- **Slot-aware run selection (`start`/`end` params)**: a UTC window keeps
-  every run whose time period intersects it — **whole runs, never cropped**
-  (a burst slot is either in or out; the loader's `slot_schedule` table maps
-  UTC windows to slot indices). This is the slot-based selection layer
-  driving Build FC, and the same window on two stations' Build FC nodes is
-  the **coarse remote-reference pairing** (§9.3): both stations compute FCs
-  over the same acquisition window, in slot granularity, without any
-  time-domain alignment machinery.
-
+- **Session tiling (`session_hours`, §9.4)**: every member is tiled into
+  fixed-length `{run id}_sNNNN` sessions before cascading (0 = off).
+  Sessions never cross run boundaries; a lone `ts.run` input is treated
+  as a one-run collection so the classic single-run flow gets session QC
+  too. The per-window `run_id` coordinate carries the session id —
+  Select Runs / Residual Sort score and reject at session granularity.
 - **Cascade spans (`regroup_contiguous`)**: maximal contiguous spans of
-  same-rate runs are cascaded as ONE payload (adjacency within two samples,
-  from the run summary columns) — the physically right unit for unbroken
-  acquisitions; gapped slot runs stay separate. Hourly sessions alone cannot
-  form deep decimation levels (an hour caps at ~0.23 Hz with window 256);
-  cascading the kept contiguous span restores the long-period tail. Build FC
-  builds spans from ALL sessions (before any QC — spans never depend on QC
-  outcomes), reads each span exactly once, and stamps per-window `run_id` at
-  session granularity.
-- **Per-family decimation trim**: the continuous (lowest-rate) family carries
-  the full `decimation_levels` cascade; higher-rate families decimate only
-  until their rate would reach the next family's native rate — prevents
-  same-rate levels from different families double-covering identical windows.
+  same-rate members are cascaded as ONE payload (adjacency within two
+  samples, non-overlapping) — the physically right unit for unbroken
+  acquisitions; gapped slot runs stay separate. Hourly sessions alone
+  cannot form deep decimation levels (an hour caps at ~0.23 Hz with
+  window 256); cascading the kept contiguous span restores the
+  long-period tail. Spans are built from ALL sessions (before any QC —
+  spans never depend on QC outcomes) and stamp per-window `run_id` at
+  session granularity (window-start attribution, §10.4).
+- **Per-family decimation trim**: the continuous (lowest-rate) family
+  carries the full `decimation_levels` cascade; higher-rate families
+  decimate only until their rate would reach the next family's native
+  rate — prevents same-rate levels from different families
+  double-covering identical windows.
+- **E dipole from the payload (L-A4)**: Extract Run stamps the archive's
+  electric-channel `dipole_length` on the payload attrs; Compute FC uses
+  it when its explicit param is unset (0/empty = the payload attr, then
+  none).
 - **Performance hardening** (mth5/mt_metadata pathologies): `pyproj.CRS`
   LRU cache (`_compat.apply_crs_cache`), `Unit`-object LRU cache
-  (`_compat.apply_unit_object_cache` — unit validation rebuilds Unit
-  objects from a DataFrame lookup per attribute update), memoized
-  dynamic metadata-class enhancement
-  (`_compat.apply_metadata_class_cache` — mth5's group/channel init
-  builds a NEW pydantic model class per init; the deterministic
-  enhancement is memoized per input class, ~80 s on a ~1000-run burst
-  ingest), `ChannelDataset.to_xarray` channel
-  reads (~40× faster than `RunGroup.to_runts`), station metadata hoisted out
-  of the run loop, `add_run`+`from_channel_ts` archive writes, and loaders
-  that write station/survey summaries directly from the known segment
-  geometry (mth5's child-walking `update_metadata` costs ~40 s per property
-  access on a ~1000-run archive). The **group
-  `.metadata` properties are the same storm** — `station.metadata`/
-  `survey.metadata` rebuild the FULL hierarchy through pydantic on every
-  access (~30-40 s on a 145-run burst archive): identity (ids) is read free
-  from the HDF5 group paths (`_group_id`) and scalars (location) from the
-  group's HDF5 attrs — Apply sites: Extract Run run-id mode (fast read +
-  `_CachedRunTS` — channels are built lazily once per downstream access,
-  ~0.2 s vs ~7-19 s), Merge Runs (per-run fast read + registry re-resolve
-  on the merged output), Build FC, Save FC (`_fc_identity_attrs`). Run-level
-  `run.metadata` accesses (~10 ms) and error-path messages stay on the
-  metadata properties.
+  (`_compat.apply_unit_object_cache`), memoized dynamic metadata-class
+  enhancement (`_compat.apply_metadata_class_cache`), fast channel reads
+  (`to_xarray` + `_CachedRunTS`, ~40× faster than `RunGroup.to_runts`),
+  and identity read free from HDF5 group paths (`_group_id`) — the
+  `station.metadata`/`survey.metadata` properties rebuild the FULL
+  hierarchy through pydantic (~30-40 s on a 145-run burst archive).
+  One workspace handle per execution (the per-level open/close is
+  quadratic, history §24.8).
 
 #### Extract Run time-range selection (ts route)
 
@@ -1290,17 +1283,17 @@ plus the continuous stream). The single `data` output port carries the
 run-id mode rides the same port as a 1-member collection; §4's
 runtime-shape hints tell the frontend which form is present).
 
-Compute FC consumes the collection on **Build FC's route**: per-run
-cascades (`compute_fc_levels`) merged along time per decimation level
-(`merge_fc_containers`), with Build FC's **per-family decimation trim**
+Compute FC consumes the collection member-wise: per-run cascades
+(`compute_fc_levels`) merged along time per decimation level
+(`merge_fc_containers`), with the **per-family decimation trim**
 (higher-rate families decimate only until their rate would reach the next
-family's native rate — history §24.8) and **per-window `run_id`** stamping (§9.3).
-A multi-run collection without `clock_zero` anchoring warns naming the
-remedy (`epoch`): run-start grids differ per run, which is fine without
-remote reference and refuses loudly at the RR pairing sites. Parity
-anchor: for a window that fully contains the runs, Extract(range) +
-Compute FC produces **identical FC levels** to Build FC (regression
-`test_compute_fc_collection.py::test_collection_route_parity_with_build_fc`).
+family's native rate — history §24.8) and **per-window `run_id`** stamping
+(§9.3). A multi-run collection without `clock_zero` anchoring warns naming
+the remedy (`epoch`): run-start grids differ per run, which is fine
+without remote reference and refuses loudly at the RR pairing sites.
+Orchestration anchor: the collection route produces the same FC levels as
+manual per-member `compute_fc_levels` + `merge_fc_containers` (regression
+`test_compute_fc_collection.py::test_collection_route_is_memberwise_cascades`).
 
 The classic single-run flow keeps the legacy semantics — including the
 first-run fallback — but the fallback now **warns loudly** whenever the
@@ -1333,7 +1326,8 @@ Residual Sort → drop-with-overlap-guard → `regroup_contiguous` cascade
 spans) is instrument-agnostic; the "slot" is really a **session label on a
 regular grid**. Two mechanisms make it universal:
 
-- **Build FC `session_hours`**: tiles every run into fixed-length,
+- **Compute FC `session_hours`** (on run collections; a lone `ts.run`
+  is a one-run collection): tiles every run into fixed-length,
   contiguous time intervals labelled `{run id}_sNNNN` (0 = off). Sessions
   never cross run boundaries; the cascade spans are built from ALL
   sessions and never depend on QC outcomes; source runs are read lazily
@@ -1348,7 +1342,7 @@ regular grid**. Two mechanisms make it universal:
 - **Compute FC stamps the per-window `run_id` coordinate** in the classic
   single-run flow (`Extract → Compute FC`) too — whole runs get their own
   id (all-or-nothing QC; stamped after persistence so the verified mth5
-  round trip is untouched). Session-level QC routes through Build FC's
+  round trip is untouched). Session-level QC routes through Compute FC's
   `session_hours`.
 
 **Session length guidance.** The statistical unit is FC windows per
@@ -1569,7 +1563,7 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   (median over windows, then median over the run's bands after per-band
   normalization against the station-wide median). **Independent, cascadeable
   node** — inputs are the fc payload and the first pass's `tf levels`; the
-  chain BuildFC → EstimateTF → Residual Sort → EstimateTF is a loop-free DAG.
+  chain Compute FC → EstimateTF → Residual Sort → EstimateTF is a loop-free DAG.
   `estimate_tf_levels` returns each level's `band_intervals` (the pooling
   key). **One-sided up-check only** (a LOW unexplained fraction means the
   data fit the model WELL, not dead channels — the inherited down-check
@@ -1810,6 +1804,11 @@ normalize + validate identically — `../` escapes are rejected).
 | Post-M3 | ✅ | l2u automatic frequency grid (default), TF rotation node, per-bin coherence sort (default), MTU-5A burst ingestion + Build FC, Phoenix ASC calibration, saturation QC, run-level QC (Select Runs / Residual Sort), settings, time selector, plot nodes |
 | M4 — backlog | **in progress** | ranked table below |
 
+Retirement note (2026-10-15): the `Build FC Database` / `Merge FC` nodes
+were retired into Compute FC's collection route (uniform TS→FC); the
+M2/M4 delivery rows above are historical records of when those features
+first shipped.
+
 Processing-correctness milestones (all verified): unit normalization
 (magnetic nT→A/m both archive types, electric mV/km→V/m — §10.5); impedance
 phase convention matches aurora (Zxy≈+45°, Zyx≈−135°); USArray SDG31
@@ -1841,7 +1840,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | only matters once ML noise-suppression plugins exist |
 | 17 | ~~Improved auto frequency grid~~ | — | — | **delivered** (§10.2 l2u) |
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
-| 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC / Build FC already consume it generically |
+| 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC already consumes it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
 | 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§10.6). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
 accept collections, the recipe applied to every member and the collection

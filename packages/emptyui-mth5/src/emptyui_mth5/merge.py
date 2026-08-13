@@ -12,8 +12,10 @@ Physical merge bridges inter-run gaps by interpolation (``gap_method``) —
 fabricated samples stay limited to the gap (~0.2% of windows for typical
 run gaps). The production-grade alternative — concatenating Fourier
 coefficients per decimation level (aurora ``merge_stfts``; no sample
-fabrication, the gap simply produces no windows) — is the ``Merge FC``
-node (aurora.fc.merge), which implements it.
+fabrication, the gap simply produces no windows) — is
+``emptyui_aurora._processing.merge_fc_containers``, the engine behind
+Compute FC's run-collection route (the ``Merge FC`` node was retired
+with the Build FC path).
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 """Compute FC on run collections ('time range' route) — DESIGN §9.3.
 
-The delivered anchor: for the same UTC window and channels, the classic
-route (Load -> Extract(range) -> Compute FC) and Build FC Database produce
-identical FC levels when the window fully contains the runs (whole runs,
-clock_zero='epoch').
+The orchestration anchor: the collection route is per-member cascades
+merged along time — the same engine the retired Build FC node drove
+(their parity was pinned while both existed); these tests pin that the
+route's orchestration adds nothing on top of the library calls.
 """
 
 from __future__ import annotations
@@ -31,10 +31,12 @@ KW = {"decimation_levels": 0, "factor": 4, "window_samples": 16, "overlap": 0.5,
       "window_type": "boxcar", "clock_zero": "epoch", "persist": False}
 
 
-def test_collection_route_parity_with_build_fc(tmp_path):
-    """Extract(range) + Compute FC == Build FC for a fully-containing
-    window (whole runs kept on both routes)."""
-    from emptyui_aurora.process import BuildFC, ComputeFC
+def test_collection_route_is_memberwise_cascades(tmp_path):
+    """Extract(range) + Compute FC == manual per-member compute_fc_levels +
+    merge_fc_containers — the route's orchestration (per-family trim,
+    identity, run-id stamping aside) adds no physics."""
+    from emptyui_aurora._processing import compute_fc_levels, merge_fc_containers
+    from emptyui_aurora.process import ComputeFC
     from emptyui_mth5.runs import ExtractRun
 
     archive = _two_run_archive(tmp_path)
@@ -45,8 +47,14 @@ def test_collection_route_parity_with_build_fc(tmp_path):
         ctx, archive, selection="time range", **W)["data"]
     fc_a = ComputeFC().execute(ctx, coll, **KW)["fc"]
 
-    fc_b = BuildFC().execute(
-        ctx, archive, runs="sr2400_0001,sr2400_0002", **W, **KW)["fc"]
+    manual = []
+    for member in coll.runs:
+        manual.append(compute_fc_levels(
+            member, "", "", num_decimations=KW["decimation_levels"],
+            factor=KW["factor"], num_samples_window=KW["window_samples"],
+            overlap=KW["overlap"], window_type=KW["window_type"],
+            clock_zero=KW["clock_zero"]))
+    fc_b = merge_fc_containers(manual)
 
     assert sorted(fc_a) == sorted(fc_b)
     for lv in fc_a:
