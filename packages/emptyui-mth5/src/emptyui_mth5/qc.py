@@ -177,10 +177,16 @@ class MaskTS(Node):
                           "An explicit value is honored (clamped to the "
                           "member's span, warned)."),
         Param("hampel_threshold", "number", label="Hampel threshold (MADs)",
-              default=3.0, min=0.5,
+              default=8.0, min=0.5,
               description="Detection threshold in scaled MADs "
                           "(1.4826·MAD estimates the std of Gaussian "
-                          "data); higher = only more extreme outliers."),
+                          "data); higher = only more extreme outliers. "
+                          "8 is the MT-tuned default: natural-source "
+                          "time series are heavy-tailed, and the "
+                          "literature's Gaussian h=3 over-gates them "
+                          "(measured on the smoke_2h corpus: h=3 masks "
+                          "~5% of samples and collapses the FC band "
+                          "coverage; h>=5 is band-neutral)."),
         Param("detect_flat", "boolean", label="Detect constant runs",
               default=True,
               description="Flag runs of identical consecutive values — "

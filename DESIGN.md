@@ -1332,7 +1332,9 @@ write (M4 #16/#19).
 - **Criteria are pooled and OR-composed** (v1): explicit UTC interval
   exclusion (`start/end` pairs, clamped, out-of-record warned), Hampel
   despiking (rolling median vs h·1.4826·MAD — self-calibrating, no
-  absolute amplitudes; the window is per member:
+  absolute amplitudes; default h=8 — natural-source series are
+  heavy-tailed and the Gaussian h=3 over-gates them, collapsing band
+  coverage; the window is per member:
   min(60 s, span/8) floored at 16 samples, so burst slots get slot-local
   windows while hour-long streams keep 60 s), constant-run detection
   (>= N identical consecutive values — scale-free exact equality: ADC

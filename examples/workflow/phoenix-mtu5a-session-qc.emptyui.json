@@ -1,0 +1,193 @@
+{
+  "format": "emptyui/workflow",
+  "version": 1,
+  "meta": {
+    "name": "phoenix-mtu5a-session-qc",
+    "created": "2026-10-15T00:00:00",
+    "author": "emptyUI"
+  },
+  "nodes": [
+    {
+      "id": "load",
+      "type": "mth5.io.load",
+      "params": {
+        "path": "examples/data/phoenix-mtu-test/smoke_2h_phoenix_mtu.mth5",
+        "mode": "r"
+      },
+      "position": {
+        "x": 60,
+        "y": 200
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "extract",
+      "type": "mth5.io.extract_run",
+      "params": {
+        "selection": "time range",
+        "sample_rates": "15",
+        "survey": "",
+        "station": ""
+      },
+      "position": {
+        "x": 360,
+        "y": 200
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "mask",
+      "type": "mth5.qc.mask_ts",
+      "params": {},
+      "position": {
+        "x": 660,
+        "y": 200
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "fc",
+      "type": "aurora.process.compute_fc",
+      "params": {
+        "clock_zero": "epoch",
+        "session_hours": 0.25,
+        "regroup_contiguous": true,
+        "decimation_levels": 4,
+        "window_samples": 256,
+        "persist": false
+      },
+      "position": {
+        "x": 960,
+        "y": 200
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "select",
+      "type": "aurora.process.select_runs",
+      "params": {},
+      "position": {
+        "x": 1260,
+        "y": 200
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "est",
+      "type": "aurora.process.estimate_tf",
+      "params": {
+        "remote_reference": false
+      },
+      "position": {
+        "x": 1560,
+        "y": 160
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "plot",
+      "type": "mth5.plot.appres_phase",
+      "params": {},
+      "position": {
+        "x": 1860,
+        "y": 100
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "prev",
+      "type": "core.display.preview_plot",
+      "params": {},
+      "position": {
+        "x": 2160,
+        "y": 100
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "viewmask",
+      "type": "core.display.view_table",
+      "params": {},
+      "position": {
+        "x": 660,
+        "y": 460
+      },
+      "plugin_version": "0.1.0"
+    },
+    {
+      "id": "viewsel",
+      "type": "core.display.view_table",
+      "params": {},
+      "position": {
+        "x": 1260,
+        "y": 460
+      },
+      "plugin_version": "0.1.0"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "load",
+      "source_port": "mth5",
+      "target": "extract",
+      "target_port": "mth5"
+    },
+    {
+      "id": "e2",
+      "source": "extract",
+      "source_port": "data",
+      "target": "mask",
+      "target_port": "data"
+    },
+    {
+      "id": "e3",
+      "source": "mask",
+      "source_port": "gated",
+      "target": "fc",
+      "target_port": "data"
+    },
+    {
+      "id": "e4",
+      "source": "fc",
+      "source_port": "fc",
+      "target": "select",
+      "target_port": "fc"
+    },
+    {
+      "id": "e5",
+      "source": "select",
+      "source_port": "fc",
+      "target": "est",
+      "target_port": "fc"
+    },
+    {
+      "id": "e6",
+      "source": "est",
+      "source_port": "tf",
+      "target": "plot",
+      "target_port": "tf"
+    },
+    {
+      "id": "e7",
+      "source": "plot",
+      "source_port": "plot",
+      "target": "prev",
+      "target_port": "plot"
+    },
+    {
+      "id": "e8",
+      "source": "mask",
+      "source_port": "report",
+      "target": "viewmask",
+      "target_port": "table"
+    },
+    {
+      "id": "e9",
+      "source": "select",
+      "source_port": "table",
+      "target": "viewsel",
+      "target_port": "table"
+    }
+  ]
+}

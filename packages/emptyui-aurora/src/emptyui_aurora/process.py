@@ -115,6 +115,24 @@ def _merge_provenance_attrs(data, logger) -> dict[str, Any]:
         return {}
 
 
+def _payload_declares_field_e(payload) -> bool:
+    """True when the payload's electric channels already carry FIELD units
+    (mV/km or V/m) — the §10.5 attr-aware path handles those; an archived
+    dipole length must NOT be applied on top (the raw-potential path would
+    double-scale field data, the exact contradiction Compute FC warns
+    about). Only raw-potential / unitless payloads take the dipole attr."""
+    try:
+        ds = payload.dataset
+        for name in ds.data_vars:
+            if str(name).lower().startswith("e"):
+                units = str(ds[name].attrs.get("units", "")).lower()
+                if "per kilometer" in units or units == "volt per meter":
+                    return True
+        return False
+    except Exception:  # noqa: BLE001 — duck payloads
+        return False
+
+
 def _tile_sessions(entries, session_seconds: float):
     """Tile runs into fixed-length QC sessions (§9.4) — the universal
     session-label mechanism, extracted from the retired Build FC
@@ -503,7 +521,8 @@ class ComputeFC(Node):
                     close_workspace_mth5(ctx)
         # L-A4 dipole fallback: the explicit param wins; otherwise the attr
         # Extract Run stamps from the archive's electric-channel metadata
-        if e_dipole_length_m is None and "dataset" in dir(data):
+        if e_dipole_length_m is None and "dataset" in dir(data) \
+                and not _payload_declares_field_e(data):
             try:
                 dl = float((data.dataset.attrs or {}).get(
                     "e_dipole_length_m", 0.0) or 0.0)
@@ -652,6 +671,8 @@ class ComputeFC(Node):
         dipole = e_dipole_length_m or None
         if dipole is None:
             for m in members:
+                if _payload_declares_field_e(m):
+                    continue  # field units: the attr path would double-scale
                 try:
                     dl = float((m.dataset.attrs or {}).get(
                         "e_dipole_length_m", 0.0) or 0.0)

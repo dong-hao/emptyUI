@@ -22,6 +22,18 @@ examples/
 │                         #   see the notes in each subdirectory)
 └── plugin-template/      # working plugin template
 
+**Session QC & gating demo** — `examples/workflow/phoenix-mtu5a-session-qc.emptyui.json`
+runs the full data-driven QC story on the tracked `smoke_2h` Phoenix
+archive: Mask TS (time-domain quality mask: Hampel despiking, constant-run
+and gap detection) → Compute FC with `session_hours=0.25` +
+`regroup_contiguous` (session-granular FCs; §9.4) → Select Runs (per-session
+scoring with the soft diurnal prior) → Estimate TF. The run diagnostics and
+mask report are viewable on their View Table nodes. When sessioning pays:
+the statistical unit is FC windows per session — aim for ≥ ~20–30 windows
+per session at the QC reference band (§9.4); a noisy session then costs ±1
+window per level instead of the whole recording. The demo is pinned by a
+headless execution test (`test_demo_session_qc.py`).
+
 test/verification/        # recorded parity/metrics JSONs + the verification
                           #   scripts that reproduce them (DESIGN history sections)
 ```
