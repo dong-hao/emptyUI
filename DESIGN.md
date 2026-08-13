@@ -1319,6 +1319,49 @@ Runs, Calibrate, Detrend/Bandpass, ts plots) **rejects collections loudly**
 with node-appropriate remedies — collection mapping and per-family viewing
 are M4 backlog #21.
 
+#### Mask TS — time-domain quality gating (§9.5, M26)
+
+`mth5.qc.mask_ts` writes a **per-sample binary `quality_mask` auxiliary
+channel** (1 = bad) onto a `ts.run`/collection — it MARKS, never touches.
+Compute FC's window-fraction rule (§10.1) turns the mask into FC-window
+rejection; session scoring stays in Select Runs. The mask is DATA (it
+rides the payload, survives the mth5 round trip, and passes the core
+filter nodes untouched) — the interface a learned-despiker plugin would
+write (M4 #16/#19).
+
+- **Criteria are pooled and OR-composed** (v1): explicit UTC interval
+  exclusion (`start/end` pairs, clamped, out-of-record warned), Hampel
+  despiking (rolling median vs h·1.4826·MAD — self-calibrating, no
+  absolute amplitudes; the window is per member:
+  min(60 s, span/8) floored at 16 samples, so burst slots get slot-local
+  windows while hour-long streams keep 60 s), constant-run detection
+  (>= N identical consecutive values — scale-free exact equality: ADC
+  clips, zero-filled gaps, stuck sensors), NaN flagging, and union with
+  any existing mask channels (the Phoenix loader's `saturated` composes).
+- **True time-axis gaps carry no samples to flag** — reported and warned
+  with the remedy (add them to 'exclude intervals'), never fabricated.
+- **`MASK_CHANNELS = ("saturated", "quality_mask")`** (canonical in
+  `emptyui-core-nodes.types`, the M5 discipline) is consumed generically:
+  Compute FC unions every present mask channel into the fraction rule and
+  records `mask_channels` on the fc attrs; the decimation max-pool, the
+  span concat and Merge Runs' padding all treat the pair uniformly. The
+  `reject_saturated`/`saturated_max` param names predate the
+  generalization and are kept (saved-workflow compat).
+- **Aux-channel passthrough**: `TimeSeries.aux_channels` (coerced from
+  the payload's `type: "auxiliary"` attrs + the mask names) — Detrend/
+  Bandpass pass these through untouched. This fixes a latent bug: the
+  core nodes previously filtered EVERY channel, corrupting the Phoenix
+  `saturated` mask on `Load → Detrend → Compute FC` chains.
+- Deferred by design: repair/replacement (Hampel-replace, AR-prediction
+  — Smirnov 2003, Kappler 2011; a separate future node — fabricated
+  samples must carry provenance), per-channel masks, cross-station
+  criteria (an optional `ref` input), frequency-domain criteria
+  (Coherence Sort / Select Runs territory). A future `Mask FC` node
+  (frequency-domain marking, e.g. Platz & Weckmann-style per-window
+  pre-selection) would write FC-level weights/masks the same way.
+
+---
+
 ### 9.4 Universality — session labels for continuous instruments
 
 The QC architecture validated on MTU-5A (session labels → Select Runs /
@@ -1428,8 +1471,11 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   whose flagged-sample FRACTION exceeds `saturated_max` (default 0.01) is
   NaN'd in all in/out FCs; the mask max-pools through decimation;
   the count is recorded in attrs. A no-op for payloads without the mask.
-  Verified: surgical — medians barely move, daytime garbage windows vanish;
-  official-EDI parity preserved (history §24.12).
+  M26: the rule consumes EVERY quality-mask channel present (`saturated`,
+  `quality_mask` — §9.5), unioned; the contributors are recorded in the
+  fc attrs (`mask_channels`). Verified: surgical — medians barely move,
+  daytime garbage windows vanish; official-EDI parity preserved
+  (history §24.12).
 - **Calibration application**: §9.2 (frequency-domain, applied-flag-aware,
   DC column NaN when the response vanishes there).
 
@@ -1840,7 +1886,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | only matters once ML noise-suppression plugins exist |
 | 17 | ~~Improved auto frequency grid~~ | — | — | **delivered** (§10.2 l2u) |
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
-| 19 | **Universal saturation/QC mask channel convention** | Low-Med | Low | generalize the MTU-5A `saturated` auxiliary-channel convention — any loader may emit a per-sample binary quality mask; Compute FC already consumes it generically |
+| 19 | ~~Universal saturation/QC mask channel convention~~ | — | — | **delivered** (M26, §9.5): `MASK_CHANNELS` + the Mask TS node; any producer may write a per-sample mask and Compute FC consumes it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
 | 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§10.6). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
 accept collections, the recipe applied to every member and the collection

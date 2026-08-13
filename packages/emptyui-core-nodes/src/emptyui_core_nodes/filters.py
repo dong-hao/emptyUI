@@ -12,6 +12,7 @@ from .types import (
     coerce_run,
     collection_member_ds,
     ensure_finite,
+    is_aux_channel,
     is_run_collection,
 )
 
@@ -113,7 +114,10 @@ class Bandpass(Node):
         if is_run_collection(data):
             return self._map_collection(ctx, data, low_freq, high_freq, order)
         data = coerce_run(data)
-        ensure_finite(data.channels, "Bandpass Filter")
+        ensure_finite(
+            {k: v for k, v in data.channels.items()
+             if k not in data.aux_channels},
+            "Bandpass Filter")
         from scipy.signal import filtfilt
 
         fs = data.sample_rate
@@ -126,6 +130,11 @@ class Bandpass(Node):
 
         filtered = {}
         for k, v in data.channels.items():
+            if k in data.aux_channels:
+                # auxiliary QC channels (a quality mask, M26) pass through
+                # untouched — filtfilt on a 0/1 mask would corrupt the gate
+                filtered[k] = v.copy()
+                continue
             filtered[k] = filtfilt(*design, v)
             ctx.progress(len(filtered) / max(len(data.channels), 1), f"filtered {k}")
         return {"filtered": TimeSeries(
@@ -135,6 +144,7 @@ class Bandpass(Node):
             meta={**data.meta, "filter": "bandpass"},
             units=dict(data.units),
             calibration={k: list(v) for k, v in data.calibration.items()},
+            aux_channels=frozenset(data.aux_channels),
         )}
 
 
@@ -161,11 +171,14 @@ class Detrend(Node):
     @staticmethod
     def _map_dataset(ds, fn):
         """Apply a per-channel function to a member's dataset, preserving
-        coords/attrs (the time axis must survive exactly — fc identity)."""
+        coords/attrs (the time axis must survive exactly — fc identity).
+        Auxiliary QC channels (a quality mask, M26) pass through UNTOUCHED —
+        detrending/filtering a 0/1 mask would corrupt the gate."""
         import xarray as xr
 
         out = xr.Dataset(
-            {k: ds[k].copy(data=fn(np.asarray(ds[k].values, dtype=float)))
+            {k: (ds[k] if is_aux_channel(k, ds[k].attrs) else
+                 ds[k].copy(data=fn(np.asarray(ds[k].values, dtype=float))))
              for k in ds.data_vars},
             coords=ds.coords, attrs=dict(ds.attrs))
         return out
@@ -185,7 +198,8 @@ class Detrend(Node):
             else:
                 ensure_finite(
                     {k: np.asarray(ds[k].values, dtype=float)
-                     for k in ds.data_vars}, "Detrend")
+                     for k in ds.data_vars
+                     if not is_aux_channel(k, ds[k].attrs)}, "Detrend")
                 if method == "mean":
                     fn = lambda v: v - v.mean()
                 else:
@@ -206,10 +220,18 @@ class Detrend(Node):
 
         data = coerce_run(data)
         if method != "none":
-            ensure_finite(data.channels, "Detrend")
+            ensure_finite(
+                {k: v for k, v in data.channels.items()
+                 if k not in data.aux_channels},
+                "Detrend")
 
         out = {}
         for k, v in data.channels.items():
+            if k in data.aux_channels:
+                # auxiliary QC channels (a quality mask, M26) pass through
+                # untouched — detrending a 0/1 mask would corrupt the gate
+                out[k] = v.copy()
+                continue
             if method == "none":
                 out[k] = v.copy()  # functional contract: never share arrays
             elif method == "mean":
@@ -227,6 +249,7 @@ class Detrend(Node):
                                    meta=dict(data.meta),
                                    units=dict(data.units),
                                    calibration={k: list(v) for k, v in
-                                                data.calibration.items()})}
+                                                data.calibration.items()},
+                                   aux_channels=frozenset(data.aux_channels))}
 
 

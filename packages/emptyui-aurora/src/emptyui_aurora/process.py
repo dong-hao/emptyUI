@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from emptyui import Input, Node, Output, Param
+from emptyui_core_nodes.types import MASK_CHANNELS
 from emptyui_mth5.nomenclature import (
     KEYWORDS,
     classify_channels,
@@ -199,7 +200,7 @@ def _concat_span_channels(parts, span_id: str, logger) -> dict:
         for name in mv:
             if name not in keys:
                 keys.append(name)
-    aux = {"saturated"}
+    aux = set(MASK_CHANNELS)  # quality masks (M26): pad, never fabricate data
     real_missing = [
         n for n in keys
         if n not in aux and any(n not in mv for _, mv in parts)]

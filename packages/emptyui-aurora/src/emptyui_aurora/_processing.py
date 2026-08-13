@@ -13,6 +13,7 @@ import logging
 import numpy as np
 import pandas as pd
 from emptyui_core_nodes.types import (
+    MASK_CHANNELS,
     channel_calibration,
     ensure_finite,
     is_unknown_start,
@@ -421,21 +422,34 @@ def compute_fc_levels(
             per_window_detrend=per_window_detrend,
         )
         n_sat_rejected = 0
-        if reject_saturated and "saturated" in series:
-            flags = _saturated_window_mask(
-                series["saturated"], max(8, int(num_samples_window)),
-                int(max(8, int(num_samples_window)) * overlap),
-                next(iter(fc_vars.values()))[1].shape[1],
-                saturated_max=saturated_max)
-            n_sat_rejected = int(flags.sum())
-            if n_sat_rejected:
-                for comp, (dims, zi) in fc_vars.items():
-                    zi = zi.copy()
-                    zi[:, flags] = np.nan + 1j * np.nan
-                    fc_vars[comp] = (dims, zi)
-                _log.info(
-                    "Compute FC: level %d rejects %d/%d saturated window(s)",
-                    level, n_sat_rejected, flags.size)
+        if reject_saturated:
+            # M26: every present mask channel (the Phoenix loader's
+            # 'saturated', Mask TS's 'quality_mask' — M4 #19: any producer
+            # may write one) unions into the pooled fraction rule
+            present = [n for n in MASK_CHANNELS if n in series]
+            if present:
+                pooled = np.logical_or.reduce(
+                    [np.asarray(series[n]) > 0 for n in present])
+                flags = _saturated_window_mask(
+                    pooled.astype(float), max(8, int(num_samples_window)),
+                    int(max(8, int(num_samples_window)) * overlap),
+                    next(iter(fc_vars.values()))[1].shape[1],
+                    saturated_max=saturated_max)
+                n_sat_rejected = int(flags.sum())
+                if n_sat_rejected:
+                    for comp, (dims, zi) in fc_vars.items():
+                        zi = zi.copy()
+                        zi[:, flags] = np.nan + 1j * np.nan
+                        fc_vars[comp] = (dims, zi)
+                    _log.info(
+                        "Compute FC: level %d rejects %d/%d masked "
+                        "window(s) [%s]", level, n_sat_rejected,
+                        flags.size, ",".join(present))
+                mask_channels_note = ",".join(present)
+            else:
+                mask_channels_note = ""
+        else:
+            mask_channels_note = ""
         cal_note = _calibrate_stft_vars(fc_vars, f, calibration, "Compute FC")
         start_iso = ""
         if start_ts is not None:
@@ -466,7 +480,11 @@ def compute_fc_levels(
                 "channel_nomenclature": keyword,
                 "e_dipole_length_m": e_dipole_length_m or 0.0,
                 "calibration_applied": cal_note,
+                # the attr NAME predates the M26 generalization (pinned by
+                # test_fc_calibration) — the count is over the UNION of all
+                # present mask channels
                 "saturated_windows_rejected": n_sat_rejected,
+                "mask_channels": mask_channels_note,
                 "saturated_max": float(saturated_max),
                 "start_datetime": start_iso,
             },
@@ -704,10 +722,10 @@ def _normalize_channels(channels, input_channels, output_channels, b_to_h, e_sca
 def _decimate_channels(channels, factor):
     """Cascade-decimate every channel by an integer factor (scipy decimate).
 
-    The binary "saturated" auxiliary channel (history §24.12 QC) is max-pooled
-    instead: a group survives decimation flagged iff any of its samples was
-    flagged — scipy's IIR decimate would blur the 0/1 mask and could let a
-    saturated block fade below any threshold.
+    Binary quality-mask auxiliary channels (MASK_CHANNELS, M26/§9.5) are
+    max-pooled instead: a group survives decimation flagged iff any of its
+    samples was flagged — scipy's IIR decimate would blur the 0/1 mask and
+    could let a flagged block fade below any threshold.
     """
     from scipy.signal import decimate
 
@@ -715,7 +733,7 @@ def _decimate_channels(channels, factor):
     out = {}
     for k, v in channels.items():
         v = np.asarray(v)
-        if k == "saturated":
+        if k in MASK_CHANNELS:
             pad = (-v.size) % factor
             if pad:
                 v = np.pad(v, (0, pad), mode="edge")

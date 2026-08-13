@@ -17,6 +17,7 @@ from .lemi import LoadLemi
 from .merge import MergeRuns
 from .phoenix_mtu import LoadPhoenixMtu
 from .plots import PlotAppResPhase, PlotPhaseTensor, PlotTipper
+from .qc import MaskTS
 from .runs import AlignRuns, ExtractRun, MergeChannels, SplitChannels
 from .tables import ViewSelection, ViewTF
 from .tf import ExportTF, ImportTF, RotateTF
@@ -44,6 +45,7 @@ def register(registry) -> None:
     registry.add(ViewSelection)
     registry.add(ViewTF)
     registry.add(Calibrate)
+    registry.add(MaskTS)
 
 
 # bundled plugin: always on, not toggleable in the Settings dialog (§5.1)

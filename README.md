@@ -126,7 +126,10 @@ Feature summary:
   caching, partial runs, cancellation, WebSocket events, runtime settings,
   remote-server contract (data-root confinement, sub-path mounting, TTL/GC,
   run-limit guard).
-- **MT pipeline** (verified end-to-end on real data) — Load MTH5/CSV/LEMI-424/
+- **MT pipeline** (verified end-to-end on real data) — Mask TS (time-domain
+  quality gating: a pooled `quality_mask` aux channel from Hampel despiking,
+  constant-run/clip detection, interval exclusion and gap reporting;
+  Compute FC consumes it at the window level), Load MTH5/CSV/LEMI-424/
   Phoenix MTU-5A, channel tooling, Align/Merge Runs, frequency-domain
   calibration inside Compute FC, multi-level Compute FC (taper schedule,
   prewhitening, clock-zero anchoring, saturation rejection), Estimate TF

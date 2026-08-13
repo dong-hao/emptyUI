@@ -13,6 +13,27 @@ from typing import Any
 
 import numpy as np
 
+#: Auxiliary channels that carry a per-sample binary QUALITY MASK
+#: (issues.md M26, DESIGN §9.5): 1 = bad sample. Compute FC's window-fraction
+#: rule unions every mask channel present on the payload (M4 #19: any
+#: producer — a loader, the Mask TS node, a learned-despiker plugin — may
+#: write one). Canonical definition lives HERE (core is the single source,
+#: the M5 discipline); mth5/aurora import it.
+MASK_CHANNELS = ("saturated", "quality_mask")
+
+
+def is_aux_channel(name: str, attrs: Any = None) -> bool:
+    """True for an auxiliary QC channel: an explicit ``type: "auxiliary"``
+    dataset attr, or one of the known mask channels. Aux channels pass
+    through the core filter nodes untouched (detrending/filtfilt on a 0/1
+    mask would corrupt the gate) and are excluded from mask criteria."""
+    if str(name) in MASK_CHANNELS:
+        return True
+    try:
+        return str((attrs or {}).get("type", "")) == "auxiliary"
+    except AttributeError:
+        return False
+
 
 @dataclass
 class TimeSeries:
@@ -45,6 +66,12 @@ class TimeSeries:
     #: without double application). Coerced from an mth5 RunTS's per-channel
     #: ``filters`` attrs + its ``filters`` object registry.
     calibration: dict[str, list] = field(default_factory=dict)
+    #: auxiliary QC channel names (e.g. a quality mask, M26). Coerced from
+    #: the payload's per-channel ``type == "auxiliary"`` attrs; the core
+    #: filter nodes pass these through UNTOUCHED (a 0/1 mask would be
+    #: corrupted by detrending/filtering) and Compute FC reads masks from
+    #: them (§9.5).
+    aux_channels: frozenset = frozenset()
 
     @property
     def n_samples(self) -> int:
@@ -62,6 +89,7 @@ class TimeSeries:
             meta=dict(self.meta),
             units=dict(self.units),
             calibration={k: list(v) for k, v in self.calibration.items()},
+            aux_channels=frozenset(self.aux_channels),
         )
 
 
@@ -185,6 +213,9 @@ def coerce_run(value):
             for k in ds.data_vars
             if ds[k].attrs.get("units")
         }
+        aux = frozenset(
+            str(k) for k in ds.data_vars
+            if is_aux_channel(k, ds[k].attrs))
         return TimeSeries(
             channels=channels,
             sample_rate=sample_rate,
@@ -194,6 +225,7 @@ def coerce_run(value):
             run=_meta_id(getattr(value, "run_metadata", None)),
             units=units,
             calibration=channel_calibration(value),
+            aux_channels=aux,
         )
     if hasattr(value, "channels") and hasattr(value, "sample_rate"):
         return value

@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 from emptyui import Input, Node, Output, Param
+from emptyui_core_nodes.types import MASK_CHANNELS
 
 from .runs import _resolve_run, _resolve_station, _resolve_survey
 
@@ -66,12 +67,13 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
 
     comp_sets = [_rt_channels(rt) for rt in run_ts_list]
     union = set.union(*comp_sets)
-    # the 'saturated' aux QC mask exists only on runs with flagged samples
-    # (history §24.12) — a station's sessions split into masked and unmasked runs,
-    # and merging them (the documented E1b remedy: "merge the remote
-    # station's runs first") must not hard-fail on QC metadata: pad the
-    # missing members with zeros (no saturation there)
-    aux = {"saturated"}
+    # quality-mask aux channels (MASK_CHANNELS, M26: 'saturated' +
+    # 'quality_mask') exist only on runs with flagged samples — a station's
+    # sessions split into masked and unmasked runs, and merging them (the
+    # documented E1b remedy: "merge the remote station's runs first") must
+    # not hard-fail on QC metadata: pad the missing members with zeros
+    # (no flagged samples there)
+    aux = set(MASK_CHANNELS)
     for rt, comps in zip(run_ts_list, comp_sets):
         missing = sorted((union - comps) - aux)
         if missing:
