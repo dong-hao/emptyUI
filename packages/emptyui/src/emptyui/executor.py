@@ -33,6 +33,10 @@ from emptyui.paths import PathPolicy
 from emptyui.schema import Workflow, WorkflowNode
 from emptyui.store import DataStore
 
+#: H7 warning cap — node-card warnings shown per node before suppression
+#: (the full record is always in the server log)
+_WARN_LIMIT = 10
+
 
 class ExecutionError(Exception):
     def __init__(self, node_id: str, original: BaseException) -> None:
@@ -915,6 +919,21 @@ class Executor:
             # so a re-execution clears the previous warning first
             self._warn_version_drift(wnode, manifest, node_id, emit)
 
+            # H7 warning cap: a node looping over hundreds of members can
+            # emit hundreds of warnings (Mask TS on a burst collection) —
+            # the card would drown in them. The first _WARN_LIMIT reach the
+            # node card; the rest are counted and summarized at completion
+            # (the server log keeps the full record — ctx.warn always logs).
+            warn_state = {"shown": 0, "suppressed": 0}
+
+            def _capped_warn(msg: str, _nid: str = node_id,
+                             _state: dict = warn_state) -> None:
+                if _state["shown"] < _WARN_LIMIT:
+                    _state["shown"] += 1
+                    emit({"event": "node_warning", "node": _nid, "msg": msg})
+                else:
+                    _state["suppressed"] += 1
+
             ctx = RunContext(
                 workspace=workspace,
                 store=store,
@@ -924,9 +943,7 @@ class Executor:
                 ),
                 # H7: degradations surface ON THE NODE (the properties
                 # panel + a card marker), never as a silent wrong result
-                warn_cb=lambda msg, _nid=node_id: emit(
-                    {"event": "node_warning", "node": _nid, "msg": msg}
-                ),
+                warn_cb=_capped_warn,
             )
             try:
                 kwargs: dict[str, Any] = {}
@@ -1093,6 +1110,13 @@ class Executor:
                         "url": f"/api/artifacts/{artifact_id}/preview",
                     }
                 )
+            if warn_state["suppressed"]:
+                msg = (f"and {warn_state['suppressed']} more warning(s) "
+                       f"suppressed (the first {_WARN_LIMIT} are shown; "
+                       "the full record is in the server log)")
+                emit({"event": "node_warning", "node": node_id, "msg": msg})
+                logging.getLogger("emptyui").warning(
+                    "%s: %s", node_id, msg)
             emit({"event": "node_status", "node": node_id, "status": "done"})
 
             # success ⇒ cacheable: record outputs + artifact summaries so a

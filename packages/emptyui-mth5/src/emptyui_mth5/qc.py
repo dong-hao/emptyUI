@@ -236,6 +236,7 @@ class MaskTS(Node):
         gap_notes: list[str] = []
         n = max((v.size for v in channels.values()), default=0)
         pooled = np.zeros(n, dtype=bool)
+        deliberate = np.zeros(n, dtype=bool)  # the user's exclude_intervals
 
         # 1. explicit UTC intervals (clamped; out-of-record warned)
         intervals = _parse_intervals(exclude_intervals)
@@ -267,6 +268,7 @@ class MaskTS(Node):
                 i0 = int(time_index.searchsorted(clo, side="left"))
                 i1 = int(time_index.searchsorted(chi, side="left"))
                 pooled[i0:i1] = True
+                deliberate[i0:i1] = True
                 rows.append({
                     "criterion": "interval", "n_flagged": int(i1 - i0),
                     "fraction": round((i1 - i0) / max(n, 1), 6),
@@ -351,7 +353,7 @@ class MaskTS(Node):
                     "fraction": 0.0, "intervals": "; ".join(gap_notes),
                     "note": "no samples exist — excluded via "
                             "'exclude_intervals' by the user"})
-        return pooled, rows, gap_notes
+        return pooled, rows, gap_notes, deliberate
 
     @staticmethod
     def _existing_mask_union(ds) -> np.ndarray | None:
@@ -380,7 +382,7 @@ class MaskTS(Node):
                 time_index = (idx.tz_localize("UTC") if idx.tz is None
                               else idx.tz_convert("UTC"))
 
-        pooled, rows, _ = self._member_mask(
+        pooled, rows, _, deliberate = self._member_mask(
             data_channels, time_index, sample_rate,
             kw["exclude_intervals"], kw["detect_spikes"],
             kw["hampel_window_s"], kw["hampel_threshold"],
@@ -400,11 +402,16 @@ class MaskTS(Node):
         else:
             out["quality_mask"] = ("time", pooled.astype(np.uint8), mask_attrs)
         frac = float(pooled.mean()) if pooled.size else 0.0
-        if frac > 0.5:
+        # the >50% misconfiguration warning judges the INVOLUNTARY flags
+        # only — a range the user deliberately excluded is not a signal
+        # (2026-10-16: a 1-h exclusion on a burst collection flagged
+        # hundreds of 2-s members 100% and drowned the card in warnings)
+        invol = float((pooled & ~deliberate).mean()) if pooled.size else 0.0
+        if invol > 0.5:
             ctx.warn(
-                f"mask TS: {frac:.0%} of member '{rid}' is flagged bad — "
-                "likely a dead channel or a misconfigured criterion "
-                "(check the report)")
+                f"mask TS: {invol:.0%} of member '{rid}' is flagged bad by "
+                "the criteria — likely a dead channel or a misconfigured "
+                "criterion (check the report)")
         rows = [dict(r, member=rid) for r in rows]
         rows.append({"member": rid, "criterion": "total",
                      "n_flagged": int(pooled.sum()),
@@ -444,7 +451,7 @@ class MaskTS(Node):
             k for k in data.channels if k in MASK_CHANNELS}
         data_channels = {k: v for k, v in data.channels.items()
                          if k not in aux}
-        pooled, rows, _ = self._member_mask(
+        pooled, rows, _, deliberate = self._member_mask(
             data_channels, None, data.sample_rate,
             kw["exclude_intervals"], kw["detect_spikes"],
             kw["hampel_window_s"], kw["hampel_threshold"],
@@ -468,10 +475,12 @@ class MaskTS(Node):
         rows.append({"member": data.run or "single", "criterion": "total",
                      "n_flagged": int(pooled.sum()),
                      "fraction": round(frac, 6), "intervals": "", "note": ""})
-        if frac > 0.5:
+        invol = float((pooled & ~deliberate).mean()) if pooled.size else 0.0
+        if invol > 0.5:
             ctx.warn(
-                f"mask TS: {frac:.0%} of the record is flagged bad — likely "
-                "a dead channel or a misconfigured criterion (check the report)")
+                f"mask TS: {invol:.0%} of the record is flagged bad by the "
+                "criteria — likely a dead channel or a misconfigured "
+                "criterion (check the report)")
         path = ctx.artifact_path("mask_ts", ".json")
         path.write_text(json.dumps(rows))
         artifact = ctx.publish_artifact(path, kind="table")

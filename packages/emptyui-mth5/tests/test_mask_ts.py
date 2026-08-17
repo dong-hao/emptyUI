@@ -274,3 +274,32 @@ def test_mask_ts_registered_with_a_report_port():
     manifest = MaskTS().manifest()
     assert manifest["outputs"][1]["type"] == "table"
     assert manifest["inputs"][0]["collection_ok"] is True
+
+
+def test_mask_ts_deliberate_exclusion_does_not_warn(tmp_path, caplog):
+    """A range the USER deliberately excluded is not a misconfiguration
+    signal: a member that is 'bad' only inside exclude_intervals stays
+    quiet (2026-10-16: a 1-h exclusion on a burst collection flagged
+    hundreds of 2-s members 100% and drowned the card in warnings)."""
+    ctx = _ctx(tmp_path)
+    payload = _ds(n=256, spike_at=None, clip_at=None)
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        MaskTS().execute(
+            ctx, payload,
+            exclude_intervals="1980-01-01T00:00:00/1980-01-01T00:05:00")
+    assert not any("flagged bad" in r.message for r in caplog.records)
+
+
+def test_mask_ts_still_warns_on_involuntary_badness(tmp_path, caplog):
+    """Deliberate exclusions don't mask a real misconfiguration: a dead
+    channel BEYOND the excluded range still warns (the involuntary
+    fraction is what the >50% rule judges)."""
+    ctx = _ctx(tmp_path)
+    payload = _ds(n=256, spike_at=None, clip_at=None)
+    payload.dataset["ex"].values[:] = 1.0  # dead across the whole record
+    with caplog.at_level(logging.WARNING, logger="emptyui"):
+        MaskTS().execute(
+            ctx, payload,
+            exclude_intervals="1980-01-01T00:01:00/1980-01-01T00:02:00")
+    assert any("flagged bad" in r.message for r in caplog.records)
+    assert any("by the criteria" in r.message for r in caplog.records)

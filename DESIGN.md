@@ -840,7 +840,10 @@ calibration (the `*_CLB.asc`/`*_CLC.asc` chains, including the
 total-absence case that used to return `{}` in silence) — a silently
 missing shape correction is a silently wrong transfer function. Warnings
 are also logged; headless embedding (no event stream) keeps the log as
-the only surface.
+the only surface. A node that loops over many members can warn hundreds
+of times (Mask TS on a burst collection) — the executor caps the card at
+the first 10 per node and appends one "and N more warning(s) suppressed"
+summary at completion; the server log always keeps the full record.
 
 **Failure reasons ride the terminal event.** `run_finished: failed` carries
 `error` — the human-readable reason (missing input, bad param, node exception)

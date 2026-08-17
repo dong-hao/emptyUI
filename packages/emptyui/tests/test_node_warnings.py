@@ -72,3 +72,35 @@ def test_ctx_warn_without_callback_stays_log_only(caplog):
         ctx.warn("headless warning")
     assert any("headless warning" in r.getMessage()
                for r in caplog.records)
+
+
+def test_warning_storm_is_capped_with_summary():
+    """A node looping over hundreds of members can emit hundreds of
+    warnings (Mask TS on a burst collection) — the card shows the first
+    _WARN_LIMIT and one 'and N more' summary at completion; the server
+    log keeps the full record."""
+    from emptyui import Node, Output
+    from emptyui.executor import _WARN_LIMIT
+    from emptyui.schema import Workflow, WorkflowNode
+
+    reg = Registry()
+
+    class Storm(Node):
+        type = "test.storm"
+        outputs = (Output("data", "any"),)
+
+        def execute(self, ctx):
+            for i in range(_WARN_LIMIT + 5):
+                ctx.warn(f"member {i} is flagged bad")
+            return {"data": "done"}
+
+    reg.add(Storm)
+    wf = Workflow(nodes=[WorkflowNode(id="n1", type="test.storm")])
+    events: list[dict] = []
+    summary = Executor(reg).run(wf, emit=events.append)
+    assert summary["status"] == "completed"
+    warnings = [e for e in events if e["event"] == "node_warning"]
+    assert len(warnings) == _WARN_LIMIT + 1
+    assert "and 5 more warning(s) suppressed" in warnings[-1]["msg"]
+    assert warnings[0]["msg"] == "member 0 is flagged bad"
+    assert warnings[-2]["msg"] == f"member {_WARN_LIMIT - 1} is flagged bad"
