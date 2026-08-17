@@ -48,41 +48,34 @@ _HAMPEL_MIN_SAMPLES = 16
 
 def _parse_intervals(text: str) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
     """Parse ``start/end`` ISO pairs separated by ``;`` — the user's manual
-    override. A lone ``start ; end`` (semicolon between the pair instead
-    of a slash) is accepted too: slash-less fragments pair up in order.
-    Raises with the offending fragment named."""
-    frags = [f.strip() for f in str(text or "").split(";")]
-    frags = [f for f in frags if f]
-
-    def _pair(i: int, a: str, b: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    override. Raises with the offending fragment named, showing the
+    expected form (2026-10-16: the user preferred the strict rule over a
+    forgiving parser — 'start ; end' stays an error)."""
+    example = ("2024-01-01T00:00/2024-01-01T02:00 ; "
+               "2024-01-05T12:00/2024-01-05T14:00")
+    out = []
+    for i, frag in enumerate(str(text or "").split(";"), 1):
+        frag = frag.strip()
+        if not frag:
+            continue
+        if "/" not in frag:
+            raise ValueError(
+                f"exclude_intervals fragment {i} ({frag!r}) is not a "
+                "'start/end' pair — write ISO datetime pairs separated by "
+                f"';', e.g. '{example}'")
+        a, b = (s.strip() for s in frag.split("/", 1))
         try:
             lo, hi = pd.Timestamp(a), pd.Timestamp(b)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"exclude_intervals fragment {i} has an unparseable "
-                f"datetime ({a!r}/{b!r})") from exc
+                f"datetime ({frag!r}) — expected 'start/end' pairs "
+                f"separated by ';', e.g. '{example}'") from exc
         if hi <= lo:
             raise ValueError(
                 f"exclude_intervals fragment {i}: end {b!r} is not after "
                 f"start {a!r}")
-        return (lo, hi)
-
-    out: list[tuple[pd.Timestamp, pd.Timestamp]] = []
-    bare: tuple[int, str] | None = None  # an unpaired slash-less fragment
-    for i, frag in enumerate(frags, 1):
-        if "/" in frag:
-            a, b = (s.strip() for s in frag.split("/", 1))
-            out.append(_pair(i, a, b))
-        elif bare is None:
-            bare = (i, frag)
-        else:
-            out.append(_pair(bare[0], bare[1], frag))
-            bare = None
-    if bare is not None:
-        raise ValueError(
-            f"exclude_intervals fragment {bare[0]} ({bare[1]!r}) is a lone "
-            "start — write 'start/end' pairs separated by ';', or a single "
-            "'start ; end'")
+        out.append((lo, hi))
     return out
 
 
@@ -169,9 +162,8 @@ class MaskTS(Node):
         Param("exclude_intervals", "text", label="Exclude intervals (UTC)",
               default="", optional=True,
               placeholder="2024-01-01T00:00/2024-01-01T02:00; …",
-              description="'start/end' ISO datetime pairs separated by "
-                          "';' — 'start ; end' also works — marked "
-                          "unconditionally (clamped to the record; "
+              description="'start/end' ISO datetime pairs separated by ';' — "
+                          "marked unconditionally (clamped to the record; "
                           "out-of-record intervals are warned, never "
                           "rejected). The manual override — the only "
                           "criterion that cannot get it wrong."),

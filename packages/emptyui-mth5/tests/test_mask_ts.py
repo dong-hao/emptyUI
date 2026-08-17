@@ -72,27 +72,24 @@ def test_parse_intervals():
         "2024-01-01T00:00:00/2024-01-01T01:00:00 ; 2024-01-02T00:00/2024-01-02T01:00")
     assert len(ivs) == 2
     assert ivs[0][1] > ivs[0][0]
-    with pytest.raises(ValueError, match="lone"):
+    with pytest.raises(ValueError, match="not a 'start/end' pair"):
         _parse_intervals("2024-01-01T00:00:00")
     with pytest.raises(ValueError, match="not after"):
         _parse_intervals("2024-01-02T00:00:00/2024-01-01T00:00:00")
 
+    def _msg(text):
+        with pytest.raises(ValueError) as exc:
+            _parse_intervals(text)
+        return str(exc.value)
 
-def test_parse_intervals_accepts_start_semicolon_end():
-    """The natural 'start ; end' input (semicolon between the pair) parses
-    as one interval — the user's reported UX friction; slash-less
-    fragments pair up in order and mix freely with 'start/end' pairs."""
-    (lo, hi), = _parse_intervals(
-        "2011-01-10 14:00:00 ; 2011-01-10 23:00:00")
-    assert lo == pd.Timestamp("2011-01-10 14:00:00")
-    assert hi == pd.Timestamp("2011-01-10 23:00:00")
-    ivs = _parse_intervals(
-        "2024-01-01T00:00/2024-01-01T01:00 ; "
-        "2024-01-02 00:00 ; 2024-01-02 02:00 ; "
-        "2024-01-03 04:00 ; 2024-01-03 06:00")
-    assert len(ivs) == 3
-    with pytest.raises(ValueError, match="lone"):
-        _parse_intervals("2024-01-01T00:00 ; 2024-01-02T00:00 ; 2024-01-03T00:00")
+    # the error teaches the format: a concrete, correct example inlined
+    # (2026-10-16: the user preferred the strict rule + a helpful message
+    # over a forgiving parser)
+    for bad in ("2024-01-01T00:00:00",                    # no pair at all
+                "2024-01-01 14:00 ; 2024-01-01 23:00",    # ';' between the pair
+                "2024-01-01T00:00/2024-01-01T01:00 ; oops"):
+        m = _msg(bad)
+        assert "start/end" in m and "e.g." in m and "2024-01-01T00:00/" in m, m
 
 
 def test_hampel_flags_an_impulse_and_not_the_signal():
