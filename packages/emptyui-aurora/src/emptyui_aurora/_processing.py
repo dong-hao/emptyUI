@@ -269,13 +269,15 @@ def compute_fc_levels(
     window_type_deep="",
     deep_from_level=None,
     clock_zero="",
-    reject_saturated=True,
+    reject_mask_channels: tuple = MASK_CHANNELS,
     saturated_max: float = 0.01,
 ):
     """Cascading-decimation multi-level STFT -> ``{level: xr.Dataset}``.
 
-    ``saturated_max`` (history §24.12 QC): an FC window is zero-weighted when the
-    flagged fraction of its sample span exceeds this threshold (the original
+    ``reject_mask_channels``: which quality-mask producers zero-weight FC
+    windows (a subset of MASK_CHANNELS). ``saturated_max`` (history §24.12
+    QC): a window is zero-weighted when the flagged fraction of its sample
+    span exceeds this threshold (the original
     any-overlap rule deleted the long-period tail whenever saturation is
     frequent — see :func:`_saturated_window_mask`).
     ``num_decimations`` is the number of cascading decimations performed, so it
@@ -422,11 +424,11 @@ def compute_fc_levels(
             per_window_detrend=per_window_detrend,
         )
         n_sat_rejected = 0
-        if reject_saturated:
-            # M26: every present mask channel (the Phoenix loader's
-            # 'saturated', Mask TS's 'quality_mask' — M4 #19: any producer
-            # may write one) unions into the pooled fraction rule
-            present = [n for n in MASK_CHANNELS if n in series]
+        if reject_mask_channels:
+            # M26: every present, SELECTED mask channel (the Phoenix
+            # loader's 'saturated', Mask TS's 'quality_mask' — M4 #19: any
+            # producer may write one) unions into the pooled fraction rule
+            present = [n for n in reject_mask_channels if n in series]
             if present:
                 pooled = np.logical_or.reduce(
                     [np.asarray(series[n]) > 0 for n in present])

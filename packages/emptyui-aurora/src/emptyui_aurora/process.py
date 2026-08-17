@@ -115,6 +115,16 @@ def _merge_provenance_attrs(data, logger) -> dict[str, Any]:
         return {}
 
 
+#: reject_masks select value -> the mask producers whose flags reject
+#: windows (kept in sync with MASK_CHANNELS)
+_REJECT_MASK_MODES = {
+    "all masks": MASK_CHANNELS,
+    "saturated only": ("saturated",),
+    "quality mask only": ("quality_mask",),
+    "none": (),
+}
+
+
 def _payload_declares_field_e(payload) -> bool:
     """True when the payload's electric channels already carry FIELD units
     (mV/km or V/m) — the §10.5 attr-aware path handles those; an archived
@@ -407,22 +417,31 @@ class ComputeFC(Node):
                           "tapering — keeps window-level trends out of the "
                           "low-frequency bins (aurora's per-window default); "
                           "'none' (default) = global Detrend node only."),
-        Param("reject_saturated", "boolean", label="Reject saturated windows",
-              default=True,
+        Param("reject_masks", "select", label="Reject masked windows",
+              default="all masks",
+              options=("all masks", "saturated only", "quality mask only",
+                       "none"),
               description="Zero-weight (NaN) every FC window whose flagged "
-                          "sample fraction exceeds 'saturated max' (MTU-5A "
-                          "block tags byte 15, history §24.12 QC). No effect on "
-                          "payloads without a 'saturated' mask."),
-        Param("saturated_max", "number", label="Saturated max",
+                          "sample fraction exceeds 'mask max'. 'all masks' "
+                          "unions every present quality-mask producer (the "
+                          "MTU-5A block-tag 'saturated' channel and Mask "
+                          "TS's pooled 'quality_mask', history §24.12 "
+                          "QC/M26); the 'only' modes reject on one "
+                          "producer and ignore the other; 'none' keeps "
+                          "every window."),
+        Param("saturated_max", "number", label="Masked max",
               default=0.01, min=0.0, max=1.0,
-              enabled_when=("reject_saturated", (True,)),
+              enabled_when=("reject_masks",
+                            ("all masks", "saturated only",
+                             "quality mask only")),
               description="Flagged-fraction threshold: a window is "
                           "zero-weighted when more than this share of its "
-                          "samples is flagged saturated. The original "
-                          "any-overlap rule deleted the long-period tail "
-                          "whenever saturation is frequent (a 73-minute "
-                          "window almost always overlaps one clipped "
-                          "sample out of 65536)."),
+                          "samples is flagged by the selected mask "
+                          "producer(s). The original any-overlap rule "
+                          "deleted the long-period tail whenever "
+                          "saturation is frequent (a 73-minute window "
+                          "almost always overlaps one clipped sample out "
+                          "of 65536)."),
         Param("session_hours", "number", label="Session length (h)",
               default=0.0, min=0, optional=True,
               description="Cut every run of a collection into fixed-length "
@@ -473,7 +492,7 @@ class ComputeFC(Node):
                 clock_zero: str = "",
                 prewhitening: str = "first difference",
                 per_window_detrend: str = "",
-                reject_saturated: bool = True,
+                reject_masks: str = "all masks",
                 saturated_max: float = 0.01,
                 session_hours: float = 0.0,
                 regroup_contiguous: bool = False,
@@ -510,7 +529,7 @@ class ComputeFC(Node):
                     channel_nomenclature, magnetic_unit, e_dipole_length_m,
                     decimation_levels, factor, window_samples, overlap,
                     window_type, window_type_deep, deep_from_level, clock_zero,
-                    prewhitening, per_window_detrend, reject_saturated,
+                    prewhitening, per_window_detrend, reject_masks,
                     saturated_max, session_hours, regroup_contiguous,
                     persist, survey, station, run)
             finally:
@@ -545,7 +564,8 @@ class ComputeFC(Node):
             window_type_deep=window_type_deep,
             deep_from_level=deep_from_level,
             clock_zero=clock_zero,
-            reject_saturated=reject_saturated,
+            reject_mask_channels=_REJECT_MASK_MODES.get(
+                str(reject_masks), MASK_CHANNELS),
             saturated_max=saturated_max,
         )
         from emptyui_mth5.persist import (
@@ -627,7 +647,7 @@ class ComputeFC(Node):
         decimation_levels: int, factor: int, window_samples: int,
         overlap: float, window_type: str, window_type_deep: str,
         deep_from_level, clock_zero: str, prewhitening: str,
-        per_window_detrend: str, reject_saturated: bool,
+        per_window_detrend: str, reject_masks: str,
         saturated_max: float, session_hours: float,
         regroup_contiguous: bool, persist: bool, survey: str, station: str,
         run: str,
@@ -801,7 +821,8 @@ class ComputeFC(Node):
                 window_type_deep=window_type_deep,
                 deep_from_level=deep_from_level,
                 clock_zero=clock_zero,
-                reject_saturated=reject_saturated,
+                reject_mask_channels=_REJECT_MASK_MODES.get(
+                    str(reject_masks), MASK_CHANNELS),
                 saturated_max=saturated_max,
             )
             # station identity travels in the attrs (DESIGN.md §10.6) —

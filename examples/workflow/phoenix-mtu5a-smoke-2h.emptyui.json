@@ -75,16 +75,16 @@
         "window_samples": 256,
         "overlap": 0.5,
         "window_type": "hamming",
-        "window_type_deep": "",
+        "window_type_deep": "same as shallow",
         "clock_zero": "",
         "prewhitening": "first difference",
-        "per_window_detrend": "",
-        "reject_saturated": true,
+        "per_window_detrend": "none",
         "saturated_max": 0.01,
         "persist": true,
         "survey": "",
         "station": "",
-        "run": ""
+        "run": "",
+        "reject_masks": "all masks"
       },
       "position": {
         "x": 593.8778609763159,

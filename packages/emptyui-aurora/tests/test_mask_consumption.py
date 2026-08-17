@@ -105,3 +105,23 @@ def test_mask_channels_is_the_canonical_pair():
     from emptyui_core_nodes.types import MASK_CHANNELS as canonical
 
     assert MASK_CHANNELS == canonical == ("saturated", "quality_mask")
+
+
+def test_rejection_is_selectable_per_producer():
+    """reject_mask_channels picks WHICH producers zero-weight windows:
+    'saturated' alone ignores a quality_mask, 'none' rejects nothing —
+    the node's reject_masks select maps onto this tuple (2026-10-16:
+    the M26 union was unconditional; the user wanted per-channel
+    control without another boolean on the node)."""
+    flagged = _payload_with_mask("quality_mask", flagged=range(100, 112))
+    rejected = _compute(flagged)[0].attrs["saturated_windows_rejected"]
+    assert rejected > 0
+    ignored = _compute(flagged, reject_mask_channels=("saturated",))
+    assert ignored[0].attrs["saturated_windows_rejected"] == 0
+    assert ignored[0].attrs["mask_channels"] == ""
+    kept = _compute(flagged, reject_mask_channels=())
+    assert kept[0].attrs["saturated_windows_rejected"] == 0
+    # the reverse: a saturated flag with quality-mask-only rejection
+    sat = _payload_with_mask("saturated", flagged=range(100, 112))
+    assert _compute(sat, reject_mask_channels=("quality_mask",))[
+        0].attrs["saturated_windows_rejected"] == 0

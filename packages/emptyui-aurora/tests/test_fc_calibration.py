@@ -271,7 +271,7 @@ def test_compute_fc_saturated_rejection_off():
     runts = _runts_with_mask(flagged_slice=slice(1000, 1008))
     levels = compute_fc_levels(runts, "hx,hy", "ex,ey", num_decimations=0,
                                num_samples_window=256, overlap=0.5,
-                               window_type="boxcar", reject_saturated=False,
+                               window_type="boxcar", reject_mask_channels=(),
                                prewhitening="")
     assert not np.any(np.isnan(levels[0]["hx"].values))
     assert levels[0].attrs["saturated_windows_rejected"] == 0

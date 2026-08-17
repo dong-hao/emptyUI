@@ -88,16 +88,16 @@
         "window_samples": 128,
         "overlap": 0.5,
         "window_type": "hamming",
-        "window_type_deep": "",
+        "window_type_deep": "same as shallow",
         "clock_zero": "",
         "prewhitening": "first difference",
-        "per_window_detrend": "",
-        "reject_saturated": false,
+        "per_window_detrend": "none",
         "saturated_max": 0.01,
         "persist": true,
         "survey": "BGS",
         "station": "NX37",
-        "run": "b"
+        "run": "b",
+        "reject_masks": "none"
       },
       "position": {
         "x": 1174.5,
@@ -158,16 +158,16 @@
         "window_samples": 128,
         "overlap": 0.5,
         "window_type": "hamming",
-        "window_type_deep": "",
+        "window_type_deep": "same as shallow",
         "clock_zero": "",
         "prewhitening": "first difference",
-        "per_window_detrend": "",
-        "reject_saturated": false,
+        "per_window_detrend": "none",
         "saturated_max": 0.01,
         "persist": true,
         "survey": "BGS",
         "station": "NX37",
-        "run": "b"
+        "run": "b",
+        "reject_masks": "none"
       },
       "position": {
         "x": 1179.197052714841,
