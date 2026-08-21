@@ -11,6 +11,7 @@ import pytest
 from emptyui.context import RunContext
 from emptyui.store import DataStore
 from emptyui_mth5.runs import (
+    AlignRuns,
     ExtractRun,
     _resolve_run,
     _resolve_station,
@@ -880,3 +881,44 @@ def test_full_extraction_avoids_metadata_storms(archive, tmp_path,
     coll = res["data"]
     assert len(coll.runs) >= 1
     assert count["n"] <= 1  # once per execute, not once per run
+
+
+def test_align_collections_never_rebuild_runts(monkeypatch):
+    """Collection members stay duck payloads: aligning slices each
+    member's dataset instead of rebuilding a RunTS (whose mt_metadata
+    validation storm cost 84 s of the 98 s align on a one-day RR corpus —
+    5993 ChannelTS + 1196 RunTS constructions for 598+598 members;
+    issues.md L22). The crop must be data-identical to the rebuild, and
+    the payload attrs downstream consumers read (sample_rate, filters)
+    ride along."""
+    import mt_timeseries
+    import numpy as np
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError(
+            "ChannelTS constructed during collection alignment — the "
+            "fast path must slice the member's dataset")
+
+    monkeypatch.setattr(mt_timeseries, "ChannelTS", _forbidden)
+
+    from emptyui_mth5.runs import RunCollection
+
+    a1, e1 = _coll_row(8.0, "2024-01-01T00:00:00", 80, station="A", run="a1")
+    a1.filters = {"remote_clb": object()}  # the response registry rides through
+    b1, eb = _coll_row(8.0, "2024-01-01T00:00:00", 80, seed=2, station="B",
+                       run="b1")
+    ctx = RunContext(workspace=Path("/tmp/opencode/l22"), store=DataStore())
+    out = AlignRuns().execute(ctx, RunCollection(runs=[a1], extents=[e1]),
+                              RunCollection(runs=[b1], extents=[eb]))
+    oa, ob = out["data1"], out["data2"]
+    assert isinstance(oa, RunCollection) and isinstance(ob, RunCollection)
+    for m_in, m_out, e in ((a1, oa.runs[0], oa.extents[0]),
+                           (b1, ob.runs[0], ob.extents[0])):
+        assert m_out.sample_rate == m_in.sample_rate
+        assert getattr(m_out, "filters", None) == getattr(
+            m_in, "filters", None)
+        np.testing.assert_array_equal(
+            np.asarray(m_out.dataset.ex), np.asarray(m_in.dataset.ex))
+        np.testing.assert_array_equal(
+            m_out.dataset["time"].values, m_in.dataset["time"].values)
+        _assert_extent(e, m_out)

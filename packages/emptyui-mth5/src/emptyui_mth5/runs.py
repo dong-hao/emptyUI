@@ -1320,7 +1320,25 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
                     "align: dropping input %d run '%s' — degenerate after "
                     "the overlap crop", idx, _member_id(m, ext))
                 continue
-            run_out = _crop_to_runts(m, ch, sr, i0, n, lo.isoformat())
+            # issues.md L22: collection members stay duck payloads —
+            # rebuilding a RunTS per member paid ~70 ms of mt_metadata
+            # validation each (5993 ChannelTS + 1196 RunTS = 84 s of the
+            # 98 s align on the one-day RR corpus); the crop is an isel
+            # on the member's dataset with every attr intact. Singles and
+            # RunTS members keep the rebuild (the single's output kind is
+            # a normalized RunTS by contract; a RunTS member's response
+            # chains live on the object).
+            if kind == "single" or isinstance(m, RunTS):
+                run_out = _crop_to_runts(m, ch, sr, i0, n, lo.isoformat())
+            else:
+                cropped = m.dataset.isel(time=slice(i0, i0 + n)).copy()
+                run_out = SimpleNamespace(
+                    dataset=cropped,
+                    sample_rate=float(sr),
+                    start=(cropped["time"].values[0]
+                           if cropped.sizes.get("time", 0) else lo),
+                    filters=getattr(m, "filters", None),
+                )
             _carry_merge_provenance(m, run_out)
             members.append(run_out)
             new_ext = dict(ext or {})
