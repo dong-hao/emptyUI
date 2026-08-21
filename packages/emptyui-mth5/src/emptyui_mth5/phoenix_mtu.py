@@ -498,7 +498,6 @@ def read_phoenix_mtu(
             f"{[p.name for p in tbls]}")
     win_start, win_end = _window_bounds(start, end)
     from mt_io.phoenix.readers.mtu.mtu_table import MTUTable
-    from mt_timeseries import ChannelTS
     from mth5.mth5 import MTH5
 
     table = MTUTable(tbls[0])
@@ -614,11 +613,11 @@ def read_phoenix_mtu(
 
                 aux_md = Auxiliary()
                 aux_md.time_period.start = seg.start.isoformat()
-                aux_md.time_period.end = seg.end.isoformat()
+                aux_md.time_period.end = (seg.end - pd.to_timedelta(
+                    1.0 / seg.rate, unit="s")).isoformat()
                 aux_md.sample_rate = float(seg.rate)
-                aux = ChannelTS("auxiliary", data=mask, channel_metadata=aux_md)
-                aux.component = "saturated"
-                array_list.append(aux)
+                aux_md.component = "saturated"
+                array_list.append(("saturated", "auxiliary", mask, aux_md))
             for comp, pos in channel_keys.items():
                 meta = getattr(table, f"{comp}_metadata")
                 meta.sample_rate = float(seg.rate)
@@ -628,7 +627,12 @@ def read_phoenix_mtu(
                 # alone is not enough: from_channel_ts propagates the
                 # channel's period into the run)
                 meta.time_period.start = seg.start.isoformat()
-                meta.time_period.end = seg.end.isoformat()
+                # the last SAMPLE — the ChannelTS constructor used to
+                # normalize the exclusive segment end to mt_timeseries'
+                # inclusive convention before from_channel_ts wrote it
+                # (the archived attrs carried the last-sample end)
+                meta.time_period.end = (seg.end - pd.to_timedelta(
+                    1.0 / seg.rate, unit="s")).isoformat()
                 x = np.concatenate([c[pos - 1] for c in seg.chunks])
                 x, unit = _apply_tbl_calibration(comp, x, table)
                 if unit:
@@ -644,17 +648,24 @@ def read_phoenix_mtu(
                         AppliedFilter(name=fap.name, applied=True, stage=i)
                         for i, fap in enumerate(refs, 1)
                     ]
-                array_list.append(ChannelTS(
+                # issues.md L25: (name, type, data, metadata) tuples —
+                # a full ChannelTS construction per channel (~7 ms of
+                # mt_metadata validation) was built here only to be
+                # unwrapped by from_channel_ts; add_channel consumes the
+                # same metadata directly and writes the identical attrs
+                # (pinned by test_phoenix_ingest_writer_fidelity)
+                array_list.append((
+                    comp,
                     "electric" if comp.startswith("e") else "magnetic",
-                    data=x,
-                    channel_metadata=meta,
+                    x,
+                    meta,
                 ))
-            # (run_id, run_metadata, channels) — written via from_channel_ts
+            # (run_id, run_metadata, channels) — written via add_channel
             # below: RunGroup.from_runts costs ~5x more per run (mt_metadata
             # deepcopy/validation storm + station-metadata rebuild,
             # history §24.8 performance note)
             runs.append((run_id, run_meta, array_list))
-            n_samples_by_run.append(array_list[0].ts.size)
+            n_samples_by_run.append(len(array_list[0][2]))
             seg_info.append((run_id, float(seg.rate), seg.start, seg.end,
                              n_samples_by_run[-1]))
         blocks = None  # free the sample chunks
@@ -699,8 +710,9 @@ def read_phoenix_mtu(
         station_group.metadata.id = station_id
         for run_id, run_meta, array_list in runs:
             run_group = station_group.add_run(run_id, run_metadata=run_meta)
-            for ch_ts in array_list:
-                run_group.from_channel_ts(ch_ts)
+            for name, ctype, data, meta in array_list:
+                run_group.add_channel(name, ctype, data,
+                                      channel_metadata=meta)
         # station/survey summaries from the KNOWN segment geometry.
         # NB: never touch mth5's `metadata` property here — its getter
         # walks every child run's metadata through pydantic and
