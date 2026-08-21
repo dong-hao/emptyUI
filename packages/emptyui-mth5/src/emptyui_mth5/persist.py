@@ -80,15 +80,32 @@ def close_workspace_mth5(ctx) -> None:
 
 
 def _ensure_survey(m, survey: str):
-    if survey in m.surveys_group.groups_list:
-        return m.get_survey(survey)
-    return m.add_survey(survey)
+    # issues.md L24: this walk re-reads+validates the survey group metadata
+    # on every persisted level (~1200 calls on a one-day RR corpus) — cache
+    # on the open MTH5 handle (the cache lives and dies with it)
+    cache = getattr(m, "_emptyui_ensure_cache", None)
+    if cache is None:
+        cache = m._emptyui_ensure_cache = {}
+    key = ("survey", survey)
+    if key not in cache:
+        if survey in m.surveys_group.groups_list:
+            cache[key] = m.get_survey(survey)
+        else:
+            cache[key] = m.add_survey(survey)
+    return cache[key]
 
 
 def _ensure_station(survey_obj, station: str):
-    if station in survey_obj.stations_group.groups_list:
-        return survey_obj.stations_group.get_station(station)
-    return survey_obj.stations_group.add_station(station)
+    cache = getattr(survey_obj, "_emptyui_ensure_cache", None)
+    if cache is None:
+        cache = survey_obj._emptyui_ensure_cache = {}
+    key = ("station", station)
+    if key not in cache:
+        if station in survey_obj.stations_group.groups_list:
+            cache[key] = survey_obj.stations_group.get_station(station)
+        else:
+            cache[key] = survey_obj.stations_group.add_station(station)
+    return cache[key]
 
 
 def _ensure_fc_group(station_obj, run: str):
@@ -102,6 +119,66 @@ def _ensure_dec_level(fc_group, level):
     if str(level) in fc_group.groups_list:
         return fc_group.get_decimation_level(str(level))
     return fc_group.add_decimation_level(str(level))
+
+
+def _write_fc_channels(dec_level, fc, sample_rate: float):
+    """Write one FC level's channels — mth5's own writer, minus the churn.
+
+    ``FCDecimationGroup.from_xarray`` walks a pandas ``channel_summary``
+    DataFrame per channel (a duplicate-name check) and constructs a fresh
+    ``FCChannelDataset`` for each — on a one-day RR corpus that made
+    persist 7x the FC math itself (issues.md L24). This replicates
+    ``from_xarray``'s metadata construction and ``add_channel`` calls
+    exactly (same fields, same orientation handling, same dtypes), with
+    the duplicate check reduced to one ``groups_list`` lookup. Returns the
+    shared ``FCChannel`` metadata for the aggregation.
+    """
+    import mt_metadata.processing.fourier_coefficients as fc_md
+    import numpy as np
+
+    ch_metadata = fc_md.FCChannel()
+    ch_metadata.time_period.start = fc.time[0].values
+    ch_metadata.time_period.end = fc.time[-1].values
+    ch_metadata.sample_rate_decimation_level = float(sample_rate)
+    ch_metadata.frequency_min = fc.coords["frequency"].data.min()
+    ch_metadata.frequency_max = fc.coords["frequency"].data.max()
+    step_size = (fc.coords["time"].data[1] - fc.coords["time"].data[0])
+    ch_metadata.sample_rate_window_step = step_size / np.timedelta64(1, "s")
+    try:
+        ch_metadata.units = fc.units  # a Dataset has none — from_xarray skips
+    except AttributeError:
+        pass
+    existing = set(dec_level.groups_list)
+    for ch in fc.data_vars.keys():
+        ch_metadata.component = ch
+        if ch in existing:
+            dec_level.remove_channel(ch)
+        arr = fc[ch].to_numpy()
+        if fc[ch].time.size == arr.shape[0]:
+            data = arr
+        elif fc[ch].time.size == arr.shape[1]:
+            data = arr.T
+        else:
+            continue  # from_xarray silently skips this orientation too
+        dec_level.add_channel(ch, fc_data=data, fc_metadata=ch_metadata,
+                              dtype=fc[ch].dtype)
+    return ch_metadata
+
+
+def _update_decimation_metadata(dec_level, ch_metadata) -> None:
+    """``FCDecimationGroup.update_metadata`` minus its summary walk: the
+    aggregation is over the channels just written, which all carry the
+    same time_period and rates (from_xarray stamps one shared metadata
+    object), so the summary's min/max/unique equal those fields."""
+    dec_level._metadata.time_period.start = (
+        ch_metadata.time_period.start.isoformat())
+    dec_level._metadata.time_period.end = (
+        ch_metadata.time_period.end.isoformat())
+    dec_level._metadata.sample_rate_decimation_level = (
+        ch_metadata.sample_rate_decimation_level)
+    dec_level._metadata.sample_rate_window_step = (
+        ch_metadata.sample_rate_window_step)
+    dec_level.write_metadata()
 
 
 def persist_fc_level(
@@ -153,8 +230,12 @@ def persist_fc_level(
         station_obj = _ensure_station(survey_obj, station)
         fc_group = _ensure_fc_group(station_obj, run)
         dec_level = _ensure_dec_level(fc_group, decimation_level)
-        dec_level.from_xarray(fc, sample_rate_decimation_level=float(sample_rate))
-        dec_level.update_metadata()
+        # the fast writer (issues.md L24): identical file content to
+        # mth5's from_xarray+update_metadata, minus the per-channel
+        # channel_summary DataFrame walks — pinned by
+        # test_persist_channel_writer_matches_mth5_from_xarray
+        ch_metadata = _write_fc_channels(dec_level, fc, float(sample_rate))
+        _update_decimation_metadata(dec_level, ch_metadata)
         fc_group.update_metadata()
         # window/decimation geometry rides mth5's own FC metadata model
         # (unknown HDF5 attrs would break mt_metadata's read_metadata for

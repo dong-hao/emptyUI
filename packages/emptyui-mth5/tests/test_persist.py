@@ -199,3 +199,92 @@ def test_runts_context_ignores_default_ids(caplog):
     assert (survey, station, run) == ("4P", "SDX", "r1")
     # and no spurious disagreement warnings
     assert not any("disagrees" in r.message for r in caplog.records)
+
+
+def test_persist_channel_writer_matches_mth5_from_xarray(tmp_path):
+    """The fast FC-channel writer produces a subtree IDENTICAL to mth5's
+    own FCDecimationGroup.from_xarray — group tree, dataset shapes/dtypes,
+    and every attr (issues.md L24: from_xarray's per-channel
+    channel_summary DataFrame walks made persist 7x the FC math on a
+    one-day RR corpus). Both levels are written into one archive and
+    their subtrees diffed."""
+    import h5py
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    from emptyui_mth5.persist import (
+        _update_decimation_metadata,
+        _write_fc_channels,
+    )
+    from mth5.mth5 import MTH5
+
+    F, W = 33, 17
+    def _fc(t0):
+        return xr.Dataset(
+            {c: (("frequency", "time"),
+                 np.random.default_rng(hash(c) % 7).standard_normal((F, W))
+                 + 1j * np.random.default_rng(1).standard_normal((F, W)))
+             for c in ("ex", "ey", "hx", "hy", "hz")},
+            coords={"frequency": np.linspace(0.1, 60, F),
+                    "time": pd.date_range(t0, periods=W, freq="1s")})
+
+    path = tmp_path / "fid.mth5"
+    m = MTH5()
+    m.open_mth5(str(path), "w", locking=False)
+    try:
+        sg = m.add_survey("S")
+        st = sg.stations_group.add_station("ST")
+        fg = st.fourier_coefficients_group.add_fc_group("r")
+        # reference: mth5's own writer; candidate: the fast writer
+        ref = fg.add_decimation_level("0")
+        ref.from_xarray(_fc("2026-01-01"), sample_rate_decimation_level=150.0)
+        ref.update_metadata()
+        new = fg.add_decimation_level("1")
+        ch_md = _write_fc_channels(
+            new, _fc("2026-01-02"), sample_rate=150.0)
+        _update_decimation_metadata(new, ch_md)
+    finally:
+        m.close_mth5()
+
+    def subtree(h5path, level):
+        out = {}
+        with h5py.File(h5path, "r") as f:
+            g = f["/Experiment/Surveys/S/Stations/ST/Fourier_Coefficients/r"][level]
+
+            def visit(name, obj):
+                key = name
+                out[key] = {
+                    "type": type(obj).__name__,
+                    "attrs": {k: repr(v) for k, v in obj.attrs.items()},
+                }
+                if isinstance(obj, h5py.Dataset):
+                    out[key]["shape"] = obj.shape
+                    out[key]["dtype"] = str(obj.dtype)
+
+            g.visititems(visit)
+            out["<group>"] = {"attrs": {k: repr(v)
+                                        for k, v in g.attrs.items()}}
+        return out
+
+    a = subtree(path, "0")
+    b = subtree(path, "1")
+    ka = {k: v["attrs"] for k, v in a.items()}
+    kb = {k: v["attrs"] for k, v in b.items()}
+    # normalize the level-relative differences (time stamps and paths
+    # legitimately differ); everything structural must match
+    assert set(ka) == set(kb), (sorted(ka), sorted(kb))
+    for key in ka:
+        assert set(ka[key]) == set(kb[key]), (key, sorted(ka[key]),
+                                              sorted(kb[key]))
+        for attr in ka[key]:
+            if attr in ("time_period.start", "time_period.end",
+                        "hdf5_reference"):
+                continue  # legitimately differ between the two spans
+            assert ka[key][attr] == kb[key][attr], (
+                key, attr, ka[key][attr], kb[key][attr])
+    # and the datasets are the same shape/dtype
+    for key in a:
+        if "shape" in a[key]:
+            assert a[key]["shape"] == b[key.replace("0", "1", 1)]["shape"]
+            assert a[key]["dtype"] == b[key.replace("0", "1", 1)]["dtype"]
+    assert ch_md is not None
