@@ -313,3 +313,33 @@ def test_compute_fc_node_forwards_saturated_max(tmp_path):
         window_type="boxcar")
     assert res_default["fc"][0].attrs["saturated_max"] == 0.01
     assert res_default["fc"][0].attrs["saturated_windows_rejected"] > 0
+
+
+def test_complex_response_is_memoized_per_filter_and_grid():
+    """The same filter object on the same frequency grid evaluates its
+    complex response once (issues.md L23: 9600 evaluations of the same few
+    tables = 43% of the FC math on a one-day RR corpus, plus 4768 repeats
+    of mt_metadata's extrapolation warning). Results are bit-identical."""
+    from emptyui_aurora._processing import _cached_complex_response
+
+    calls = {"n": 0}
+
+    class _Stub:
+        name = "stub"
+
+        def complex_response(self, f):
+            calls["n"] += 1
+            return np.ones(len(f), dtype=complex) * (0.5 + 0.5j)
+
+    f = np.linspace(0.1, 10.0, 64)
+    obj = _Stub()
+    a = _cached_complex_response(obj, f)
+    b = _cached_complex_response(obj, f)
+    assert calls["n"] == 1  # the second call hit the cache
+    np.testing.assert_array_equal(a, b)
+    # a different grid re-evaluates
+    _cached_complex_response(obj, f[:32])
+    assert calls["n"] == 2
+    # a different object with the same grid re-evaluates
+    _cached_complex_response(_Stub(), f)
+    assert calls["n"] == 3

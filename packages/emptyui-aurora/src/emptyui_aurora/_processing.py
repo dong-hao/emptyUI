@@ -915,6 +915,32 @@ def _saturated_window_mask(sat, nperseg, noverlap, n_win,
     return (c[ends] - c[starts]) / n > saturated_max
 
 
+#: (id(filter), frequency-grid bytes) -> (filter, response) — a survey's
+#: filter objects are the same few across a collection's members and the
+#: frequency grid is fixed per (window, level, rate), yet the complex
+#: response was recomputed per member x channel x level: on a one-day RR
+#: corpus that was 9600 evaluations of the same few tables = 43% of the FC
+#: math and 4768 repeats of mt_metadata's extrapolation warning
+#: (issues.md L23). The filter object is held strongly so its id stays
+#: valid; entries are capped FIFO (a handful of filters per survey is
+#: typical). Thread safety: dict ops are GIL-atomic; a race recomputes.
+_RESP_CACHE: dict = {}
+_RESP_CACHE_CAP = 256
+
+
+def _cached_complex_response(obj, f) -> np.ndarray:
+    """``obj.complex_response(f)`` memoized per (filter object, grid)."""
+    key = (id(obj), np.asarray(f).tobytes())
+    hit = _RESP_CACHE.get(key)
+    if hit is not None and hit[0] is obj:
+        return hit[1]
+    resp = np.asarray(obj.complex_response(f), dtype=complex)
+    if len(_RESP_CACHE) >= _RESP_CACHE_CAP:
+        _RESP_CACHE.pop(next(iter(_RESP_CACHE)))
+    _RESP_CACHE[key] = (obj, resp)
+    return resp
+
+
 def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
     """Divide the per-channel FCs by their instrument response (history §24.12).
 
@@ -936,7 +962,7 @@ def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
         for obj, applied in pairs:
             if not applied:
                 continue
-            r = np.asarray(obj.complex_response(f), dtype=complex)
+            r = _cached_complex_response(obj, f)
             resp = r if resp is None else resp * r
             names.append(str(obj.name))
         if not names:
@@ -1532,8 +1558,11 @@ def _per_bin_coherence(local, ref, ins, outs, ensemble_windows=16,
             usable = (W_seg > n_in) & ok_chunk
             coh_c = np.zeros((F, c1 - c0, n_out))
             if np.any(usable):
-                pinv = np.linalg.pinv(
-                    S_hh.reshape(-1, n_in, n_in)).reshape(S_hh.shape)
+                if n_in == 2:
+                    pinv = _pinv_hermitian2_batch(S_hh)
+                else:
+                    pinv = np.linalg.pinv(
+                        S_hh.reshape(-1, n_in, n_in)).reshape(S_hh.shape)
                 t = np.einsum("fwio,fwij->fwjo", S_he.conj(), pinv)
                 num = np.real(np.einsum("fwjo,fwjo->fwo", t, S_he))
                 with np.errstate(divide="ignore", invalid="ignore"):
@@ -1564,6 +1593,46 @@ def _coherence_weight_array(coh, lo, hi, mode, ramp=0.05):
     if mode == "drop":
         w = np.where((coh < lo) | (coh > hi), 0.0, w)
     return w
+
+
+def _pinv_hermitian2_batch(S):
+    """Batched 2x2 pseudoinverse in closed form.
+
+    ``S`` is (F, W, 2, 2) hermitian PSD (sums of outer products), so where
+    the determinant is decisively nonzero the pseudoinverse is the
+    (conjugate) inverse — a pure-numpy adjugate instead of a batched SVD
+    over ~1e6 tiny matrices (the SVD path measured 11 s of the 13.7 s
+    coherence sort on a one-day RR corpus; issues.md L23). Degenerate
+    matrices (a dead input channel's zero row) fall back to the SVD pinv
+    on that subset, so the result is the exact pseudoinverse either way —
+    the closed form differs from SVD rounding only at ~1e-16.
+    """
+    import numpy as np
+
+    a = S[..., 0, 0]
+    b = S[..., 0, 1]
+    c = S[..., 1, 0]
+    d = S[..., 1, 1]
+    det = a * d - b * c
+    scale = np.maximum(np.abs(a) + np.abs(d), np.abs(b) + np.abs(c))
+    good = np.abs(det) > 1e-12 * np.maximum(scale * scale, 1e-300)
+    inv = np.empty_like(S)
+    if good.all():
+        inv[..., 0, 0] = d
+        inv[..., 0, 1] = -b
+        inv[..., 1, 0] = -c
+        inv[..., 1, 1] = a
+        return inv / det[..., None, None]
+    inv[..., 0, 0] = d
+    inv[..., 0, 1] = -b
+    inv[..., 1, 0] = -c
+    inv[..., 1, 1] = a
+    with np.errstate(invalid="ignore", divide="ignore"):
+        inv /= det[..., None, None]
+    bad = ~good
+    if bad.any():
+        inv[bad] = np.linalg.pinv(S[bad])
+    return inv
 
 
 def _per_bin_sort(local, ref, local_out, ref_out, ins, outs, *,

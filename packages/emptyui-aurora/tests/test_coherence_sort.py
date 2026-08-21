@@ -444,3 +444,28 @@ def test_realistic_size_stays_bounded():
     assert np.all(coh_e > 0.95)
     assert (coh_x == 1.0).all()
     assert peak / 2**20 < 900, f"transient grew to {peak / 2**20:.0f} MiB"
+
+
+def test_pinv_hermitian2_batch_matches_reference():
+    """The closed-form batched 2x2 pseudoinverse equals np.linalg.pinv
+    (issues.md L23: the SVD path was 11 s of the 13.7 s coherence sort on
+    a one-day RR corpus) — including the degenerate fallback."""
+    import numpy as np
+    from emptyui_aurora._processing import _pinv_hermitian2_batch
+
+    rng = np.random.default_rng(7)
+    F, W = 37, 211
+    h = rng.standard_normal((2, F, W)) + 1j * rng.standard_normal((2, F, W))
+    S = np.einsum("ifw,jfw->fwij", h, h.conj())  # hermitian PSD
+    ref = np.linalg.pinv(S.reshape(-1, 2, 2)).reshape(S.shape)
+    fast = _pinv_hermitian2_batch(S)
+    np.testing.assert_allclose(fast, ref, atol=1e-10)
+
+    # a dead input channel: zero row/column -> rank-deficient -> the SVD
+    # fallback must produce the exact pseudoinverse there too
+    h2 = h.copy()
+    h2[1] = 0.0
+    S2 = np.einsum("ifw,jfw->fwij", h2, h2.conj())
+    ref2 = np.linalg.pinv(S2.reshape(-1, 2, 2)).reshape(S2.shape)
+    fast2 = _pinv_hermitian2_batch(S2)
+    np.testing.assert_allclose(fast2, ref2, atol=1e-10)

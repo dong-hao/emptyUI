@@ -659,11 +659,17 @@ class ExtractRun(Node):
             run_obj = _resolve_run(station_obj, rid)
             payload = _run_duck_payload(survey_obj, run_obj, lo=clo, hi=chi)
             # history §24.12: the response-chain filters are the same few objects
-            # across members of one survey — resolve each name-set once
+            # across members of one survey — resolve each name-set once and
+            # assign it to EVERY member (issues.md L23: the fresh per-member
+            # registry from _run_duck_payload used to survive on all but the
+            # first member of each name-set, so downstream saw 4784 distinct
+            # filter objects instead of a handful and the FC response cache
+            # never hit)
             names = tuple(sorted(getattr(payload, "filters", {}) or {}))
-            if names and names not in registry_cache:
-                registry_cache[names] = resolve_filter_registry(
-                    survey_obj, payload.dataset)
+            if names:
+                if names not in registry_cache:
+                    registry_cache[names] = resolve_filter_registry(
+                        survey_obj, payload.dataset)
                 payload.filters = registry_cache[names]
             members.append(payload)
             extents.append({
