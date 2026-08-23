@@ -991,13 +991,15 @@ class CoherenceSort(Node):
               description="weight = smooth down-weighting outside the bounds "
                           "(rows scaled by √w); drop = exclude windows "
                           "outside the bounds (NaN); off = no sorting."),
-        Param("apply_below_period", "number", label="Apply below period (s)",
+        Param("apply_below_period", "number", label="Sort below period (s)",
               default=0.0, min=0, optional=True,
-              description="Scope the sorting to the noise-floor head: bin "
-                          "periods at/above this value pass through "
-                          "unsorted (the deep tail is healthy and weighting "
-                          "it only perturbs the estimate). 0 = sort all "
-                          "bins."),
+              description="0 (the default) sorts EVERY bin. A positive "
+                          "value sorts only the bins SHORTER than this "
+                          "period; bins at/above it pass through "
+                          "unsorted — the deep tail is healthy and "
+                          "weighting it only perturbs the estimate "
+                          "(the diagnostics table's 'unsorted' column "
+                          "flags exactly those bins)."),
         Param("ensemble_windows", "integer", label="Ensemble windows",
               default=16, min=1,
               description="Sliding window-ensemble half-width for the "
@@ -1054,10 +1056,13 @@ class CoherenceSort(Node):
         artifact = ctx.publish_artifact(path, kind="table")
         retained = sum(r["n_retained"] for r in rows)
         total = sum(r["n_windows"] for r in rows)
+        exempted = sum(1 for r in rows if r.get("unsorted"))
+        scope = (f"; {exempted} bin(s) at/above {apply_below_period:g} s "
+                 "passed through unsorted" if exempted else "")
         ctx.progress(
             1.0,
             f"coherence sort: {retained}/{total} samples kept "
-            f"({len(rows)} frequency bins)",
+            f"({len(rows)} frequency bins{scope})",
         )
         result: dict[str, Any] = {"fc": out_levels, "table": artifact}
         if ref_fc is not None:

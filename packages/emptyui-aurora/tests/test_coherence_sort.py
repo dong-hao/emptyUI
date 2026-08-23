@@ -469,3 +469,39 @@ def test_pinv_hermitian2_batch_matches_reference():
     ref2 = np.linalg.pinv(S2.reshape(-1, 2, 2)).reshape(S2.shape)
     fast2 = _pinv_hermitian2_batch(S2)
     np.testing.assert_allclose(fast2, ref2, atol=1e-10)
+
+
+def test_apply_below_period_zero_sorts_every_bin():
+    """0 (the default) and an unset scope are the same contract: EVERY bin
+    is sorted, no bin is flagged unsorted (issues.md M16 follow-up — the
+    'apply below = 0 still takes effect' report was this semantics, not a
+    bug; the param is relabelled 'Sort below period (s)' to say so)."""
+    source = synthetic_source(12)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=12)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    for scope in (0.0, None):
+        out, _, rows = coherence_sort_fc(
+            fc, None, ["hx", "hy"], ["ex", "ey"],
+            coherence_min=0.5, coherence_max=1.0, mode="drop",
+            apply_below_period=scope)
+        assert not any(r.get("unsorted") for r in rows)
+        # and the sorted output differs from the input (the sort acted)
+        assert not np.array_equal(np.asarray(out["hx"].values),
+                                  np.asarray(fc["hx"].values))
+
+
+def test_scope_is_visible_on_the_progress_message(tmp_path):
+    """The exempted-bin count rides the completion progress, so the scope's
+    effect is visible without opening the diagnostics table."""
+    from emptyui_aurora.process import CoherenceSort
+
+    source = synthetic_source(12)
+    runts = synthetic_runts(source, h_noise_segment=(0, 8192), seed=12)
+    fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    msgs: list[str] = []
+    orig = ctx.progress
+    ctx.progress = lambda frac, msg="", _o=orig: (_o(frac, msg),
+                                                  msgs.append(msg))
+    CoherenceSort().execute(ctx, fc=fc, apply_below_period=32.0)
+    assert any("passed through unsorted" in m for m in msgs), msgs
