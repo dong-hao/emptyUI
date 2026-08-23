@@ -149,7 +149,7 @@ def _write_fc_channels(dec_level, fc, sample_rate: float):
     except AttributeError:
         pass
     existing = set(dec_level.groups_list)
-    for ch in fc.data_vars.keys():
+    for ch in fc.data_vars:
         ch_metadata.component = ch
         if ch in existing:
             dec_level.remove_channel(ch)

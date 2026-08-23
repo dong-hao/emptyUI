@@ -273,15 +273,15 @@ def test_persist_channel_writer_matches_mth5_from_xarray(tmp_path):
     # normalize the level-relative differences (time stamps and paths
     # legitimately differ); everything structural must match
     assert set(ka) == set(kb), (sorted(ka), sorted(kb))
-    for key in ka:
-        assert set(ka[key]) == set(kb[key]), (key, sorted(ka[key]),
+    for key, va in ka.items():
+        assert set(va) == set(kb[key]), (key, sorted(va),
                                               sorted(kb[key]))
-        for attr in ka[key]:
+        for attr, val in va.items():
             if attr in ("time_period.start", "time_period.end",
                         "hdf5_reference"):
                 continue  # legitimately differ between the two spans
-            assert ka[key][attr] == kb[key][attr], (
-                key, attr, ka[key][attr], kb[key][attr])
+            assert val == kb[key][attr], (
+                key, attr, val, kb[key][attr])
     # and the datasets are the same shape/dtype
     for key in a:
         if "shape" in a[key]:
