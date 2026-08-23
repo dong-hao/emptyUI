@@ -204,3 +204,76 @@ def test_import_edi_si_opt_out_skips_the_conversion(tmp_path: Path):
         tf_in.dataset["transfer_function"].sel(
             output=tf_in.ex, input=tf_in.hx).values,
         rtol=1e-5)
+
+
+def _seg_z(tf_tf, i: int, r: int, c: int) -> float:
+    """The SEG-scaled magnitude the writers store: |Z_si| * SI_TO_EDI."""
+    z = tf_tf.impedance.data if hasattr(tf_tf.impedance, "data") \
+        else np.asarray(tf_tf.impedance)
+    return abs(z[i, r, c]) * SI_TO_EDI
+
+
+def test_export_xml_from_lemi_tf(tmp_path: Path):
+    """XML export: the EM_TF tree carries standard channel names (LEMI
+    relabeled, like EDI/ZMM) and the SEG-scaled impedance values."""
+    import xml.etree.ElementTree as ET
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = _lemi_tf()
+    out = tmp_path / "lemi_tf.xml"
+    ExportTF().execute(ctx, tf, path=str(out), file_type="xml")
+    root = ET.parse(out).getroot()
+    assert root.tag == "EM_TF"
+    # standard names in the site layout (the LEMI e1/e2 relabeled)
+    electric_names = [e.get("name") for e in root.iter("Electric")]
+    assert "Ex" in electric_names and "Ey" in electric_names
+    # the first period's Zxx/Zyy carry the SEG-scaled diagonal magnitudes
+    data = root.find("Data")
+    p1 = data.findall("Period")[0]
+    z = p1.find("Z")
+    assert z.get("units") == "[mV/km]/[nT]"
+    values = {v.get("name"): complex(*map(float, v.text.split()))
+              for v in z.findall("value")}
+    assert abs(values["Zxx"].real - _seg_z(tf, 0, 0, 0)) < 1e-2
+    assert abs(values["Zyy"].real - _seg_z(tf, 0, 1, 1)) < 1e-2
+    assert values["Zxx"].imag == 0.0
+
+
+def test_export_avg_from_lemi_tf(tmp_path: Path):
+    """AVG export: the Geotext/EMTF-style header blocks carry the
+    SEG-scaled Z magnitudes (mt_metadata's to_avg writes per-component
+    $Rx.Cmp blocks sampled on the TF's periods)."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = _lemi_tf()
+    out = tmp_path / "lemi_tf.avg"
+    ExportTF().execute(ctx, tf, path=str(out), file_type="avg")
+    lines = out.read_text().splitlines()
+    assert "$Survey.Type=Nsamt" in lines
+    # the Zxx block: the $Rx.Cmp header followed by the column legend and
+    # the per-frequency rows; Z.mag holds |Zxx| * SI_TO_EDI
+    i = lines.index("$Rx.Cmp = Zxx")
+    assert lines[i + 1].strip().startswith("Skp,Freq")
+    end = next(j for j in range(i + 1, len(lines))
+               if lines[j].startswith("$Rx.Cmp"))
+    rows = [ln for ln in lines[i + 2:end] if ln]
+    assert rows, "no data rows in the Zxx block"
+    zxx = _seg_z(tf, 0, 0, 0)
+    mags = [float(r.split(",")[4]) for r in rows]
+    assert all(abs(m - zxx) / zxx < 1e-3 for m in mags), (mags, zxx)
+
+
+def test_export_j_reports_upstream_gap(tmp_path: Path):
+    """The 'j' option fails with an actionable error, not a raw
+    NotImplementedError: mt_metadata's to_jfile is unimplemented
+    upstream (issues.md M16 — the option stays until it ships)."""
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    tf = _lemi_tf()
+    with pytest.raises(ValueError, match="not implemented in mt_metadata"):
+        ExportTF().execute(ctx, tf, path=str(tmp_path / "t.j"),
+                           file_type="j")
+    # and via the extension sniff (path suffix drives file_type)
+    with pytest.raises(ValueError, match="not implemented in mt_metadata"):
+        ExportTF().execute(ctx, tf, path=str(tmp_path / "t2.j"),
+                           file_type="edi")
+    # no partial file left behind
+    assert not (tmp_path / "t.j").exists()

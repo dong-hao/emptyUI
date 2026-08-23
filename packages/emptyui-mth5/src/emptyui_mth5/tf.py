@@ -527,10 +527,20 @@ class ExportTF(Node):
         # ([mV/km]/[nT]); internal TFs are SI — convert on a copy so the
         # input payload (shared/cached) is untouched
         export_tf = _scaled_impedance_copy(export_tf, SI_TO_EDI)
-        saved = export_tf.write(
-            save_dir=str(out.parent),
-            fn_basename=out.name,
-            file_type=file_type,
-        )
+        try:
+            saved = export_tf.write(
+                save_dir=str(out.parent),
+                fn_basename=out.name,
+                file_type=file_type,
+            )
+        except NotImplementedError as exc:
+            # M16: the 'j' writer is not implemented upstream
+            # (mt_metadata's to_jfile raises) — a raw NotImplementedError
+            # would surface as the run's error with no remedy named
+            raise ValueError(
+                f"the '{file_type}' TF writer is not implemented in "
+                "mt_metadata — export edi, xml, zmm or avg instead (issues."
+                "md M16: the option stays until upstream ships to_jfile)"
+            ) from exc
         ctx.progress(1.0, f"exported TF -> {saved}")
         return {}
