@@ -72,6 +72,13 @@ def _block_tag(buf: bytes) -> _BlockTag:
     )
 
 
+#: blocks decoded per batch in :func:`_iter_blocks` — bounds the vectorized
+#: decode's transient (~n_ch x n_scan x batch x 12 bytes) without giving up
+#: the 20x+ gain over per-block small-array decoding (issues.md L25; the
+#: matlab lineage decoded whole files in one vectorized pass)
+_DECODE_BATCH_BLOCKS = 16384
+
+
 def _iter_blocks(
     path: Path, warnings: list[str] | None = None,
 ) -> Iterator[tuple[_BlockTag, np.ndarray]]:
@@ -79,6 +86,11 @@ def _iter_blocks(
 
     Validates per-block rate/tag-length consistency and ignores a truncated
     final block with a warning (appended to ``warnings`` when given).
+
+    The 24-bit samples are decoded in vectorized batches (the whole
+    matlab-lineage point): per-block small-array ``_sign24`` calls were
+    ~60% of the ingest on a 12-h corpus (303k blocks in the 2400 Hz file
+    alone — 22.8x slower than the batched decode, measured bit-identical).
     """
     size = path.stat().st_size
     with open(path, "rb") as fid:
@@ -100,23 +112,42 @@ def _iter_blocks(
             _log.warning(msg)
             if warnings is not None:
                 warnings.append(msg)
-        for k in range(n_block):
-            fid.seek(k * stride)
-            tag = _block_tag(fid.read(32))
-            if (tag.rate, tag.n_scan, tag.n_ch) != (rate, n_scan, n_ch):
+        batch_blocks = max(1, _DECODE_BATCH_BLOCKS)
+        for b0 in range(0, n_block, batch_blocks):
+            b1 = min(b0 + batch_blocks, n_block)
+            nb = b1 - b0
+            buf = np.fromfile(path, dtype=np.uint8,
+                              count=nb * stride, offset=b0 * stride)
+            blocks = buf.reshape(nb, stride)
+            tag_bytes = np.ascontiguousarray(blocks[:, :tag_len])
+            # vectorized header consistency check (the per-block guard,
+            # evaluated for the whole batch at once)
+            rates = tag_bytes[:, 18] | (tag_bytes[:, 19].astype(np.int32) << 8)
+            scans = tag_bytes[:, 10] | (tag_bytes[:, 11].astype(np.int32) << 8)
+            bad = np.flatnonzero(
+                (rates != rate) | (scans != n_scan)
+                | (tag_bytes[:, 12] != n_ch))
+            if bad.size:
+                k = b0 + int(bad[0])
+                tag = _block_tag(tag_bytes[bad[0]].tobytes())
                 raise ValueError(
                     f"{path.name} block {k}: header fields diverge from the "
                     f"file header (rate {tag.rate} != {rate}, n_scan "
                     f"{tag.n_scan} != {n_scan}, n_ch {tag.n_ch} != {n_ch})")
-            raw = np.frombuffer(fid.read(n_scan * n_ch * 3), dtype=np.uint8)
-            # channel-interleaved per scan: (n_scan, n_ch*3); channel c is
-            # the consecutive byte triple (low, mid, high) = [3c, 3c+1, 3c+2]
-            raw = raw.reshape(n_scan, n_ch * 3).T.astype(np.int32)
-            samples = np.empty((n_ch, n_scan), dtype=np.float64)
-            for c in range(n_ch):
-                samples[c] = _sign24(
-                    raw[3 * c + 2] * 2**16 + raw[3 * c + 1] * 2**8 + raw[3 * c])
-            yield tag, samples
+            raw = blocks[:, tag_len:].reshape(nb, n_scan, n_ch * 3)
+            lo = raw[:, :, 0::3].astype(np.int32)
+            mid = raw[:, :, 1::3].astype(np.int32)
+            hi = raw[:, :, 2::3].astype(np.int32)
+            v = hi * 2**16 + mid * 2**8 + lo
+            v[v > 2**23 - 1] -= 2**24
+            # (nb, n_scan, n_ch) -> per channel, scan-major like the old
+            # per-block (n_ch, n_scan) chunks concatenated in block order
+            for k in range(nb):
+                tag = _block_tag(tag_bytes[k].tobytes())
+                samples = np.empty((n_ch, n_scan), dtype=np.float64)
+                for c in range(n_ch):
+                    samples[c] = v[k, :, c]
+                yield tag, samples
 
 
 @dataclass
