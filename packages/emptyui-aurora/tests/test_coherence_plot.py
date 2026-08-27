@@ -1,4 +1,4 @@
-"""Plot Coherency node (DESIGN.md §10.6 and §10.3): fc-direct per-frequency-bin
+"""Plot Coherency node (docs/DESIGN.md §10.6 and §10.3): fc-direct per-frequency-bin
 window-ensemble coherence — the exact statistic Coherence Sort applies
 (shared `_per_bin_coherence` helper). No band geometry anywhere."""
 
@@ -154,8 +154,8 @@ def _two_fc_levels(seed=21):
     local = synthetic_runts(synthetic_source(seed), seed=seed)
     ref = synthetic_runts(synthetic_source(seed + 100), e_noise=2.0,
                           seed=seed + 100)
-    kw = dict(num_decimations=2, factor=4, num_samples_window=256,
-              overlap=0.5, window_type="boxcar")
+    kw = {"num_decimations": 2, "factor": 4, "num_samples_window": 256,
+          "overlap": 0.5, "window_type": "boxcar"}
     return cfl(local, ["hx", "hy"], ["ex", "ey"], **kw), \
         cfl(ref, ["hx", "hy"], ["ex", "ey"], **kw)
 
@@ -232,7 +232,7 @@ def test_coherence_map_window_centres(tmp_path):
     sr = float(paired.attrs["sample_rate"])
     nw = float(paired.attrs["num_samples_window"])
     if starts.dtype.kind == "M":
-        half = np.timedelta64(int(round(nw / sr / 2 * 1e9)), "ns")
+        half = np.timedelta64(round(nw / sr / 2 * 1e9), "ns")
         expected = starts + half
     else:
         expected = starts + nw / sr / 2

@@ -1,4 +1,4 @@
-"""Display nodes for the frequency-domain QC products (DESIGN.md §10.6).
+"""Display nodes for the frequency-domain QC products (docs/DESIGN.md §10.6).
 
 Plot Coherency renders the per-frequency coherence of an fc — the exact
 statistic Coherence Sort applies (shared `_per_bin_coherence` helper) —
@@ -108,7 +108,7 @@ class PlotCoherency(Node):
         "Per-frequency coherence vs period — the exact statistic "
         "Coherence Sort applies (EMTF-style window-ensemble coherence at "
         "each frequency bin, median across the sliding window ensemble, "
-        "DESIGN.md §10.6 / history §24.6): the E–H signal coherence (remote H when a "
+        "docs/DESIGN.md §10.6 / history §24.6): the E–H signal coherence (remote H when a "
         "'ref fc' is connected) and, two-FC, the local↔remote magnetic "
         "transfer coherence. Shaded guidance band at [coherence_min, "
         "coherence_max] (the sort's default bounds). Each decimation level "
@@ -483,7 +483,7 @@ def station_title_from_fc(fc) -> str:
 def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
                           ensemble_windows: int = 16, smooth_bins: int = 0):
     """The coherence map's matrix: the Coherence Sort's exact criterion
-    over (frequency bin, window) — issues.md L18.
+    over (frequency bin, window) — docs/issues.md L18.
 
     Two-FC: the conservative min of the E–remote-H signal coherence and
     the local↔remote magnetic transfer coherence, computed over the
@@ -512,7 +512,7 @@ def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
     nw = float(getattr(local, "attrs", {}).get("num_samples_window", 0) or 0)
     if t.dtype.kind == "M":
         if nw > 0 and sr > 0:
-            half = np.timedelta64(int(round(nw / sr / 2 * 1e9)), "ns")
+            half = np.timedelta64(round(nw / sr / 2 * 1e9), "ns")
         elif t.size > 1:
             half = (t[1] - t[0]) // 2
         else:
@@ -549,7 +549,7 @@ class CoherenceMap(Node):
     title = "Plot Coherence Map"
     tooltip = "Time x frequency map of the Coherence Sort's criterion — localizes WHEN a band is bad."
     description = (
-        "Time-frequency map of COHERENCE instead of power (issues.md "
+        "Time-frequency map of COHERENCE instead of power (docs/issues.md "
         "L18): the exact per-(window, bin) statistic Coherence Sort "
         "applies — the E–H signal coherence, or two-FC the conservative "
         "min of the E–remote-H signal and the local↔remote magnetic "
