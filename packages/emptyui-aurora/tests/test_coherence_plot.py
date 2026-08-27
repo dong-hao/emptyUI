@@ -237,3 +237,19 @@ def test_coherence_map_window_centres(tmp_path):
     else:
         expected = starts + nw / sr / 2
     np.testing.assert_allclose(np.asarray(centres), expected, rtol=1e-9)
+
+
+def test_coherence_map_title_params_toggle():
+    """print_params=False (the default) keeps the production title clean;
+    True adds the provenance line (the Plot AppRes/Phase convention)."""
+    from emptyui_aurora._processing import _normalize_fc_layout
+    from emptyui_aurora.plots import _coherence_map_title
+
+    levels, _ref = _two_fc_levels()
+    paired = _normalize_fc_layout(levels[0])
+    clean = _coherence_map_title(paired, 2, 15.0, 16, True, False)
+    full = _coherence_map_title(paired, 2, 15.0, 16, True, True)
+    assert clean.endswith("Coherence map")
+    assert "ensemble" not in clean
+    assert "ensemble ±16" in full and "step 2" in full
+    assert "E–remote H" in full

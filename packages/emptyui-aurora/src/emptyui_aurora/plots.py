@@ -525,6 +525,25 @@ def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
     return coh, centres, local
 
 
+def _coherence_map_title(paired, step: int, family_rate: float,
+                         ensemble_windows: int, two_fc: bool,
+                         print_params: bool) -> str:
+    """The map's title: station + 'Coherence map', plus the processing
+    provenance line only when ``print_params`` (production images stay
+    clean — the Plot AppRes/Phase convention)."""
+    title = (station_title_from_fc(paired) + " — "
+             if station_title_from_fc(paired) else "") + "Coherence map"
+    if not print_params:
+        return title
+    mode_note = ("E–remote H / local↔remote min"
+                 if two_fc else "E–H signal")
+    tier_rate = float(getattr(paired, "attrs", {}).get("sample_rate", 0) or 0)
+    return title + (f" (step {step} ({tier_rate:g} Hz) of the "
+                    f"{family_rate:g} Hz family, window "
+                    f"{paired.attrs.get('num_samples_window', '?')} samples"
+                    f", ensemble ±{int(ensemble_windows)} — {mode_note})")
+
+
 class CoherenceMap(Node):
     type = "aurora.plot.coherence_map"
     title = "Plot Coherence Map"
@@ -570,12 +589,18 @@ class CoherenceMap(Node):
                           "FC database (auto = the lowest rate present — "
                           "the continuous stream). The connected fc's "
                           "tiers are offered as suggestions after a run."),
+        Param("print_params", "boolean", label="Print parameters on plot",
+              default=False,
+              description="Add the processing-provenance line (cascade "
+                          "step, window size, ensemble, coherence type) "
+                          "to the title — useful for algorithm "
+                          "comparison; untick for production images."),
     )
     deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
 
     def execute(self, ctx, fc, ref_fc=None, ensemble_windows: int = 16,
                 smooth_bins: int = 0, decimation_level: int = 0,
-                sample_rate: str = "auto") -> dict[str, Any]:
+                sample_rate: str = "auto", print_params: bool = False) -> dict[str, Any]:
         import matplotlib
 
         matplotlib.use("Agg")
@@ -644,18 +669,9 @@ class CoherenceMap(Node):
             ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(
                 mdates.AutoDateLocator()))
         ax.set_ylabel("Frequency (Hz)")
-        mode_note = ("E–remote H / local↔remote min"
-                     if ref is not None else "E–H signal")
-        tier_rate = float(getattr(paired, "attrs", {}).get("sample_rate", 0) or 0)
-        attrs_note = (
-            f"step {k} ({tier_rate:g} Hz) of the {rate:g} Hz family"
-            + f", window {paired.attrs.get('num_samples_window', '?')} samples"
-            + f", ensemble ±{int(ensemble_windows)} — {mode_note}")
-        ax.set_title(
-            (station_title_from_fc(paired) + " — " if station_title_from_fc(paired) else "")
-            + f"Coherence map ({attrs_note})",
-            fontsize=10,
-        )
+        ax.set_title(_coherence_map_title(
+            paired, k, rate, ensemble_windows, ref is not None,
+            print_params), fontsize=10,)
         fig.tight_layout()
 
         path = ctx.artifact_path("coherence_map", ".png")
