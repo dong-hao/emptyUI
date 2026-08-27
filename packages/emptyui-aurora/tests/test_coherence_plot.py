@@ -143,3 +143,97 @@ def test_plot_coherency_two_fc_pairs_remote_grid(tmp_path):
                  for lv, ds in levels.items()}
     res = PlotCoherency().execute(ctx, levels, ref_fc=ref_fewer)
     assert res["plot"]["path"].endswith(".png")
+
+
+# --- L18: the coherence map (time x frequency view of the sort's criterion)
+
+
+def _two_fc_levels(seed=21):
+    """Local + remote fc level containers (the two-FC map's inputs)."""
+    from emptyui_aurora._processing import compute_fc_levels as cfl
+    local = synthetic_runts(synthetic_source(seed), seed=seed)
+    ref = synthetic_runts(synthetic_source(seed + 100), e_noise=2.0,
+                          seed=seed + 100)
+    kw = dict(num_decimations=2, factor=4, num_samples_window=256,
+              overlap=0.5, window_type="boxcar")
+    return cfl(local, ["hx", "hy"], ["ex", "ey"], **kw), \
+        cfl(ref, ["hx", "hy"], ["ex", "ey"], **kw)
+
+
+def test_coherence_map_matrix_is_the_sort_criterion():
+    """The map's per-(bin, window) values are EXACTLY the sort's criterion:
+    the conservative min of the E–remote-H signal and local↔remote
+    transfer coherences (two-FC), computed over the intersect-paired
+    windows — a dark region in the map is a window the sort down-weights."""
+    from emptyui_aurora._processing import (
+        _normalize_fc_layout,
+        _pair_remote_fc,
+        _per_bin_coherence,
+    )
+    from emptyui_aurora.plots import _coherence_map_matrix
+
+    levels, ref_levels = _two_fc_levels()
+    sample = _normalize_fc_layout(levels[0])
+    ins = [c.strip() for c in sample.attrs["input_channels"].split(",")]
+    outs = [c.strip() for c in sample.attrs["output_channels"].split(",")]
+
+    coh, centres, paired_local = _coherence_map_matrix(
+        levels[0], ref_levels[0], ins, outs, ensemble_windows=8,
+        smooth_bins=0)
+
+    # the reference: pair + statistic exactly like coherence_sort_fc
+    lfc = _normalize_fc_layout(levels[0])
+    rfc = _normalize_fc_layout(ref_levels[0])
+    lfc2, rfc2 = _pair_remote_fc(lfc, rfc, pairing="intersect", tol_s=0.0)
+    coh_e, coh_x = _per_bin_coherence(lfc2, rfc2, ins, outs,
+                                      ensemble_windows=8, smooth_bins=0)
+    np.testing.assert_array_equal(coh, np.minimum(coh_e, coh_x))
+    # the map's time axis rides the PAIRED local grid
+    assert centres.size == lfc2.sizes["time"]
+    np.testing.assert_array_equal(
+        np.asarray(paired_local["time"].values),
+        np.asarray(lfc2["time"].values))
+
+
+def test_coherence_map_renders_and_selects_tiers(tmp_path):
+    """The node renders a PNG for both modes; the cascade-step selection
+    follows the spectrogram's convention and errors actionably OOR."""
+    from emptyui_aurora.plots import CoherenceMap
+
+    levels, ref_levels = _two_fc_levels()
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+
+    res = CoherenceMap().execute(ctx, levels, ref_fc=ref_levels,
+                                 decimation_level=0)
+    assert Path(res["plot"]["path"]).stat().st_size > 1000
+
+    res1 = CoherenceMap().execute(ctx, levels, ref_fc=None,
+                                  decimation_level=-1)
+    assert Path(res1["plot"]["path"]).stat().st_size > 1000
+
+    with pytest.raises(ValueError, match="no decimation step 9"):
+        CoherenceMap().execute(ctx, levels, decimation_level=9)
+
+
+def test_coherence_map_window_centres(tmp_path):
+    """The time axis labels are window CENTRES (start + half the window
+    span) — the settled L11 convention."""
+    from emptyui_aurora._processing import _normalize_fc_layout
+    from emptyui_aurora.plots import _coherence_map_matrix
+
+    levels, ref_levels = _two_fc_levels()
+    sample = _normalize_fc_layout(levels[0])
+    ins = [c.strip() for c in sample.attrs["input_channels"].split(",")]
+    outs = [c.strip() for c in sample.attrs["output_channels"].split(",")]
+    _, centres, paired = _coherence_map_matrix(
+        levels[0], ref_levels[0], ins, outs, ensemble_windows=8,
+        smooth_bins=0)
+    starts = np.asarray(paired["time"].values)
+    sr = float(paired.attrs["sample_rate"])
+    nw = float(paired.attrs["num_samples_window"])
+    if starts.dtype.kind == "M":
+        half = np.timedelta64(int(round(nw / sr / 2 * 1e9)), "ns")
+        expected = starts + half
+    else:
+        expected = starts + nw / sr / 2
+    np.testing.assert_allclose(np.asarray(centres), expected, rtol=1e-9)

@@ -9,7 +9,7 @@ remote-reference RME_RR) are all aurora-backed.
 
 from __future__ import annotations
 
-from .plots import PlotCoherency, PlotSpectrogramFC
+from .plots import CoherenceMap, PlotCoherency, PlotSpectrogramFC
 from .process import (
     CoherenceSort,
     ComputeFC,
@@ -29,6 +29,7 @@ def register(registry) -> None:
     registry.add(MergeTFLevels)
     registry.add(PlotCoherency)
     registry.add(PlotSpectrogramFC)
+    registry.add(CoherenceMap)
 
 
 # bundled plugin: always on, not toggleable in the Settings dialog (§5.1)

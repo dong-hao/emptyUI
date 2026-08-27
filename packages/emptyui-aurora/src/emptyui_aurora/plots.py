@@ -478,3 +478,190 @@ def station_title_from_fc(fc) -> str:
     survey = fc.attrs.get("survey_id") or ""
     parts = [p for p in (station, survey) if p]
     return " — ".join(parts) if parts else "Coherence"
+
+
+def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
+                          ensemble_windows: int = 16, smooth_bins: int = 0):
+    """The coherence map's matrix: the Coherence Sort's exact criterion
+    over (frequency bin, window) — issues.md L18.
+
+    Two-FC: the conservative min of the E–remote-H signal coherence and
+    the local↔remote magnetic transfer coherence, computed over the
+    intersect-paired windows (``_pair_remote_fc`` + ``_per_bin_coherence``,
+    the sort's own helpers) — a dark region in the map is a window the
+    sort down-weights. Single-FC: the E–H signal coherence.
+
+    Returns ``(coh (F, W), window_centres, paired_local)`` — the time
+    labels are the window CENTRES (start + half the window span, the
+    settled L11 convention), derived from the fc's own window geometry.
+    """
+    import numpy as np
+
+    local = _normalize_fc_layout(local_fc)
+    ref = _normalize_fc_layout(ref_fc) if ref_fc is not None else None
+    if ref is not None:
+        local, ref = _pair_remote_fc(local, ref, pairing="intersect",
+                                     tol_s=0.0)
+    coh_e, coh_x = _per_bin_coherence(
+        local, ref, ins, outs, ensemble_windows=ensemble_windows,
+        smooth_bins=smooth_bins)
+    coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
+
+    t = np.asarray(local["time"].values)
+    sr = float(getattr(local, "attrs", {}).get("sample_rate", 0) or 0)
+    nw = float(getattr(local, "attrs", {}).get("num_samples_window", 0) or 0)
+    if t.dtype.kind == "M":
+        if nw > 0 and sr > 0:
+            half = np.timedelta64(int(round(nw / sr / 2 * 1e9)), "ns")
+        elif t.size > 1:
+            half = (t[1] - t[0]) // 2
+        else:
+            half = np.timedelta64(0, "ns")
+        centres = t + half
+    else:
+        dt = (nw / sr) if (nw > 0 and sr > 0) else (
+            float(np.median(np.diff(t))) if t.size > 1 else 0.0)
+        centres = t + dt / 2
+    return coh, centres, local
+
+
+class CoherenceMap(Node):
+    type = "aurora.plot.coherence_map"
+    title = "Plot Coherence Map"
+    tooltip = "Time x frequency map of the Coherence Sort's criterion — localizes WHEN a band is bad."
+    description = (
+        "Time-frequency map of COHERENCE instead of power (issues.md "
+        "L18): the exact per-(window, bin) statistic Coherence Sort "
+        "applies — the E–H signal coherence, or two-FC the conservative "
+        "min of the E–remote-H signal and the local↔remote magnetic "
+        "transfer coherence over the intersect-paired windows. A dark "
+        "region is a window the sort down-weights; a band that is dark "
+        "only at certain times localizes the noise source (e.g. a remote "
+        "station's daytime noise). The level follows the spectrogram's "
+        "cascade-step convention; the ensemble semantics match the "
+        "upstream sort's."
+    )
+    category = "Display"
+    terminal = True  # M13: manifest-declared run visibility
+    inputs = (
+        Input("fc", "fc"),
+        Input("ref_fc", "fc", label="ref fc (remote)", required=False),
+    )
+    outputs = (Output("plot", "plot"),)
+    params = (
+        Param("ensemble_windows", "integer", label="Ensemble windows",
+              default=16, min=1,
+              description="Sliding window-ensemble half-width — match the "
+                          "upstream Coherence Sort setting."),
+        Param("smooth_bins", "integer", label="Frequency smoothing (bins)",
+              default=0, min=0,
+              description="Adjacent-bin pooling — match the upstream "
+                          "Coherence Sort setting."),
+        Param("decimation_level", "integer", label="Decimation level",
+              default=0, min=-1,
+              description="Cascade step within the selected rate family: "
+                          "0 (default) = the family's native tier, 1..k "
+                          "one decimation deeper each, −1 = the deepest "
+                          "available step."),
+        Param("sample_rate", "string", label="Sample rate", default="auto",
+              optional=True, suggest_from="fc",
+              placeholder="auto (lowest rate present)",
+              description="Which rate family to display on a merged burst "
+                          "FC database (auto = the lowest rate present — "
+                          "the continuous stream). The connected fc's "
+                          "tiers are offered as suggestions after a run."),
+    )
+    deps: ClassVar[tuple[str, ...]] = ("matplotlib",)
+
+    def execute(self, ctx, fc, ref_fc=None, ensemble_windows: int = 16,
+                smooth_bins: int = 0, decimation_level: int = 0,
+                sample_rate: str = "auto") -> dict[str, Any]:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+        from emptyui_mth5.plotting import apply_style
+
+        levels = fc if isinstance(fc, dict) else {0: fc}
+        rate, steps = _resolve_rate_tiers(levels, sample_rate)
+        k = int(decimation_level)
+        if k < 0:
+            lv = steps[-1]
+        elif k < len(steps):
+            lv = steps[k]
+        else:
+            raise ValueError(
+                f"fc has no decimation step {k} within the {rate:g} Hz "
+                f"family (available steps: {len(steps)}, rates "
+                f"{[round(float(levels[s].attrs['sample_rate']), 6) for s in steps]}"
+                ") — lower 'Decimation level' or pick another 'Sample rate'")
+        ds = levels[lv]
+        ins, outs, _ = _fc_io_channels(ds)
+
+        ref = None
+        if ref_fc is not None:
+            ref_levels = ref_fc if isinstance(ref_fc, dict) else {0: ref_fc}
+            # the remote's tier at the same family rate, matched like
+            # PlotCoherency does (merged burst databases key tiers by
+            # rate position, which differs between stations)
+            ref_by_rate: dict[float, list] = {}
+            for rl, rds in ref_levels.items():
+                r = round(float(getattr(rds, "attrs", {}).get(
+                    "sample_rate", 0.0) or 0.0), 9)
+                ref_by_rate.setdefault(r, []).append(rl)
+            r_rate = round(float(getattr(ds, "attrs", {}).get(
+                "sample_rate", 0.0) or 0.0), 9)
+            r_ids = ref_by_rate.get(r_rate)
+            if not r_ids:
+                raise ValueError(
+                    f"remote-reference fc has no tier at {r_rate:g} Hz "
+                    f"(has {sorted(ref_by_rate)}) — compute both "
+                    "stations' FCs with the same decimation/window "
+                    "settings")
+            ref = ref_levels[r_ids[0]]
+
+        coh, centres, paired = _coherence_map_matrix(
+            ds, ref, ins, outs, ensemble_windows=ensemble_windows,
+            smooth_bins=smooth_bins)
+
+        # DC and nonpositive frequencies cannot live on a log axis
+        freq = np.asarray(paired["frequency"].values, dtype=float)
+        keep = np.isfinite(freq) & (freq > 0)
+        coh = coh[keep, :]
+        freq = freq[keep]
+
+        time_is_dt = centres.dtype.kind == "M"
+        fig, ax = plt.subplots(figsize=(10, 4))
+        mesh = ax.pcolormesh(centres, freq, coh, shading="auto",
+                             cmap="viridis", vmin=0.0, vmax=1.0)
+        cbar = fig.colorbar(mesh, ax=ax)
+        cbar.set_label("Coherence$^2$")
+        apply_style(fig, (ax,))
+        ax.set_yscale("log")
+        ax.set_xlabel("Time" if time_is_dt else "Time (s)")
+        if time_is_dt:
+            ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(
+                mdates.AutoDateLocator()))
+        ax.set_ylabel("Frequency (Hz)")
+        mode_note = ("E–remote H / local↔remote min"
+                     if ref is not None else "E–H signal")
+        tier_rate = float(getattr(paired, "attrs", {}).get("sample_rate", 0) or 0)
+        attrs_note = (
+            f"step {k} ({tier_rate:g} Hz) of the {rate:g} Hz family"
+            + f", window {paired.attrs.get('num_samples_window', '?')} samples"
+            + f", ensemble ±{int(ensemble_windows)} — {mode_note}")
+        ax.set_title(
+            (station_title_from_fc(paired) + " — " if station_title_from_fc(paired) else "")
+            + f"Coherence map ({attrs_note})",
+            fontsize=10,
+        )
+        fig.tight_layout()
+
+        path = ctx.artifact_path("coherence_map", ".png")
+        fig.savefig(path, dpi=150, bbox_inches="tight",
+                    metadata={"Software": "emptyUI"})
+        plt.close(fig)
+        ctx.progress(1.0, f"coherence map: {coh.shape[0]} bins x "
+                          f"{coh.shape[1]} windows (level {lv})")
+        return {"plot": ctx.publish_artifact(path, kind="image")}
