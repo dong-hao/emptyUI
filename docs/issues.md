@@ -667,6 +667,14 @@ values to 3.4e-15). Re-recorded at L21.
   the entire `FileBrowser` dialog, palette search/`hidden`, the error/notice
   surfaces, the WS `offline` terminal state, and **zero accessibility
   assertions** (see L1).
+  **Migration note (2026-10-17, pre-push): the committed `smoke_phoenix_mtu.mth5`
+  archive is ~100+ MB — GitHub's hard blob limit is 100 MB, so a plain push
+  fails.** Decide before the first push: (a) Git LFS for the archive (+ the
+  `*.TBL/.TS*/.asc/.edi` corpus is gitignored anyway, only the smoke archive
+  is tracked), or (b) drop the binary from git and fetch it via a release
+  asset / download script (tests + e2e already skip gracefully when it is
+  absent — corpus-guarded). Keep the tracked-data list minimal: only files
+  the tests/e2e/quick-start actually need.
   Status (2026-10-10, `f666b3a`): part 1 fixed. `tsc -b` covers src, e2e and
   config (it had hidden 54 e2e type errors); ESLint 9 with the react-hooks
   rules; Vitest for the pure logic (17 tests); `npm run check`. Probes: a
