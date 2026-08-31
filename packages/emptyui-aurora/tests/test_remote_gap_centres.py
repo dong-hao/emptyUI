@@ -1,6 +1,6 @@
 """M10: the remote-gap safety check must test window STARTS against the gap
 intervals. The fc labels are window centres, half a window after the start
-(issues.md M10; the centre convention itself is L11).
+(docs/issues.md M10; the centre convention itself is L11).
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Session QC on the uniform Compute FC route (§9.4) — the tests ported
 from the retired Build FC node onto Extract Run 'time range' → Compute
-FC (issues.md: the Build FC retirement).
+FC (docs/issues.md: the Build FC retirement).
 
 Covers what the collection route previously did NOT have: session tiling
 (`session_hours`), contiguous-span regrouping (`regroup_contiguous`),
@@ -395,7 +395,7 @@ def test_span_does_not_fabricate_missing_channels(tmp_path, caplog):
 def test_dipole_length_m_reads_e_channel_metadata():
     """First positive electric-channel dipole length; 0.0 when none.
 
-    The read is from the channel's raw HDF5 attrs (issues.md L21: the
+    The read is from the channel's raw HDF5 attrs (docs/issues.md L21: the
     get_channel path paid the mt_metadata validation storm per run)."""
     def _fake(lengths):
         return SimpleNamespace(

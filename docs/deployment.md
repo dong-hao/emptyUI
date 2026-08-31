@@ -1,7 +1,7 @@
 # emptyUI deployment — embedded/remote mode
 
 How to deploy emptyUI as an embedded module behind an existing
-authentication gateway. The contract is designed in **DESIGN.md §11** —
+authentication gateway. The contract is designed in **docs/DESIGN.md §11** —
 read it first; this guide is the operational counterpart.
 
 ## Deployment shape

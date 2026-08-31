@@ -10,7 +10,7 @@ from emptyui import Node, Output, Param
 
 class LoadLemi(Node):
     type = "mth5.io.lemi"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Load LEMI-424"
     tooltip = "Convert raw LEMI-424 .INF/.TXT data into an MTH5 archive and open it."
@@ -81,7 +81,7 @@ class LoadLemi(Node):
         )
         client.collection.survey_id = survey_id
         client.collection.station_id = station_id
-        # Manufacturer calibration (DESIGN.md §9.1): explicit file/dir wins,
+        # Manufacturer calibration (docs/DESIGN.md §9.1): explicit file/dir wins,
         # otherwise auto-pickup in the data directory; the filters are
         # attached to each run BEFORE it is written, so the association is
         # archived and survives Extract Run / MTH5 round trips.

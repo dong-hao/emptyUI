@@ -213,7 +213,7 @@ class ImportTF(Node):
               description="The convention the FILE stores the impedance "
                           "in. Every supported format stores SEG/EMTF "
                           "([mV/km]/[nT]) — the default converts it to "
-                          "emptyUI's internal SI on import (issues.md L8: "
+                          "emptyUI's internal SI on import (docs/issues.md L8: "
                           "a file already stored in SI would otherwise be "
                           "double-scaled with no way to say so)."),
         Param("sign_convention", "select", label="Sign convention",

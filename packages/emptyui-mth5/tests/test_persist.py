@@ -204,7 +204,7 @@ def test_runts_context_ignores_default_ids(caplog):
 def test_persist_channel_writer_matches_mth5_from_xarray(tmp_path):
     """The fast FC-channel writer produces a subtree IDENTICAL to mth5's
     own FCDecimationGroup.from_xarray — group tree, dataset shapes/dtypes,
-    and every attr (issues.md L24: from_xarray's per-channel
+    and every attr (docs/issues.md L24: from_xarray's per-channel
     channel_summary DataFrame walks made persist 7x the FC math on a
     one-day RR corpus). Both levels are written into one archive and
     their subtrees diffed."""

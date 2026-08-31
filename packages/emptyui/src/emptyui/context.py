@@ -29,7 +29,7 @@ class RunContext:
         self._warn_cb = warn_cb
         self.logger = logger or logging.getLogger("emptyui")
         self.published: list[dict[str, Any]] = []
-        #: Watchdog flag (issues.md M2): True once the executor abandoned
+        #: Watchdog flag (docs/issues.md M2): True once the executor abandoned
         #: this node for exceeding its deadline. The abandoned thread keeps
         #: running — late progress/artifact calls must not emit events for
         #: a run that already ended. Checked, never reset.
@@ -55,7 +55,7 @@ class RunContext:
             self._progress_cb(frac, message)
 
     def warn(self, message: str) -> None:
-        """Surface a degradation on the node (issues.md H7): a warning the
+        """Surface a degradation on the node (docs/issues.md H7): a warning the
         UI renders on the node card and in the properties panel — not a
         silent wrong result. Also logged, so the server log keeps the
         full record (headless embedding has no warn callback — the log is

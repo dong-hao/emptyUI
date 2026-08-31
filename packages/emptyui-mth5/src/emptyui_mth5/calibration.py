@@ -1,6 +1,6 @@
 """Instrument calibration: manufacturer FAP files -> mt_metadata filters.
 
-DESIGN.md §9.1: the LEMI logger outputs physical units (nT, mV/km) assuming
+docs/DESIGN.md §9.1: the LEMI logger outputs physical units (nT, mV/km) assuming
 unity gain and zero phase; the manufacturer calibration files provide the
 frequency-dependent correction. This module parses the manufacturer FAP
 files (``.chn`` LEMI-417-era, ``.def`` KMS-200-era wrapper) and the mt_io
@@ -33,7 +33,7 @@ _HEADER_RE = re.compile(r"^['\"]?#FP['\"]?\s+(\d+)\s+(\d+)")
 
 
 def _default_unit(channel: str) -> str:
-    """Best-effort default physical unit for a channel name (DESIGN.md §10.5).
+    """Best-effort default physical unit for a channel name (docs/DESIGN.md §10.5).
 
     Magnetic channels (hx/hy/hz, bx/by/bz, h1..h3) default to nanoTesla
     (coil/fluxgate archives in A/m must be stamped from their real unit
@@ -177,7 +177,7 @@ def build_fap_filters(rows, prefix: str = "cal", extend_flat: bool = True,
     ``rows`` is the :func:`parse_fap` result. ``extend_flat`` (default) pads
     the table down to 0.001·f_min with the first row's modulus and zero
     phase — below the measured range the response is treated as constant
-    (log-extrapolation was found to be worse, DESIGN.md §9.1). TWO pad rows:
+    (log-extrapolation was found to be worse, docs/DESIGN.md §9.1). TWO pad rows:
     mt_metadata's extrapolation below the lowest table point follows the
     lowest interval's slope — a single pad row made the phase ramp below
     the pad point (flat in modulus, ramping in phase, L-M7); a second

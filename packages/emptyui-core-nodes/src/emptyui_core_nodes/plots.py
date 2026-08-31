@@ -1,8 +1,8 @@
-"""Display nodes: render figures to `plot` outputs (DESIGN.md §3).
+"""Display nodes: render figures to `plot` outputs (docs/DESIGN.md §3).
 
 Display nodes emit a typed `plot` port (rendered-figure reference) consumed
 by `Preview Plot` (inline viewer) and `Save Plot` (export) — ComfyUI's
-Preview/Save Image pattern. Plot conventions follow DESIGN.md §10.6 (shared
+Preview/Save Image pattern. Plot conventions follow docs/DESIGN.md §10.6 (shared
 style module ``_plotstyle.py``): 150 dpi, grid/tick conventions, absolute
 datetime x-axis when the run carries a start time, channel unit hints, and
 run/station identity in titles.
@@ -87,7 +87,7 @@ def _plot_title(data: TimeSeries, what: str) -> str:
 
 class PlotTimeSeriesNode(Node):
     type = "core.plot.timeseries"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Plot Time Series"
     tooltip = "Plot the (stacked) channel time series as a PNG figure."

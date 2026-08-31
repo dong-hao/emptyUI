@@ -6,7 +6,7 @@ Conventions demonstrated here:
   new types are namespaced and declare UI metadata via ``port_types``
 - the §4 manifest protocol: one-sentence ``tooltip`` + full ``description``
 - execute is functional: never mutate inputs (cached payloads are shared
-  across runs, DESIGN.md §7 immutability contract) — always copy
+  across runs, docs/DESIGN.md §7 immutability contract) — always copy
 """
 
 from __future__ import annotations

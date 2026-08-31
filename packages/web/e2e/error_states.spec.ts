@@ -1,4 +1,4 @@
-/** Failure-surface e2e (DESIGN §8.1, issues.md H6): a catalog request that
+/** Failure-surface e2e (DESIGN §8.1, docs/issues.md H6): a catalog request that
  *  never comes back, and a render that throws, must both land somewhere the
  *  user can act on — a message plus a retry, or the crash card — instead of
  *  the two silent outcomes the register found: an empty palette with a dead

@@ -1,4 +1,4 @@
-"""Table-producing Display nodes (DESIGN.md §3, `table` port type)."""
+"""Table-producing Display nodes (docs/DESIGN.md §3, `table` port type)."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ class ViewTF(Node):
             # L-M8: the table deliberately shows the RAW ±180° phase
             # (provenance: what was estimated) — the AppRes plot folds the
             # off-diagonal phase to 0-90° for its half-height panel
-            # (display-only, DESIGN.md §10.6)
+            # (display-only, docs/DESIGN.md §10.6)
             phase = np.angle(z, deg=True)
             return rho, phase
 

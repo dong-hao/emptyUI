@@ -103,9 +103,9 @@ def write_fc_geometry(dec, attrs: dict[str, Any]) -> None:
             _log.debug("fc geometry attr %s not written: %s", key, exc)
 
 
-#: The station-identity attr keys an fc carries (DESIGN.md §10.6) — the ONE
+#: The station-identity attr keys an fc carries (docs/DESIGN.md §10.6) — the ONE
 #: list; builders filter through it so the key sets cannot drift apart
-#: (issues.md M5: three sites used to hardcode their own copies).
+#: (docs/issues.md M5: three sites used to hardcode their own copies).
 FC_IDENTITY_KEYS = (
     "survey_id",
     "station_id",
@@ -286,7 +286,7 @@ def _enrich_fc_attrs(spectra, dec, decimation_level: int,
 
 class SpectraToFCGroup(Node):
     type = "mth5.fc.write"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Write FC"
     tooltip = "Persist an fc handle into an mth5 FC group."

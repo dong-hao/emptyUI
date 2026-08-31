@@ -1,4 +1,4 @@
-"""Runtime settings persistence (DESIGN.md §5.1, §7.4).
+"""Runtime settings persistence (docs/DESIGN.md §5.1, §7.4).
 
 The ``EMPTYUI_DISABLED_PLUGINS`` environment variable is the platform-level
 plugin baseline (env wins at startup; in embedded mode history §17 the platform
@@ -46,7 +46,7 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
         float, None,
         ("In-memory node-result cache budget in GiB (0/None = unbounded; "
          "the bound is approximate — payloads are sized once at store "
-         "time, issues.md L5)"),
+         "time, docs/issues.md L5)"),
     ),
     "node_timeout_seconds": (
         float, 600.0,
@@ -59,10 +59,10 @@ LIVE_KNOBS: dict[str, tuple[type, object, str]] = {
 
 #: Knobs reserved for the postponed §12.3 disk cache — defined in the schema
 #: so the UI/API scaffolding is ready, without any effect yet. (cache_max_gb
-#: graduated to the live knobs for the MEMORY tier, issues.md L5 — the disk
+#: graduated to the live knobs for the MEMORY tier, docs/issues.md L5 — the disk
 #: cache will introduce its own knob when it lands. project_dir graduated to
 #: the deployment rows — it is live as the relative-path anchor since
-#: issues.md M23, user decision 2026-10-15; the disk cache will reuse it.)
+#: docs/issues.md M23, user decision 2026-10-15; the disk cache will reuse it.)
 PLANNED_KNOBS: dict[str, tuple[type, object, str]] = {
     "cache_ttl_days": (
         float, 30.0, "Disk-cache entry expiry in days — reserved (§12.3)",
@@ -72,7 +72,7 @@ PLANNED_KNOBS: dict[str, tuple[type, object, str]] = {
 
 @dataclass
 class SettingsStore:
-    """Plugin toggle state (DESIGN.md §5.1).
+    """Plugin toggle state (docs/DESIGN.md §5.1).
 
     With ``path=None`` (the default) the store is **memory-only**: toggles
     live for the server process lifetime and nothing is written to disk.
@@ -241,7 +241,7 @@ class SettingsStore:
 
 @dataclass
 class RuntimeSettings:
-    """Live-editable runtime knobs (DESIGN.md §7.4) — a mutable holder so UI
+    """Live-editable runtime knobs (docs/DESIGN.md §7.4) — a mutable holder so UI
     changes take effect without a restart (the app closures read it).
 
     Initialized from the effective start values (kwarg → env → settings

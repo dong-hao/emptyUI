@@ -28,7 +28,7 @@ ML denoisers, …) arrives as an ordinary Python package.
   (palette, inline params, properties panel); there is no plugin-side UI
   code. A well-written manifest *is* the documentation.
 - **Functional nodes.** `execute` must never mutate its inputs — cached
-  payloads (DESIGN.md §7) are handed to downstream nodes and later runs as
+  payloads (docs/DESIGN.md §7) are handed to downstream nodes and later runs as
   the *same object instances*.
 
 ## 2. Anatomy of a plugin
@@ -79,7 +79,7 @@ add classes, nothing else (no file I/O, no downloads).
   connectable only if producers and consumers share type tags. Introduce a
   new type only when the payload is genuinely different (see §5).
 
-## 4. Node manifest protocol (DESIGN.md §4)
+## 4. Node manifest protocol (docs/DESIGN.md §4)
 
 Every `Node` subclass declares class variables that become the manifest the
 frontend renders:
@@ -93,7 +93,7 @@ frontend renders:
 | `category` | palette grouping; unknown categories are appended alphabetically |
 | `hidden` | utility/test nodes excluded from the palette (still executable) |
 | `viewer` | inline canvas-body renderer the frontend mounts in the node card: `"plot"` or `"table"` (L-F12: the frontend never switches on node types); omit for ordinary nodes |
-| `terminal` | `True` when running this node produces something the user can see (issues.md M13) — the frontend's "results won't be visible" notice tests this flag and `outputs == ()`, **never the category string**; declare it on display nodes |
+| `terminal` | `True` when running this node produces something the user can see (docs/issues.md M13) — the frontend's "results won't be visible" notice tests this flag and `outputs == ()`, **never the category string**; declare it on display nodes |
 | `version` | bump on behavior changes; workflows record versions for reproducibility |
 | `deps` | human-readable dependency notes surfaced in the properties panel |
 | `inherit` | params auto-filled (as dropdowns) from the upstream chain — see DESIGN §4 |
@@ -109,7 +109,7 @@ reference forcing the robust estimator).
 
 The type system is **open**: a port type is a string tag; connections are
 validated by equality, declared `accepts`, or the `any` escape hatch
-(`port_type_compatible`, DESIGN.md §3).
+(`port_type_compatible`, docs/DESIGN.md §3).
 
 **Core types** (fixed names — reuse these whenever your payload matches):
 
@@ -189,7 +189,7 @@ Model weights (e.g. CNN noise-suppression networks) are **never bundled**
 inside the plugin wheel — the same rule ComfyUI's ecosystem converged on.
 Declare the requirement in the manifest; binaries live in a configured model
 directory (`EMPTYUI_MODELS_PATH`), platform-provisioned in embedded remote
-mode (DESIGN.md §11's read-only data root):
+mode (docs/DESIGN.md §11's read-only data root):
 
 ```python
 class Denoiser(Node):
@@ -218,7 +218,7 @@ Rules:
   properties panel and the workflow document records it.
 - Changing a node's semantics without a version bump silently invalidates
   reproducibility for saved workflows — treat `version` as part of the
-  cache signature (it is: DESIGN.md §7 keys include it).
+  cache signature (it is: docs/DESIGN.md §7 keys include it).
 
 ## 10. Security & quality guidelines
 
@@ -240,13 +240,13 @@ Rules:
 - Bundled plugins shipped in this repository (`emptyui-core-nodes`,
   `emptyui-mth5`, `emptyui-aurora`) mark their register function with
   `register.bundled = True`; third-party plugins never set this — it keeps
-  them toggleable in the Settings dialog (DESIGN.md §5.1) while bundled
+  them toggleable in the Settings dialog (docs/DESIGN.md §5.1) while bundled
   plugins stay always-on.
 - Pin heavy domain deps exactly (e.g. `mth5==0.6.8`): emptyUI nodes wrap
   third-party APIs that move.
 - A plugin index/publish flow (marketplace-style) is an M4 item; PyPI plus
   the guide's conventions are the MVP distribution path.
-- Embedded/remote deployments (DESIGN.md §11) decide plugin availability at
+- Embedded/remote deployments (docs/DESIGN.md §11) decide plugin availability at
   the platform level — `EMPTYUI_DISABLED_PLUGINS` sets the baseline there;
   runtime toggling is in-memory only for now (settings-file persistence is
   optional behind `EMPTYUI_SETTINGS_PATH`, §5.1).

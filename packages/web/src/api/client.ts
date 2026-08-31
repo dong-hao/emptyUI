@@ -7,7 +7,7 @@ export interface PortSpec {
   label?: string;
   /** rendering-only: the port is populated only when the named sibling
    *  param holds one of the listed values (Extract Run's dual outputs,
-   *  DESIGN.md §4) */
+   *  docs/DESIGN.md §4) */
   populated_when?: { param: string; values: string[] } | null;
   /** one-port convention (§4): this INPUT accepts a run collection
    *  (ts.runs) arriving on the static port — the wiring check consults
@@ -30,25 +30,25 @@ export interface ParamSpec {
   placeholder?: string;
   /** Auto-change rules: value key -> [targetParam, targetValue][] */
   cascade?: Record<string, [string, unknown][]>;
-  /** Conditional-UX rule (DESIGN.md §4): editable only when the named
+  /** Conditional-UX rule (docs/DESIGN.md §4): editable only when the named
    *  sibling param holds one of the listed values. Rendering-only. */
   enabled_when?: { param: string; values: string[] } | null;
   /** Split inherited comma-separated candidates into individual options. */
   split_inherited?: boolean;
-  /** Time-selector bar binding (DESIGN.md §8.3): input port name whose
+  /** Time-selector bar binding (docs/DESIGN.md §8.3): input port name whose
    *  payload summary (extent, via `payload` run events) drives the bar. */
   time_bar?: string;
   /** M19/M23: "in" reads data (relativized on save against the project
    *  dir / data root); "out" writes a product (never relativized). */
   path_kind?: string;
-  /** Select-option suggestions (DESIGN.md §8.3): input port name whose
+  /** Select-option suggestions (docs/DESIGN.md §8.3): input port name whose
    *  payload summary offers the options (e.g. an fc database's sample-rate
    *  tiers) — the static options are extended after a run. */
   suggest_from?: string | null;
 }
 
 /** Extent summary of a ts payload, streamed via `payload` run events
- *  (DESIGN.md §8.3): absolute ISO bounds (UTC) or relative seconds. */
+ *  (docs/DESIGN.md §8.3): absolute ISO bounds (UTC) or relative seconds. */
 export interface RunExtent {
   survey: string;
   station: string;
@@ -75,7 +75,7 @@ export interface PayloadSummary {
 /** inherit: input port -> { targetParam: upstreamParam } */
 export type InheritMap = Record<string, Record<string, string>>;
 
-/** One runtime knob in GET /api/settings (DESIGN.md §7.4). */
+/** One runtime knob in GET /api/settings (docs/DESIGN.md §7.4). */
 export interface LiveSetting {
   value: number | null;
   type: string;
@@ -98,7 +98,7 @@ export interface NodeManifest {
   type: string;
   version: string;
   title: string;
-  /** one-sentence hover tip (hover protocol, DESIGN.md §4) */
+  /** one-sentence hover tip (hover protocol, docs/DESIGN.md §4) */
   tooltip: string;
   /** full details for the properties panel (shown on click) */
   description: string;
@@ -157,11 +157,11 @@ export interface PluginInfo {
   bundled: boolean;
   enabled: boolean;
   /** present when discovery/registration failed — the plugin is skipped
-   *  and the row shows why (issues.md M20) */
+   *  and the row shows why (docs/issues.md M20) */
   error?: string;
 }
 
-/** API base, derived at runtime (DESIGN.md §11.3 single-origin convention):
+/** API base, derived at runtime (docs/DESIGN.md §11.3 single-origin convention):
  *  the API always lives one segment below the document root — so this works
  *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
  *  proxies /api). No build-time env or hardcoded mount is needed. */
@@ -182,7 +182,7 @@ export const api = {
   nodes: () => getJson<Catalog>("/nodes"),
   files: (path = "") =>
     getJson<FileListing>(`/files?path=${encodeURIComponent(path)}`),
-  // runtime settings (DESIGN.md §7.4): live knobs editable, deployment rows
+  // runtime settings (docs/DESIGN.md §7.4): live knobs editable, deployment rows
   // read-only, planned (§12.3 cache) knobs reserved
   settings: () => getJson<SettingsView>("/settings"),
   putSettings: async (values: Record<string, number | null>): Promise<SettingsView> => {
@@ -198,7 +198,7 @@ export const api = {
     return res.json();
   },
   // targets: partial execution — run only these nodes plus their ancestors
-  // ("execute to here", DESIGN.md §7); omitted = run everything
+  // ("execute to here", docs/DESIGN.md §7); omitted = run everything
   runWorkflow: async (workflow: unknown, targets?: string[]): Promise<{ run_id: string }> => {
     const res = await fetch(`${BASE}/runs`, {
       method: "POST",
@@ -222,7 +222,7 @@ export const api = {
     return res.json();
   },
   artifactUrl: (artifactId: string) => `${BASE}/artifacts/${artifactId}`,
-  // plugin enable/disable (DESIGN.md §5.1): returns the updated plugin list
+  // plugin enable/disable (docs/DESIGN.md §5.1): returns the updated plugin list
   plugins: () => getJson<PluginInfo[]>("/plugins"),
   setPlugin: async (name: string, enabled: boolean): Promise<PluginInfo[]> => {
     const action = enabled ? "enable" : "disable";

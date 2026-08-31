@@ -1,4 +1,4 @@
-"""FastAPI application (DESIGN.md §7.3).
+"""FastAPI application (docs/DESIGN.md §7.3).
 
 M1: runs execute on a worker thread; events stream to WebSocket clients.
 """
@@ -138,7 +138,7 @@ def create_app(
     settings_path: Path | str | None = None,
     project_dir=None,
 ) -> FastAPI:
-    """Build the application (DESIGN.md §7.3, remote-mode knobs §11/§11.2).
+    """Build the application (docs/DESIGN.md §7.3, remote-mode knobs §11/§11.2).
 
     Explicit keyword arguments win over ``settings``/env: embedding platforms
     pass what they need without env coupling. ``data_root`` confines input
@@ -358,7 +358,7 @@ def create_app(
 
     @app.get("/api/plugins")
     def list_plugins() -> list[dict]:
-        """Installed plugins with enable state (DESIGN.md §5.1).
+        """Installed plugins with enable state (docs/DESIGN.md §5.1).
 
         Bundled plugins are always enabled; third-party plugins carry the
         user-toggleable state. The palette is catalog-driven, so hiding/
@@ -731,7 +731,7 @@ def create_app(
     def list_files(path: str = "") -> dict:
         """Server-side directory listing for the file-picker widget.
 
-        With a data root configured (DESIGN.md §11.2, remote/embedded mode)
+        With a data root configured (docs/DESIGN.md §11.2, remote/embedded mode)
         the listing is confined to that root: requests outside it resolve to
         the root itself, so users can never browse beyond the
         platform-provisioned data. Without one (local dev) the whole
@@ -819,7 +819,7 @@ def create_app(
             # server shutdown) must drop the client from the hub
             hub.disconnect(ws)
 
-    # single-origin serving (DESIGN.md §11.3): mount the built frontend
+    # single-origin serving (docs/DESIGN.md §11.3): mount the built frontend
     # last, so /api/* routes win; html=True serves index.html at the root.
     # API routes stay on top — a same-origin deployment needs no CORS at all.
     if serve_dist:

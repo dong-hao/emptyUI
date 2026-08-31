@@ -13,7 +13,7 @@ export const useCatalog = create<CatalogState>((set) => ({
 
 /** Fallback port-type colors (ComfyUI-style socket coloring). The canonical
  *  colors come from the backend catalog (`GET /api/nodes` → port_types,
- *  DESIGN.md §3 — the backend is the single source of truth); this table
+ *  docs/DESIGN.md §3 — the backend is the single source of truth); this table
  *  only covers older/offline backends and must mirror the backend's
  *  CORE_PORT_TYPES. */
 export const PORT_COLORS: Record<string, string> = {

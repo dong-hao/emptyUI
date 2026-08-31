@@ -10,7 +10,7 @@ interface State {
 }
 
 /**
- * Top-level React error boundary (DESIGN §8.1, issues.md H6).
+ * Top-level React error boundary (DESIGN §8.1, docs/issues.md H6).
  *
  * React only recovers from a render throw if an error boundary sits ABOVE
  * the component that threw, so without this the whole tree unmounts into a

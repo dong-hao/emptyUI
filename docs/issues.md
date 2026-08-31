@@ -24,10 +24,10 @@ deleted with the rest of the register on cleanup). The session's fixes
 landed as `dd0dfed` (H2, H5) · `09b8a59` (H1) · `e6735ad` (H3, H4) ·
 `d4a2f02` (H6). Open entries are ranked
 **High → Medium → Low by impact/severity**, not by subsystem. Section refs
-in parentheses use the living DESIGN.md numbering (§1–§12); `history §N`
+in parentheses use the living docs/DESIGN.md numbering (§1–§12); `history §N`
 resolves in `docs/history/`.
 
-> **Note (decision 2026-09-28):** `issues.md` **stays gitignored**
+> **Note (decision 2026-09-28):** `docs/issues.md` **stays gitignored**
 > (`.gitignore:23`) until the register is cleared; only then drop that rule
 > and version the file (L17).
 
@@ -1100,13 +1100,13 @@ values to 3.4e-15). Re-recorded at L21.
   the current behavior (persistence shipped; the milestone tags are
   history); the bare-`§13+` references — 191 across 53 files by today's
   count (the register's 270 predates the later fixes) — are prefixed
-  `history §` by a scripted pass (DESIGN.md, issues.md, docs/history and
+  `history §` by a scripted pass (docs/DESIGN.md, docs/issues.md, docs/history and
   the appendix table excluded; appendix-row `| §N |` definitions kept).
   A post-pass census: zero bare references, one README prose collision
   fixed. Gates: pytest 739, vitest 33, Playwright 34, ruff clean.
 
 - [x] **L10 — DESIGN §9.4 session arithmetic does not match its own formula.**
-  DESIGN.md:1284 says one deepest-level window spans about 68 min of raw
+  docs/DESIGN.md:1284 says one deepest-level window spans about 68 min of raw
   1 Hz data "(5 levels × factor 4)". With a window of 256 and a factor of 4
   per level, the deepest window spans 256·4^L seconds at 1 Hz: about 3 days
   at L = 5. The 68 min figure corresponds to L = 2. The session-length
@@ -1117,7 +1117,7 @@ values to 3.4e-15). Re-recorded at L21.
   manifests and asserts that the DESIGN figure matches within 10%.
 
 - [x] **L11 — window labels are documented as starts but produced as centres. DECIDED 2026-10-10: centres kept; reader audit DONE (2026-10-14).**
-  DESIGN §10.1 (DESIGN.md:1335) and the `compute_fc_levels` docstring say
+  DESIGN §10.1 (docs/DESIGN.md:1335) and the `compute_fc_levels` docstring say
   clock-zero "anchors window starts" to `t0 + k·step`. The code labels each
   window with its scipy segment centre (`process.py:1049`). The code is
   internally consistent (BuildFC shifts back), but the docs, M10, and any new
@@ -1337,10 +1337,10 @@ values to 3.4e-15). Re-recorded at L21.
   four verification records byte-identical. Remaining: ~1 s tags + ~4 s
   mth5's writer floor (path B noted).
 
-- [x] **L17 — `issues.md` is gitignored (legacy H7). DONE (2026-10-16):
+- [x] **L17 — `docs/issues.md` is gitignored (legacy H7). DONE (2026-10-16):
   the rule is dropped and the register ships.**
   **Sanity check (the caveat below), run before the un-ignore:** 58
-  register entry IDs; 118 distinct IDs cited across DESIGN.md + 317
+  register entry IDs; 118 distinct IDs cited across docs/DESIGN.md + 317
   commits — every current-register citation resolves. The only
   non-resolving tokens belong to the 2026-09-18 review round
   (H1–H4/M1–M14 + the B/L-A/L-C/L-F/L-M sub-item families), whose
@@ -1460,7 +1460,7 @@ decisions come first.
    shipped path?~~
    **Resolved 2026-10-11: deleted** (see the M6 entry) — fixtures moved to
    `compute_fc_seconds`, which delegates to the shipped path.
-8. ~~**L17** — un-ignore `issues.md` so the register is version-controlled,
+8. ~~**L17** — un-ignore `docs/issues.md` so the register is version-controlled,
    or keep it local?~~
    **Resolved 2026-10-15: keep local until cleared** (user decision) — the
    original rationale stands; the L17 entry records the caveat to handle

@@ -1,6 +1,6 @@
 """M8: a time-domain Calibrate must not run on a payload whose instrument response
 has already been removed (an upstream Calibrate). The second pass divides the
-same response out again: a silent double correction (issues.md M8).
+same response out again: a silent double correction (docs/issues.md M8).
 
 The guard test at the end pins the route that must keep working: Calibrate
 followed by Compute FC, which honours the applied flags.

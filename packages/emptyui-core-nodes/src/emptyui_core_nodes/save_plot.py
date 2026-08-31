@@ -1,4 +1,4 @@
-"""Plot export node — ComfyUI Save Image pattern (DESIGN.md §3)."""
+"""Plot export node — ComfyUI Save Image pattern (docs/DESIGN.md §3)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class SavePlotNode(Node):
         "(e.g. timeseries_001.png)."
     )
     # plots are figures, not data — Display category (ComfyUI's Save Image
-    # pattern sits with the preview viewers, DESIGN.md §3 Display nodes)
+    # pattern sits with the preview viewers, docs/DESIGN.md §3 Display nodes)
     category = "Display"
     terminal = True  # M13: manifest-declared run visibility
     inputs = (Input("plot", "plot"),)

@@ -10,14 +10,14 @@ count (first timestamp + sample rate), NOT from the per-row timestamps. A
 missing-data gap in the source therefore shifts every later sample earlier
 than its true time and destroys inter-station alignment (remote reference).
 This converter **fills gaps with linearly interpolated rows** so one row ==
-one true second (see DESIGN.md §3 "Align Runs" / the BGS note).
+one true second (see docs/DESIGN.md §3 "Align Runs" / the BGS note).
 
 Usage:
     python scripts/convert_bgs_lemi.py <in.xyz> <out.txt> [--days N] [--start "YYYY-MM-DD HH:MM:SS"] [--lat 56.72884] [--lon -2.85449067] [--elev 120]
 
 ``--start`` skips everything before the given absolute time, so two sites
 can be converted over the *same* window (required for remote-reference
-alignment — see DESIGN.md §3 "Align Runs").
+alignment — see docs/DESIGN.md §3 "Align Runs").
 """
 
 from __future__ import annotations

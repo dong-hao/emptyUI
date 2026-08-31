@@ -19,7 +19,7 @@ interface Props {
 /**
  * Node palette grouped by category, populated from GET /api/nodes.
  *
- * Ordering protocol (DESIGN.md §4): categories in the fixed order above,
+ * Ordering protocol (docs/DESIGN.md §4): categories in the fixed order above,
  * nodes alphabetically by title within each category. Nodes with
  * `hidden: true` (utility/test nodes, e.g. the echo smoke test) are
  * excluded from the palette — they remain executable when present in a

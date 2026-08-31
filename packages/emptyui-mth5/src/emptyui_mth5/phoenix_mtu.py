@@ -74,7 +74,7 @@ def _block_tag(buf: bytes) -> _BlockTag:
 
 #: blocks decoded per batch in :func:`_iter_blocks` — bounds the vectorized
 #: decode's transient (~n_ch x n_scan x batch x 12 bytes) without giving up
-#: the 20x+ gain over per-block small-array decoding (issues.md L25; the
+#: the 20x+ gain over per-block small-array decoding (docs/issues.md L25; the
 #: matlab lineage decoded whole files in one vectorized pass)
 _DECODE_BATCH_BLOCKS = 16384
 
@@ -679,7 +679,7 @@ def read_phoenix_mtu(
                         AppliedFilter(name=fap.name, applied=True, stage=i)
                         for i, fap in enumerate(refs, 1)
                     ]
-                # issues.md L25: (name, type, data, metadata) tuples —
+                # docs/issues.md L25: (name, type, data, metadata) tuples —
                 # a full ChannelTS construction per channel (~7 ms of
                 # mt_metadata validation) was built here only to be
                 # unwrapped by from_channel_ts; add_channel consumes the
@@ -807,7 +807,7 @@ def read_phoenix_mtu(
 
 class LoadPhoenixMtu(Node):
     type = "mth5.io.phoenix_mtu"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Load Phoenix MTU-5A"
     tooltip = "Convert raw legacy Phoenix MTU-5A (TBL/TSn) data into an MTH5 archive and open it."
@@ -824,7 +824,7 @@ class LoadPhoenixMtu(Node):
         "placeholder schedule times. Manufacturer ASC calibration tables "
         "(box CLB + coil CLC) are auto-matched by the TBL serials and "
         "registered as FAP shape corrections that Compute FC removes "
-        "frequency-domain-wise (DESIGN.md §9.2)."
+        "frequency-domain-wise (docs/DESIGN.md §9.2)."
     )
     category = "Data I/O"
     inputs = ()

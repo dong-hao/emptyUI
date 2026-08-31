@@ -231,7 +231,7 @@ def test_grid_mismatch_coherence_sort_errors():
 
 
 def test_estimate_tf_skips_nonfinite_rows():
-    """estimate_tf handles NaN FC rows (generic robustness, DESIGN.md §10.3)."""
+    """estimate_tf handles NaN FC rows (generic robustness, docs/DESIGN.md §10.3)."""
     runts = synthetic_runts(synthetic_source(12), seed=12)
     fc = synthetic_fc(runts, ["hx", "hy"], ["ex", "ey"])
     fc = fc.copy(deep=True)

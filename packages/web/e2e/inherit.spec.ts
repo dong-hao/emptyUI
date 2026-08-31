@@ -1,4 +1,4 @@
-/** Chain-walking inheritance e2e (DESIGN.md §4): identities (survey/station/
+/** Chain-walking inheritance e2e (docs/DESIGN.md §4): identities (survey/station/
  *  run) flow through the upstream chain — auto-filled into empty params and
  *  rendered as editable combobox suggestions — across pass-through nodes
  *  (filters with no inherit declaration walk every input port with the same

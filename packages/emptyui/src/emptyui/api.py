@@ -49,7 +49,7 @@ class Output:
     type: str = "any"
     description: str = ""
     label: str = ""
-    #: Rendering-only (DESIGN.md §4): the port is populated only when the
+    #: Rendering-only (docs/DESIGN.md §4): the port is populated only when the
     #: named sibling param holds one of the listed values (same shape as
     #: Param.enabled_when). The UI dims ports that will not be populated;
     #: the executor stores unpopulated outputs as None. Currently dormant:
@@ -90,7 +90,7 @@ class Param:
     description: str = ""
     #: Placeholder text for text inputs (e.g. "auto (detect from data)").
     placeholder: str = ""
-    #: Remote-mode path confinement (DESIGN.md §11.2): "" = not a path,
+    #: Remote-mode path confinement (docs/DESIGN.md §11.2): "" = not a path,
     #: "in" = read-only input resolved under the data root (validated),
     #: "out" = writable output resolved into the run workspace.
     path_kind: str = ""
@@ -98,7 +98,7 @@ class Param:
     #: value (key), set the listed (other_param, value) pairs. Keys are
     #: serialized as strings (bool -> "true"/"false") for JSON transport.
     cascade: dict[Any, tuple[tuple[str, Any], ...]] | None = None
-    #: Conditional-UX rule (DESIGN.md §4): the widget is editable only when
+    #: Conditional-UX rule (docs/DESIGN.md §4): the widget is editable only when
     #: the named sibling param currently holds one of the listed values,
     #: e.g. ``enabled_when=("estimator_engine", ("Robust",))``. Purely a
     #: rendering/UX rule — the executor never enforces it (nodes validate
@@ -155,12 +155,12 @@ class Param:
         }
 
 
-#: Tooltip hard cap (DESIGN.md §4) — a sentence with no terminator stops here.
+#: Tooltip hard cap (docs/DESIGN.md §4) — a sentence with no terminator stops here.
 _TOOLTIP_CAP = 140
 
 
 def first_sentence(text: str) -> str:
-    """First sentence of a description (tooltip fallback, DESIGN.md §4).
+    """First sentence of a description (tooltip fallback, docs/DESIGN.md §4).
 
     Whitespace-normalized, cut at the first sentence terminator; a sentence
     with no terminator is hard-capped at :data:`_TOOLTIP_CAP` chars. (The
@@ -187,7 +187,7 @@ class Node:
 
     type: ClassVar[str]
     title: ClassVar[str] = ""
-    #: One-sentence hover tip (hover protocol, DESIGN.md §4): what the node
+    #: One-sentence hover tip (hover protocol, docs/DESIGN.md §4): what the node
     #: does, in a single sentence. Empty = derived from ``description``.
     tooltip: ClassVar[str] = ""
     #: Full details for the right-hand properties panel (shown on click).
@@ -217,7 +217,7 @@ class Node:
     #: (identity mapping = same name), e.g.
     #: ``{"data": {"survey": "survey", "station": "station", "run": "run"}}``.
     #: Resolved by the frontend via a recursive chain-walking resolver
-    #: (DESIGN.md §4 "Chain-walking inheritance").
+    #: (docs/DESIGN.md §4 "Chain-walking inheritance").
     inherit: ClassVar[dict[str, dict[str, str]]] = {}
 
     #: New port types introduced by this node (plugin guide §"Port types").
@@ -236,7 +236,7 @@ class Node:
     models: ClassVar[list[dict[str, str]]] = []
 
     #: Whether structural cache hits may skip this node's execution
-    #: (DESIGN.md §7.1). Save/export nodes are ``False``: their side effect IS writing
+    #: (docs/DESIGN.md §7.1). Save/export nodes are ``False``: their side effect IS writing
     #: the file — a cache hit that skips it reports "done (cached)" while the
     #: file is never (re-)written (and a deleted destination stays gone).
     #: Cheap to re-run: the inputs come from the cache either way.
@@ -248,7 +248,7 @@ class Node:
     #: be served to later structurally-identical runs (§7.1 immutability).
     invalidates_inputs: ClassVar[bool] = False
 
-    #: Per-node watchdog budget in seconds (issues.md M2, DESIGN.md §7.1).
+    #: Per-node watchdog budget in seconds (docs/issues.md M2, docs/DESIGN.md §7.1).
     #: The server's ``node_timeout_seconds`` setting is the default budget
     #: every node gets; a node may declare its own: ``None`` (default)
     #: inherits the knob, ``0`` opts out entirely (this node knows its
@@ -287,7 +287,7 @@ class Node:
 
 
 def port_type_compatible(source_type: str, target: Input) -> bool:
-    """Connection rule from DESIGN.md §3: equal tags, declared accepts, or any."""
+    """Connection rule from docs/DESIGN.md §3: equal tags, declared accepts, or any."""
     if source_type == target.type:
         return True
     if target.type == "any" or source_type == "any":

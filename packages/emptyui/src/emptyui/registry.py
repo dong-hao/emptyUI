@@ -12,7 +12,7 @@ from emptyui.api import Node
 
 ENTRY_POINT_GROUP = "emptyui.nodes"
 
-#: UI metadata for the core port types (DESIGN.md §3) — the backend is the
+#: UI metadata for the core port types (docs/DESIGN.md §3) — the backend is the
 #: single source of truth for socket colors; the frontend's built-in table
 #: is only a fallback. Colors mirror the frontend table verbatim so the
 #: rendered result is unchanged. Node-declared ``port_types`` (plugin guide
@@ -23,7 +23,7 @@ CORE_PORT_TYPES: dict[str, dict[str, str]] = {
     "plot": {"color": "#d81b8c", "label": "Plot"},
     "mth5": {"color": "#9b59b6", "label": "MTH5 Archive"},
     "calibration": {"color": "#af7ac5", "label": "Calibration / Instrument Response"},
-    # NB: "selection" is intentionally absent (issues.md L2, decision
+    # NB: "selection" is intentionally absent (docs/issues.md L2, decision
     # 2026-10-14): no bundled node produces it (the Kernel Dataset surface
     # is M4-deferred) — the type returns together with its producer.
     # ViewSelection (mth5.table.selection) stays registered but hidden.
@@ -43,7 +43,7 @@ logger = logging.getLogger("emptyui")
 
 @dataclass
 class PluginInfo:
-    """Metadata about one discovered plugin (DESIGN.md §5.1).
+    """Metadata about one discovered plugin (docs/DESIGN.md §5.1).
 
     ``enabled`` is derived at discovery time from the disabled set; bundled
     plugins (``register.bundled = True``) are always enabled.
@@ -114,7 +114,7 @@ class Registry:
         return sorted(self._nodes)
 
     def manifests(self) -> dict[str, Any]:
-        # port_types: UI metadata for every port type (DESIGN.md §3) — the
+        # port_types: UI metadata for every port type (docs/DESIGN.md §3) — the
         # backend decides the colors (the frontend table is only a fallback).
         # The core tags ship here; node-declared ``port_types`` (plugin guide
         # §"Port types") override per tag, first declaration wins among nodes.
@@ -175,7 +175,7 @@ class Registry:
 
     def plugin_version_of(self, node_type: str) -> str | None:
         """Distribution version of the plugin providing ``node_type``
-        (issues.md M23) — the drift-warning comparison key. None for
+        (docs/issues.md M23) — the drift-warning comparison key. None for
         manual/test nodes registered outside any plugin."""
         name = self._plugin_of.get(node_type)
         if name is None:
@@ -226,7 +226,7 @@ def _plugin_version(ep) -> str:
 def _record_plugin_failure(
     registry: Registry, infos: list[PluginInfo], ep, bundled: bool, exc: Exception
 ) -> None:
-    """Degrade one failed plugin (issues.md M20): log it, and record the
+    """Degrade one failed plugin (docs/issues.md M20): log it, and record the
     PluginInfo BOTH in the discovery list and in the registry's plugin
     table — ``GET /api/plugins`` must show the error row (previously the
     info existed only in the local list and the API never saw it).
@@ -243,7 +243,7 @@ def _record_plugin_failure(
 
 
 def _rollback_partial(registry: Registry, before: set[str]) -> None:
-    """Remove the nodes a failed register() already added (issues.md M20):
+    """Remove the nodes a failed register() already added (docs/issues.md M20):
     a plugin is skipped whole — a half-registered plugin would expose
     nodes whose siblings vanished, and pollute the shared manual table
     across rebuilds."""

@@ -3,7 +3,7 @@ import type { MTNodeData } from "../stores/workflow";
 import type { InheritMap, NodeManifest } from "../api/client";
 
 /**
- * Chain-walking inheritance resolver (DESIGN.md §4 "Chain-walking inheritance").
+ * Chain-walking inheritance resolver (docs/DESIGN.md §4 "Chain-walking inheritance").
  *
  * `inherit` is a pure, frontend-only graph walk over the workflow document. For
  * a target node + param it returns the candidate value(s) supplied by the

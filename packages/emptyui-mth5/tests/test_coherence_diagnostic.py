@@ -1,7 +1,7 @@
 """M7: the inter-station coherence diagnostic must run at any station rate and
 must not fail silently. Before the fix it returned without a message above
 64 Hz (the 4096-sample segments are coarser than the 1/64 Hz band edge), and
-every skip was silent (issues.md M7).
+every skip was silent (docs/issues.md M7).
 """
 
 from __future__ import annotations

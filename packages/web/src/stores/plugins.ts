@@ -12,7 +12,7 @@ interface PluginsState {
   toggle: (name: string, enabled: boolean) => Promise<void>;
 }
 
-/** Plugin enable/disable state (DESIGN.md §5.1).
+/** Plugin enable/disable state (docs/DESIGN.md §5.1).
  *
  * Toggling goes through the backend (in-place registry hot reload) and then
  * refetches the node catalog — the palette is catalog-driven, so hiding/

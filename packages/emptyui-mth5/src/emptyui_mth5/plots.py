@@ -1,4 +1,4 @@
-"""TF analysis plots (Display nodes) — publication-quality style (DESIGN.md §10.6).
+"""TF analysis plots (Display nodes) — publication-quality style (docs/DESIGN.md §10.6).
 
 The rendering logic lives in :mod:`emptyui_mth5.plotting` (USArray
 conventions: log10 Period × log10 ρ_a, phase 0–90° fold for off-diagonal,
@@ -141,7 +141,7 @@ class PlotPhaseTensor(Node):
         "azimuth, axis ratio from the singular values, fill color = skew "
         "β (colorbar; β ≠ 0 indicates 3D structure; galvanic-distortion "
         "free). Needs the complete 2x2 impedance. MVP: no PT error bars "
-        "(Z_err → PT covariance propagation is nontrivial, DESIGN.md §10.6)."
+        "(Z_err → PT covariance propagation is nontrivial, docs/DESIGN.md §10.6)."
     )
     category = "Display"
     terminal = True  # M13: manifest-declared run visibility

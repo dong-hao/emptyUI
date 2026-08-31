@@ -5,7 +5,7 @@ released in the worker's ``finally``, cancellation is polled between nodes
 (never mid-node), and TTL cleanup refuses non-worker-done runs — with
 ``max_concurrent_runs=1`` a single stuck node returned 429 forever.
 
-The contract (issues.md M2, user decision 2026-10-13): a **default
+The contract (docs/issues.md M2, user decision 2026-10-13): a **default
 deadline, editable in Settings, enforced per node**. Each node gets the
 full budget (reset at node boundaries), so a long pipeline of quick nodes
 is never killed — only a single stuck node is. The deadline is enforced by

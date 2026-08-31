@@ -1,4 +1,4 @@
-"""Cross-run node cache + partial execution ("execute to here") — DESIGN.md §7.
+"""Cross-run node cache + partial execution ("execute to here") — docs/DESIGN.md §7.
 
 Feature tests: structural signatures, hit/miss invalidation, artifact
 restore, ancestor-closure targets. Error surfaces (unknown targets) live in

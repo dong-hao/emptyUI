@@ -1,7 +1,7 @@
 # emptyUI
 
 A node-based, ComfyUI-inspired visual workflow interface for magnetotelluric
-(MT) data processing and visualization. See [DESIGN.md](DESIGN.md) for the
+(MT) data processing and visualization. See [docs/DESIGN.md](docs/DESIGN.md) for the
 architecture and design decisions.
 
 ## Layout
@@ -80,7 +80,7 @@ cd packages/web && npm run dev
 ### Commit-log convention
 
 ```
-Type: one-line summary — the what and where (DESIGN.md §ref)
+Type: one-line summary — the what and where (docs/DESIGN.md §ref)
 
 Short paragraph: the problem/motivation — why the change exists.
 
@@ -92,13 +92,16 @@ message-only/docs chores + why).
 ```
 
 `Type` is one of `Feat:`, `Fix:`, `Perf:`, `Chore:`, `Docs:`. Keep the
-subject under ~72 characters where possible; the DESIGN.md section
+subject under ~72 characters where possible; the docs/DESIGN.md section
 reference anchors the change to the design record. The message must
 describe the diff it accompanies — a message narrating changes that are
 not in the commit falsifies the decision record. Historical references (history §13
 and above) are written `history §N` and resolve in `docs/history/`, which
 preserves the original numbering verbatim; current-contract references are
-written `DESIGN.md §<n>` against DESIGN.md's living numbering (§1–§12).
+written `docs/DESIGN.md §<n>` against docs/DESIGN.md's living numbering (§1–§12).
+Both records live under `docs/` since 2026-10-17; commit messages written
+before that date cite the repo-root `DESIGN.md`/`issues.md` paths — do not
+rewrite them (the same precedent as `docs/history/`'s verbatim records).
 
 ## Browser end-to-end tests (Playwright)
 
@@ -128,7 +131,7 @@ npm run test:headed         # watch the browser while it runs
 Current state: **M0–M3 complete (2026-09-09)**; M4 (community & advanced
 backlog) in progress. The full feature status, the ranked M4 backlog and the
 processing-correctness record (unit chain, USArray SDG31 ground-truth
-verification, MTU-5A official-product parity) live in [DESIGN.md](DESIGN.md)
+verification, MTU-5A official-product parity) live in [docs/DESIGN.md](docs/DESIGN.md)
 §12; dated delivery records are preserved in `docs/history/`.
 
 Feature summary:
@@ -157,7 +160,7 @@ Feature summary:
   over the full band). Records + reproduction scripts in `test/verification/`.
 
 The M4 backlog (batch runner, disk cache, cross-level FC pooling, MMT, …) is
-ranked in DESIGN.md §12.2.
+ranked in docs/DESIGN.md §12.2.
 
 ### UI conventions (stable)
 
@@ -165,14 +168,14 @@ ranked in DESIGN.md §12.2.
   right-hand panel shows metadata (id, version, ports, description, deps) and
   Delete. Hover protocol: one-sentence tooltips; palette in fixed category
   order (Data I/O, Processing, Display), nodes alphabetized, utility nodes
-  hidden by default (DESIGN.md §4).
+  hidden by default (docs/DESIGN.md §4).
 - **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
   renders inline (drag-resizable) and `Save Plot` exports. No run-level gallery
-  (DESIGN.md §8).
+  (docs/DESIGN.md §8).
 
 ## Documentation
 
-- [DESIGN.md](DESIGN.md) — the living design contract, organized by subsystem
+- [docs/DESIGN.md](docs/DESIGN.md) — the living design contract, organized by subsystem
   (§7 backend, §8 frontend, §9 data/instruments, §10 processing semantics,
   §11 deployment, §12 roadmap).
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.

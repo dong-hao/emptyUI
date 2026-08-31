@@ -1,4 +1,4 @@
-"""Plugin enable/disable (DESIGN.md §5.1) — happy path.
+"""Plugin enable/disable (docs/DESIGN.md §5.1) — happy path.
 
 Error surfaces (disabled-plugin validation message, unknown-plugin 404)
 live in test_errors.py. The suite builds fake entry points so it never

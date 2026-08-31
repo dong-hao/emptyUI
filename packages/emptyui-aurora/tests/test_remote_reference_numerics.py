@@ -3,7 +3,7 @@ remote-reference pairing accepts one sample of label difference.
 
 Labels are window CENTRES (scipy segment centre = nperseg / 2 / fs past the
 window start); the offset is part of the convention and is checked here
-(issues.md M9; the convention itself is L11).
+(docs/issues.md M9; the convention itself is L11).
 """
 
 from __future__ import annotations

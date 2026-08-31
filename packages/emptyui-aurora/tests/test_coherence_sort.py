@@ -448,7 +448,7 @@ def test_realistic_size_stays_bounded():
 
 def test_pinv_hermitian2_batch_matches_reference():
     """The closed-form batched 2x2 pseudoinverse equals np.linalg.pinv
-    (issues.md L23: the SVD path was 11 s of the 13.7 s coherence sort on
+    (docs/issues.md L23: the SVD path was 11 s of the 13.7 s coherence sort on
     a one-day RR corpus) — including the degenerate fallback."""
     import numpy as np
     from emptyui_aurora._processing import _pinv_hermitian2_batch
@@ -473,7 +473,7 @@ def test_pinv_hermitian2_batch_matches_reference():
 
 def test_apply_below_period_zero_sorts_every_bin():
     """0 (the default) and an unset scope are the same contract: EVERY bin
-    is sorted, no bin is flagged unsorted (issues.md M16 follow-up — the
+    is sorted, no bin is flagged unsorted (docs/issues.md M16 follow-up — the
     'apply below = 0 still takes effect' report was this semantics, not a
     bug; the param is relabelled 'Sort below period (s)' to say so)."""
     source = synthetic_source(12)

@@ -1,4 +1,4 @@
-"""Shared publication-quality TF plot helpers (DESIGN.md §10.6).
+"""Shared publication-quality TF plot helpers (docs/DESIGN.md §10.6).
 
 Conventions follow the USArray reference figure (``SDG31b_H28coh.png``):
 x = Period (secs) on log10, apparent resistivity on log10 (Ω·m), phase in
@@ -80,7 +80,7 @@ def run_notes(tf) -> str:
 
 
 def _wrap_notes(fig, text: str, width_px: float, fontsize: float) -> str:
-    """Greedy word-wrap measured in display pixels (DESIGN.md §10.6).
+    """Greedy word-wrap measured in display pixels (docs/DESIGN.md §10.6).
 
     Proportional fonts make character-count wrapping unreliable, so each
     candidate line is measured with the real renderer: a word moves to the
@@ -111,7 +111,7 @@ def _annotate_notes(fig, ax, notes: str, show: bool = True,
     """Place the provenance note below the x-axis label of ``ax``.
 
     Anchored to the *measured* x-label bottom (never overlapping it,
-    DESIGN.md §10.6), centered on the axes, and word-wrapped so no line is wider than
+    docs/DESIGN.md §10.6), centered on the axes, and word-wrapped so no line is wider than
     the axes — an unwrapped long note used to blow the figure width up via
     ``bbox_inches="tight"``. Skipped entirely when ``show`` is False (the
     production-images toggle on the plot nodes).
@@ -191,7 +191,7 @@ def _decade_limits(values, lo=None, hi=None):
 
 def _fold_phase_deg(phase):
     """Fold phases by ±180° into [0°, 180°) — the off-diagonal display
-    convention (DESIGN.md §10.6: Z and −Z carry the same physics, so the
+    convention (docs/DESIGN.md §10.6: Z and −Z carry the same physics, so the
     USArray panel shows both XY and YX in one quadrant).
 
     A single ``p < 0 → p + 180`` pass (the old behaviour) left every wrapped
@@ -269,7 +269,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
 
     ``rho_ylim`` optionally pins the apparent-resistivity y-limits
     (``(min, max)``) instead of the auto whole-decade fit — used to match an
-    external reference figure's axis range exactly (DESIGN.md §10.6, the
+    external reference figure's axis range exactly (docs/DESIGN.md §10.6, the
     SDG31b_H28coh.png head-to-head: 5 - 4e4 Ohm m). ``show_params=False``
     drops the processing-provenance line for production images (history §23.3).
     """
@@ -311,7 +311,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
                 "plot; check the calibration/decimation of the source FC")
         y_min, y_max = _decade_limits(np.concatenate(rho_all))
     # Off-diagonal phase spans 0-90° -> half-height panel; diagonal spans
-    # the full signed range -> full-height panel (DESIGN.md §10.6).
+    # the full signed range -> full-height panel (docs/DESIGN.md §10.6).
     phase_h = 1.3 if mode == "off-diagonal" else 2.6
     fig = plt.figure(figsize=(6.5, 8.0))
     gs = fig.add_gridspec(2, 1, height_ratios=[3.2, phase_h], hspace=0.18)
@@ -338,14 +338,14 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
                         label=label, capsize=2.5, markersize=5,
                         linewidth=1.0, elinewidth=0.8)
         # L-M8 display convention: the plot FOLDS the off-diagonal phase
-        # to 0-90° (the half-height panel, DESIGN.md §10.6) — the ViewTF
+        # to 0-90° (the half-height panel, docs/DESIGN.md §10.6) — the ViewTF
         # table deliberately shows the RAW ±180° values (provenance: what
         # was estimated); the fold is display-only.
         ph = _fold_phase_deg(phase)[ok] if mode == "off-diagonal" else phase[ok]
         if mode == "off-diagonal":
             # the axis is (0°, 90°) and matplotlib drops what falls outside
             # it — count those instead of losing the series in silence
-            # (issues.md H5: a convention-flipped import drew an empty panel)
+            # (docs/issues.md H5: a convention-flipped import drew an empty panel)
             outside = (ph < 0.0) | (ph > 90.0)
             if np.any(outside):
                 clipped[label] = (int(outside.sum()),
@@ -364,7 +364,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
             for name, (n, lo, hi) in sorted(clipped.items())
         )
         _log.warning(
-            "off-diagonal phase panel shows only 0°–90° (DESIGN.md §10.6) — "
+            "off-diagonal phase panel shows only 0°–90° (docs/DESIGN.md §10.6) — "
             "%s fall outside it and are clipped: no ±180° fold can place "
             "them in the display quadrant. The raw values are still in the "
             "View TF table; check the impedance sign/phase convention of "
@@ -399,7 +399,7 @@ def plot_impedance_response(tf, mode: str, path, rho_ylim=None,
 
 
 def plot_tipper(tf, path, ylim=None, show_params: bool = True):
-    """Render the tipper figure — Re/Im panels, Tzx/Tzy series (DESIGN.md §10.6).
+    """Render the tipper figure — Re/Im panels, Tzx/Tzy series (docs/DESIGN.md §10.6).
 
     Mirrors the AppRes & Phase grammar exactly (USArray reference figure):
     panels = Re (top) / Im (bottom); series = Tzx = OPEN circle (blue) /
@@ -514,7 +514,7 @@ def _ellipse_outline(p, w_px, h_px, angle_deg, px_per_decade, px_per_y, n=72):
 
 
 def plot_phase_tensor(tf, path, show_params: bool = True):
-    """Render the Caldwell-style phase-tensor figure (DESIGN.md §10.6).
+    """Render the Caldwell-style phase-tensor figure (docs/DESIGN.md §10.6).
 
     PT ellipses vs period: the image ellipse of Φ = Re(Z)⁻¹·Im(Z) at each
     period (semi-axes scaled by the largest σ1 so the biggest ellipse fits

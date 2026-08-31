@@ -159,7 +159,7 @@ def _refuse_if_calibrated(data, where: str) -> None:
     ignores the ``applied`` flag. An upstream Calibrate leaves its filters at
     ``applied=False`` (the response is already removed), so a second pass divides
     the same response out again: a silent double correction. Refuse loudly
-    instead (DESIGN.md §9.2).
+    instead (docs/DESIGN.md §9.2).
     """
     done = sorted(ch for ch, pairs in channel_calibration(data).items()
                   if any(not applied for _, applied in pairs))
@@ -169,12 +169,12 @@ def _refuse_if_calibrated(data, where: str) -> None:
             "removed by an upstream Calibrate; a second time-domain Calibrate "
             "would divide that response out again (a silent double correction). "
             "Remove the second Calibrate node, or apply the response once at the "
-            "Compute FC stage (DESIGN.md §9.2, issues.md M8)")
+            "Compute FC stage (docs/DESIGN.md §9.2, docs/issues.md M8)")
 
 
 class Calibrate(Node):
     type = "mth5.calibrate"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Calibrate"
     tooltip = "Remove the instrument response (calibration) from a time series."

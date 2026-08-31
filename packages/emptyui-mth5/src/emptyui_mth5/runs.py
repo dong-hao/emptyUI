@@ -56,7 +56,7 @@ def read_run_channels(run_obj):
     validation storm per channel (~6 ms each, ~40x the data read itself;
     history §24.8 performance note) for metadata the duck payload never
     consumes — on a burst archive that made full-collection extraction
-    metadata-bound (issues.md L21). The fast result is pinned bit-identical
+    metadata-bound (docs/issues.md L21). The fast result is pinned bit-identical
     to the slow path (``test_read_run_channels_matches_slow_path``).
     """
 
@@ -219,7 +219,7 @@ def _group_id(group_obj) -> str:
 
 
 def _dipole_length_m(run_obj) -> float:
-    """First positive electric-channel dipole length (issues.md L-A4).
+    """First positive electric-channel dipole length (docs/issues.md L-A4).
 
     Read from the channel's HDF5 attrs (free — no mt_metadata storm);
     0.0 when the archive carries none. Compute FC falls back to this
@@ -344,7 +344,7 @@ def _resolve_run(station_obj, run: str):
     if str(run).strip():
         # direct HDF5 resolution — the run summary is a per-station walk
         # (~30 ms on a burst archive) and paying it per resolved run made
-        # full-collection extraction metadata-bound (issues.md L21)
+        # full-collection extraction metadata-bound (docs/issues.md L21)
         name = str(run).strip()
         try:
             return station_obj.get_run(name)
@@ -396,7 +396,7 @@ def _largest_runs_hint(summary, limit: int = 3) -> str:
 
 class ExtractRun(Node):
     type = "mth5.io.extract_run"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Extract Run"
     tooltip = "Extract one run's — or all runs' — time series from an MTH5 archive."
@@ -660,7 +660,7 @@ class ExtractRun(Node):
             payload = _run_duck_payload(survey_obj, run_obj, lo=clo, hi=chi)
             # history §24.12: the response-chain filters are the same few objects
             # across members of one survey — resolve each name-set once and
-            # assign it to EVERY member (issues.md L23: the fresh per-member
+            # assign it to EVERY member (docs/issues.md L23: the fresh per-member
             # registry from _run_duck_payload used to survive on all but the
             # first member of each name-set, so downstream saw 4784 distinct
             # filter objects instead of a handful and the FC response cache
@@ -994,7 +994,7 @@ def _crop_to_runts(source, channels, sample_rate, start_idx, n_common, start_iso
 
 class AlignRuns(Node):
     type = "mth5.runs.align"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Align Runs"
     tooltip = "Crop two time series to their common acquisition overlap (remote-reference prerequisite)."
@@ -1016,7 +1016,7 @@ class AlignRuns(Node):
     )
     category = "Processing"
     inputs = (
-        # collection_ok (issues.md M24): Extract Run 'time range' payloads
+        # collection_ok (docs/issues.md M24): Extract Run 'time range' payloads
         # (burst-mode corpora) align member-wise — the frontend's wiring
         # check gates ts.runs payloads on this flag (DESIGN §4)
         Input("data1", "ts.run", label="time series 1", collection_ok=True),
@@ -1326,7 +1326,7 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
                     "align: dropping input %d run '%s' — degenerate after "
                     "the overlap crop", idx, _member_id(m, ext))
                 continue
-            # issues.md L22: collection members stay duck payloads —
+            # docs/issues.md L22: collection members stay duck payloads —
             # rebuilding a RunTS per member paid ~70 ms of mt_metadata
             # validation each (5993 ChannelTS + 1196 RunTS = 84 s of the
             # 98 s align on the one-day RR corpus); the crop is an isel

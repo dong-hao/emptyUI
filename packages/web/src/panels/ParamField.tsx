@@ -17,7 +17,7 @@ interface Props {
   selectOptions?: unknown[];
 }
 
-/** ComfyUI-parity text editing (DESIGN.md §8.1): the input holds a local
+/** ComfyUI-parity text editing (docs/DESIGN.md §8.1): the input holds a local
  *  draft while focused — typing never touches the workflow store, so the
  *  caret stays wherever the user put it for as long as they like (writing
  *  per keystroke raced the store round-trip: React re-rendered with the

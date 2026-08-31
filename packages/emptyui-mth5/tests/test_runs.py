@@ -824,7 +824,7 @@ def test_read_run_channels_matches_slow_path(archive):
     values, dtype, the time axis, and every attr the duck payload path
     consumes (filters for the response registry, units/type for channel
     classification, sample_rate, time_period.start for the time-base
-    cross-check). issues.md L21."""
+    cross-check). docs/issues.md L21."""
     import numpy as np
     from emptyui_mth5.runs import read_run_channels
 
@@ -852,7 +852,7 @@ def test_full_extraction_avoids_metadata_storms(archive, tmp_path,
                                                 monkeypatch):
     """Full-collection extraction from a burst archive must not pay the
     per-channel metadata storm: RunGroup.get_channel is never called and
-    the station run summary is built at most once (issues.md L21 — the
+    the station run summary is built at most once (docs/issues.md L21 — the
     day_12h profile: 347k HDF5 attr reads + 146 run_summary walks for
     145 runs made a 15.6 s extraction)."""
     from mth5.groups import run as run_mod
@@ -888,7 +888,7 @@ def test_align_collections_never_rebuild_runts(monkeypatch):
     member's dataset instead of rebuilding a RunTS (whose mt_metadata
     validation storm cost 84 s of the 98 s align on a one-day RR corpus —
     5993 ChannelTS + 1196 RunTS constructions for 598+598 members;
-    issues.md L22). The crop must be data-identical to the rebuild, and
+    docs/issues.md L22). The crop must be data-identical to the rebuild, and
     the payload attrs downstream consumers read (sample_rate, filters)
     ride along."""
     import mt_timeseries

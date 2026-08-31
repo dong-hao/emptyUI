@@ -1,9 +1,9 @@
-"""Path confinement for remote/embedded mode (DESIGN.md §11.2).
+"""Path confinement for remote/embedded mode (docs/DESIGN.md §11.2).
 
 Storage realms: a read-only data root (platform-provisioned original
 data — inputs resolve only inside it), the writable per-run workspace
 (artifacts/exports — output params resolve there) and the project
-directory (issues.md M23) — the anchor for portable relative input
+directory (docs/issues.md M23) — the anchor for portable relative input
 paths in local mode. Data-root confinement activates only when a data
 root is configured; project-dir anchoring activates when a project dir
 is configured and no data root takes precedence; local dev with neither
@@ -21,7 +21,7 @@ class PathPolicy:
 
     Three realms: the read-only data root (remote-mode confinement), the
     writable per-run workspace (outputs) and the project directory
-    (issues.md M23) — the anchor that makes relative input paths portable:
+    (docs/issues.md M23) — the anchor that makes relative input paths portable:
     a workflow saved with project-relative paths resolves against
     ``project_dir`` on any machine, instead of silently depending on the
     server's CWD.

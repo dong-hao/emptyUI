@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Plugin enable/disable settings dialog (DESIGN.md §5.1).
+ * Plugin enable/disable settings dialog (docs/DESIGN.md §5.1).
  *
  * Full-stack: the backend is the shared dev/CI instance and runtime toggles
  * are in-memory only, so the test first ensures a known state (example

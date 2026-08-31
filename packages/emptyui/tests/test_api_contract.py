@@ -1,6 +1,6 @@
 """API contract between the backend and the handwritten frontend types.
 
-DESIGN.md §2: the frontend API types are handwritten
+docs/DESIGN.md §2: the frontend API types are handwritten
 (``packages/web/src/api/client.ts``) — the node manifest is plugin-open
 (unknown fields are ignored downstream), so catalog types stay deliberately
 loose. This test pins the server-side *shapes* the frontend depends on:
@@ -114,7 +114,7 @@ def test_port_types_has_no_producer_less_selection(client: TestClient):
 
 
 def test_no_select_param_offers_a_blank_option():
-    """A blank dropdown option is an unnamed choice (issues.md, user report
+    """A blank dropdown option is an unnamed choice (docs/issues.md, user report
     2026-10-14: Compute FC's prewhitening showed "first difference" and a
     blank). Empty-string options carry honest labels now — "none" / "same
     as shallow" — aliased to the canonical internals at execution."""

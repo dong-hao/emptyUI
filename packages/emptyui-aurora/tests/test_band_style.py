@@ -1,4 +1,4 @@
-"""Tests for the two band-construction schemes (DESIGN.md §10.2):
+"""Tests for the two band-construction schemes (docs/DESIGN.md §10.2):
 ``band_style="l2u"`` (default) — the reference-template band table with
 log-uniform window-starvation coarsening — and ``band_style="uniform"``
 (formerly named ``"log"``) — the uniform log2-grid partition with

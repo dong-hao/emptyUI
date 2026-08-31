@@ -1,4 +1,4 @@
-"""Workspace MTH5 + Fourier-coefficient persistence (DESIGN.md §3, history §14).
+"""Workspace MTH5 + Fourier-coefficient persistence (docs/DESIGN.md §3, history §14).
 
 The server workspace is itself an MTH5 archive: every intermediate result a
 node chooses to persist is written into ``<workspace>/workspace.mth5``. FCs are
@@ -80,7 +80,7 @@ def close_workspace_mth5(ctx) -> None:
 
 
 def _ensure_survey(m, survey: str):
-    # issues.md L24: this walk re-reads+validates the survey group metadata
+    # docs/issues.md L24: this walk re-reads+validates the survey group metadata
     # on every persisted level (~1200 calls on a one-day RR corpus) — cache
     # on the open MTH5 handle (the cache lives and dies with it)
     cache = getattr(m, "_emptyui_ensure_cache", None)
@@ -127,7 +127,7 @@ def _write_fc_channels(dec_level, fc, sample_rate: float):
     ``FCDecimationGroup.from_xarray`` walks a pandas ``channel_summary``
     DataFrame per channel (a duplicate-name check) and constructs a fresh
     ``FCChannelDataset`` for each — on a one-day RR corpus that made
-    persist 7x the FC math itself (issues.md L24). This replicates
+    persist 7x the FC math itself (docs/issues.md L24). This replicates
     ``from_xarray``'s metadata construction and ``add_channel`` calls
     exactly (same fields, same orientation handling, same dtypes), with
     the duplicate check reduced to one ``groups_list`` lookup. Returns the
@@ -230,7 +230,7 @@ def persist_fc_level(
         station_obj = _ensure_station(survey_obj, station)
         fc_group = _ensure_fc_group(station_obj, run)
         dec_level = _ensure_dec_level(fc_group, decimation_level)
-        # the fast writer (issues.md L24): identical file content to
+        # the fast writer (docs/issues.md L24): identical file content to
         # mth5's from_xarray+update_metadata, minus the per-channel
         # channel_summary DataFrame walks — pinned by
         # test_persist_channel_writer_matches_mth5_from_xarray

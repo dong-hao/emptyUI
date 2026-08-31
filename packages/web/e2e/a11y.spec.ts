@@ -1,4 +1,4 @@
-/** Accessibility assertions (issues.md L1): named param controls, live
+/** Accessibility assertions (docs/issues.md L1): named param controls, live
  *  run-status regions, and dialogs that trap focus and name their close
  *  control. */
 import { expect, test } from "@playwright/test";

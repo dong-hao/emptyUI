@@ -2,7 +2,7 @@ import type { Edge } from "@xyflow/react";
 import type { ArtifactInfo } from "../stores/run";
 
 /**
- * Resolve the artifact flowing into a viewer node's body (issues.md L3):
+ * Resolve the artifact flowing into a viewer node's body (docs/issues.md L3):
  * the input edge (matched on the node's declared input port) names a
  * source node + source handle; only the artifact whose `handle` names
  * that same OUTPUT port feeds it. §7.2 makes the handle the authoritative

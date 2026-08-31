@@ -56,7 +56,7 @@ def test_estimate_tf_returns_standard_errors():
 
 def test_build_tf_carries_errors_and_station_identity():
     """build_tf stores element stds in transfer_function_error and the station
-    identity in station/survey metadata (DESIGN.md §10.6)."""
+    identity in station/survey metadata (docs/DESIGN.md §10.6)."""
     periods = np.array([2.0, 4.0])
     Z = np.array([[[1 + 0j, 0j], [0j, 2 + 0j]],
                   [[1 + 0j, 0j], [0j, 2 + 0j]]])
@@ -537,7 +537,7 @@ def test_nan_in_unused_auxiliary_channel_is_tolerated():
 
 
 def test_estimate_tf_no_banding_inherit_and_remote_reference_rule():
-    """Manifest-level contracts (DESIGN.md §10.3 + §4 `enabled_when`):
+    """Manifest-level contracts (docs/DESIGN.md §10.3 + §4 `enabled_when`):
     - Estimate TF declares NO chain-walking inherit of banding params from
       the fc chain (history §24.9 — the sort is band-free; the estimator owns
       banding);

@@ -1,7 +1,7 @@
 """Every node class in this plugin must end up in the default registry.
 
 Regression: RotateTF was fully implemented and tested but never added in
-plugin.py, so the node was unreachable from the UI (DESIGN.md §11 claims it
+plugin.py, so the node was unreachable from the UI (docs/DESIGN.md §11 claims it
 delivered). This guards the plugin wiring itself, not node behavior.
 """
 

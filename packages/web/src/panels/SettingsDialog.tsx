@@ -47,7 +47,7 @@ function LiveKnobRow({
   );
 }
 
-/** Toolbar ⚙ Settings dialog (DESIGN.md §7.4).
+/** Toolbar ⚙ Settings dialog (docs/DESIGN.md §7.4).
  *
  * Sections: Plugins (§5.1 enable/disable, bundled read-only), Server &
  * retention (live-editable knobs, explicit Save), Deployment (read-only

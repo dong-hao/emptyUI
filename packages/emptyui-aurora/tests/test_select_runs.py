@@ -1,4 +1,4 @@
-"""Select Runs node tests (DESIGN.md §10.4): run-level QC by per-window
+"""Select Runs node tests (docs/DESIGN.md §10.4): run-level QC by per-window
 impedance-level deviation in a reference band, with the soft diurnal
 prior. Weckmann et al. (2005, GJI 161:635): power and coherence alone
 mislead; here the score is the run's stable impedance level vs the

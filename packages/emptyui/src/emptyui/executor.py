@@ -1,11 +1,11 @@
-"""DAG executor (DESIGN.md §7).
+"""DAG executor (docs/DESIGN.md §7).
 
 Sequential topological execution over validated workflows. Cancellation
 is supported via a threading.Event polled between nodes. Results are
 content-addressed in a cross-run :class:`NodeCache` (structural signatures
 propagate upstream changes), and runs can be restricted to a target node's
 ancestral closure ("execute to here"); per-node watchdog deadlines
-(issues.md M2) bound each node's budget. Concurrency (thread-pool
+(docs/issues.md M2) bound each node's budget. Concurrency (thread-pool
 branches) remains future work. (The M0/M3 milestone tags are history —
 docs/history/.)
 """
@@ -46,7 +46,7 @@ class ExecutionError(Exception):
 
 
 class NodeDeadlineExceeded(Exception):
-    """A node exceeded its watchdog budget (issues.md M2).
+    """A node exceeded its watchdog budget (docs/issues.md M2).
 
     Raised by :meth:`Executor._execute_with_deadline` when the node's
     daemon thread did not finish within the budget. The node thread itself
@@ -83,7 +83,7 @@ def _as_float(value: Any) -> float:
 
 
 def _ts_summary(value: Any) -> dict[str, Any] | None:
-    """Lightweight extent summary for a time-series payload (DESIGN.md §8.3).
+    """Lightweight extent summary for a time-series payload (docs/DESIGN.md §8.3).
 
     Drives the frontend time-selector bar. Duck-typed over the payload
     shapes so the core package stays independent of mth5:
@@ -229,7 +229,7 @@ def _ts_summary(value: Any) -> dict[str, Any] | None:
 
 
 def _fc_summary(value) -> dict[str, Any] | None:
-    """Lightweight rate-tier summary for an fc payload (DESIGN.md §8.3).
+    """Lightweight rate-tier summary for an fc payload (docs/DESIGN.md §8.3).
 
     A merged burst FC database is rate-keyed (`{tier: Dataset}`); the plot
     nodes select a tier by its actual sample rate — the summary streams the
@@ -383,7 +383,7 @@ class Executor:
 
         The path part is taken data-root-relative (POSIX form) when the
         file lives under the data root or project dir, so cache keys
-        survive relocation (DESIGN.md §7.1, §12.3); the absolute path is
+        survive relocation (docs/DESIGN.md §7.1, §12.3); the absolute path is
         used otherwise. The stat half still moves with the file: a plain
         copy refreshes ``mtime_ns`` and misses the cache (recompute — the
         safe direction); only mtime-preserving moves stay cache hits.
@@ -438,7 +438,7 @@ class Executor:
         self, wnode: WorkflowNode, manifest
     ) -> str | None:
         """Drift message when the document records a different plugin
-        version than this server runs (issues.md M23, user decision
+        version than this server runs (docs/issues.md M23, user decision
         2026-10-15: the record is informational — the run always uses the
         installed codebase, loudly). None when there is nothing to compare
         (no record, a manual/test node outside any plugin, or an exact
@@ -474,7 +474,7 @@ class Executor:
         data_root=None,
         project_dir=None,
     ) -> str:
-        """Structural cache signature for one node (DESIGN.md §7).
+        """Structural cache signature for one node (docs/DESIGN.md §7).
 
         ``sha256(type, manifest version, effective params, per-input upstream
         signatures)`` — node ids are deliberately excluded, so structurally
@@ -564,7 +564,7 @@ class Executor:
     @staticmethod
     def _relocated_output(value: Any, dest_by_src: dict[str, str]) -> Any:
         """Rewrite an artifact-valued output's ``path`` to this run's copy
-        (issues.md M4).
+        (docs/issues.md M4).
 
         A cache hit copies the artifact files into the new run's workspace
         — the stored value must point THERE, not into the producer run's
@@ -603,7 +603,7 @@ class Executor:
 
     @staticmethod
     def _effective_deadline(manifest, node_timeout_seconds: float | None) -> float | None:
-        """The watchdog budget for one node (issues.md M2).
+        """The watchdog budget for one node (docs/issues.md M2).
 
         The node's declared ``timeout`` wins: ``0`` opts out entirely,
         ``> 0`` is its own budget; ``None`` inherits the server knob.
@@ -675,14 +675,14 @@ class Executor:
         `targets` restricts execution to the given nodes plus their
         ancestors ("execute to here"); other nodes emit no events.
 
-        `data_root` (DESIGN.md §11.2) confines input path params to a
+        `data_root` (docs/DESIGN.md §11.2) confines input path params to a
         read-only root and resolves output path params into the run
         workspace; None keeps local-dev behavior. `project_dir` (§11.2,
         M23) anchors relative input paths in local mode (data root takes
         precedence) and makes cache keys project-relative; None resolves
         relative inputs against the process CWD (status quo).
 
-        `node_timeout_seconds` (issues.md M2) is the per-node watchdog
+        `node_timeout_seconds` (docs/issues.md M2) is the per-node watchdog
         budget — each node must finish within it or the run ends with a
         ``timeout`` terminal status and the node is abandoned (its thread
         dies with the process). None/0 = no watchdog (headless default);
@@ -732,7 +732,7 @@ class Executor:
             )
             raise ExecutionError(missing[0], ValueError(cycle_error))
 
-        # Snapshot the manifests this run needs at start (DESIGN.md §5.1):
+        # Snapshot the manifests this run needs at start (docs/DESIGN.md §5.1):
         # a plugin enable/disable toggle mid-run must not yank a node out of
         # an executing workflow — the run completes under the manifests it
         # started with. NB the whole TABLE is fetched once (M-C5): per-node

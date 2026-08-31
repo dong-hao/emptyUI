@@ -76,7 +76,7 @@ Repository layout (monorepo):
 ```
 emptyui/
 ├── README.md
-├── DESIGN.md                        # the living contract (this document)
+├── docs/DESIGN.md                        # the living contract (this document)
 ├── docs/
 │   ├── deployment.md                # remote/embedded deployment guide
 │   ├── plugin-guide.md              # plugin authoring contract
@@ -608,7 +608,7 @@ Rules that keep the ecosystem healthy:
    (filesystem access, network, subprocesses) is the plugin's own business and
    the user's own risk; the settings dialog's plugin list is therefore the
    natural place to audit what is installed.
-- **Failure degradation (issues.md M20)**: a plugin that fails to import,
+- **Failure degradation (docs/issues.md M20)**: a plugin that fails to import,
    crashes in `register()`, or declares a **duplicate node type** is skipped
    whole (its partial registrations roll back; the first registration wins
    the type) — the instance starts, the conflict lands in the plugin's
@@ -753,7 +753,7 @@ One file = one reproducible pipeline.
   hit the executor re-registers outputs and
   **copies artifact files into the new run's workspace**, rewriting each
   artifact-valued output's `path` to this run's copy as a **shallow copy**
-  (issues.md M4 — the stored value and the `artifact` event name the same
+  (docs/issues.md M4 — the stored value and the `artifact` event name the same
   file, and no downstream consumer ever resolves into the producer run's
   TTL-reclaimable workspace; the cache entry's dict is never mutated);
   vanished artifact
@@ -790,7 +790,7 @@ One file = one reproducible pipeline.
   cancelling during the last node reports `cancelled`); toolbar **✕ Cancel**
   enabled while queued/running. A node cannot be interrupted mid-execution —
   cancellation takes effect at the next node boundary.
-- **Watchdog (per-node deadline, issues.md M2)**: every node gets a budget —
+- **Watchdog (per-node deadline, docs/issues.md M2)**: every node gets a budget —
   default 600 s, live-editable as `node_timeout_seconds` (§7.4; 0 = off) —
   reset at each node boundary, so a long pipeline of quick nodes is never
   killed; only a single stuck node is. The node runs on a **daemon thread**;
@@ -832,7 +832,7 @@ The `artifact` event carries the output `handle` id so viewer nodes resolve
 exactly which figure arrives on which input edge, even when one node publishes
 several figures.
 
-**Node warnings ride the stream** (issues.md H7): `ctx.warn(message)` emits
+**Node warnings ride the stream** (docs/issues.md H7): `ctx.warn(message)` emits
 `node_warning` — a degradation the UI renders on the node card (an amber ⚠
 marker, full text on hover) and in the properties panel (a readable amber
 block, deduped). This is how the Phoenix loaders surface a missing
@@ -886,9 +886,9 @@ source of truth (`GET/PUT /api/settings`).
 - **Live-editable whitelist** (`LIVE_KNOBS` in `emptyui.settings`):
   `workspace_ttl_seconds` (null/0 = off), `max_concurrent_runs`
   (null/0 = unlimited), `cache_max_entries` (default 256; **0 = off** —
-  the worker skips the cache and the view reports 0, issues.md L6),
+  the worker skips the cache and the view reports 0, docs/issues.md L6),
   `cache_max_gb` (the memory-tier byte budget, default null = off —
-  §7.4 unbounded-local policy; approximate sizing, issues.md L5),
+  §7.4 unbounded-local policy; approximate sizing, docs/issues.md L5),
   `node_timeout_seconds` (per-node watchdog budget, default 600, 0 = off —
   §7.1). Applied
   immediately (TTL loop re-reads per pass, admission check reads the live
@@ -902,7 +902,7 @@ source of truth (`GET/PUT /api/settings`).
   confinement/serving mid-flight is an architecture change; env + restart only.
 - **Planned (reserved, inert)**: `cache_ttl_days` — the §12.3 disk cache
   lands into this scaffolding (`cache_max_gb` graduated to the live knobs
-  for the memory tier, issues.md L5; the disk cache will introduce its own
+  for the memory tier, docs/issues.md L5; the disk cache will introduce its own
   knobs; `project_dir` graduated to the deployment rows — it is live as the
   relative-path anchor since M23).
 - **Persistence**: one sectioned JSON file via `EMPTYUI_SETTINGS_PATH`
@@ -1400,7 +1400,7 @@ session, not wall time: ~1 h at 1 Hz with window 256 gives ~28 windows
 holds thousands of windows). Rule of thumb: each session should hold
 ≥ ~20–30 FC windows at the QC reference band. The deep level bounds how
 fine is useful — one deepest-level window spans ~18.2 h of raw 1 Hz data
-(window 256, 5 levels × factor 4: 256·4⁴ s — issues.md L10; a session
+(window 256, 5 levels × factor 4: 256·4⁴ s — docs/issues.md L10; a session
 finer than that still feeds the shallow QC-reference levels fine), and
 each dropped session costs ±1 window per level — so finer than ~10 min
 mostly buys scoring noise.
@@ -1463,7 +1463,7 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   remote-reference pairing across separately-computed runs (burst slots).
   Window labels are the window **centres** (scipy convention: the first
   sample used + N/(2·fs)), and that first sample sits at the actual sample
-  time of the data (rounded to a whole sample — issues.md M9), i.e. within half
+  time of the data (rounded to a whole sample — docs/issues.md M9), i.e. within half
   a sample of the grid; remote-reference pairing therefore accepts up to one
   sample of label difference (`_pair_remote_fc`). Levels with fewer samples
   than one window are skipped with a warning.
@@ -1563,7 +1563,7 @@ multiple coherence** — the band-free sort:
   realizations mean the effective DOF is smaller than the nominal row count;
   no Egbert-style DOF correction is applied to the estimate's σ² (M4 #7
   statistics work). The per-bin debias handles the statistic itself.
-- **Memory (issues.md M21, bounded)**: the per-(bin, window) statistic is
+- **Memory (docs/issues.md M21, bounded)**: the per-(bin, window) statistic is
   computed in windows chunks sized from a transient budget
   (`_COH_BUDGET_BYTES`, 256 MiB) — a chunk's haloed slice contains every
   window's full ensemble, so the values match the unchunked path to FP
@@ -1593,7 +1593,7 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   clean level per bin = a configurable percentile (default 50) over the runs'
   medians — self-calibrating (storms raise every run equally and cancel;
   cultural noise raises single runs). The hour-of-day fed to the prior is the
-  window **start** (label − `N/(2·fs)` — the labels are centres, issues.md
+  window **start** (label − `N/(2·fs)` — the labels are centres, docs/issues.md
   L11 audit); the overlap guard's label deltas need no such correction
   (same-level centre-vs-centre — the half-window shifts cancel). **One-sided up check** (noise only ever
   inflates E): drop if run/level > `deviation_max` (default 2) scaled by the
@@ -1640,7 +1640,7 @@ wrong — rejection is **data-driven with a soft diurnal prior**.
   **no** usable unit attrs fall back to the mode alone ('b' converts —
   fluxgate is archived in nT; 'h' leaves — the legacy unitless synthetic
   convention). Regression: `test_magnetic_units.py` (incl. the `b`+A/m
-  precedence case, issues.md H2).
+  precedence case, docs/issues.md H2).
 - **Electric (`Compute FC`, attr-aware)**:
 
   | condition | action |
@@ -1690,7 +1690,7 @@ nodes — no combined plot.
   components keep signed phase in [-180°, 180°]**. A value no ±180° fold can
   place inside (0°, 90°) is **reported, not silently dropped**: one loud
   warning names the component, the clipped point count and their value range
-  (issues.md H5). The axis stays at 0–90° — parity with USArray/aurora
+  (docs/issues.md H5). The axis stays at 0–90° — parity with USArray/aurora
   `plot_config`, never an auto-expanding ylim; raw values stay in the View
   TF table.
 - **Axes**: x = Period (secs) log10 (decade ticks, shared across panels);
@@ -1821,7 +1821,7 @@ normalize + validate identically — `../` escapes are rejected).
   artifact GC; expired workspaces invalidate their artifact entries; cleanup
   only removes worker-complete terminal runs and runs on a worker thread
   (`asyncio.to_thread` — a multi-GB reclaim never stalls the WS-broadcast
-  loop, issues.md M17), with failed deletions logged, never silent. Disabled TTL preserves
+  loop, docs/issues.md M17), with failed deletions logged, never silent. Disabled TTL preserves
   local-dev behavior.
 - **Max concurrent runs** per instance (queued or HTTP 429), bounding
   memory/CPU in a shared platform; default unlimited for local dev.
@@ -1886,6 +1886,7 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 11 | **FC→TS inverse node** | Low | Low-Med | inverse STFT/overlap-add for frequency-domain denoising demos |
 | 12 | **Executor thread-pool concurrency** | Low | Medium | `cpu_bound` hints; MT pipelines are 5–10 mostly-linear nodes |
 | 13 | **Sub-workflows (nested DAGs)** | Medium | High | **deferred**: typical MT pipelines are 5–10 mostly-linear nodes; copy/paste + example templates + the batch runner cover the repetition patterns; revisit only if workflows outgrow them |
+| 14 | **Plugin manager (ComfyUI-Manager style)** | Low-Med | High | browse/install/enable-disable plugin packages from within the UI (pip-style installs via the manager, as ComfyUI-Manager does for custom nodes); core ComfyUI itself ships no CLI entry — it runs script-style (`python main.py`), the deployment shape emptyUI follows |
 | 14 | **Docs site** | Low-Med | Med-High | plugin guide + deployment guide exist; a hosted site is onboarding, not functionality |
 | 15 | **Plugin index/publish flow** | Low | High | PyPI + the plugin-guide checklist already cover distribution |
 | 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | only matters once ML noise-suppression plugins exist |
@@ -1958,7 +1959,7 @@ the ephemeral per-run workspaces — a third storage realm (§11.2).
 
 ## Appendix — history map
 
-| Former DESIGN.md sections | Now |
+| Former docs/DESIGN.md sections | Now |
 |---|---|
 | §1–§6 | unchanged in this document (§1–§6) |
 | §7 execution, §8 API, §22 settings | §7 |

@@ -1,5 +1,5 @@
 """Shared param coercion — the single copy used by the executor AND schema
-validation (issues.md M1/M5).
+validation (docs/issues.md M1/M5).
 
 Workflows are JSON-borne and older saved documents (or free-text combobox
 entries) can carry numbers as strings. ``coerce_param`` turns a raw workflow

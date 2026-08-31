@@ -1,6 +1,6 @@
 """emptyui-aurora plugin.
 
-aurora processing nodes (DESIGN.md §3, pin aurora==0.6.2): ComputeFC
+aurora processing nodes (docs/DESIGN.md §3, pin aurora==0.6.2): ComputeFC
 (TS→FC, the uniform route — collections cascade per run/_session and
 merge along time), EstimateTF (FC→TF), per-level TF merge. The TS→FC→TF
 pipeline is split at the FC boundary; estimators (OLS / robust RME /

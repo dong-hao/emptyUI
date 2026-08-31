@@ -1,5 +1,5 @@
-"""Time-domain quality masking — the Mask TS node (DESIGN.md §9.5,
-issues.md M26).
+"""Time-domain quality masking — the Mask TS node (docs/DESIGN.md §9.5,
+docs/issues.md M26).
 
 The node MARKS, never touches: a per-sample binary ``quality_mask``
 auxiliary channel rides the payload, and Compute FC's window-fraction

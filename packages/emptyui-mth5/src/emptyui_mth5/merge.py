@@ -1,4 +1,4 @@
-"""Merge Runs node (DESIGN.md §3 'Merging multiple runs'; history §24.5 P1 rebuild).
+"""Merge Runs node (docs/DESIGN.md §3 'Merging multiple runs'; history §24.5 P1 rebuild).
 
 Combines several acquisition runs of one station (e.g. SDH28 'b' + 'c') into
 a single ``ts.run`` so a downstream Align Runs sees the station's full
@@ -223,7 +223,7 @@ def _rt_span(rt):
 
 class MergeRuns(Node):
     type = "mth5.runs.merge"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Merge Runs"
     tooltip = "Combine several acquisition runs of one station into a single time series."

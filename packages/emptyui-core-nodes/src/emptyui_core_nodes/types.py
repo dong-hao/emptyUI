@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 #: Auxiliary channels that carry a per-sample binary QUALITY MASK
-#: (issues.md M26, DESIGN §9.5): 1 = bad sample. Compute FC's window-fraction
+#: (docs/issues.md M26, DESIGN §9.5): 1 = bad sample. Compute FC's window-fraction
 #: rule unions every mask channel present on the payload (M4 #19: any
 #: producer — a loader, the Mask TS node, a learned-despiker plugin — may
 #: write one). Canonical definition lives HERE (core is the single source,
@@ -55,9 +55,9 @@ class TimeSeries:
     #: per-channel physical units (e.g. ``nanoTesla`` / ``milliVolt per
     #: kilometer``). Coerced from mth5 RunTS dataset attrs and carried
     #: through the core filter nodes so Compute FC's instrument-unit
-    #: normalization survives a core node in the chain (DESIGN.md §10.5).
+    #: normalization survives a core node in the chain (docs/DESIGN.md §10.5).
     units: dict[str, str] = field(default_factory=dict)
-    #: per-channel instrument response chains (DESIGN.md §9.2):
+    #: per-channel instrument response chains (docs/DESIGN.md §9.2):
     #: ``{channel: [(filter_object, applied: bool), ...]}`` in stage order.
     #: Compute FC divides the Fourier coefficients by the chained complex
     #: response of every *applied* filter (aurora semantics: ``applied=True``

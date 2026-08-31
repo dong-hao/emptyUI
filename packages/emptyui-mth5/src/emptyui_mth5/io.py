@@ -13,7 +13,7 @@ from ._compat import ensure_h5_openable
 
 class LoadMth5(Node):
     type = "mth5.io.load"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Load MTH5"
     tooltip = "Open an MTH5 HDF5 archive as the data source."
@@ -66,7 +66,7 @@ class LoadMth5(Node):
 
 class SaveMth5(Node):
     type = "mth5.io.save"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Save MTH5"
     tooltip = "Close (flush) the open MTH5 archive, or copy it to a new path (Save As)."

@@ -1,7 +1,7 @@
 """M6 (b): the library entry point's defaults are the shipped recipe (boxcar +
 first-difference prewhitening, DESIGN §10.1). A direct caller that passes no
 recipe arguments must get the same FC as the node. Before the fix it silently
-got hamming with no prewhitening (issues.md M6).
+got hamming with no prewhitening (docs/issues.md M6).
 """
 
 from __future__ import annotations

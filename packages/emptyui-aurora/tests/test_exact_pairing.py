@@ -1,7 +1,7 @@
 """M22: exact remote-reference pairing must be linear in the number of windows.
 
 The fix replaces a per-row list membership test with a boolean mask. The
-keep-first duplicate semantics (L-A12) must survive (issues.md M22).
+keep-first duplicate semantics (L-A12) must survive (docs/issues.md M22).
 """
 
 from __future__ import annotations

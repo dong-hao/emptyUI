@@ -1,4 +1,4 @@
-"""Workflow document validation (DESIGN.md §6, format ``emptyui/workflow`` v1)."""
+"""Workflow document validation (docs/DESIGN.md §6, format ``emptyui/workflow`` v1)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class WorkflowNode(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     position: Position = Field(default_factory=Position)
     #: The plugin distribution version recorded when the document was
-    #: saved (issues.md M23, DESIGN §5). Informational only — the run
+    #: saved (docs/issues.md M23, DESIGN §5). Informational only — the run
     #: always uses the installed codebase; a mismatch surfaces as a
     #: node_warning (executor._warn_version_drift), never an error.
     #: Tolerated absent (documents saved before the field existed).
@@ -152,7 +152,7 @@ def validate_workflow(workflow: Workflow, registry) -> None:
     Raises :class:`ValidationError_` listing all problems found.
     """
     errors: list[str] = []
-    # document envelope (M-C2/L-C2, DESIGN.md §6): the frontend validates
+    # document envelope (M-C2/L-C2, docs/DESIGN.md §6): the frontend validates
     # format/version at load time, but the executor is a public API — a
     # foreign or future document must be rejected here too (a silent
     # best-effort parse would run half-understood workflows)

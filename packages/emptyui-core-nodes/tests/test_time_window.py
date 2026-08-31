@@ -1,4 +1,4 @@
-"""Time-selector window resolution (DESIGN.md §8.3): ISO/relative bounds,
+"""Time-selector window resolution (docs/DESIGN.md §8.3): ISO/relative bounds,
 clamped into the record (warn, never reject), slot > 1 s, legacy duration."""
 
 from __future__ import annotations

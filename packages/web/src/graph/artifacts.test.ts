@@ -15,7 +15,7 @@ const A = (over: Partial<ArtifactInfo>): ArtifactInfo =>
     ...over,
   }) as ArtifactInfo;
 
-test("matches the artifact by the edge's source handle (issues.md L3)", () => {
+test("matches the artifact by the edge's source handle (docs/issues.md L3)", () => {
   const edges = [E({ sourceHandle: "tf", targetHandle: "plot" })];
   const artifacts = [
     A({ id: "table1", handle: "table" }),

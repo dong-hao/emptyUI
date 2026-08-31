@@ -74,7 +74,7 @@ export interface MTNodeData extends Record<string, unknown> {
   params: Record<string, unknown>;
 }
 
-/** Internal clipboard for copy/paste (DESIGN.md §8): a subgraph snapshot of
+/** Internal clipboard for copy/paste (docs/DESIGN.md §8): a subgraph snapshot of
  *  selected nodes + the edges among them (external edges are not copied —
  *  the pasted copy is independent, ComfyUI parity). */
 interface NodeClipboard {
@@ -86,7 +86,7 @@ interface NodeClipboard {
 
 const PASTE_STEP = 24;
 
-/** Port-type connection rule (DESIGN.md §3): equal tags, declared accepts, any. */
+/** Port-type connection rule (docs/DESIGN.md §3): equal tags, declared accepts, any. */
 export function portTypesCompatible(
   srcType: string,
   tgtType: string,
@@ -124,7 +124,7 @@ export function connectionCreatesCycle(
 }
 
 /**
- * Full client-side connection rule (DESIGN.md §3 + §8): known ports, type
+ * Full client-side connection rule (docs/DESIGN.md §3 + §8): known ports, type
  * compatibility, no self-loop, no cycle. Used by the live
  * `isValidConnection` (drag feedback) and as defense-in-depth in
  * `onConnect`; the server re-validates before every run.
@@ -177,12 +177,12 @@ interface WorkflowState {
   docRev: number;
   selectedNodeId: string | null;
   clipboard: NodeClipboard | null;
-  /** document name carried through save/load (meta.name, DESIGN.md §6) */
+  /** document name carried through save/load (meta.name, docs/DESIGN.md §6) */
   docName: string;
   onNodesChange: (changes: NodeChange<Node<MTNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
-  /** Disconnect gestures (DESIGN.md §8): remove edges by id (drag-handle-
+  /** Disconnect gestures (docs/DESIGN.md §8): remove edges by id (drag-handle-
    *  away unlink, edge-endpoint drop on the pane) and re-route an existing
    *  edge to a new connection (validated with the full connection rule). */
   detachEdges: (edgeIds: string[]) => void;
@@ -221,7 +221,7 @@ interface WorkflowState {
   newWorkflow: () => void;
 }
 
-/** The workflow document is the single source of truth (DESIGN.md §8). */
+/** The workflow document is the single source of truth (docs/DESIGN.md §8). */
 export const useWorkflow = create<WorkflowState>((set, get) => ({
   nodes: [],
   edges: [],
@@ -391,7 +391,7 @@ export const useWorkflow = create<WorkflowState>((set, get) => ({
     const internal = get().edges.filter((e) => ids.has(e.source) && ids.has(e.target));
     set({
       clipboard: {
-        // deep-copy params (DESIGN.md §8 "deep-copied params"): a shallow
+        // deep-copy params (docs/DESIGN.md §8 "deep-copied params"): a shallow
         // spread shares nested arrays/objects (output_channels lists, save
         // paths) — editing a copy would mutate the original and every
         // earlier paste
@@ -538,7 +538,7 @@ export function enforceWiringRules<E extends { id: string; source: string; sourc
 }
 
 
-/** Anchor directories for save-time path portability (issues.md M19/M23):
+/** Anchor directories for save-time path portability (docs/issues.md M19/M23):
  *  an absolute input path living under one of these is STORED anchor-relative
  *  — the workflow then loads on any machine whose server resolves the
  *  relative path against the same anchor (project_dir, default server CWD).
@@ -569,7 +569,7 @@ export function relativizeToAnchor(
   return value;
 }
 
-/** Serialize the workflow document (DESIGN.md §6 format).
+/** Serialize the workflow document (docs/DESIGN.md §6 format).
  *
  *  M23: each node records its plugin's distribution version (from the
  *  catalog manifest) — the executor compares it at run time and warns
@@ -641,7 +641,7 @@ export function serializeWorkflow(
 
 /** Rebuild editor state from a workflow document (inverse of serialize).
  *
- *  Validates the document envelope (format + version, DESIGN.md §6) and
+ *  Validates the document envelope (format + version, docs/DESIGN.md §6) and
  *  prunes stale edges — edges referencing missing nodes or ports load
  *  silently broken otherwise. Throws on foreign/unsupported documents.
  */

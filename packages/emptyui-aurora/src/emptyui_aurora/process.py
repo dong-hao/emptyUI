@@ -1,6 +1,6 @@
 """aurora pipeline nodes: ComputeFC (TS→FC), EstimateTF (FC→TF), MergeTFLevels.
 
-ComputeFC/EstimateTF split the aurora pipeline at the FC boundary (DESIGN.md
+ComputeFC/EstimateTF split the aurora pipeline at the FC boundary (docs/DESIGN.md
 §3, history §14). FC is passed in-memory between nodes and, when ``persist`` is on,
 also written into the workspace MTH5's FC layer so it can be reused / merged.
 Estimators are OLS / robust RME / remote-reference RME_RR (aurora-backed).
@@ -55,7 +55,7 @@ def _station_location(data):
 
 
 def _station_identity_attrs(data, survey: str, station: str, run: str) -> dict[str, Any]:
-    """Primitive station-identity attrs to carry on an fc (DESIGN.md §10.6).
+    """Primitive station-identity attrs to carry on an fc (docs/DESIGN.md §10.6).
 
     The ts.run payload (mth5 RunTS) exposes survey/station/run metadata and the
     station location; only primitives are stored (xarray attrs must survive
@@ -304,7 +304,7 @@ def _stamp_span_run_ids(levels, span, member_lens, sample_rate: float,
 
 class ComputeFC(Node):
     type = "aurora.process.compute_fc"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Compute FC"
     tooltip = "Windowed STFT: time series to Fourier coefficients over cascading decimation levels."
@@ -577,7 +577,7 @@ class ComputeFC(Node):
 
         # Station identity travels with the fc (attrs) so EstimateTF can attach
         # it to the TF — the single point of truth for plot titles and export
-        # headers (DESIGN.md §10.6).
+        # headers (docs/DESIGN.md §10.6).
         surv, stat, run_id = runts_context(data, survey, station, run,
                                            logger=ctx.logger)
         identity = _station_identity_attrs(data, surv, stat, run_id)
@@ -825,7 +825,7 @@ class ComputeFC(Node):
                     str(reject_masks), MASK_CHANNELS),
                 saturated_max=saturated_max,
             )
-            # station identity travels in the attrs (DESIGN.md §10.6) —
+            # station identity travels in the attrs (docs/DESIGN.md §10.6) —
             # the first member's extent row names the survey/station; the
             # run key is the span id (the session id when tiled — the QC
             # label the per-window run_id coordinate carries)
@@ -949,7 +949,7 @@ def _fc_io_channels(fc):
 
 class CoherenceSort(Node):
     type = "aurora.process.coherence_sort"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Coherence Sort"
     tooltip = "Down-weight or drop low-coherence FC windows before TF estimation."
@@ -965,7 +965,7 @@ class CoherenceSort(Node):
         "single shared weight is applied to both FCs (exact weighted-LS "
         "semantics for RME_RR). The weights are per (frequency bin, window) "
         "and independent of band geometry: band construction is Estimate "
-        "TF's concern (DESIGN.md §10.3)."
+        "TF's concern (docs/DESIGN.md §10.3)."
     )
     category = "Processing"
     inputs = (
@@ -1072,12 +1072,12 @@ class CoherenceSort(Node):
 
 class SelectRuns(Node):
     type = "aurora.process.select_runs"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Select Runs"
     tooltip = "Drop noise-dominated runs before TF estimation (run-level QC)."
     description = (
-        "Run-level QC (DESIGN.md §10.4, after Weckmann et al. 2005): score "
+        "Run-level QC (docs/DESIGN.md §10.4, after Weckmann et al. 2005): score "
         "every run by its per-window impedance level in a reference band — "
         "the per-window |Z| from the run's own Fourier coefficients, "
         "compared against the station-wide clean level (a percentile of the "
@@ -1331,12 +1331,12 @@ class SelectRuns(Node):
 
 class ResidualSort(Node):
     type = "aurora.process.residual_sort"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Residual Sort"
     tooltip = "Drop runs whose windows do not fit the first-pass TF model."
     description = (
-        "Residual-based two-pass selection (DESIGN.md §10.4, the orthogonal "
+        "Residual-based two-pass selection (docs/DESIGN.md §10.4, the orthogonal "
         "complement of power and coherence screening): a first-pass TF "
         "(Estimate TF's 'tf levels') predicts each FC window's outputs; "
         "RUNS whose pooled unexplained-power fraction is excessive are "
@@ -1551,7 +1551,7 @@ class ResidualSort(Node):
 
 class EstimateTF(Node):
     type = "aurora.process.estimate_tf"
-    # raw-data/FC-scale work: a generous own budget (issues.md M2)
+    # raw-data/FC-scale work: a generous own budget (docs/issues.md M2)
     timeout = 3600.0
     title = "Estimate TF"
     tooltip = "Estimate the impedance/tipper transfer function from Fourier coefficients (OLS or robust, optional remote reference)."
@@ -1591,7 +1591,7 @@ class EstimateTF(Node):
               description="Log2 period bands per power-of-2 octave."),
         Param("band_style", "select", label="Band style",
               options=("l2u", "uniform", "manual"), default="l2u",
-              description="Band construction scheme (DESIGN.md §10.2). "
+              description="Band construction scheme (docs/DESIGN.md §10.2). "
                           "'l2u' (default) is the reference-template band "
                           "table with log-uniform window-starvation "
                           "coarsening: the same fixed band template at every "
@@ -1625,7 +1625,7 @@ class EstimateTF(Node):
         Param("min_bins_per_band", "number", label="Min bins per band",
               default=20.0, min=0,
               description="Window-starvation coarsening threshold "
-                          "(DESIGN.md §10.2): a level where any band has "
+                          "(docs/DESIGN.md §10.2): a level where any band has "
                           "fewer than this many total samples (windows × "
                           "band width) is rebuilt as a coarser uniform grid "
                           "(n−⌊n/3⌋ bands, widened to exceed the threshold, "
@@ -1634,7 +1634,7 @@ class EstimateTF(Node):
                           "coarsening."),
         Param("t_short", "number", label="Shortest period (s)",
               default=0.0, min=0,
-              description="Head clip (DESIGN.md §10.2): bands shorter than "
+              description="Head clip (docs/DESIGN.md §10.2): bands shorter than "
                           "this are not evaluated. 0 starts at the "
                           "template's shortest band (the legacy behavior); "
                           "the official USArray grid clips at ~7.3 s for "
@@ -1744,7 +1744,7 @@ class EstimateTF(Node):
         )
         return {"tf": tf, "tf_levels": per_level}
 
-    #: Banding is Estimate TF's own concern (DESIGN.md §10.3): no inherit from
+    #: Banding is Estimate TF's own concern (docs/DESIGN.md §10.3): no inherit from
     #: an upstream Coherence Sort — the sort's per-(bin, window) weights are
     #: band-independent, so there is no banding parameter to auto-fill (and
     #: no duplicated banding param set on the sort node).

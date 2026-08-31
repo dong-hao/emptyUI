@@ -3,7 +3,7 @@
 The §9.4 session-length guidance stated a deepest-window span (~68 min)
 that contradicted its own formula (window 256, 5 levels x factor 4 ->
 256·4^4 s = 18.2 h at 1 Hz; 68 min is the L=2 span). The test parses the
-figure straight out of DESIGN.md and compares it against the manifest
+figure straight out of docs/DESIGN.md and compares it against the manifest
 defaults, so the doc cannot silently drift again.
 """
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-DESIGN = Path(__file__).resolve().parents[3] / "DESIGN.md"
+DESIGN = Path(__file__).resolve().parents[3] / "docs/DESIGN.md"
 
 
 def test_design_deepest_window_figure_matches_manifest_defaults():
@@ -29,7 +29,7 @@ def test_design_deepest_window_figure_matches_manifest_defaults():
     m = re.search(
         r"deepest-level window spans ~(\d+(?:\.\d+)?) (min|h|hours?) of "
         r"raw 1 Hz data", text)
-    assert m, "the §9.4 deepest-window figure vanished from DESIGN.md"
+    assert m, "the §9.4 deepest-window figure vanished from docs/DESIGN.md"
     value = float(m.group(1))
     documented_s = value * 60 if m.group(2) == "min" else value * 3600
     assert abs(documented_s - span_s) / span_s < 0.10, (

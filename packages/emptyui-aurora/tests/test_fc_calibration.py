@@ -1,4 +1,4 @@
-"""FC-level frequency-domain calibration (DESIGN.md §9.2).
+"""FC-level frequency-domain calibration (docs/DESIGN.md §9.2).
 
 Compute FC divides the Fourier coefficients by the chained complex response
 of the payload's *applied* filters (aurora semantics between STFT and
@@ -317,7 +317,7 @@ def test_compute_fc_node_forwards_saturated_max(tmp_path):
 
 def test_complex_response_is_memoized_per_filter_and_grid():
     """The same filter object on the same frequency grid evaluates its
-    complex response once (issues.md L23: 9600 evaluations of the same few
+    complex response once (docs/issues.md L23: 9600 evaluations of the same few
     tables = 43% of the FC math on a one-day RR corpus, plus 4768 repeats
     of mt_metadata's extrapolation warning). Results are bit-identical."""
     from emptyui_aurora._processing import _cached_complex_response

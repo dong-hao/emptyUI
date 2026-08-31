@@ -1,4 +1,4 @@
-"""Tests for the calibration framework (DESIGN.md §9.1). Error surfaces live
+"""Tests for the calibration framework (docs/DESIGN.md §9.1). Error surfaces live
 in test_errors.py."""
 
 from __future__ import annotations

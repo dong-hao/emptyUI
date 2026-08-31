@@ -1,6 +1,6 @@
 """M3: the collection route ('time range' mode) must close the write-open
 workspace archive when persisting a member fails. Before the fix the close ran
-only on the success path, so an exception leaked a write-open handle (issues.md
+only on the success path, so an exception leaked a write-open handle (docs/issues.md
 M3).
 """
 

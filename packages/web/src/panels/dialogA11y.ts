@@ -1,7 +1,7 @@
 import { useEffect, type RefObject } from "react";
 
 /**
- * Dialog focus management (issues.md L1): aria-modal alone traps nothing —
+ * Dialog focus management (docs/issues.md L1): aria-modal alone traps nothing —
  * keyboard focus walked straight through the overlay into the canvas. On
  * mount the first focusable control is focused; Tab/Shift+Tab cycle within
  * the dialog; on unmount focus returns to the invoker. Escape closes

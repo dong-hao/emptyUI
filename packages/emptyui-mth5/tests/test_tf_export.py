@@ -265,7 +265,7 @@ def test_export_avg_from_lemi_tf(tmp_path: Path):
 def test_export_j_reports_upstream_gap(tmp_path: Path):
     """The 'j' option fails with an actionable error, not a raw
     NotImplementedError: mt_metadata's to_jfile is unimplemented
-    upstream (issues.md M16 — the option stays until it ships)."""
+    upstream (docs/issues.md M16 — the option stays until it ships)."""
     ctx = RunContext(workspace=tmp_path, store=DataStore())
     tf = _lemi_tf()
     with pytest.raises(ValueError, match="not implemented in mt_metadata"):

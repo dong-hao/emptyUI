@@ -1,7 +1,7 @@
 """M11: tolerance pairing returns matched windows in local time order.
 
 Coherence Sort's sliding ensemble is defined by array index, so the matched
-pairs must come back chronological (issues.md M11).
+pairs must come back chronological (docs/issues.md M11).
 """
 
 from __future__ import annotations

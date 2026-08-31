@@ -11,7 +11,7 @@ import type { ParamSpec, PayloadSummary, PortSpec } from "../api/client";
 import { inheritableParams, makeInheritContext, resolveInherited } from "./inherit";
 
 /** payload summary → time-bar extent (epoch/relative seconds); null when
- *  absent or degenerate (DESIGN.md §8.3). An `mth5` archive summary
+ *  absent or degenerate (docs/DESIGN.md §8.3). An `mth5` archive summary
  *  resolves the run matching the node's survey/station/run params
  *  (mirroring the server's first-run fallbacks); multiple ports bind as an
  *  intersection (e.g. Align Runs shows the overlap of both inputs). */
@@ -86,7 +86,7 @@ function tsExtent(
 /** Resolve the artifact flowing into a viewer node's body: the input edge
  *  (matched on the node's declared input port — M13) names a source node +
  *  handle; only the artifact whose handle names that same output port
- *  feeds it (issues.md L3 — the old "last artifact of the source"
+ *  feeds it (docs/issues.md L3 — the old "last artifact of the source"
  *  fallback showed the wrong figure for multi-output sources). */
 function useInputPlotArtifact(nodeId: string, inputPort?: string) {
   const edges = useWorkflow((s) => s.edges);
@@ -98,7 +98,7 @@ function useInputPlotArtifact(nodeId: string, inputPort?: string) {
 }
 
 /**
- * Custom node renderer (DESIGN.md §8 + Port rendering conventions):
+ * Custom node renderer (docs/DESIGN.md §8 + Port rendering conventions):
  * typed ports inside the edges aligned with labels, and — following the
  * ComfyUI paradigm — the node's parameters rendered inline on the node
  * body. The right-hand panel keeps metadata (id, version, ports,
@@ -123,7 +123,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
   const rows = Math.max(inputs.length, outputs.length);
   const params = useMemo(() => manifest?.params ?? [], [manifest]);
 
-  // Chain-walking inheritance context (DESIGN.md §4): survey/station/run (and
+  // Chain-walking inheritance context (docs/DESIGN.md §4): survey/station/run (and
   // any other declared params) auto-fill from the upstream chain, flowing
   // through intermediate nodes.
   const inheritCtx = useMemo(
@@ -228,7 +228,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
     void graphRev;
   }, [id, catalog, manifest, edges, graphRev, inheritable, params]);
 
-  // Conditional-UX rules are manifest-driven (DESIGN.md §4 `enabled_when`):
+  // Conditional-UX rules are manifest-driven (docs/DESIGN.md §4 `enabled_when`):
   // a param is editable only when its named sibling param holds one of the
   // listed values (e.g. remote_reference only for the robust estimator).
   // NB: both sides are stringified case-insensitively — the manifest
@@ -244,7 +244,7 @@ function MTNodeBase({ id, data, selected }: NodeProps) {
     return ew.values.map(String).some((v) => v.toLowerCase() === cur);
   };
 
-  // Port-analog of enabled_when (DESIGN.md §4 `populated_when`): the output
+  // Port-analog of enabled_when (docs/DESIGN.md §4 `populated_when`): the output
   // port is populated only when the named sibling param holds one of the
   // listed values — inactive ports render dimmed.
   const isOutputPopulated = (o: PortSpec): boolean => {

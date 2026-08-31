@@ -1,4 +1,4 @@
-"""Runtime configuration (DESIGN.md §11 embedded mode).
+"""Runtime configuration (docs/DESIGN.md §11 embedded mode).
 
 Env-first knobs mirrored as ``create_app(...)`` keyword arguments so the
 platform can embed emptyUI as a module without env coupling (kwargs win).
@@ -33,9 +33,9 @@ class Settings:
     workspace_ttl_seconds: float | None = None
     #: Maximum queued/running runs per process. None or <= 0 means unlimited.
     max_concurrent_runs: int | None = None
-    #: Per-node watchdog budget in seconds (issues.md M2). None/<=0 = off.
+    #: Per-node watchdog budget in seconds (docs/issues.md M2). None/<=0 = off.
     node_timeout_seconds: float | None = None
-    #: Plugin entry-point names disabled at startup (DESIGN.md §5.1) — the
+    #: Plugin entry-point names disabled at startup (docs/DESIGN.md §5.1) — the
     #: platform-level baseline; runtime UI toggles are in-memory only (no
     #: settings file is created by default) and the environment wins for
     #: the baseline. Unknown names are ignored.
@@ -44,7 +44,7 @@ class Settings:
     #: None = memory-only for now — no file is created unless configured
     #: (config-file persistence is deferred to the configure/env file work).
     settings_path: Path | None = None
-    #: Stable project directory (issues.md M23, user decision 2026-10-15):
+    #: Stable project directory (docs/issues.md M23, user decision 2026-10-15):
     #: the anchor for portable relative input paths — a saved workflow may
     #: carry paths relative to it, and execution resolves them here.
     #: None = the server process CWD is the implicit anchor (status quo).

@@ -1,4 +1,4 @@
-"""Publication-quality plot conventions (DESIGN.md §10.6).
+"""Publication-quality plot conventions (docs/DESIGN.md §10.6).
 
 Asserts the USArray-style conventions of the TF display figures: log10
 period and ρ_a axes, off-diagonal phase folded to (0, 90°), diagonal phase
@@ -140,7 +140,7 @@ def _phase_series(ax_phi, name):
 
 
 def test_fold_phase_deg_is_a_full_mod180():
-    """The ±180° fold is complete in both directions (issues.md H5).
+    """The ±180° fold is complete in both directions (docs/issues.md H5).
 
     The old one-sided ``p < 0 → p + 180`` pass left anything at/above 180°
     untouched, so wrapped phases were clipped away by the (0°, 90°) axis.
@@ -185,7 +185,7 @@ def test_out_of_quadrant_phase_is_reported_not_silent(tmp_path: Path,
 
     The shipped fixture's ``Zxy = 3 - 1j`` folds to 161.6° — outside the
     display quadrant, so matplotlib drops those markers: previously they
-    vanished silently and the panel simply looked empty (issues.md H5).
+    vanished silently and the panel simply looked empty (docs/issues.md H5).
     """
     tf = _impedance_tf()
     with caplog.at_level(logging.WARNING, logger="emptyui"):
@@ -228,7 +228,7 @@ def test_equal_per_decade_scale(tmp_path: Path):
 
 def test_rho_ylim_pins_axis(tmp_path: Path):
     """Explicit ρ_a y-limits pin the axis (reference-figure matching,
-    DESIGN.md §10.6 / SDG31b_H28coh.png head-to-head)."""
+    docs/DESIGN.md §10.6 / SDG31b_H28coh.png head-to-head)."""
     tf = _impedance_tf()
     path = tmp_path / "fig.png"
     with patch.object(plotting.plt, "close", lambda *a, **k: None):
@@ -244,7 +244,7 @@ def test_rho_ylim_pins_axis(tmp_path: Path):
 
 def test_offdiagonal_phase_panel_half_height(tmp_path: Path):
     """The off-diagonal phase panel is about half the diagonal one (0-90°
-    vs the full signed range) — DESIGN.md §10.6 / feedback 2026-09-06."""
+    vs the full signed range) — docs/DESIGN.md §10.6 / feedback 2026-09-06."""
     fig_off, _ = _render(_impedance_tf(), "off-diagonal", tmp_path)
     ax_off = fig_off.axes[1]
     fh_off = fig_off.get_size_inches()[1]

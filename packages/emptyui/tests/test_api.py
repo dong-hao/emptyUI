@@ -75,7 +75,7 @@ def test_port_compatibility_rules():
 
 
 def test_manifest_tooltip_and_hidden():
-    """Hover protocol (DESIGN.md §4): explicit tooltip wins; else the first
+    """Hover protocol (docs/DESIGN.md §4): explicit tooltip wins; else the first
     sentence of the description; hidden flags utility/test nodes."""
 
     class Explicit(Node):

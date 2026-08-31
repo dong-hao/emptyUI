@@ -6,7 +6,7 @@ import { AppErrorBoundary } from "./AppErrorBoundary";
 import App from "./App";
 import "./styles.css";
 
-/** Dev-only fault injection (issues.md H6, DESIGN §8.1): `?fault=render`
+/** Dev-only fault injection (docs/issues.md H6, DESIGN §8.1): `?fault=render`
  *  throws during the render pass so the boundary above it can be exercised
  *  end-to-end. `import.meta.env.DEV` compiles to `false` in every production
  *  bundle — the check, and the throw behind it, are dropped by the build. */

@@ -143,7 +143,7 @@ def test_fluxgate_explicit_am_is_not_converted(tmp_path):
 
     The nomenclature-derived mode must never override an explicit unit: the
     payload already carries H, so converting it again scales Z by
-    1e-9/mu0 (~1.26e3) and rho by ~1.6e6 (issues.md H2).
+    1e-9/mu0 (~1.26e3) and rho by ~1.6e6 (docs/issues.md H2).
     """
     rng = np.random.default_rng(15)
     hx, hy, ex, ey = _field(rng)
@@ -199,7 +199,7 @@ def test_fluxgate_tesla_unit_converts_at_its_own_scale(tmp_path):
 
 
 def test_magnetic_to_h_precedence():
-    """Unit-attr precedence over the mode, both ways (issues.md H2)."""
+    """Unit-attr precedence over the mode, both ways (docs/issues.md H2)."""
     from emptyui_aurora._processing import _magnetic_to_h
 
     x = np.array([1.0, 2.0])

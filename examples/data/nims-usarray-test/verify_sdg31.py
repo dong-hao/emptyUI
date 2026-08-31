@@ -17,7 +17,7 @@ function (history §16.3):
 3. Compares against the official USArray.SDG31.2017.edi (EMTF, robust remote
    reference vs SDH28) at the official periods: apparent resistivity + phase
    for xy/yx, error statistics, and overlay figures in the USArray style
-   (DESIGN.md §10.6 conventions; official = filled ○/✕, emptyUI = hollow □/◇).
+   (docs/DESIGN.md §10.6 conventions; official = filled ○/✕, emptyUI = hollow □/◇).
 
 Findings recorded here (2026-09-10):
 - The xy-down / yx-up systematic offset (from ~100 s) is a COORDINATE-FRAME
@@ -443,7 +443,7 @@ def raw_overlay_figure(periods, Z, path, title, periods_o, zo,
 def render_appres_figure(reg, ctx, label, p, Z, Ze, out_name, note,
                          window=128):
     """    EMTF-convention AppRes & Phase figure via the Plot AppRes & Phase node
-    (DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
+    (docs/DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
     title, ρ_a y-limits pinned to the reference figure's range 5-4e4 Ωm) —
     the head-to-head counterpart of SDG31b_H28coh.png. The TF is rotated to
     TRUE NORTH with the package rotation (mth5.tf.rotate /
@@ -591,7 +591,7 @@ def main():
         rotated_compare(label, p, Zl)
 
     # EMTF-convention AppRes & Phase figures via the Plot AppRes & Phase node
-    # (DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
+    # (docs/DESIGN.md §10.6: ○ XY / ✕ YX, error bars, log-log ρ, phase 0-90, EMTF-style
     # title, ρ_a y-limits pinned to the reference figure's range 5-4e4 Ωm) —
     # the head-to-head counterpart of SDG31b_H28coh.png. Rendered from the
     # N=128 exact-grid variant (so the evaluated periods match the EMTF grid)

@@ -1,4 +1,4 @@
-"""Node-result cache shared across runs (DESIGN.md §7).
+"""Node-result cache shared across runs (docs/DESIGN.md §7).
 
 Server-lifetime, in-memory LRU. Entries are keyed by the executor's
 structural node signature — ``(type, version, effective params, upstream
@@ -42,7 +42,7 @@ def _probe(value: Any, name: str) -> Any:
 
 
 def _approx_size(value: Any, depth: int = 0) -> int:
-    """Approximate deep size of a cached payload in bytes (issues.md L5).
+    """Approximate deep size of a cached payload in bytes (docs/issues.md L5).
 
     The budget is a bound, not an accounting system: numpy/xarray payloads
     dominate, and their exact ``nbytes`` is what matters — scalars and
@@ -97,7 +97,7 @@ class CacheEntry:
 class NodeCache:
     """Thread-safe LRU of :class:`CacheEntry` keyed by structural signature.
 
-    Bounded two ways (issues.md L5): by entry *count* (``max_entries``)
+    Bounded two ways (docs/issues.md L5): by entry *count* (``max_entries``)
     and — when ``max_bytes`` is set — by the approximate deep size of the
     cached payloads. The byte accounting is computed once per ``put`` via
     :func:`_approx_size`; it bounds the memory, it does not audit it.
