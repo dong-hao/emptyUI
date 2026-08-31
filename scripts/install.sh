@@ -12,16 +12,25 @@
 # Flags:
 #   --with-browsers   also download the Playwright Chromium build (needed
 #                     for the e2e suite: cd packages/web && npm test)
+#   --backend-only    skip npm entirely (server/embedded deployments: the
+#                     API runs from .venv alone; serve a prebuilt dist/
+#                     later with ./scripts/serve.sh)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 with_browsers=0
+backend_only=0
 for arg in "$@"; do
   case "$arg" in
     --with-browsers) with_browsers=1 ;;
+    --backend-only) backend_only=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
+if [ "$with_browsers" = "1" ] && [ "$backend_only" = "1" ]; then
+  echo "--with-browsers needs the frontend; drop --backend-only" >&2
+  exit 2
+fi
 
 PY="${PYTHON:-}"
 if [ -z "$PY" ]; then
@@ -61,6 +70,14 @@ else
     -e "examples/plugin-template[dev]"
 fi
 
+if [ "$backend_only" = "1" ]; then
+  echo
+  echo "Install complete (backend only)."
+  echo "  serve API + built frontend:  ./scripts/serve.sh"
+  echo "  backend tests:               .venv/bin/python -m pytest packages -q"
+  exit 0
+fi
+
 echo "== Node dependencies =="
 npm --prefix packages/web install
 
@@ -71,6 +88,7 @@ fi
 
 echo
 echo "Install complete."
-echo "  run the backend + frontend:  ./scripts/dev.sh"
-echo "  run the e2e suite:           cd packages/web && npm test"
-echo "  backend tests:               .venv/bin/python -m pytest packages -q"
+echo "  serve (frontend + API, one port): ./scripts/serve.sh"
+echo "  develop (two servers, reload):    ./scripts/dev.sh"
+echo "  run the e2e suite:                cd packages/web && npm test"
+echo "  backend tests:                    ./scripts/test.sh"
