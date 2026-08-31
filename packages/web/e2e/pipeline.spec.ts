@@ -210,7 +210,7 @@ test("Extract Run offers the collection's sample rates as select suggestions (hi
 }) => {
   const H5 = path.resolve(
     here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
-    "smoke_2h_phoenix_mtu.mth5",
+    "smoke_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
@@ -257,7 +257,7 @@ test("time selector bar on Extract Run shows the archive run extent (GMT)", asyn
 }) => {
   const H5 = path.resolve(
     here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
-    "smoke_2h_phoenix_mtu.mth5",
+    "smoke_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
@@ -330,7 +330,7 @@ test("a node error is shown as copyable text in the properties panel", async ({
   // Deterministic node error: Extract Run with a nonexistent run id.
   const H5 = path.resolve(
     here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
-    "smoke_2h_phoenix_mtu.mth5",
+    "smoke_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");

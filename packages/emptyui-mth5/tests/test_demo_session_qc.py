@@ -1,7 +1,7 @@
 """L20 — the session-QC/gating demo workflow runs end-to-end.
 
 Executes the SHIPPED example document through the real executor against
-the tracked smoke_2h archive (corpus-guarded like the other data tests):
+the tracked smoke archive (corpus-guarded like the other data tests):
 the QC story must actually work — sessions scored, the noisy tail
 dropped at the production defaults, and a TF estimated from the
 survivors. Skipped when the corpus is absent (fresh clones without
@@ -18,11 +18,11 @@ import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 DEMO = Path("examples/workflow/phoenix-mtu5a-session-qc.emptyui.json")
-ARCHIVE = Path("examples/data/phoenix-mtu-test/smoke_2h_phoenix_mtu.mth5")
+ARCHIVE = Path("examples/data/phoenix-mtu-test/smoke_phoenix_mtu.mth5")
 
 requires_corpus = pytest.mark.skipif(
     not (DEMO.exists() and ARCHIVE.exists()),
-    reason="demo workflow or smoke_2h corpus not present (fresh clone)")
+    reason="demo workflow or smoke corpus not present (fresh clone)")
 
 
 @requires_corpus

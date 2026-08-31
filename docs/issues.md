@@ -1221,7 +1221,7 @@ values to 3.4e-15). Re-recorded at L21.
   L20.**
 - [x] **L20 — a shipped example demonstrating session QC + gating.
   DONE (2026-10-15).** `examples/workflow/phoenix-mtu5a-session-qc.emptyui.json`
-  on the tracked `smoke_2h` corpus (stream family only — the 16-s/2-s
+  on the tracked `smoke` corpus (stream family only — the 16-s/2-s
   slots are statistically meaningless QC units, a README-noted choice):
   Load MTH5 → Extract Run (time range, sample_rates=15) → Mask TS
   (defaults) → Compute FC (session_hours=0.25, regroup_contiguous,
@@ -1601,7 +1601,7 @@ Start with the Phase 0 gates, so every later change is type-checked.
   once Phase 0 is in place.
 - **L9**: documentation drift, including the bare `§13+` references —
   mechanical, separate commit.
-- **L15**: a burst demo workflow against the tracked `smoke_2h` archive.
+- **L15**: a burst demo workflow against the tracked `smoke` archive.
 - **L14**, **L16**, **L17**: cleanup, per decisions 8 and 9.
 
 ### Effort and risks

@@ -11,7 +11,7 @@
       "id": "load",
       "type": "mth5.io.load",
       "params": {
-        "path": "examples/data/phoenix-mtu-test/smoke_2h_phoenix_mtu.mth5",
+        "path": "examples/data/phoenix-mtu-test/smoke_phoenix_mtu.mth5",
         "mode": "r"
       },
       "position": {

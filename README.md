@@ -23,7 +23,7 @@ examples/
 └── plugin-template/      # working plugin template
 
 **Session QC & gating demo** — `examples/workflow/phoenix-mtu5a-session-qc.emptyui.json`
-runs the full data-driven QC story on the tracked `smoke_2h` Phoenix
+runs the full data-driven QC story on the tracked `smoke` Phoenix
 archive: Mask TS (time-domain quality mask: Hampel despiking, constant-run
 and gap detection) → Compute FC with `session_hours=0.25` +
 `regroup_contiguous` (session-granular FCs; §9.4) → Select Runs (per-session

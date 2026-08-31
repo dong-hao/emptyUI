@@ -190,7 +190,7 @@ class MaskTS(Node):
                           "8 is the MT-tuned default: natural-source "
                           "time series are heavy-tailed, and the "
                           "literature's Gaussian h=3 over-gates them "
-                          "(measured on the smoke_2h corpus: h=3 masks "
+                          "(measured on the smoke corpus: h=3 masks "
                           "~5% of samples and collapses the FC band "
                           "coverage; h>=5 is band-neutral)."),
         Param("detect_flat", "boolean", label="Detect constant runs",

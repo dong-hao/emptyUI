@@ -27,7 +27,7 @@ test("identities auto-fill and render as comboboxes through a pass-through filte
   // same-named params on Extract Run.
   const H5 = path.resolve(
     here, "..", "..", "..", "examples", "data", "phoenix-mtu-test",
-    "smoke_2h_phoenix_mtu.mth5",
+    "smoke_phoenix_mtu.mth5",
   );
   await page.goto("/");
   await addNode(page, "Load MTH5");
