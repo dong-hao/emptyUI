@@ -3,7 +3,7 @@ name = "emptyui"
 version = "0.1.0"
 description = "Node-based visual workflow core for magnetotelluric processing"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",

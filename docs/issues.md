@@ -1408,6 +1408,35 @@ values to 3.4e-15). Re-recorded at L21.
     remedy ("remote station noisy at 5-30 s; restrict the estimate
     window"). Would have flagged the 630/634 case automatically.
 
+- [x] **L26 — user-facing documentation & migration prep (the GitHub
+  milestone's doc track). DONE (2026-10-17), four phases:**
+  - **Phase 0 (`1481aab` + `e9d45c5`)**: DESIGN.md/issues.md moved under
+    `docs/` (111 living files re-cited; docs/history/ verbatim); the
+    stray untracked `fig_src.txt` deleted; the ComfyUI-Manager-style
+    plugin manager noted in §12.2 row 14. Also surfaced 3 ruff errors
+    the L18 commits had shipped (gate output truncation — lesson:
+    never tail -1 a gate).
+  - **Phase 1 (`750d9a5`)**: scripts/serve.sh (one-port serve via
+    EMPTYUI_SERVE_DIST — the backend already static-mounted the dist),
+    install.sh --backend-only, scripts/test.sh (CI-mirroring gates).
+  - **Pre-push data hygiene (`8fa54de`)**: the smoke archive renamed
+    smoke_2h -> smoke (it spans exactly 3 h; duration-free name), 18
+    references swept; the M14 entry now records the ~100 MB blob
+    decision (`13215f3`).
+  - **Phases 2-3 (`36ec095`, `e490713`)**: README rewritten user-facing
+    (hero screenshot captured by driving the real app; quick start on
+    the bundled archive; deploy section; verification anchors kept);
+    docs/user-guide.md (98 lines: three recipes + plots/exports/
+    troubleshooting, all labels checked against the live manifests);
+    deployment.md quick start.
+  - **Phase 4 — LICENSE (Apache-2.0, the user's pick; the pyprojects
+    said MIT — corrected) + the fresh-clone smoke test: clone HEAD to
+    an empty dir -> install.sh --backend-only (uv cache; PyPI was
+    unreachable — worth re-running on real network before the push) ->
+    serve.sh cold path (npm install + vite build + uvicorn) -> the
+    quick start driven through the REAL UI (Load -> Run -> completed,
+    3 plots rendered). Every copy-pasted command works verbatim.**
+
 ---
 
 ## Suggested fix order
@@ -1418,10 +1447,9 @@ docs); M16 Phase 0 part (`447c7bb`); M14 part 1 (`f666b3a`); M1
 (2026-10-12); M2, M4, M17, M20, M21, H7, M24 (2026-10-13);
 L8, L7, L10, L11-audit (2026-10-14);
 L4, L5, L6, L3-backend (2026-10-14); L5-regression, M12, M15, M18, M13
-(2026-10-14, Phase 3); L20 (`356b151`, 2026-10-15); M16 (2026-10-16). **Open: 2** —
-M14, L17 (M14 waits for the GitHub migration; L17 ships when the
-register clears — it now does after L18; L20–L22 fixed 2026-10-15/16;
-L23–L25 + M16 + L18 2026-10-16).
+(2026-10-14, Phase 3); L20 (`356b151`, 2026-10-15); M16 (2026-10-16);
+L17, L18 (2026-10-17); **L19–L26 docs & migration prep (2026-10-17,
+see L26)**. **Open: 1** — M14 (waits for the GitHub migration).
 The plan below is organised in phases;
 decisions come first.
 
