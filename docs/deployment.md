@@ -1,5 +1,22 @@
 # emptyUI deployment — embedded/remote mode
 
+## Quick start (a lab server)
+
+The two-command recipe; see the README's Deploying section for the
+user-level view. One-time: `./scripts/install.sh --backend-only` (skip
+npm on servers), build the frontend once anywhere with Node
+(`cd packages/web && npm install && npm run build`), then:
+
+```bash
+./scripts/serve.sh --host 0.0.0.0 --data-root /srv/mt/data --port 8080
+```
+
+That serves the frontend + API on one port with file access confined to
+the data root (input paths and `/api/files` resolve only inside it).
+Put your real TLS/reverse-proxy layer in front — see the contract below.
+
+---
+
 How to deploy emptyUI as an embedded module behind an existing
 authentication gateway. The contract is designed in **docs/DESIGN.md §11** —
 read it first; this guide is the operational counterpart.

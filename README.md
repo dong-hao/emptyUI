@@ -153,6 +153,8 @@ rewrite them (the same precedent as `docs/history/`'s verbatim records).
 - [docs/DESIGN.md](docs/DESIGN.md) — the living design contract,
   organized by subsystem (§7 backend, §8 frontend, §9 data/instruments,
   §10 processing semantics, §11 deployment, §12 roadmap).
+- [docs/user-guide.md](docs/user-guide.md) — recipes: single-station,
+  remote reference, session QC; plots, exports, troubleshooting.
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.
 - [docs/deployment.md](docs/deployment.md) — remote/embedded deployment.
 - [docs/issues.md](docs/issues.md) — the issue register: what is open,
