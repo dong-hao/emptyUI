@@ -39,6 +39,8 @@ Screenshot-comfyUI.png
 *.png
 # …but keep the USArray style-reference figure (moved out of the repo root)
 !examples/data/nims-usarray-test/SDG31b_H28coh.png
+# …and the README hero screenshot (a real capture of the running app)
+!docs/screenshot.png
 
 # Playwright test-runner artifacts
 packages/web/test-results/

@@ -1,81 +1,126 @@
 # emptyUI
 
-A node-based, ComfyUI-inspired visual workflow interface for magnetotelluric
-(MT) data processing and visualization. See [docs/DESIGN.md](docs/DESIGN.md) for the
-architecture and design decisions.
+A node-based, visual workflow interface for magnetotelluric (MT) data
+processing and TF estimation — a ComfyUI-style canvas where processing
+chains are built by connecting typed ports, with publication-quality
+plots, verified end-to-end on real data.
 
-## Layout
+![emptyUI running the burst-processing demo workflow](docs/screenshot.png)
 
+*The demo workflow (below) — Load MTH5 → Extract Run → Compute FC →
+Coherence Sort → Estimate TF, with the time series, apparent
+resistivity/phase and spectrogram plots rendered on the canvas.*
+
+## Quick start
+
+Requires **Python ≥ 3.10** (3.12 recommended) and **Node ≥ 20** (needed
+once to build the web frontend; serving afterwards is pure Python).
+[uv](https://docs.astral.sh/uv/) is optional but speeds the install up.
+
+```bash
+./scripts/install.sh          # .venv + editable packages + npm install
+./scripts/serve.sh            # frontend + API on http://127.0.0.1:8000
 ```
-packages/
-├── emptyui/              # Python core: node API, registry, DAG executor, FastAPI server
-├── emptyui-core-nodes/   # bundled minimal node plugin
-├── emptyui-mth5/         # archive/IO plugin: MTH5/LEMI/Phoenix, TF I/O, plots
-├── emptyui-aurora/       # processing plugin: FC/TF estimation, QC, sorts
-└── web/                  # React + React Flow frontend (Vite)
 
-examples/
-├── workflow/             # ready-to-load example workflow documents (kept in sync
-│                         #   with the current node manifests; regenerate by loading
-│                         #   and re-saving when node surfaces change)
-├── data/                 # sample datasets (raw instrument corpora are gitignored;
-│                         #   see the notes in each subdirectory)
-└── plugin-template/      # working plugin template
+Then open **http://127.0.0.1:8000** in any modern browser and:
 
-**Session QC & gating demo** — `examples/workflow/phoenix-mtu5a-session-qc.emptyui.json`
-runs the full data-driven QC story on the tracked `smoke` Phoenix
-archive: Mask TS (time-domain quality mask: Hampel despiking, constant-run
-and gap detection) → Compute FC with `session_hours=0.25` +
-`regroup_contiguous` (session-granular FCs; §9.4) → Select Runs (per-session
-scoring with the soft diurnal prior) → Estimate TF. The run diagnostics and
-mask report are viewable on their View Table nodes. When sessioning pays:
-the statistical unit is FC windows per session — aim for ≥ ~20–30 windows
-per session at the QC reference band (§9.4); a noisy session then costs ±1
-window per level instead of the whole recording. The demo is pinned by a
-headless execution test (`test_demo_session_qc.py`).
+1. Click **Load** and pick `examples/workflow/phoenix-mtu5a-smoke.emptyui.json`.
+2. Click **▶ Run** — the chain completes in well under a minute.
+3. Click the **Preview Plot** nodes to see the time series, the apparent
+   resistivity/phase curve and the spectrogram.
 
-test/verification/        # recorded parity/metrics JSONs + the verification
-                          #   scripts that reproduce them (DESIGN history sections)
+That workflow is the tracked-data demo: it reads the bundled Phoenix
+MTU-5A archive (`examples/data/phoenix-mtu-test/smoke_phoenix_mtu.mth5`,
+a 3-hour real instrument recording, logger MTU-1690), so it works with
+no data of your own. The Python-only variant — for servers without
+Node — is `./scripts/install.sh --backend-only`, then
+`./scripts/serve.sh` (build the frontend once anywhere, or see
+[docs/deployment.md](docs/deployment.md)).
+
+## How it works
+
+- **Nodes render their parameters inline** on the body; the right panel
+  shows metadata (id, version, ports, dependencies). Drag nodes from the
+  palette (Data I/O, Processing, Display), connect typed ports, press
+  **▶ Run**. Invalid connections are rejected; each node can also carry
+  its own validation errors.
+- **Executions are incremental**: unchanged subtrees reuse cached
+  results, so editing one parameter and re-running only recomputes
+  downstream. Runs can be cancelled mid-flight; every node reports
+  progress and warnings over WebSocket.
+- **Plots are data**: Display nodes emit a typed `plot` port —
+  `Preview Plot` renders it inline (drag-resizable), `Save Plot`
+  exports it. Plot nodes follow USArray conventions with error bars
+  and station metadata.
+
+## Supported data
+
+| Node | Input |
+|---|---|
+| Load MTH5 | [MTH5](https://github.com/kujaku11/mth5) archives (v0.2) |
+| Load Phoenix MTU-5A | raw `TS*`/`TBL` streams + coil/dipole `*.asc` calibration files |
+| Load LEMI-424 | BGS-converted LEMI archives (`scripts/convert_bgs_lemi.py` helps convert) |
+| Load CSV | generic time-series CSV (for teaching/testing) |
+| Import TF | EDI, mt_metadata XML/avg, ZMM, Z-file (j) |
+
+Everything lands in one internal representation (`ts.run` /
+collections), so Align/Merge Runs, Mask TS, Compute FC, Coherence Sort,
+Select Runs, Estimate TF, Rotate TF and the plot nodes compose freely.
+The bundled sample data lives in `examples/data/` (the large raw corpora
+are gitignored — see the notes there); ready-to-load workflows are in
+`examples/workflow/`, including the **session QC & gating demo**
+(`phoenix-mtu5a-session-qc.emptyui.json`): Mask TS → session-granular
+Compute FC → per-session Select Runs → Estimate TF, with run
+diagnostics and the mask report on View Table nodes.
+
+## Deploying
+
+`scripts/serve.sh` is the deployment entry point: it builds
+`packages/web/dist` if missing (Node needed once) and serves the
+frontend **and** API from a single port — no Node at runtime.
+
+```bash
+./scripts/serve.sh --host 0.0.0.0 --port 8080    # expose to the network
+./scripts/serve.sh --data-root /srv/mt/data      # confine file access
 ```
+
+`--data-root` turns on read-only path confinement: `/api/files` and
+input-path parameters resolve only inside that directory. Reverse
+proxies, sub-path mounting, workspace retention, run limits and the
+embedded-mode contract are documented in
+[docs/deployment.md](docs/deployment.md). Ports busy? Pick another
+with `--port`; remote browsers need `--host 0.0.0.0` (the default binds
+localhost only).
+
+## Verification anchors
+
+The processing chain is pinned against official products, with records
+and reproduction scripts in `test/verification/`:
+
+- **USArray SDG31** vs the official EMTF TF: median |Δlog₁₀ρ| = **0.019**
+  (after the documented −5.7° rotation), 98% of periods within gate.
+- **MTU-5A burst pipeline** vs the official Phoenix EDI:
+  Δlog₁₀ρ ≈ **0.005** over the full band.
 
 ## Development
 
-Requires Python ≥3.10 with [uv](https://docs.astral.sh/uv/) and Node ≥20.
-
 ```bash
-# One-shot setup: creates .venv, installs all packages editable (with their
-# [dev] extras) + the example plugin, and runs npm install in packages/web.
-# Add --with-browsers to also download the Playwright Chromium build.
-./scripts/install.sh
-
-# …or do it manually:
-uv venv --python 3.12 .venv
-uv pip install -e "packages/emptyui[dev]" -e "packages/emptyui-core-nodes[dev]" \
-               -e "packages/emptyui-mth5[dev]" -e "packages/emptyui-aurora[dev]" \
-               -e "examples/plugin-template[dev]"
-cd packages/web && npm install
-
-# Run tests
-.venv/bin/python -m pytest packages -q
-
-# Fast development passes (tests are grouped by role, see below)
-.venv/bin/python -m pytest packages -q -m "not errors"   # happy path
-.venv/bin/python -m pytest packages -q -m errors         # edge cases (~5 s)
-
-# CI runs the same two groups (.github/workflows/tests.yml) on every
-# push/PR, plus the Playwright e2e suite (.github/workflows/e2e.yml)
-
-# Start API server on http://127.0.0.1:8000
-./scripts/dev-backend.sh
-
-# Frontend — dev server on http://localhost:7860 (proxies /api to :8000),
-# also on every interface (0.0.0.0:7860) for remote browsers. Narrow it:
-#   cd packages/web && npm run dev -- --host 127.0.0.1
-cd packages/web && npm run dev
-
-# …or launch both at once (Ctrl+C stops both cleanly)
-./scripts/dev.sh
+./scripts/dev.sh               # Vite + API with reload (two servers)
+./scripts/test.sh              # full gates: pytest (2 groups) + ruff
+                               #   + tsc + eslint + vitest
+./scripts/test.sh --fast       # happy-path pytest + ruff
+./scripts/test.sh --e2e        # Playwright suite (needs the Chromium
+                               #   build: ./scripts/install.sh --with-browsers)
 ```
+
+Repo layout: `packages/emptyui` (core: node API, registry, DAG
+executor, FastAPI server), `packages/emptyui-core-nodes` (minimal
+plugin), `packages/emptyui-mth5` (archive/IO: MTH5/LEMI/Phoenix, TF
+I/O, plots), `packages/emptyui-aurora` (processing: FC/TF estimation,
+QC, sorts), `packages/web` (React + React Flow frontend),
+`examples/plugin-template` (working plugin template). New node types
+need **zero frontend changes** — manifests drive the UI; author plugins
+against [docs/plugin-guide.md](docs/plugin-guide.md).
 
 ### Commit-log convention
 
@@ -103,83 +148,14 @@ Both records live under `docs/` since 2026-10-17; commit messages written
 before that date cite the repo-root `DESIGN.md`/`issues.md` paths — do not
 rewrite them (the same precedent as `docs/history/`'s verbatim records).
 
-## Browser end-to-end tests (Playwright)
-
-Headless full-stack regression tests live in `packages/web/e2e/` (Playwright
-Test runner — separate from the interactive Playwright MCP setup). The suite
-starts both servers itself (Vite + the FastAPI backend, see
-`playwright.config.ts`) and drives the real UI:
-
-```bash
-cd packages/web
-npm install
-npx playwright install chromium   # one-time browser download
-
-npm test                    # headless (default)
-npm run test:headed         # watch the browser while it runs
-```
-
-- Requires the Python packages installed per the Development section (the
-  backend is launched from the repo-root `.venv`).
-- CI: `.github/workflows/e2e.yml` runs the same suite headless on
-  ubuntu-latest (backend via `uv`, frontend via `npm ci`).
-- Artifacts (`test-results/`, `playwright-report/`, `.playwright-mcp/`) are
-  gitignored.
-
-## Status
-
-Current state: **M0–M3 complete (2026-09-09)**; M4 (community & advanced
-backlog) in progress. The full feature status, the ranked M4 backlog and the
-processing-correctness record (unit chain, USArray SDG31 ground-truth
-verification, MTU-5A official-product parity) live in [docs/DESIGN.md](docs/DESIGN.md)
-§12; dated delivery records are preserved in `docs/history/`.
-
-Feature summary:
-
-- **Framework** — manifest-driven nodes (zero frontend changes for new node
-  types), plugin system with enable/disable, DAG executor with structural
-  caching, partial runs, cancellation, WebSocket events, runtime settings,
-  remote-server contract (data-root confinement, sub-path mounting, TTL/GC,
-  run-limit guard).
-- **MT pipeline** (verified end-to-end on real data) — Mask TS (time-domain
-  quality gating: a pooled `quality_mask` aux channel from Hampel despiking,
-  constant-run/clip detection, interval exclusion and gap reporting;
-  Compute FC consumes it at the window level), Load MTH5/CSV/LEMI-424/
-  Phoenix MTU-5A, channel tooling, Align/Merge Runs, frequency-domain
-  calibration inside Compute FC, multi-level Compute FC (taper schedule,
-  prewhitening, clock-zero anchoring, saturation rejection), Estimate TF
-  (OLS/robust/RME_RR, l2u/uniform/manual band grids), Coherence Sort (per-bin
-  EMTF-style statistic), Select Runs + Residual Sort (data-driven run-level
-  QC with a soft diurnal prior), Rotate TF, TF import/export.
-- **Display** — publication-quality plots (AppRes & Phase, Tipper, Coherency,
-  Phase Tensor, Spectrogram, Time Series) with error bars, USArray
-  conventions and station metadata.
-- **Verification anchors** — USArray SDG31 vs the official EMTF TF
-  (median |Δlog₁₀ρ| = 0.019 after the documented −5.7° rotation, 98% within
-  gate); MTU-5A burst pipeline vs the official Phoenix EDI (Δlog₁₀ρ ~0.005
-  over the full band). Records + reproduction scripts in `test/verification/`.
-
-The M4 backlog (batch runner, disk cache, cross-level FC pooling, MMT, …) is
-ranked in docs/DESIGN.md §12.2.
-
-### UI conventions (stable)
-
-- **ComfyUI paradigm**: parameters render inline on the node body; the
-  right-hand panel shows metadata (id, version, ports, description, deps) and
-  Delete. Hover protocol: one-sentence tooltips; palette in fixed category
-  order (Data I/O, Processing, Display), nodes alphabetized, utility nodes
-  hidden by default (docs/DESIGN.md §4).
-- **Plots as data**: Display nodes emit a typed `plot` port; `Preview Plot`
-  renders inline (drag-resizable) and `Save Plot` exports. No run-level gallery
-  (docs/DESIGN.md §8).
-
 ## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — the living design contract, organized by subsystem
-  (§7 backend, §8 frontend, §9 data/instruments, §10 processing semantics,
-  §11 deployment, §12 roadmap).
+- [docs/DESIGN.md](docs/DESIGN.md) — the living design contract,
+  organized by subsystem (§7 backend, §8 frontend, §9 data/instruments,
+  §10 processing semantics, §11 deployment, §12 roadmap).
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.
 - [docs/deployment.md](docs/deployment.md) — remote/embedded deployment.
+- [docs/issues.md](docs/issues.md) — the issue register: what is open,
+  the resolved record, and the decisions behind them.
 - `docs/history/` — verbatim delivery records (M2/M3/M4) preserving the
-  original history §13–history §24 numbering; write references to them as `history §N`
-  in code docstrings and commit messages.
+  original history §13–history §24 numbering.
