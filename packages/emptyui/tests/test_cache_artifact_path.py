@@ -170,8 +170,11 @@ def test_artifact_handle_names_the_output_port():
         WorkflowNode(id="src", type="test.plot_source", params={}),
     ], edges=[])
     cache = NodeCache()
-    _summary, fresh = _run(reg, wf, cache)
-    _summary2, restored = _run(reg, wf, cache)  # same signature -> cache hit
+    # a workspace is REQUIRED here: headless (workspace=None) artifact
+    # paths are CWD-relative (context.py), so this test used to litter
+    # fig_src.txt into whatever directory pytest ran from
+    _summary, fresh = _run(reg, wf, cache, workspace=tempfile.mkdtemp(prefix="m4-c-"))
+    _summary2, restored = _run(reg, wf, cache, workspace=tempfile.mkdtemp(prefix="m4-d-"))
     for tag, events in (("fresh", fresh), ("restored", restored)):
         arts = [e for e in events if e.get("event") == "artifact"]
         assert arts, f"no artifact event emitted ({tag})"
