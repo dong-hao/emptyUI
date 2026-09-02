@@ -5,6 +5,15 @@ toolbar **Load** button; ready-to-run examples live in
 `examples/workflow/`. Node parameters edit inline on the node body —
 hover a parameter for its one-sentence tooltip.
 
+> **Data availability**: only the `phoenix-mtu5a-smoke*` examples ship
+> with data (the tracked 3-hour smoke archive). The remote-reference
+> recipe below can be exercised on a fresh clone by first regenerating
+> the NIMS archives with
+> `python examples/data/nims-usarray-test/build_mth5.py` (an EarthScope
+> FDSN download). The `phoenix-mtu5a-day-12h` and `lemi424` examples
+> need local corpora that do not ship — see the availability table in
+> the README.
+
 ## Recipe: single-station processing
 
 The bundled demo (`phoenix-mtu5a-smoke.emptyui.json`) is exactly this:

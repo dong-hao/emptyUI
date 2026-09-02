@@ -73,6 +73,20 @@ are gitignored — see the notes there); ready-to-load workflows are in
 Compute FC → per-session Select Runs → Estimate TF, with run
 diagnostics and the mask report on View Table nodes.
 
+### Example workflow data availability
+
+Not every example's data travels with the repository — the raw
+instrument corpora are gitignored. What works out of the box on a
+fresh clone:
+
+| Workflow | Data required | Fresh clone |
+|---|---|---|
+| `phoenix-mtu5a-smoke` | `smoke_phoenix_mtu.mth5` — **tracked** | ✅ runs as-is |
+| `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is |
+| `nims-remote-reference` | `4P_SDG31.h5` + `4P_SDH28.h5` — gitignored | 🔁 regenerate first: `python examples/data/nims-usarray-test/build_mth5.py` (downloads the two stations from EarthScope's FDSN service; needs `mth5` and network) |
+| `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5` — gitignored | ❌ local only (rebuilt from the raw MTU-5A corpus, which does not ship) |
+| `lemi424-remote-reference` | BGS-converted LEMI corpus — gitignored | ❌ local only (local instrument data, not redistributable) |
+
 ## Deploying
 
 `scripts/serve.sh` is the deployment entry point: it builds

@@ -117,7 +117,7 @@
         "window_type_deep": "hanning",
         "clock_zero": "",
         "prewhitening": "first difference",
-        "per_window_detrend": "",
+        "per_window_detrend": "none",
         "persist": true,
         "survey": "",
         "station": "SDG31",
@@ -146,7 +146,7 @@
         "window_type_deep": "hanning",
         "clock_zero": "",
         "prewhitening": "first difference",
-        "per_window_detrend": "",
+        "per_window_detrend": "none",
         "persist": true,
         "survey": "",
         "station": "SDH28",
@@ -231,6 +231,24 @@
         "y": 230.00987482760743
       },
       "plugin_version": "0.1.0"
+    },
+    {
+      "id": "ncal_sdg31",
+      "type": "mth5.calibrate",
+      "params": {},
+      "position": {
+        "x": 273.66047640851934,
+        "y": -114.23351876608112
+      }
+    },
+    {
+      "id": "ncal_sdh28",
+      "type": "mth5.calibrate",
+      "params": {},
+      "position": {
+        "x": 266.58668581104496,
+        "y": 82.22601904990144
+      }
     }
   ],
   "edges": [
@@ -245,7 +263,7 @@
       "id": "e0bfd923a-a7ec-4ee3-9835-34f0a6a5df81",
       "source": "n5f79a1",
       "source_port": "merged_run",
-      "target": "n1907b3",
+      "target": "ncal_sdg31",
       "target_port": "data"
     },
     {
@@ -266,7 +284,7 @@
       "id": "ef17f2448-e9d7-4fbd-806d-2c66bd977fce",
       "source": "n361d7c",
       "source_port": "merged_run",
-      "target": "n368210",
+      "target": "ncal_sdh28",
       "target_port": "data"
     },
     {
@@ -338,6 +356,20 @@
       "source_port": "plot",
       "target": "nea8f7c",
       "target_port": "plot"
+    },
+    {
+      "id": "e_ncal_sdg31",
+      "source": "ncal_sdg31",
+      "source_port": "data",
+      "target": "n1907b3",
+      "target_port": "data"
+    },
+    {
+      "id": "e_ncal_sdh28",
+      "source": "ncal_sdh28",
+      "source_port": "data",
+      "target": "n368210",
+      "target_port": "data"
     }
   ]
 }
