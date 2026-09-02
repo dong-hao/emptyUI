@@ -94,13 +94,16 @@ localhost only).
 
 ## Verification anchors
 
-The processing chain is pinned against official products, with records
-and reproduction scripts in `test/verification/`:
+The processing chain is pinned against official products, with
+reproduction scripts and recorded metrics in
+`examples/data/nims-usarray-test/` (USArray) and `test/verification/`
+(MTU-5A):
 
-- **USArray SDG31** vs the official EMTF TF: median |Δlog₁₀ρ| = **0.019**
+- **USArray SDG31** (`examples/data/nims-usarray-test/verify_sdg31.py`)
+  vs the official EMTF TF: median |Δlog₁₀ρ| = **0.019**
   (after the documented −5.7° rotation), 98% of periods within gate.
-- **MTU-5A burst pipeline** vs the official Phoenix EDI:
-  Δlog₁₀ρ ≈ **0.005** over the full band.
+- **MTU-5A burst pipeline** (`test/verification/clb_coupling_comparison.py`)
+  vs the official Phoenix EDI: Δlog₁₀ρ ≈ **0.005** over the full band.
 
 ## Development
 

@@ -1202,7 +1202,7 @@ def _pair_remote_fc(local_fc, ref_fc, pairing="intersect", tol_s=0.0,
             "remote window(s); dropped %d on each side (unmatched window "
             "times — GPS stray clocks? raise 'Pair tolerance (s)'; or "
             "coverage differences — restrict both stations to the same "
-            "Build FC window)%s",
+            "Compute FC window)%s",
             f" at level {level}" if level is not None else "",
             li.size, lt.size, ri.size, rt.size, n_local_drop, detail,
         )

@@ -1088,8 +1088,8 @@ class SelectRuns(Node):
         "prior: daytime runs are held to a stricter deviation (the prior "
         "expects a solar plant nearby), but a measured-clean day still "
         "passes and a noisy night is still dropped — the clock shapes the "
-        "expectation, it does not delete data. Requires an fc payload built "
-        "by Build FC (per-window 'run_id' coordinate)."
+        "expectation, it does not delete data. Requires an fc payload "
+        "carrying the per-window 'run_id' coordinate (stamped by Compute FC)."
     )
     category = "Processing"
     inputs = (Input("fc", "fc"),)
@@ -1160,7 +1160,7 @@ class SelectRuns(Node):
         if "run_id" not in sample.coords:
             raise ValueError(
                 "Select Runs needs an fc payload with a per-window "
-                "'run_id' coordinate — rebuild it with Build FC")
+                "'run_id' coordinate — re-run Compute FC to stamp it")
         ins, outs, _ = _fc_io_channels(sample)
         # L-A9: a magnetic-only fc (no electric outputs — or vice versa)
         # raised a raw numpy stack error; name the channels
@@ -1168,7 +1168,7 @@ class SelectRuns(Node):
             raise ValueError(
                 "Select Runs needs an fc with both input (horizontal "
                 f"magnetic) and output channels — got inputs={ins}, "
-                f"outputs={outs}; rebuild it with Build FC")
+                f"outputs={outs}; re-run Compute FC to stamp it")
         absolute_time = np.issubdtype(
             np.asarray(sample["time"].values).dtype, np.datetime64)
         if use_prior and not absolute_time:
@@ -1349,8 +1349,8 @@ class ResidualSort(Node):
         "fit the model' rather than 'is the floor high' — the right lever "
         "for diffuse, unpolarized noise. Cascadeable: chain Estimate TF -> "
         "Residual Sort -> Estimate TF, iterating if needed. Requires the fc "
-        "payload's per-window 'run_id' coordinate (Build FC) and the "
-        "'band_intervals' carried by the first pass's tf levels."
+        "payload's per-window 'run_id' coordinate (stamped by Compute FC) "
+        "and the 'band_intervals' carried by the first pass's tf levels."
     )
     category = "Processing"
     inputs = (
@@ -1382,7 +1382,7 @@ class ResidualSort(Node):
         Param("use_prior", "boolean", label="Daytime soft prior",
               default=True,
               description="Scale the threshold by local time of day "
-                          "(shared with Select Runs / Build FC QC)."),
+                          "(shared with Select Runs QC)."),
         Param("prior_max", "number", label="Prior max", default=2.0,
               min=1.0, optional=True),
         Param("local_utc_offset", "number", label="Local UTC offset (h)",
@@ -1402,7 +1402,7 @@ class ResidualSort(Node):
         if "run_id" not in sample.coords:
             raise ValueError(
                 "Residual Sort needs an fc payload with a per-window "
-                "'run_id' coordinate — rebuild it with Build FC")
+                "'run_id' coordinate — re-run Compute FC to stamp it")
         ins, outs, _ = _fc_io_channels(sample)
         # L-A9: a magnetic-only fc (no electric outputs — or vice versa)
         # raised a raw numpy stack error; name the channels
@@ -1410,7 +1410,7 @@ class ResidualSort(Node):
             raise ValueError(
                 "Residual Sort needs an fc with both input (horizontal "
                 f"magnetic) and output channels — got inputs={ins}, "
-                f"outputs={outs}; rebuild it with Build FC")
+                f"outputs={outs}; re-run Compute FC to stamp it")
         absolute_time = np.issubdtype(
             np.asarray(sample["time"].values).dtype, np.datetime64)
 
