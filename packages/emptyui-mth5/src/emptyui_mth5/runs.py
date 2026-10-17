@@ -405,8 +405,8 @@ class ExtractRun(Node):
         "runs intersecting a UTC time range as a run collection "
         "('time range' mode — the inclusive selection for burst-mode "
         "archives: the 150/2400 Hz slots and the continuous stream are "
-        "each cropped to the window, so Compute FC can cascade and merge "
-        "them per level exactly like Build FC does).")
+        "each cropped to the window, so Compute FC can cascade and "
+        "them per level.")
     category = "Data I/O"
     inputs = (Input("mth5", "mth5"),)
     outputs = (
@@ -1366,7 +1366,8 @@ def _align_collections(ctx, data1, data2, start: str, end: str) -> dict:
                 "alignment discards %.0f%% of input %d (%d of %d samples; "
                 "runs outside the overlap are dropped) — for remote "
                 "reference, restrict both stations to the same window "
-                "(Build FC start/end) or extract matching time ranges",
+                "(e.g. via the time-selector window) or extract matching "
+                "time ranges",
                 100 * (1 - n_after / n_before), idx, n_after, n_before)
         if kind == "single":
             out[f"data{idx}"] = members[0]
@@ -1495,9 +1496,10 @@ def _warn_merge_gaps_in_overlap(ctx, inputs, outputs, overlap) -> None:
             "%s was merged across acquisition gap(s) %s — %.0f%% of the "
             "aligned overlap falls inside interpolated gap(s) (%d of %d "
             "samples): windows over them pair with fabricated "
-            "(interpolated) remote samples. Prefer Merge FC (Fourier "
-            "coefficients concatenate without fabrication) or exclude the "
-            "gap intervals via the time-selector window.",
+            "(interpolated) remote samples. Prefer Compute FC's "
+            "run-collection cascade (Fourier coefficients concatenate "
+            "without fabrication) or exclude the gap intervals via the "
+            "time-selector window.",
             tag, ", ".join(f"[{a}, {b})" for a, b in hit), 100 * share,
             n_hit, n_common,
         )

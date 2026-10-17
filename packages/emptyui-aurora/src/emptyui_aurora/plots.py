@@ -85,7 +85,8 @@ def _resolve_rate_tiers(levels: dict, sample_rate: str):
                 break
     if families is None:
         # legacy fc (per-level sample_rate attrs, no family_rates stamp —
-        # e.g. Merge FC of separately-computed ComputeFC outputs): the
+        # e.g. a run-collection cascade of separately-computed ComputeFC
+        # outputs): the
         # TESTED legacy contract is 'auto' = every level (indices =
         # cascade depth), titled with the native rate first
         ids = [lv for r in rates for lv in by_rate[r]]

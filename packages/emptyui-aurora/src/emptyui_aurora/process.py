@@ -399,8 +399,9 @@ class ComputeFC(Node):
                           "'epoch' (Unix epoch — automatically common to "
                           "all stations/runs) or an explicit ISO datetime. "
                           "Required for remote-reference pairing across "
-                          "separately-computed per-run FCs (Merge FC, burst "
-                          "mode); empty anchors at each run's start (legacy). "
+                          "separately-computed per-run FCs (burst mode's "
+                          "run-collection cascade); empty anchors at each "
+                          "run's start (legacy). "
                           "Needs an absolute start time."),
         Param("prewhitening", "select", label="Prewhitening",
               default="first difference",

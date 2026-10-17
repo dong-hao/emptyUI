@@ -1302,9 +1302,9 @@ def _warn_remote_gaps(local_fc, ref_fc) -> None:
         "remote-reference fc carries interpolated gap(s) %s inside the "
         "local run's span — %d of %d local window(s) pair with fabricated "
         "(interpolated) remote samples and silently degrade the estimate. "
-        "Use Merge FC (concatenates Fourier coefficients without "
-        "fabrication) or exclude the gap intervals via the time-selector "
-        "window (M4 #2).",
+        "Use Compute FC's run-collection cascade (concatenates Fourier "
+        "coefficients without fabrication) or exclude the gap intervals "
+        "via the time-selector window (M4 #2).",
         ", ".join(hits), int(affected.sum()), t_idx.size,
     )
 

@@ -44,7 +44,8 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
     (RunTS.merge cannot combine unequal sets) and OVERLAPPING acquisitions
     are rejected (the merge cannot combine non-monotonic time indexes, and
     the overlap would be interpolated over — fabricated samples). The
-    FC-level alternative (Merge FC) concatenates without fabrication.
+    FC-level alternative (Compute FC's run-collection cascade)
+    concatenates without fabrication.
     """
     import logging
 
@@ -121,8 +122,9 @@ def merge_runts(run_ts_list, gap_method: str = "slinear",
                 f"cannot merge: run '{_rt_id(rt)}' starting {start} overlaps "
                 f"the previous run's end {prev_end} — overlapping "
                 "acquisitions cannot be concatenated (check the run "
-                "selection; Merge FC concatenates Fourier coefficients "
-                "without fabricating samples)")
+                "selection; Compute FC's run-collection cascade "
+                "concatenates Fourier coefficients without fabricating "
+                "samples)")
         if prev_end is not None and start > prev_end:
             gaps.append([prev_end.isoformat(), start.isoformat()])
         prev_end = end
