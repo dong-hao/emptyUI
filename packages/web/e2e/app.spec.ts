@@ -124,7 +124,7 @@ test("Coherence Sort is band-free and Estimate TF keeps its own banding (history
   for (const label of ["Band style", "Periods per octave", "Min bins per band"]) {
     await expect(param(sort, label)).toHaveCount(0);
   }
-  await expect(param(sort, "Apply below period")).toHaveCount(1);
+  await expect(param(sort, "Sort below period")).toHaveCount(1);
   await expect(param(estimate, "Band style").locator("select")).toHaveValue(
     "l2u",
   );

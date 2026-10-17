@@ -740,12 +740,20 @@ def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
     ensure_h5_openable(p, log=None)
     # and the stale-flag path (no in-process holder) still clears when
     # h5clear is available
+    import shutil
+
     def busy_file2(*args, **kwargs):
         raise OSError("file is already open for write (may use h5clear)")
 
     monkeypatch.setattr(h5py, "File", busy_file2)
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
+    # hermetic: runners without the HDF5 tools must reach the mocked
+    # `h5clear -s` too — fake the lookup (the refusal branch above must
+    # stay real, it fires before the which() call)
+    monkeypatch.setattr(shutil, "which",
+                        lambda cmd: "/usr/bin/fake-h5clear"
+                        if cmd == "h5clear" else None)
     ensure_h5_openable(p, log=None)  # cleared via the mocked h5clear
 
 
