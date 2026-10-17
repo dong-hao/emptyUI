@@ -1,12 +1,16 @@
 # emptyUI
 
-A node-based, visual workflow interface for magnetotelluric (MT) data
-processing and TF estimation — a ComfyUI-style canvas where processing
-chains are dataflow-driven, easily built by connecting typed ports.
+ A node-based, visual workflow interface for magnetotelluric (MT) data processing.
+ 
+ emptyUI is a node-based, dataflow-driven, ComfyUI-inspired graphical interface 
+ for magnetotelluric (MT) data processing and analysis. The goal is to lower the 
+ barrier of entry for geoscientists by integrating scattered, command-line-driven 
+ open-source tools with a visual, ComfyUI-style canvas where processing chains 
+ can be built by  simple drag-and-drop operations.
 
 ![emptyUI running the burst-processing demo workflow](docs/screenshot.png)
 
-*The demo workflow (below) — Load MTH5 → Extract Run → Compute FC →
+*The demo workflow — Load MTH5 → Extract Run → Compute FC →
 Coherence Sort → Estimate TF, with the time series, apparent
 resistivity/phase and spectrogram plots rendered on the canvas.*
 
@@ -186,7 +190,6 @@ rewrite them (the same precedent as `docs/history/`'s verbatim records).
   original history §13–history §24 numbering. obsolete history. The 
   current contract is in `docs/DESIGN.md` (§1–§12).
 
-## Contribution
 ## HOW TO GET UPDATED
 ```
 cd to_you_local_folder
