@@ -715,17 +715,16 @@ def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
     p = tmp_path / "live.h5"
     with h5py.File(p, "w", locking=False):
         pass
+    real_file = h5py.File
     register_write_open(p)
     try:
         assert is_write_open_in_process(p)
         # force the "already open" error path: the file is fine, so simulate
         # the flag by patching the probe to raise
-        import h5py as _h5
-
         def busy_file(*args, **kwargs):
             raise OSError("file is already open for write (may use h5clear)")
 
-        monkeypatch.setattr(_h5, "File", busy_file)
+        monkeypatch.setattr(h5py, "File", busy_file)
         try:
             ensure_h5_openable(p, log=None)
         except OSError as exc:
@@ -736,7 +735,11 @@ def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
     finally:
         release_write_open(p)
     assert not is_write_open_in_process(p)
-    # released: the pre-check passes (the file opens cleanly)
+    # released: the pre-check passes (the file opens cleanly) — the real
+    # h5py.File back, or the still-raising mock would be misread as a
+    # stale flag and "cleared" (silently by a real h5clear on macOS,
+    # loudly on runners without the HDF5 tools)
+    monkeypatch.setattr(h5py, "File", real_file)
     ensure_h5_openable(p, log=None)
     # and the stale-flag path (no in-process holder) still clears when
     # h5clear is available
@@ -749,8 +752,7 @@ def test_h5clear_refuses_live_in_process_writer(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
     # hermetic: runners without the HDF5 tools must reach the mocked
-    # `h5clear -s` too — fake the lookup (the refusal branch above must
-    # stay real, it fires before the which() call)
+    # `h5clear -s` too — fake the lookup
     monkeypatch.setattr(shutil, "which",
                         lambda cmd: "/usr/bin/fake-h5clear"
                         if cmd == "h5clear" else None)
