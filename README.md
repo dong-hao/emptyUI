@@ -2,8 +2,7 @@
 
 A node-based, visual workflow interface for magnetotelluric (MT) data
 processing and TF estimation — a ComfyUI-style canvas where processing
-chains are built by connecting typed ports, with publication-quality
-plots, verified end-to-end on real data.
+chains are dataflow-driven, easily built by connecting typed ports.
 
 ![emptyUI running the burst-processing demo workflow](docs/screenshot.png)
 
@@ -22,7 +21,9 @@ once to build the web frontend; serving afterwards is pure Python).
 ./scripts/serve.sh            # frontend + API on http://127.0.0.1:8000
 ```
 
-Then open **http://127.0.0.1:8000** in any modern browser and:
+## Simple demo
+Once your server is running, open **http://127.0.0.1:8000** in any modern 
+browser (mostly tested on Chrome and Safari) and:
 
 1. Click **Load** and pick `examples/workflow/phoenix-mtu5a-smoke.emptyui.json`.
 2. Click **▶ Run** — the chain completes in well under a minute.
@@ -61,7 +62,7 @@ Node — is `./scripts/install.sh --backend-only`, then
 | Load Phoenix MTU-5A | raw `TS*`/`TBL` streams + coil/dipole `*.asc` calibration files |
 | Load LEMI-424 | BGS-converted LEMI archives (`scripts/convert_bgs_lemi.py` helps convert) |
 | Load CSV | generic time-series CSV (for teaching/testing) |
-| Import TF | EDI, mt_metadata XML/avg, ZMM, Z-file (j) |
+| Import TF | EDI, mt_metadata XML/avg, ZMM, (sorry Alan, but MTH5 does not yet support j!) |
 
 Everything lands in one internal representation (`ts.run` /
 collections), so Align/Merge Runs, Mask TS, Compute FC, Coherence Sort,
@@ -79,13 +80,13 @@ Not every example's data travels with the repository — the raw
 instrument corpora are gitignored. What works out of the box on a
 fresh clone:
 
-| Workflow | Data required | Fresh clone |
+| Workflow | Data required | Available |
 |---|---|---|
 | `phoenix-mtu5a-smoke` | `smoke_phoenix_mtu.mth5` — **tracked** | ✅ runs as-is |
-| `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is |
-| `nims-remote-reference` | `4P_SDG31.h5` + `4P_SDH28.h5` — gitignored | 🔁 regenerate first: `python examples/data/nims-usarray-test/build_mth5.py` (downloads the two stations from EarthScope's FDSN service; needs `mth5` and network) |
-| `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5` — gitignored | ❌ local only (rebuilt from the raw MTU-5A corpus, which does not ship) |
-| `lemi424-remote-reference` | BGS-converted LEMI corpus — gitignored | ❌ local only (local instrument data, not redistributable) |
+| `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is, not working very well,though |
+| `nims-remote-reference` | `4P_SDG31.h5` + `4P_SDH28.h5` | 🔁 regenerate first: `python examples/data/nims-usarray-test/build_mth5.py` (downloads the two stations from EarthScope's FDSN service; needs `mth5` and network) |
+| `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5`  | ❌  ask Hao if you want to try this|
+| `lemi424-remote-reference` | BGS-converted LEMI corpus | ❌ need to be downloaded from the BGS website |
 
 ## Deploying
 
@@ -141,6 +142,9 @@ against [docs/plugin-guide.md](docs/plugin-guide.md).
 
 ### Commit-log convention
 
+Important if you want to contribute: should record the design decision
+and changes:
+
 ```
 Type: one-line summary — the what and where (docs/DESIGN.md §ref)
 
@@ -167,14 +171,44 @@ rewrite them (the same precedent as `docs/history/`'s verbatim records).
 
 ## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — the living design contract,
-  organized by subsystem (§7 backend, §8 frontend, §9 data/instruments,
-  §10 processing semantics, §11 deployment, §12 roadmap).
+- [docs/DESIGN.md](docs/DESIGN.md) — the living (and growing) design 
+  contract, organized by subsystem (§7 backend, §8 frontend, §9 
+  data/instruments, §10 processing semantics, §11 deployment, 
+  §12 roadmap). Kind of arbitary. 
 - [docs/user-guide.md](docs/user-guide.md) — recipes: single-station,
   remote reference, session QC; plots, exports, troubleshooting.
 - [docs/plugin-guide.md](docs/plugin-guide.md) — plugin authoring contract.
 - [docs/deployment.md](docs/deployment.md) — remote/embedded deployment.
 - [docs/issues.md](docs/issues.md) — the issue register: what is open,
-  the resolved record, and the decisions behind them.
+  the resolved record, and the decisions behind them. very long, try 
+  `git log --grep=docs/issues.md` for a summary.
 - `docs/history/` — verbatim delivery records (M2/M3/M4) preserving the
-  original history §13–history §24 numbering.
+  original history §13–history §24 numbering. obsolete history. The 
+  current contract is in `docs/DESIGN.md` (§1–§12).
+
+## Contribution
+## HOW TO GET UPDATED
+```
+cd to_you_local_folder
+git pull
+```
+
+## Contact
+
+DONG Hao –  donghao@cugb.edu.cn
+
+China University of Geosciences, Beijing
+
+Distributed under the Apache license. See ``LICENSE`` for more information.
+
+[https://github.com/dong-hao/emptyUI]
+
+## Contributing
+
+Those who are willing to contribute are welcomed to try - but I probably won't have the time to review the commits frequently (not that I would expect there will be any).
+
+1. Fork it (<https://github.com/dong-hao/emptyUI/fork>)
+2. Create your feature branch (`git checkout -b feature/somename`)
+3. Commit your changes (`git commit -am 'Add some features'`)
+4. Push to the branch (`git push origin feature/somename`)
+5. Create a new Pull Request - lather, rinse, repeat
