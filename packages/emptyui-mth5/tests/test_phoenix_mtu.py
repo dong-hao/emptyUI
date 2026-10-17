@@ -489,6 +489,59 @@ def test_read_phoenix_mtu_asc_calibration(tmp_path):
         assert all(d["applied_filter"]["applied"] for d in attrs)
 
 
+def test_read_phoenix_mtu_gain_conflict_warns_tbl_wins(tmp_path):
+    """CLB/CLC normalizing settings conflicting with the recording TBL
+    (EGN/HGN/HNOM) warn — the TBL is the acquisition parameter set and
+    wins: the scalar calibration is unchanged and the chains still build,
+    but the shape mismatch is never silent."""
+    _synthetic_corpus(tmp_path)
+    # defaults: EGN=2 HGN=2 HNOM=1000 vs the fixtures' E-gain: 2 H-gain: 2
+    # / Normalizing Factor: 1000 — force all three conflicts
+    _write_tbl(tmp_path / "SYNTH01.TBL", EGN=1, HGN=1, HNOM=500.0,
+               HXSN="COIL111", HYSN="COIL222", HZSN="COIL333")
+    _write_cal_files(tmp_path, box=True, coils=("COIL111",))
+    res = read_phoenix_mtu(tmp_path, save_path=tmp_path)
+    conflicts = [w for w in res["warnings"] if "normalized" in w]
+    assert len(conflicts) == 3
+    assert any("E-gain 2" in w and "EGN=1" in w for w in conflicts)
+    assert any("H-gain 2" in w and "HGN=1" in w for w in conflicts)
+    assert any("Normalizing Factor (mV/nT) 1000" in w and "HNOM=500" in w
+               for w in conflicts)
+    # the TBL wins: the scalar calibration is unchanged and every matched
+    # chain still builds (the conflict is advisory, never structural)
+    assert res["calibration"]["ex"] == ["phoenix_clb_mtu-1234_ex"]
+    assert res["calibration"]["hx"] == ["phoenix_clb_mtu-1234_hx",
+                                        "phoenix_clc_coil111_hx"]
+
+
+def test_normalizing_conflict_absent_side_is_silent():
+    """A pair with either side absent (an export carrying only E-gain, a
+    TBL tag not written) skips the check — no false warning from missing
+    data; a matching pair is silent too."""
+    from emptyui_mth5.phoenix_calibration import PhoenixCalibration
+    from emptyui_mth5.phoenix_mtu import _warn_normalizing_conflict
+
+    cal = PhoenixCalibration(kind="CLB", serial="X",
+                             normalizing={"e_gain": 2.0},
+                             channels={})
+    warnings: list[str] = []
+    _warn_normalizing_conflict(
+        cal, "box calibration",
+        (("EGN", "e_gain", "final E-channel gain", "E-gain"),
+         ("HGN", "h_gain", "final H-channel gain", "H-gain")),
+        {"EGN": 10, "HGN": 3}, warnings)
+    # E-gain conflicts (2 vs 10); the HGN pair is skipped — no h_gain side
+    assert len(warnings) == 1
+    assert "E-gain 2" in warnings[0] and "EGN=10" in warnings[0]
+
+    warnings.clear()
+    _warn_normalizing_conflict(
+        cal, "box calibration",
+        (("EGN", "e_gain", "final E-channel gain", "E-gain"),),
+        {"EGN": 2}, warnings)
+    assert warnings == []
+
+
 def test_read_phoenix_mtu_asc_calibration_missing_warns(tmp_path):
     """Missing box / mismatched coil serials warn but never fail the
     ingest — the TBL scalar calibration still applies."""

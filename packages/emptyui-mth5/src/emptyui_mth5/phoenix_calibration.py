@@ -14,7 +14,12 @@ The tables are normalized SHAPE corrections: the CLB amplitudes are relative
 to the normalizing E/H gains (which match the recording TBL's ``EGN``/``HGN``
 when the box was calibrated at the deployed gain setting) and the CLC
 amplitudes are relative to the normalizing coil factor (1000 mV/nT = the TBL
-``HNOM`` feedback constant expressed in mV). The absolute scale is carried
+``HNOM`` feedback constant expressed in mV). The loader cross-checks the
+headers against the TBL and **the TBL wins** any conflict — it is the
+acquisition parameter set (the CLB/CLC headers reflect the calibration-time
+settings): the TBL-derived scalar chain is never touched and the table is
+never rescaled, the conflict is warned (``_warn_normalizing_conflict``). The
+absolute scale is carried
 entirely by the TBL scalar chain (applied at ingest, units mV/km / nT), so
 the ASC filters operate on the already-scalar-calibrated channels with
 ``units_in == units_out`` — removing them is a plain per-frequency complex

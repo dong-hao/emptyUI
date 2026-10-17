@@ -308,6 +308,46 @@ def _apply_tbl_calibration(
     return x, ""
 
 
+def _warn_normalizing_conflict(
+    cal, what: str, pairs: tuple[tuple[str, str, str, str], ...],
+    tbl_dict: dict, warnings: list[str],
+) -> None:
+    """Cross-check a parsed ASC table's normalizing settings against the
+    recording TBL (the original Phoenix processing convention).
+
+    The TBL is the parameter set of the *acquisition*; the CLB/CLC headers
+    reflect the settings while the box/coil was *calibrated*. When the two
+    conflict the **TBL wins** — the scalar calibration is TBL-derived and is
+    never touched, and the manufacturer table is never rescaled (its
+    normalized shape cannot be re-derived). A conflict therefore means the
+    shape correction does not match the deployed gain setting — a silently
+    biased TF if applied unawares — so it is warned, never silently
+    accepted. Pairs where either side is absent (older TBLs/exports) are
+    skipped.
+    """
+    for tbl_key, norm_key, tbl_label, norm_label in pairs:
+        tbl_v = tbl_dict.get(tbl_key)
+        norm_v = cal.normalizing.get(norm_key)
+        if tbl_v is None or norm_v is None:
+            continue
+        try:
+            tbl_f, norm_f = float(tbl_v), float(norm_v)
+        except (TypeError, ValueError):
+            continue
+        if not (np.isfinite(tbl_f) and np.isfinite(norm_f)) or tbl_f == 0:
+            continue
+        if np.isclose(tbl_f, norm_f, rtol=1e-6, atol=0.0):
+            continue
+        warnings.append(
+            f"{what} ({cal.source}) was normalized at {norm_label} {norm_f:g} "
+            f"but the recording TBL carries {tbl_key}={tbl_f:g} ({tbl_label}) "
+            "— the normalized shape correction does not match the deployed "
+            "acquisition setting; the TBL parameter set wins (the scalar "
+            "calibration is unchanged), use the calibration file exported at "
+            "the recording setting for a correct shape")
+        _log.warning(warnings[-1])
+
+
 def _prepare_asc_calibration(
     data_path: Path, calibration_folder: str | Path, table, warnings: list[str],
 ) -> dict[str, list]:
@@ -319,7 +359,10 @@ def _prepare_asc_calibration(
     recording). Returns ``{comp: [FrequencyResponseTableFilter, ...]}`` in
     chain order (box first, coil second); unmatched tables are warnings —
     the TBL scalar calibration still applies, only the shape correction is
-    missing.
+    missing. Matched tables are cross-checked against the TBL's recording
+    gains/feedback constant (``EGN``/``HGN``/``HNOM``): the TBL is the
+    acquisition parameter set and wins any conflict (see
+    :func:`_warn_normalizing_conflict`).
     """
     from .phoenix_calibration import (
         build_phoenix_filters,
@@ -354,6 +397,11 @@ def _prepare_asc_calibration(
     box_file = found.get("box")
     if box_file is not None:
         box = parse_asc_calibration(box_file)
+        _warn_normalizing_conflict(
+            box, "box calibration",
+            (("EGN", "e_gain", "final E-channel gain", "E-gain"),
+             ("HGN", "h_gain", "final H-channel gain", "H-gain")),
+            table.tbl_dict, warnings)
         comp_map = {int(n): c for c, n in table.channel_keys.items()}
         for comp, fap in build_phoenix_filters(box, comp_map=comp_map).items():
             chains.setdefault(comp, []).append(fap)
@@ -374,6 +422,11 @@ def _prepare_asc_calibration(
                     "is missing (the TBL scalar calibration still applies)")
             continue
         coil = parse_asc_calibration(path)
+        _warn_normalizing_conflict(
+            coil, f"{comp} coil calibration",
+            (("HNOM", "factor_mv_per_nt", "HNOM feedback constant (mA/nT)",
+              "Normalizing Factor (mV/nT)"),),
+            table.tbl_dict, warnings)
         filters = build_phoenix_filters(coil, comp_map={1: comp})
         chains.setdefault(comp, []).extend(filters.values())
     return chains
