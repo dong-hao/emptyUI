@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Python backend (editable packages)
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.12"
       - name: Create venv with the full plugin stack
@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
 
       - name: ruff check (same pinned version as the [dev] extras)
         # uvx --from pins the exact release, so CI's rule set is the one
