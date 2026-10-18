@@ -1,12 +1,10 @@
 # emptyUI
 
- A node-based, visual workflow interface for magnetotelluric (MT) data processing.
- 
  emptyUI is a node-based, dataflow-driven, ComfyUI-inspired graphical interface 
  for magnetotelluric (MT) data processing and analysis. The goal is to lower the 
  barrier of entry for geoscientists by integrating scattered, command-line-driven 
  open-source tools with a visual, ComfyUI-style canvas where processing chains 
- can be built by  simple drag-and-drop operations.
+ can be built by simple drag-and-drop operations.
 
 ![emptyUI running the burst-processing demo workflow](docs/screenshot.png)
 
@@ -43,7 +41,11 @@ Node — is `./scripts/install.sh --backend-only`, then
 [docs/deployment.md](docs/deployment.md)).
 
 ## How it works
-
+![emptyUI DAG processs pipeline chart](docs/emptyUI-DAG.svg)
+- **Each processing work is represented as a graph** or DAG (directed
+  acyclic graph), more precisely. Each step of the processing pipeline is
+  abstracted as a "node", with input and output data as "ports" that
+  connect them.  
 - **Nodes render their parameters inline** on the body; the right panel
   shows metadata (id, version, ports, dependencies). Drag nodes from the
   palette (Data I/O, Processing, Display), connect typed ports, press
@@ -53,10 +55,24 @@ Node — is `./scripts/install.sh --backend-only`, then
   results, so editing one parameter and re-running only recomputes
   downstream. Runs can be cancelled mid-flight; every node reports
   progress and warnings over WebSocket.
-- **Plots are data**: Display nodes emit a typed `plot` port —
+- **Plots are data**: Display nodes can emit a typed `plot` port —
   `Preview Plot` renders it inline (drag-resizable), `Save Plot`
-  exports it. Plot nodes follow USArray conventions with error bars
-  and station metadata.
+  exports it (idea from comfyUI). Plot nodes follow USArray conventions
+  with error bars and station metadata.
+- **Exact reproduction using workflows**: each DAG graph can be saved
+  as a "workflow" (in json format), which can be save/loaded and
+  exchanged between users to reproduce the exact workflow and parameters
+  across different platforms/machines. 
+
+## Underlying Open-source libraries:
+
+- All from our EM community (thanks to Jared, Karl, and many others): 
+
+| Library | Role |
+|---|---|
+| [`mt_metadata`](https://github.com/kujaku11/mt_metadata) | Standard MT metadata handling |
+| [`mth5`](https://github.com/kujaku11/mth5) | HDF5-based MT time-series storage |
+| [`aurora`](https://github.com/simpeg/aurora) | Time-Frequency transformation; Transfer-function estimation |
 
 ## Supported data
 
@@ -89,8 +105,8 @@ fresh clone:
 | `phoenix-mtu5a-smoke` | `smoke_phoenix_mtu.mth5` — **tracked** | ✅ runs as-is |
 | `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is, not working very well,though |
 | `nims-remote-reference` | `4P_SDG31.h5` + `4P_SDH28.h5` | 🔁 regenerate first: `python examples/data/nims-usarray-test/build_mth5.py` (downloads the two stations from EarthScope's FDSN service; needs `mth5` and network) |
-| `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5`  | ❌  ask Hao if you want to try this|
-| `lemi424-remote-reference` | BGS-converted LEMI corpus | ❌ need to be downloaded from the BGS website |
+| `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5`  | ❌  example for noisy data, ask Hao if you want to try this|
+| `lemi424-remote-reference` | BGS-converted LEMI 417/424 corpus | ❌ need to be downloaded from the BGS [website](https://www.data.gov.uk/dataset/90d6b5c1-af65-4eee-be3b-53d5bc224217/long-period-magnetotelluric-time-series-at-9-sites-in-scotland-uk) |
 
 ## Deploying
 
@@ -144,35 +160,6 @@ QC, sorts), `packages/web` (React + React Flow frontend),
 need **zero frontend changes** — manifests drive the UI; author plugins
 against [docs/plugin-guide.md](docs/plugin-guide.md).
 
-### Commit-log convention
-
-Important if you want to contribute: should record the design decision
-and changes:
-
-```
-Type: one-line summary — the what and where (docs/DESIGN.md §ref)
-
-Short paragraph: the problem/motivation — why the change exists.
-
-- bullet: the substantive change (mechanism, not narration)
-- bullet: …one per logical step
-
-Tests: what covers the change (test names/cases, or "none needed" for
-message-only/docs chores + why).
-```
-
-`Type` is one of `Feat:`, `Fix:`, `Perf:`, `Chore:`, `Docs:`. Keep the
-subject under ~72 characters where possible; the docs/DESIGN.md section
-reference anchors the change to the design record. The message must
-describe the diff it accompanies — a message narrating changes that are
-not in the commit falsifies the decision record. Historical references (history §13
-and above) are written `history §N` and resolve in `docs/history/`, which
-preserves the original numbering verbatim; current-contract references are
-written `docs/DESIGN.md §<n>` against docs/DESIGN.md's living numbering (§1–§12).
-Both records live under `docs/` since 2026-10-17; commit messages written
-before that date cite the repo-root `DESIGN.md`/`issues.md` paths — do not
-rewrite them (the same precedent as `docs/history/`'s verbatim records).
-
 ## Documentation
 
 - [docs/DESIGN.md](docs/DESIGN.md) — the living (and growing) design 
@@ -215,3 +202,32 @@ Those who are willing to contribute are welcomed to try - but I probably won't h
 3. Commit your changes (`git commit -am 'Add some features'`)
 4. Push to the branch (`git push origin feature/somename`)
 5. Create a new Pull Request - lather, rinse, repeat
+
+### Commit-log convention
+
+Important if you want to contribute: should record the design decision
+and changes:
+
+```
+Type: one-line summary — the what and where (docs/DESIGN.md §ref)
+
+Short paragraph: the problem/motivation — why the change exists.
+
+- bullet: the substantive change (mechanism, not narration)
+- bullet: …one per logical step
+
+Tests: what covers the change (test names/cases, or "none needed" for
+message-only/docs chores + why).
+```
+
+`Type` is one of `Feat:`, `Fix:`, `Perf:`, `Chore:`, `Docs:`. Keep the
+subject under ~72 characters where possible; the docs/DESIGN.md section
+reference anchors the change to the design record. The message must
+describe the diff it accompanies — a message narrating changes that are
+not in the commit falsifies the decision record. Historical references (history §13
+and above) are written `history §N` and resolve in `docs/history/`, which
+preserves the original numbering verbatim; current-contract references are
+written `docs/DESIGN.md §<n>` against docs/DESIGN.md's living numbering (§1–§12).
+Both records live under `docs/` since 2026-10-17; commit messages written
+before that date cite the repo-root `DESIGN.md`/`issues.md` paths — do not
+rewrite them (the same precedent as `docs/history/`'s verbatim records).
