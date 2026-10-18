@@ -129,3 +129,60 @@ test("Coherence Sort is band-free and Estimate TF keeps its own banding (history
     "l2u",
   );
 });
+
+test("palette search narrows the node list by title and type tag (M14)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const search = page.getByPlaceholder("Search nodes…");
+  await expect(page.getByRole("button", { name: "Load CSV", exact: true }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Estimate TF", exact: true }))
+    .toBeVisible();
+
+  await search.fill("csv");
+  await expect(page.getByRole("button", { name: "Load CSV", exact: true }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Estimate TF", exact: true }))
+    .toHaveCount(0);
+  // the type tag is searched alongside the title (core.io.load_csv)
+  await search.fill("io.load_csv");
+  await expect(page.getByRole("button", { name: "Load CSV", exact: true }))
+    .toBeVisible();
+  // clearing restores the full catalog
+  await search.fill("");
+  await expect(page.getByRole("button", { name: "Estimate TF", exact: true }))
+    .toBeVisible();
+});
+
+test("the FileBrowser dialog browses the server filesystem and closes on Esc (M14)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await addNode(page, "Load CSV");
+  const load = page.locator(".mt-node", { hasText: "Load CSV" }).first();
+
+  await load.locator(".browse-btn").click();
+  const dialog = page.getByRole("dialog", { name: "Select file" });
+  await expect(dialog).toBeVisible();
+  // the backend serves the directory it runs from (the repo root in the
+  // e2e webServer): browse down to a tracked archive and select it
+  await dialog.getByRole("button", { name: "📁 examples" }).click();
+  await dialog.getByRole("button", { name: "📁 data" }).click();
+  await dialog.getByRole("button", { name: "📁 phoenix-mtu-test" }).click();
+  await dialog
+    .getByRole("button", { name: "📄 smoke_phoenix_mtu.mth5" })
+    .click();
+  await expect(load.locator(".path-field input")).toHaveValue(
+    /smoke_phoenix_mtu\.mth5$/,
+  );
+
+  // Esc closes without changing the committed value (L-F11)
+  await load.locator(".browse-btn").click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(load.locator(".path-field input")).toHaveValue(
+    /smoke_phoenix_mtu\.mth5$/,
+  );
+});

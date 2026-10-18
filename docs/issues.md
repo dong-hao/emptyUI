@@ -654,19 +654,23 @@ values to 3.4e-15). Re-recorded at L21.
   first — the key was absent); full gates: pytest 732, vitest 24,
   Playwright 31, ruff/tsc clean.
 
-- [ ] **M14 — frontend quality gates are open. Part 1 FIXED (2026-10-10, commit `f666b3a`); the CI job and the e2e holes are deferred to Phase 4 (user decision).** No ESLint/Prettier/Biome
-  config anywhere (yet `MTNode.tsx:217` carries an `eslint-disable` no tool
-  ever reads); **no unit tests** in `packages/web` (only `playwright test`),
-  so pure logic — `validateConnection`, `connectionCreatesCycle`,
-  `resolveInherited`, `enforceWiringRules` — is reachable only through slow
-  fixture-dependent e2e; `tsconfig.json:14` `include: ["src"]` means
-  `e2e/*.ts`, `vite.config.ts`, `playwright.config.ts` are never type-checked;
-  and CI (`e2e.yml`) runs `npm test` without any `tsc`/`npm run build` step →
-  a type error can ship green. E2e holes worth closing when there: port-type
-  mismatch/`accepts` rejection, one-edge-per-input replacement on `onConnect`,
-  the entire `FileBrowser` dialog, palette search/`hidden`, the error/notice
-  surfaces, the WS `offline` terminal state, and **zero accessibility
-  assertions** (see L1).
+- [x] **M14 — frontend quality gates are open. CLOSED (2026-10-18): part 1
+  fixed `f666b3a` (2026-10-10); part 2 — the CI `web` gate and the deferred
+  e2e holes — delivered with the GitHub migration (`bd7a1aa` + the e2e
+  commit).** The CI gap is gone: `tests.yml` gained a `web` job parallel to
+  pytest/lint — `npm ci`, `npm run check` (tsc -b + eslint + vitest, the
+  local contract unchanged) and `npm run build` (vite bundling, which the
+  e2e dev-server boots never exercise) — so a type error can no longer
+  ship green. The deferred e2e holes landed across the interim deliveries:
+  port-type/`accepts`/cycle rejection and one-edge-per-input are pinned by
+  unit tests (`workflow.test.ts`) AND e2e (`interactions.spec.ts`); the
+  error/notice surfaces (`error_states.spec.ts`), the WS `offline` state
+  (`ws_outage.spec.ts`), accessibility (L1's `a11y.spec.ts`) and the
+  delete/copy-paste gestures all have dedicated specs. The last two named
+  holes closed with their own tests: palette search narrows by title AND
+  type tag and restores on clear; the `FileBrowser` dialog browses the
+  server filesystem (repo-root listing → select a tracked archive into the
+  path param) and Esc-closes without committing (L-F11).
   **Migration note (2026-10-17, pre-push): RESOLVED — no LFS needed.**
   The earlier "~100+ MB" figure is stale: the tracked
   `smoke_phoenix_mtu.mth5` measures **14 MB** since the `8fa54de`
@@ -679,12 +683,6 @@ values to 3.4e-15). Re-recorded at L21.
   tracked-data list is already minimal. Verified 2026-10-17
   (`git ls-files` sizes + `git count-objects`); example-data
   availability is documented in the README's table.
-  Status (2026-10-10, `f666b3a`): part 1 fixed. `tsc -b` covers src, e2e and
-  config (it had hidden 54 e2e type errors); ESLint 9 with the react-hooks
-  rules; Vitest for the pure logic (17 tests); `npm run check`. Probes: a
-  conditional hook is flagged, and a broken cycle check fails 4 unit tests.
-  Still open: the CI `web` job (waits for a remote, P0.4) and the e2e holes
-  above (Phase 3).
 
 - [x] **M15 — liveness/recovery gaps in the run channel. FIXED (2026-10-14).**
   Remedy, all four parts: (a) the socket NEVER gives up — after
