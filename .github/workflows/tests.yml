@@ -43,3 +43,30 @@ jobs:
         # uvx --from pins the exact release, so CI's rule set is the one
         # the repo's own ruff==0.16.4 pin resolves for local dev
         run: uvx --from ruff==0.16.4 ruff check .
+
+  web:
+    # the M14 gate: typecheck + eslint + vitest + a real vite build run in
+    # CI — `npm test` in e2e.yml alone lets a type error ship green (the
+    # e2e boots dev servers, so nothing else compiles the frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/web/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: packages/web
+        run: npm ci
+
+      - name: Typecheck, lint, unit tests (npm run check)
+        working-directory: packages/web
+        run: npm run check
+
+      - name: Production build (tsc -b && vite build)
+        working-directory: packages/web
+        run: npm run build
