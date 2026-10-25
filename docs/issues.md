@@ -27,9 +27,12 @@ landed as `dd0dfed` (H2, H5) · `09b8a59` (H1) · `e6735ad` (H3, H4) ·
 in parentheses use the living docs/DESIGN.md numbering (§1–§12); `history §N`
 resolves in `docs/history/`.
 
-> **Note (decision 2026-09-28):** `docs/issues.md` **stays gitignored**
-> (`.gitignore:23`) until the register is cleared; only then drop that rule
-> and version the file (L17).
+> **Note (2026-10-25):** the 2026-09-28 "stays gitignored" decision is
+> **historical** — L17 is done and the file is tracked (`git ls-files
+> docs/issues.md` confirms). The register is versioned from here on; the
+> stale note is kept only as provenance. The header's "solved entries are
+> removed" sentence is likewise stale (the `[x]` entries are retained) —
+> see L29.
 
 **Verification baseline (2026-09-29, this review):** pytest **630 passed** /
 0 failed (87 s) · `ruff check .` **0** (pinned `ruff==0.16.4`) ·
@@ -67,9 +70,89 @@ were last written pre-M25 (`b1845de`, Build FC era) and the uniform
 route shifted the marginal deep-band grid (46 → 44 periods; shared
 values to 3.4e-15). Re-recorded at L21.
 
+**Re-verified at the 2026-10-25 full-codebase review** (docs ↔
+implementation ↔ tests): pytest **727 passed** (`-m "not errors"`) +
+**74 passed** (`-m errors`) = **801 collected**, 0 failed (~72 s) ·
+`ruff check .` **0** · `npm run typecheck` / `npm run lint` clean ·
+Vitest **38 passed** (6 files) · Playwright **36 tests / 11 spec files**
+collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
+example 2) · all five shipped example workflows validate against the
+current manifests. The gates are green: the findings below are **not**
+gate failures — they are correctness, contract and drift gaps the gates
+do not cover. **Open after this review: 14** (H8–H10, M27–M31,
+L27–L32); the `[x]` entries are retained for continuity.
+
 ---
 
 ## High — silent wrong results, invisible failures, data loss
+
+- [ ] **H8 — the coherence map's time axis double-shifts window centres to
+  window ends (silent misregistration, worst at deep levels).** (Found
+  2026-10-25, full-codebase review; the L18 node.) `plots.py:511-526`
+  (`_coherence_map_matrix`). The FC `time` coordinate is **already** the
+  window centre — the settled L11 convention, and the function's own
+  docstring says so (`plots.py:495-497`); `process.py:288-297` proves it
+  by subtracting `half_win` to recover a start. The function then adds a
+  second half-window (`centres = t + half`, `t + dt / 2`), so the map is
+  labelled with window **ends**. The offset is half a window per level —
+  seconds at shallow levels, tens of minutes at the deepest — and
+  `pcolormesh(..., shading="auto")` treats the labels as centres, so the
+  whole map slides right relative to the data. Silent: no warning, no
+  error, a plausible-looking image.
+  **Impact:** High — wrong scientific output on a shipped diagnostic
+  node; the error grows exactly where long windows matter.
+  **Effort:** S (≈0.5 day) — drop the second shift; keep the docstring.
+  **Test:** `test_coherence_map_window_centres` (`test_coherence_plot.py:218`)
+  currently **pins the bug** (`expected = starts + half`); rewrite it to
+  assert `centres == paired["time"]` and add a deep-level case where the
+  half-window is large enough that a regression cannot hide inside the
+  tolerance.
+  **Fix sketch:** return `t` unchanged (both datetime64 and float
+  branches); delete the `half`/`dt` computation. Verify the two-FC
+  `_pair_remote_fc` path keeps the same convention.
+
+- [ ] **H9 — `Calibrate` mutates its input payload in place (cache
+  poisoning; DESIGN §7.1).** (Found 2026-10-25.) `calibrate.py:256-267` +
+  `calibration.py:293-353`. The explicit-filter path takes the input
+  object itself (`runts = data if hasattr(data, "dataset") ...`) and calls
+  `attach_filters(runts, ...)`, which writes
+  `run.dataset[ch].attrs["filters"]` (`calibration.py:328,342`), assigns
+  `run.filters = run_filters` (`:344`) and clears the channel cache
+  (`:345-352`). A cached or shared `RunTS` is therefore modified by a
+  downstream node: the same input hash can now yield different results
+  depending on execution order, and a second `Calibrate` on the same
+  payload sees an already-filtered run (the M8 guard only catches
+  `_refuse_if_calibrated`, not this path's attrs).
+  **Impact:** High — violates the immutability contract the cache depends
+  on; order-dependent results are the hardest class to reproduce.
+  **Effort:** S (≈0.5-1 day) — copy the payload before attaching (deep
+  copy of `dataset` + `filters`, or build a fresh `RunTS` from the
+  channels); leave the input untouched. `_to_runts` already copies for
+  dict payloads — the RunTS branch is the one that leaks.
+  **Test:** red test — snapshot `data.dataset[ch].attrs` and
+  `data.filters` before `execute`, assert unchanged after; then assert the
+  output is calibrated. Add a cache-order test: Calibrate twice on the
+  same cached payload, second run must not double-correct.
+
+- [ ] **H10 — `ImportTF`'s `sign_convention` is a silent no-op for every
+  format except EDI.** (Found 2026-10-25.) `tf.py:219-233` declares the
+  param for all imports; `tf.py:260-302` applies it only inside
+  `if p.suffix.lower() == ".edi":`. For `.xml`, `.zmm`, `.avg`, `.j` the
+  user selects "negate" or "conjugate", the node reports success, and the
+  TF is unchanged — a silently wrong polarity/phase convention downstream
+  (the exact class H2 fixed for units). The only `sign_convention` tests
+  are EDI (`test_tf_rotate.py:441,452`).
+  **Impact:** High — silent wrong result on a user-visible parameter; the
+  graph looks correct.
+  **Effort:** S (≈0.5 day) — move the negate/conjugate block out of the
+  EDI branch and apply it to `tf.dataset["transfer_function"]` after any
+  format loads; keep the EDI-header warning EDI-only. If a format cannot
+  be converted, raise instead of ignoring.
+  **Test:** parameterized over the four non-EDI fixtures (the
+  `zmm`/`xml`/`avg`/`j` exports M16 deferred with L8 now exist in
+  `test_tf_export.py`): assert `negate` flips the sign and `conjugate`
+  flips the imaginary part; assert `as-is` is a no-op. Red first — today
+  all three pass unchanged for non-EDI.
 
 - [x] **H7 — Phoenix calibration absence loads silently (and the
   collected warnings are UI-invisible). FIXED (2026-10-13).** (User
@@ -271,6 +354,94 @@ values to 3.4e-15). Re-recorded at L21.
 ---
 
 ## Medium — correctness risk, robustness, gate gaps
+
+- [ ] **M27 — `MaskTS`'s `hampel_threshold` default disagrees between the
+  manifest (8.0) and `execute` (3.0) — L7 recurrence.** (Found
+  2026-10-25.) `qc.py:185-186` declares `default=8.0` with a long
+  rationale ("h=3 masks ~5% of samples and collapses the FC band
+  coverage"); `qc.py:491` defaults the method argument to `3.0`. The
+  executor resolves the manifest default, so graph runs use 8.0; every
+  direct `MaskTS().execute(...)` in `test_mask_ts.py` (10 call sites) uses
+  3.0. Tests therefore exercise a different gate than production, and a
+  headless/embedding caller that omits the kwarg silently gets the
+  over-gating value the manifest explicitly rejects.
+  **Impact:** Medium — correctness risk plus a test/production
+  divergence; the exact defect class L7 closed for `print_params`.
+  **Effort:** XS (hours) — set the method default to 8.0 (or resolve it
+  from the manifest at the single choke point, the L7 remedy pattern);
+  update the direct-call tests to pass the value they mean.
+  **Test:** assert `MaskTS().execute(ctx, payload)` (no kwarg) gates like
+  `hampel_threshold=8.0`; red today (3.0 masks more).
+
+- [ ] **M28 — `Load Phoenix MTU-5` materializes the whole time series in
+  memory (`blocks = list(...)`).** (Found 2026-10-25.)
+  `phoenix_mtu.py:623` wraps the streaming `_iter_blocks(path, warnings)`
+  in `list(...)`, so the entire recording is resident before the MTH5
+  write starts. At 2400 Hz × 4 channels × 12 h that is ≈3.3 GB (float64)
+  plus block metadata — a scalability cliff that is nowhere documented,
+  and the iterator exists precisely to avoid it.
+  **Impact:** Medium — OOM on realistic long acquisitions; the failure is
+  a crash, not silent, but it arrives after a long read.
+  **Effort:** M (1-2 days) — feed blocks into the writer incrementally
+  (the MTH5 append loop already consumes them one at a time); keep the
+  warning/clock bookkeeping streaming. Measure peak RSS on the 12 h/2400
+  Hz shape before and after (the register's numbers-first rule).
+  **Test:** a synthetic multi-block corpus with a peak-RSS assertion or a
+  block-count/streaming spy; assert the writer sees blocks before the
+  reader finishes.
+
+- [ ] **M29 — an empty `save_path` writes the MTH5 next to the input data
+  (`phoenix_mtu.py:775`, `lemi.py:61,71`).** (Found 2026-10-25.) Both
+  loaders do `Path(save_path) if save_path else <data dir>`; LEMI passes
+  `save_path=None` to the client and then re-derives `client.save_path`,
+  which the client resolves into the data directory. In remote mode
+  `PathPolicy._resolve_output` maps an empty `path_kind="out"` param to
+  the run workspace, so the contract holds there — but a local/headless
+  run without a workspace writes outputs into the read-only-by-intent
+  input tree, and a re-run can overwrite a source archive.
+  **Impact:** Medium — data-placement/data-loss risk outside the remote
+  path policy; contained in the shipped remote deployment.
+  **Effort:** S (hours) — resolve the destination through the node
+  context (or require `save_path` and raise an actionable error); never
+  default to `data_path`.
+  **Test:** empty `save_path` + no workspace → actionable error (or a
+  workspace path), never a write under `data_path`; assert the input
+  directory is unchanged.
+
+- [ ] **M30 — `merge_tf_levels` builds a 1-D `Z_err` when a level omits
+  it, crashing TF assembly with an opaque `IndexError`.** (Found
+  2026-10-25.) `_processing.py:3074-3077`: `err = np.zeros(len(Z))` is
+  1-D, so each `e` is a scalar and `Z_err = np.stack(...)` (`:3106`) has
+  shape `(n_periods,)` instead of `(n_periods, n_out, n_in)`.
+  `tf_from_estimates` then indexes `Z_err[:, ri, ci]` (`:2899`) →
+  `IndexError: too many indices`. The comment says "treat as zeros", so
+  the intent is a zero-filled array of `Z`'s shape.
+  **Impact:** Medium — a hand-built/external level payload without errors
+  crashes Merge TF Levels instead of producing zero errors; loud, but the
+  message points at the wrong place.
+  **Effort:** XS (minutes) — `np.zeros_like(Z, dtype=float)`.
+  **Test:** a level dict with `Z` but no `Z_err` merges and returns
+  `Z_err.shape == Z.shape`, all zeros; red today (IndexError).
+
+- [ ] **M31 — the plugin guide documents a model-integrity control that
+  does not exist (`EMPTYUI_MODELS_PATH`, mandatory `sha256`).** (Found
+  2026-10-25.) `docs/plugin-guide.md:185-215` says weights live in a
+  configured `EMPTYUI_MODELS_PATH` and that `sha256` is **mandatory** —
+  "results must be reproducible and tamper-evident" — and the checklist
+  (`:262`) repeats it. Nothing reads `EMPTYUI_MODELS_PATH`; `models` is a
+  declared `ClassVar` with a docstring (`api.py:232-236`) and no
+  resolution or hash verification anywhere in `packages/`. A plugin
+  author following the guide ships a manifest that is silently
+  unenforced.
+  **Impact:** Medium — a documented security/reproducibility control that
+  is absent is worse than an undocumented gap: it invites reliance.
+  **Effort:** S (hours) — per the M23 precedent, either implement
+  (resolve `models` against the env dir, verify sha256 at load, fail
+  actionably) or mark it **planned** in DESIGN §11 and rewrite the guide
+  as a contract-not-yet-enforced. Decide before the next plugin release.
+  **Test:** if implemented, a wrong-hash fixture must fail loudly and a
+  missing model must name the setting + filename; if marked planned, a
+  docs/checklist assertion keeps the wording honest.
 
 - [x] **M24 — Align Runs cannot be wired to Extract Run's collection
   output (burst-mode RR route blocked in the UI). FIXED (2026-10-13).**
@@ -1023,6 +1194,98 @@ values to 3.4e-15). Re-recorded at L21.
 
 ## Low — polish, hygiene, dormant surfaces
 
+- [ ] **L27 — the inherited/suggested combobox is unlabelled (L1
+  regression).** (Found 2026-10-25.) `ParamField.tsx:203-232`: the
+  `selectOptions` branch renders `CommitInput` without `id={fieldId}` or
+  `ariaLabel`, although `CommitInput` accepts both (`:29-60`, `:114`). The
+  visible `<label htmlFor={fieldId}>` (`:387`) therefore points at no
+  element, and the control has no accessible name — on the most common
+  param type once inheritance/suggestions are active.
+  **Impact:** Low — accessibility regression; no data effect.
+  **Effort:** XS (minutes) — pass `id={fieldId}` and
+  `ariaLabel={param.label ?? param.name}`.
+  **Test:** a Vitest/Playwright assertion that `getByLabel(param.label)`
+  resolves the combobox input.
+
+- [ ] **L28 — the settings live-knob label does not wrap its input.**
+  (Found 2026-10-25.) `SettingsDialog.tsx:24-40`: `LiveKnobRow` renders
+  `<label className="plugin-row"><span>{label}</span></label>` and a
+  separate `<input type="number">` with no `id`; the label names nothing.
+  **Impact:** Low — accessibility.
+  **Effort:** XS (minutes) — `id` on the input plus `htmlFor` on the
+  label (or wrap the input inside the label).
+  **Test:** `getByLabel` for a live knob in the settings dialog.
+
+- [ ] **L29 — documentation drift after the 2026-10-15/18 deliveries.**
+  (Found 2026-10-25.) Mechanical, but it misleads contributors:
+  - `docs/issues.md` header still says the file "stays gitignored"
+    (`:30-35`) although L17 is done and the file is tracked; the
+    "solved entries are removed" sentence contradicts the kept `[x]`
+    entries; the baseline blocks stop at 775/34 while the tree is at
+    801/36.
+  - `docs/DESIGN.md` §12.1 still says "M4 — backlog **in progress**"
+    though the M4 delivery rows are historical; §12.2's open rows
+    (batch runner #3, disk cache #5, DOF stats #7, Parzen taper #4,
+    FC→TS #11, thread pool #12, sub-workflows #13, plugin manager #14,
+    FDSN #20, MMT #18) are the real backlog and should say so.
+  - `docs/plugin-guide.md:125` still lists `selection` as a core port
+    type (removed by L2).
+  - `docs/deployment.md` omits `EMPTYUI_NODE_TIMEOUT` and
+    `EMPTYUI_PROJECT_DIR` (`config.py:86`, DESIGN §11) and presents
+    `X-Forwarded-*` as required (`:79-81,144`) while DESIGN §11.3 marks
+    the handling **planned** (M23 decision).
+  **Impact:** Low — no runtime effect; high onboarding cost.
+  **Effort:** S (hours) — one docs commit, no code.
+  **Test:** none (docs); optionally a grep-based CI check for the
+  removed `selection` token and the env-var list.
+
+- [ ] **L30 — repository hygiene: an untracked 385 MB corpus file is not
+  ignored, and the template ships build clutter.** (Found 2026-10-25.)
+  - `test/test_mtu.mth5` (385 MB, untracked) is **not** covered by
+    `.gitignore` — only `test/verification/*.mth5` is (`:62`); one
+    `git add -A` commits it.
+  - `examples/plugin-template/{src,tests}/__pycache__/` are present.
+  - The `example` plugin is installed by `scripts/install.sh:62,70` and
+    CI and appears in the palette under "Example"; its nodes
+    (`example.ts.gain`, `example.demo.rms`) are not `hidden`, although
+    the plugin-guide checklist (`:259-260`) asks for `hidden` on test
+    nodes.
+  **Impact:** Low — repo size and palette clutter; the gitignore gap is
+  one command away from a 385 MB history entry.
+  **Effort:** XS (minutes) — add `test/*.mth5` (or the exact file) to
+  `.gitignore`, delete `__pycache__`, set `hidden = True` on the demo
+  nodes (or gate the template install behind a dev extra).
+  **Test:** `git check-ignore -v test/test_mtu.mth5`; a registry test
+  asserting the example nodes are hidden.
+
+- [ ] **L31 — the plugin template declares MIT while the repository is
+  Apache-2.0.** (Found 2026-10-25.)
+  `examples/plugin-template/pyproject.toml:7` has
+  `license = { text = "MIT" }`; the repo ships Apache-2.0. The template
+  is the copy-me surface, so every derived plugin inherits the wrong
+  license.
+  **Impact:** Low (legal/metadata) — but it propagates by design.
+  **Effort:** XS (one line) — `license = { text = "Apache-2.0" }` (and
+  check the template's `LICENSE`/classifier if present).
+  **Test:** none; a packaging check if CI has one.
+
+- [ ] **L32 — no undo/redo and no run history in the graph editor
+  (decision to revisit, not a defect).** (Found 2026-10-25.) DESIGN §8.2
+  documents the omission; the practical effect is that a mis-drag or a
+  delete is unrecoverable, and there is no gallery of previous runs to
+  compare against. Batch/queue, disk cache and auth are already tracked
+  in DESIGN §12.2 (#3, #5) and are not duplicated here.
+  **Impact:** Low-Medium (usability) — the highest-friction gap for new
+  users after the correctness items.
+  **Effort:** L for undo (graph history + store integration), M for a
+  run-history list (the run records already exist server-side).
+  **Decision needed:** whether undo is in scope before the GitHub
+  migration, or the editor stays append-only with save/load as the
+  recovery path.
+  **Test:** if implemented, undo/redo round-trips a node add, move,
+  delete and edge change; history lists completed runs with their
+  artifacts.
+
 - [x] **L1 — accessibility gaps (systemic). FIXED (2026-10-14).**
   Remedy, all four clauses: (1) every param control is labeled — the
   visible label is a real `<label htmlFor>` (radio keeps its wrapped
@@ -1451,9 +1714,54 @@ L8, L7, L10, L11-audit (2026-10-14);
 L4, L5, L6, L3-backend (2026-10-14); L5-regression, M12, M15, M18, M13
 (2026-10-14, Phase 3); L20 (`356b151`, 2026-10-15); M16 (2026-10-16);
 L17, L18 (2026-10-17); **L19–L26 docs & migration prep (2026-10-17,
-see L26)**. **Open: 1** — M14 (waits for the GitHub migration).
-The plan below is organised in phases;
-decisions come first.
+see L26)**; M14 (2026-10-18). **Open: 0** in the pre-2026-10-25
+register. The plan below is organised in phases; decisions come first.
+
+### 2026-10-25 review — open findings (ranked by impact / effort)
+
+Fourteen new entries. The rank is impact first, then effort (a one-line
+fix that removes a silent wrong result outranks a multi-day scalability
+item). Effort: XS = minutes, S = ≤1 day, M = 1–2 days, L = a feature.
+
+| Rank | ID | Finding | Impact | Effort | Why this rank |
+|---|---|---|---|---|---|
+| 1 | H8 | coherence map centres → ends | High | S | wrong science, one-line fix, test pins it |
+| 2 | H9 | `Calibrate` mutates its input | High | S | cache poisoning; §7.1 contract |
+| 3 | H10 | `sign_convention` no-op off EDI | High | S | silent wrong polarity |
+| 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
+| 5 | M30 | `merge_tf_levels` 1-D `Z_err` | Medium | XS | crash on an error-less level |
+| 6 | M29 | empty `save_path` → data dir | Medium | S | data placement / overwrite |
+| 7 | M31 | models/`sha256` documented, absent | Medium | S | documented-but-absent control |
+| 8 | M28 | Phoenix full-file ingest | Medium | M | OOM on long acquisitions |
+| 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
+| 10 | L28 | settings label a11y | Low | XS | cheap |
+| 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
+| 12 | L31 | template license MIT vs Apache-2.0 | Low | XS | propagates by design |
+| 13 | L29 | docs drift sweep | Low | S | onboarding cost |
+| 14 | L32 | undo / run history | Low-Med | L / M | decision first |
+
+**Phase A — correctness (1–2 days).** H8 → H9 → H10 → M27 → M30. All
+five are small and each closes a silent-wrong-result or a
+test/production divergence. H8 and M30 are one-liners plus test updates;
+H9 needs the copy-on-write decision; H10 needs the four non-EDI
+fixtures. H8's test currently pins the bug — fix code and test in the
+same commit.
+
+**Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
+M29 and M31 are hours each; M28 is the only multi-day item and needs a
+before/after RSS measurement (numbers-first rule). M31 needs the M23-style
+decision: implement or mark planned.
+
+**Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
+then L32 (decision). The a11y pair and the hygiene/license items are
+minutes each; the docs sweep is one commit.
+
+**Cross-cutting rules:** one issue per commit, red test first (P0.6),
+`scripts/dev/verify_index.sh` before each commit, full `pytest packages`
+plus `ruff check .` per phase, and the frontend gates (`npm run check`,
+Playwright) for L27/L28. The 2026-10-25 baseline is 801 collected
+(727 + 74) / 38 Vitest / 36 Playwright; any new count must be recorded
+in the header block.
 
 ### Ground rules (every item)
 
@@ -1670,4 +1978,16 @@ uv pip install --python .venv/bin/python -e "packages/emptyui[dev]" -e … \
 .venv/bin/python -m pytest packages -q -m "not errors"   # 544 passed, 6 corpus-guarded skips (fresh-clone run)
 .venv/bin/python -m pytest packages -q -m errors         # 68 passed (fresh-clone run)
 git check-ignore -v <file>                         # smoke/SDG31b trackable; day_12h/h5/sdg31-pngs ignored
+```
+
+### 2026-10-25 review
+
+```bash
+.venv/bin/python -m pytest packages -q -m "not errors"   # 727 passed, 74 deselected (~72 s)
+.venv/bin/python -m pytest packages -q -m errors         # 74 passed
+.venv/bin/ruff check .                                   # 0
+cd packages/web && npm run typecheck                     # tsc -b, clean
+cd packages/web && npm run lint                          # eslint, clean
+cd packages/web && npm run test:unit                     # vitest: 38 passed (6 files)
+cd packages/web && npx playwright test --list            # 36 tests in 11 files
 ```
