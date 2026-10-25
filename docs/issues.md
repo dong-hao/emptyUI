@@ -79,9 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 10** (M27–M29, M31, L27–L32;
-H8 fixed 2026-10-25, H9/H10/M30 fixed 2026-10-26); the `[x]` entries
-are retained for continuity.
+do not cover. **Open after this review: 9** (M28, M29, M31, L27–L32;
+H8 fixed 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26); the `[x]`
+entries are retained for continuity.
 
 ---
 
@@ -381,23 +381,31 @@ are retained for continuity.
 
 ## Medium — correctness risk, robustness, gate gaps
 
-- [ ] **M27 — `MaskTS`'s `hampel_threshold` default disagrees between the
-  manifest (8.0) and `execute` (3.0) — L7 recurrence.** (Found
-  2026-10-25.) `qc.py:185-186` declares `default=8.0` with a long
-  rationale ("h=3 masks ~5% of samples and collapses the FC band
-  coverage"); `qc.py:491` defaults the method argument to `3.0`. The
-  executor resolves the manifest default, so graph runs use 8.0; every
-  direct `MaskTS().execute(...)` in `test_mask_ts.py` (10 call sites) uses
-  3.0. Tests therefore exercise a different gate than production, and a
-  headless/embedding caller that omits the kwarg silently gets the
-  over-gating value the manifest explicitly rejects.
-  **Impact:** Medium — correctness risk plus a test/production
-  divergence; the exact defect class L7 closed for `print_params`.
-  **Effort:** XS (hours) — set the method default to 8.0 (or resolve it
-  from the manifest at the single choke point, the L7 remedy pattern);
-  update the direct-call tests to pass the value they mean.
-  **Test:** assert `MaskTS().execute(ctx, payload)` (no kwarg) gates like
-  `hampel_threshold=8.0`; red today (3.0 masks more).
+- [x] **M27 — `MaskTS`'s `hampel_threshold` default disagreed between the
+  manifest (8.0) and `execute` (3.0) — L7 recurrence. FIXED
+  (2026-10-26).** (Found 2026-10-25.) `qc.py:185-186` declares
+  `default=8.0` with a long rationale ("h=3 masks ~5% of samples and
+  collapses the FC band coverage"); `qc.py:491` defaulted the method
+  argument to `3.0`. The executor resolves the manifest default, so graph
+  runs used 8.0; every direct `MaskTS().execute(...)` in
+  `test_mask_ts.py` (10 call sites) used 3.0. Tests therefore exercised a
+  different gate than production, and a headless/embedding caller that
+  omitted the kwarg silently got the over-gating value the manifest
+  explicitly rejects.
+  **Remedy (done 2026-10-26):** the method default is now `8.0`
+  (`qc.py:491`), matching the manifest — the same manual-alignment
+  pattern L7 used for `print_params`. No algorithm change.
+  **Tests:** `test_mask_ts_default_threshold_is_the_manifest_value` —
+  omitting the kwarg gates identically to `hampel_threshold=8.0`, and
+  the 3.0 run flags strictly more on clean Gaussian noise. Red first:
+  default == 3.0 (11/512 flagged) vs 8.0 (0/512).
+  **Verification:** pytest **809 passed** (~71 s), `ruff check .` 0.
+  **Follow-up (open, not this fix):** the user reports MaskTS "wasn't
+  performing very well in real-world scenarios" (2026-10-26). This entry
+  only aligns the default; the field gating quality (false positives on
+  clean natural-source data, missed spikes, FC band coverage) needs a
+  corpus-driven review before any criterion/threshold change. Do not read
+  this fix as a quality endorsement.
 
 - [ ] **M28 — `Load Phoenix MTU-5` materializes the whole time series in
   memory (`blocks = list(...)`).** (Found 2026-10-25.)
@@ -1758,7 +1766,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 1 | ~~H8~~ | ~~coherence map centres → ends~~ | ~~High~~ | ~~S~~ | **done 2026-10-25** (801 passed) |
 | 2 | ~~H9~~ | ~~`Calibrate` mutates its input~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (804 passed) |
 | 3 | ~~H10~~ | ~~`sign_convention` no-op off EDI~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (808 passed) |
-| 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
+| 4 | ~~M27~~ | ~~`MaskTS` 3.0 vs 8.0~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (809 passed) |
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | M29 | empty `save_path` → data dir | Medium | S | data placement / overwrite |
 | 7 | M31 | models/`sha256` documented, absent | Medium | S | documented-but-absent control |
@@ -1770,9 +1778,10 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
-**Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) →
-~~H9~~, ~~H10~~, ~~M30~~ (done 2026-10-26) → M27. All five are small and
-each closes a silent-wrong-result or a test/production divergence.
+**Phase A — correctness (1–2 days). COMPLETE (2026-10-26).** ~~H8~~
+(2026-10-25); ~~H9~~, ~~H10~~, ~~M27~~, ~~M30~~ (2026-10-26). All five
+were small and each closed a silent-wrong-result or a
+test/production divergence.
 
 **Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
 M29 and M31 are hours each; M28 is the only multi-day item and needs a

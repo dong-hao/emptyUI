@@ -488,7 +488,7 @@ class MaskTS(Node):
 
     def execute(self, ctx, data, exclude_intervals: str = "",
                 detect_spikes: bool = True, hampel_window_s: float = 0.0,
-                hampel_threshold: float = 3.0, detect_flat: bool = True,
+                hampel_threshold: float = 8.0, detect_flat: bool = True,
                 flat_run_min: int = 8, detect_gaps: bool = True,
                 union_existing: bool = True) -> dict[str, Any]:
         if data is None:

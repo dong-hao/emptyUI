@@ -147,6 +147,20 @@ def test_mask_ts_flags_spikes_clips_and_writes_the_mask(tmp_path):
     assert {"hampel", "flat_run", "total"} <= criteria
 
 
+def test_mask_ts_default_threshold_is_the_manifest_value(tmp_path):
+    """M27: omitting hampel_threshold must gate like 8.0 (the manifest
+    default), not the old 3.0 — direct/headless calls then match the
+    executor. 3.0 over-gates clean Gaussian noise (the manifest's own
+    rationale: ~5% of samples, collapsing FC band coverage)."""
+    ctx = _ctx(tmp_path)
+    payload = _ds(n=512, spike_at=None, clip_at=None)
+    default = _mask_of(MaskTS().execute(ctx, payload))
+    at8 = _mask_of(MaskTS().execute(ctx, payload, hampel_threshold=8.0))
+    at3 = _mask_of(MaskTS().execute(ctx, payload, hampel_threshold=3.0))
+    np.testing.assert_array_equal(default, at8)
+    assert at3.sum() > at8.sum()  # the over-gating the manifest rejects
+
+
 def test_mask_ts_unions_the_existing_saturated_mask(tmp_path):
 
     ctx = _ctx(tmp_path)
