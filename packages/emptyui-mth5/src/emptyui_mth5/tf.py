@@ -257,6 +257,19 @@ class ImportTF(Node):
                 "impedance units converted [mV/km]/[nT] -> SI "
                 f"(x{EDI_TO_SI:.6g} on import)"
             )
+        # H10: the sign conversion is format-agnostic — a file's convention
+        # is not reliably self-describing in ANY format, so the explicit
+        # param must convert the data regardless of the reader. (It used to
+        # live inside the `.edi` branch, silently ignoring xml/zmm/avg/j.)
+        if sign_convention.startswith("negate"):
+            tf.dataset["transfer_function"].values *= -1.0
+            notes.append("sign convention: negated (180 deg) on import")
+        elif sign_convention.startswith("conjugate"):
+            tf.dataset["transfer_function"].values = np.conj(
+                tf.dataset["transfer_function"].values)
+            notes.append(
+                "sign convention: conjugated (exp(+i omega t) -> "
+                "exp(-i omega t)) on import")
         if p.suffix.lower() == ".edi":
             text = p.read_text(errors="replace")
             m = _EDI_SIGNCONVENTION_RE.search(text)
@@ -269,15 +282,6 @@ class ImportTF(Node):
                     "it while its data already matches the exp(-i omega t) "
                     "convention as-is. If phases appear mirrored, set the "
                     "'Sign convention' param explicitly.", m.group(1))
-            if sign_convention.startswith("negate"):
-                tf.dataset["transfer_function"].values *= -1.0
-                notes.append("sign convention: negated (180 deg) on import")
-            elif sign_convention.startswith("conjugate"):
-                tf.dataset["transfer_function"].values = np.conj(
-                    tf.dataset["transfer_function"].values)
-                notes.append(
-                    "sign convention: conjugated (exp(+i omega t) -> "
-                    "exp(-i omega t)) on import")
             m = _EDI_DECL_RE.search(text)
             d = tf.station_metadata.location.declination
             if m:

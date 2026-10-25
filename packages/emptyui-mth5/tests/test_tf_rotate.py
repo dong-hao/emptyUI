@@ -456,6 +456,52 @@ def test_import_conjugate_convention(tmp_path: Path):
     assert "conjugated" in con.run_metadata.comments.value
 
 
+def _mt_sample(name: str) -> Path:
+    """A real sample file shipped with the pinned mt_metadata (1.0.10).
+
+    The non-EDI formats have no corpus in this repo; the library's
+    ``data/transfer_functions`` files are in the wheel RECORD, so they are
+    a stable fixture for the readers (skip if a future pin drops them).
+    """
+    import mt_metadata
+
+    return Path(mt_metadata.__file__).parent / "data" / "transfer_functions" / name
+
+
+@pytest.mark.parametrize("name", [
+    "tf_xml.xml", "tf_zmm.zmm", "tf_jfile.j", "tf_avg.avg",
+])
+def test_import_sign_convention_applies_to_every_format(tmp_path: Path, name: str):
+    """H10: the sign conversion is format-agnostic.
+
+    It used to live inside the ``.edi`` branch, so xml/zmm/j/avg imports
+    silently ignored the param — the node reported success and the TF was
+    unchanged. The samples are real files read by the real readers; the
+    assertions are relative (as-is vs negate vs conjugate), so they do not
+    depend on each file's own convention.
+    """
+    p = _mt_sample(name)
+    if not p.exists():
+        pytest.skip(f"mt_metadata sample {name} not installed")
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+
+    tf_base = ImportTF().execute(ctx, str(p))["tf"]
+    tf_neg = ImportTF().execute(
+        ctx, str(p), sign_convention="negate (180 deg)")["tf"]
+    tf_con = ImportTF().execute(
+        ctx, str(p), sign_convention="conjugate (exp(+i omega t))")["tf"]
+
+    base = tf_base.dataset["transfer_function"].values
+    assert np.any(base != 0), "sample carries no transfer-function data"
+    np.testing.assert_allclose(
+        tf_neg.dataset["transfer_function"].values, -base)
+    np.testing.assert_allclose(
+        tf_con.dataset["transfer_function"].values, np.conj(base))
+    assert "negated" in tf_neg.run_metadata.comments.value
+    assert "conjugated" in tf_con.run_metadata.comments.value
+    assert "negated" not in (tf_base.run_metadata.comments.value or "")
+
+
 def test_import_as_is_warns_on_declared_plus_convention(tmp_path, caplog):
     with caplog.at_level("WARNING", logger="emptyui"):
         _import(tmp_path, _sign_edi())

@@ -79,8 +79,8 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 12** (H10, M27–M31, L27–L32;
-H8 fixed 2026-10-25, H9 fixed 2026-10-26); the `[x]` entries are
+do not cover. **Open after this review: 11** (M27–M31, L27–L32; H8
+fixed 2026-10-25, H9/H10 fixed 2026-10-26); the `[x]` entries are
 retained for continuity.
 
 ---
@@ -152,25 +152,33 @@ retained for continuity.
   the bare filter gained `cal_ex` / `milliVolt per kilometer`.
   **Verification:** pytest **804 passed** (~71 s), `ruff check .` 0.
 
-- [ ] **H10 — `ImportTF`'s `sign_convention` is a silent no-op for every
-  format except EDI.** (Found 2026-10-25.) `tf.py:219-233` declares the
-  param for all imports; `tf.py:260-302` applies it only inside
-  `if p.suffix.lower() == ".edi":`. For `.xml`, `.zmm`, `.avg`, `.j` the
-  user selects "negate" or "conjugate", the node reports success, and the
-  TF is unchanged — a silently wrong polarity/phase convention downstream
-  (the exact class H2 fixed for units). The only `sign_convention` tests
-  are EDI (`test_tf_rotate.py:441,452`).
-  **Impact:** High — silent wrong result on a user-visible parameter; the
-  graph looks correct.
-  **Effort:** S (≈0.5 day) — move the negate/conjugate block out of the
-  EDI branch and apply it to `tf.dataset["transfer_function"]` after any
-  format loads; keep the EDI-header warning EDI-only. If a format cannot
-  be converted, raise instead of ignoring.
-  **Test:** parameterized over the four non-EDI fixtures (the
-  `zmm`/`xml`/`avg`/`j` exports M16 deferred with L8 now exist in
-  `test_tf_export.py`): assert `negate` flips the sign and `conjugate`
-  flips the imaginary part; assert `as-is` is a no-op. Red first — today
-  all three pass unchanged for non-EDI.
+- [x] **H10 — `ImportTF`'s `sign_convention` was a silent no-op for every
+  format except EDI. FIXED (2026-10-26).** (Found 2026-10-25.)
+  `tf.py:219-233` declares the param for all imports; `tf.py:260-302`
+  applied it only inside `if p.suffix.lower() == ".edi":`. For `.xml`,
+  `.zmm`, `.avg`, `.j` the user selected "negate" or "conjugate", the
+  node reported success, and the TF was unchanged — a silently wrong
+  polarity/phase convention downstream (the exact class H2 fixed for
+  units). The only `sign_convention` tests were EDI
+  (`test_tf_rotate.py:441,452`).
+  **Remedy (done 2026-10-26):** the negate/conjugate block moved out of
+  the EDI branch and now runs for every format before the EDI-only
+  header/declination parsing (`tf.py:260-272`). The EDI SIGNCONVENTION
+  warning stays EDI-only (it reads the header text).
+  **Tests:** `test_import_sign_convention_applies_to_every_format`
+  (`test_tf_rotate.py`), parameterized over the real sample files shipped
+  with the pinned `mt_metadata==1.0.10`
+  (`data/transfer_functions/tf_xml.xml`, `tf_zmm.zmm`, `tf_jfile.j`,
+  `tf_avg.avg` — in the wheel RECORD, so a stable fixture; the test skips
+  if a future pin drops them). The assertions are relative — as-is vs
+  negate vs conjugate — so they do not depend on each file's own
+  convention. Red first: all four formats returned identical arrays for
+  all three options (112/700 elements mismatched on the negate check).
+  The export round-trip was rejected as a fixture source: the minimal
+  synthetic TF does not survive the XML/ZMM/AVG writers (missing
+  metadata, azimuth rotation, pydantic enum), so the library samples are
+  the honest real-file route.
+  **Verification:** pytest **808 passed** (~71 s), `ruff check .` 0.
 
 - [x] **H7 — Phoenix calibration absence loads silently (and the
   collected warnings are UI-invisible). FIXED (2026-10-13).** (User
@@ -1746,7 +1754,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 |---|---|---|---|---|---|
 | 1 | ~~H8~~ | ~~coherence map centres → ends~~ | ~~High~~ | ~~S~~ | **done 2026-10-25** (801 passed) |
 | 2 | ~~H9~~ | ~~`Calibrate` mutates its input~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (804 passed) |
-| 3 | H10 | `sign_convention` no-op off EDI | High | S | silent wrong polarity |
+| 3 | ~~H10~~ | ~~`sign_convention` no-op off EDI~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (808 passed) |
 | 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
 | 5 | M30 | `merge_tf_levels` 1-D `Z_err` | Medium | XS | crash on an error-less level |
 | 6 | M29 | empty `save_path` → data dir | Medium | S | data placement / overwrite |
@@ -1760,9 +1768,9 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
 **Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) →
-~~H9~~ (done 2026-10-26) → H10 → M27 → M30. All five are small and each
-closes a silent-wrong-result or a test/production divergence. M30 is a
-one-liner plus a test; H10 needs the four non-EDI fixtures.
+~~H9~~, ~~H10~~ (done 2026-10-26) → M27 → M30. All five are small and
+each closes a silent-wrong-result or a test/production divergence. M30
+is a one-liner plus a test.
 
 **Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
 M29 and M31 are hours each; M28 is the only multi-day item and needs a
