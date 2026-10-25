@@ -79,8 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 13** (H9–H10, M27–M31, L27–L32; H8 fixed
-2026-10-25); the `[x]` entries are retained for continuity.
+do not cover. **Open after this review: 12** (H10, M27–M31, L27–L32;
+H8 fixed 2026-10-25, H9 fixed 2026-10-26); the `[x]` entries are
+retained for continuity.
 
 ---
 
@@ -113,28 +114,43 @@ do not cover. **Open after this review: 13** (H9–H10, M27–M31, L27–L32; H8
   first: 63/63 mismatches, 16 s shift.
   **Verification:** pytest **801 passed** (~71 s), `ruff check .` 0.
 
-- [ ] **H9 — `Calibrate` mutates its input payload in place (cache
-  poisoning; DESIGN §7.1).** (Found 2026-10-25.) `calibrate.py:256-267` +
-  `calibration.py:293-353`. The explicit-filter path takes the input
-  object itself (`runts = data if hasattr(data, "dataset") ...`) and calls
-  `attach_filters(runts, ...)`, which writes
+- [x] **H9 — `Calibrate` mutated its input payload in place (cache
+  poisoning; DESIGN §7.1). FIXED (2026-10-26).** (Found 2026-10-25.)
+  `calibrate.py:256-267` + `calibration.py:293-353`. The explicit-filter
+  path took the input object itself (`runts = data if hasattr(data,
+  "dataset") ...`) and called `attach_filters(runts, ...)`, which writes
   `run.dataset[ch].attrs["filters"]` (`calibration.py:328,342`), assigns
   `run.filters = run_filters` (`:344`) and clears the channel cache
-  (`:345-352`). A cached or shared `RunTS` is therefore modified by a
-  downstream node: the same input hash can now yield different results
+  (`:345-352`). A cached or shared `RunTS` was therefore modified by a
+  downstream node: the same input hash could yield different results
   depending on execution order, and a second `Calibrate` on the same
-  payload sees an already-filtered run (the M8 guard only catches
-  `_refuse_if_calibrated`, not this path's attrs).
-  **Impact:** High — violates the immutability contract the cache depends
-  on; order-dependent results are the hardest class to reproduce.
-  **Effort:** S (≈0.5-1 day) — copy the payload before attaching (deep
-  copy of `dataset` + `filters`, or build a fresh `RunTS` from the
-  channels); leave the input untouched. `_to_runts` already copies for
-  dict payloads — the RunTS branch is the one that leaks.
-  **Test:** red test — snapshot `data.dataset[ch].attrs` and
-  `data.filters` before `execute`, assert unchanged after; then assert the
-  output is calibrated. Add a cache-order test: Calibrate twice on the
-  same cached payload, second run must not double-correct.
+  payload saw an already-stamped run (the M8 guard only catches
+  `_refuse_if_calibrated`, not this path's attrs). The dict calibration
+  path also stamped missing names/units onto the caller's filter objects
+  (`_channel_filters`).
+  **Remedy (done 2026-10-26):**
+  1. New `_private_copy(runts)` (`calibrate.py:110-130`) — a fresh
+     `RunTS` with `dataset.copy(deep=True)` and a shallow copy of the
+     filter registry. `RunTS.copy()` alone is not enough: `set_dataset`
+     stores the Dataset by reference, so the copy would share the
+     DataArray attrs. `execute` attaches to that copy
+     (`calibrate.py:296`); the caller's payload and channel cache stay
+     untouched.
+  2. `_channel_filters` copies each dict-path filter
+     (`model_copy(deep=True)`, `copy.deepcopy` fallback) before stamping
+     names/units (`calibrate.py:167-171`), so the calibration payload is
+     immutable too.
+  **Tests:** `test_calibrate_does_not_mutate_the_input_runts` (snapshot
+  of every channel's attrs + the registry; a sentinel archived response
+  on the unmatched channel proves the copy carries the registry and the
+  output still applies it);
+  `test_calibrate_twice_on_the_same_payload_is_order_independent` (two
+  gains on one payload, each output matches its own gain, the input
+  keeps `filters == []` and an empty registry);
+  `test_calibrate_does_not_mutate_the_calibration_payload` (a bare
+  filter keeps empty name/units). Red first: the input gained `cal_ex`;
+  the bare filter gained `cal_ex` / `milliVolt per kilometer`.
+  **Verification:** pytest **804 passed** (~71 s), `ruff check .` 0.
 
 - [ ] **H10 — `ImportTF`'s `sign_convention` is a silent no-op for every
   format except EDI.** (Found 2026-10-25.) `tf.py:219-233` declares the
@@ -1729,7 +1745,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | Rank | ID | Finding | Impact | Effort | Why this rank |
 |---|---|---|---|---|---|
 | 1 | ~~H8~~ | ~~coherence map centres → ends~~ | ~~High~~ | ~~S~~ | **done 2026-10-25** (801 passed) |
-| 2 | H9 | `Calibrate` mutates its input | High | S | cache poisoning; §7.1 contract |
+| 2 | ~~H9~~ | ~~`Calibrate` mutates its input~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (804 passed) |
 | 3 | H10 | `sign_convention` no-op off EDI | High | S | silent wrong polarity |
 | 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
 | 5 | M30 | `merge_tf_levels` 1-D `Z_err` | Medium | XS | crash on an error-less level |
@@ -1743,11 +1759,10 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
-**Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) → H9 →
-H10 → M27 → M30. All five are small and each closes a
-silent-wrong-result or a test/production divergence. M30 is a one-liner
-plus a test; H9 needs the copy-on-write decision; H10 needs the four
-non-EDI fixtures.
+**Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) →
+~~H9~~ (done 2026-10-26) → H10 → M27 → M30. All five are small and each
+closes a silent-wrong-result or a test/production divergence. M30 is a
+one-liner plus a test; H10 needs the four non-EDI fixtures.
 
 **Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
 M29 and M31 are hours each; M28 is the only multi-day item and needs a

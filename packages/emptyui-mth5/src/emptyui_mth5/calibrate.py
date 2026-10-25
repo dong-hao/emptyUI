@@ -15,6 +15,7 @@ series edges):
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -106,6 +107,28 @@ def _to_runts(source):
     return RunTS(array_list=pieces)
 
 
+def _private_copy(runts):
+    """A private RunTS for ``attach_filters`` (H9, DESIGN §7.1).
+
+    ``RunTS.copy()`` alone is not enough: ``set_dataset`` stores the passed
+    xarray Dataset by reference, so the copy would share the original's
+    DataArray attrs and ``attach_filters`` would stamp the caller's payload.
+    Deep-copy the dataset and shallow-copy the filter registry
+    (``attach_filters`` registers filters but never mutates the filter
+    objects themselves).
+    """
+    from mth5.timeseries import RunTS
+
+    out = RunTS(
+        array_list=runts.dataset.copy(deep=True),
+        run_metadata=runts.run_metadata.copy(),
+        station_metadata=runts.station_metadata.copy(),
+        survey_metadata=runts.survey_metadata.copy(),
+    )
+    out.filters = dict(getattr(runts, "filters", {}) or {})
+    return out
+
+
 def _channel_filters(calibration, runts) -> dict:
     """Map a calibration payload onto the run's channel names.
 
@@ -141,6 +164,10 @@ def _channel_filters(calibration, runts) -> dict:
                 key, names,
             )
             continue
+        # H9 (§7.1): stamp the copy, not the caller's filter object — the
+        # calibration payload may be cached/shared across runs.
+        fap = (fap.model_copy(deep=True)
+               if hasattr(fap, "model_copy") else copy.deepcopy(fap))
         if not getattr(fap, "name", ""):
             fap.name = f"cal_{matched}"
         unit = _default_unit(matched)
@@ -263,6 +290,10 @@ class Calibrate(Node):
                 f"{list(runts.dataset.data_vars)} — check the calibration "
                 "file's channel keys"
             )
+        # H9 (§7.1): attach_filters stamps the dataset attrs and the filter
+        # registry in place. A cached/shared payload must not be modified —
+        # attach to a private copy (deep dataset + registry copy).
+        runts = _private_copy(runts)
         attach_filters(runts, filters, strict=False)
         out = runts.calibrate(**kwargs)
         ctx.progress(1.0, f"calibrated {len(filters)} channel(s) via RunTS.calibrate")

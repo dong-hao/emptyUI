@@ -180,3 +180,94 @@ def test_to_runts_preserves_stamped_units(tmp_path):
     runts2 = _to_runts(ts2)
     assert runts2.hx.channel_metadata.units == "nanoTesla"
     assert runts2.ex.channel_metadata.units == "milliVolt per kilometer"
+
+
+def test_calibrate_does_not_mutate_the_input_runts(tmp_path: Path):
+    """H9 (§7.1): the explicit-filter path attaches filters to a private
+    copy. A cached/shared RunTS must come out unchanged — dataset attrs,
+    filter registry and channel cache included."""
+    from emptyui_mth5.calibrate import _to_runts
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    sr = 8.0
+    n = 1024
+    t = np.arange(n) / sr
+    x = 3.0 * np.sin(2 * np.pi * 1.0 * t)
+    runts = _to_runts(TimeSeries(channels={"ex": x, "hx": x.copy()},
+                                 sample_rate=sr))
+
+    # a sentinel archived response on hx (the unmatched channel) and a
+    # sentinel registry entry: the private copy must carry both, the input
+    # must keep them untouched.
+    sentinel = CoefficientFilter(gain=7.0)
+    sentinel.name = "sentinel_hx"
+    sentinel.units_in = "nanoTesla"
+    sentinel.units_out = "nanoTesla"
+    runts.filters = {"sentinel_hx": sentinel}
+    runts.dataset["hx"].attrs["filters"] = [
+        {"applied_filter": {"name": "sentinel_hx", "applied": True}}]
+    before_attrs = {
+        ch: dict(runts.dataset[ch].attrs) for ch in runts.dataset.data_vars
+    }
+    before_filters = dict(runts.filters)
+
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+    out = Calibrate().execute(
+        ctx, runts, calibration={"ex": CoefficientFilter(gain=2.0)})["data"]
+
+    # the input is untouched
+    for ch in runts.dataset.data_vars:
+        assert dict(runts.dataset[ch].attrs) == before_attrs[ch]
+    assert runts.filters.keys() == before_filters.keys()
+    assert runts.filters["sentinel_hx"] is sentinel
+
+    # the output is calibrated: ex divided by 2, hx by its sentinel (7)
+    np.testing.assert_allclose(out.ex.ts, x / 2.0, rtol=0.03, atol=0.03)
+    np.testing.assert_allclose(out.hx.ts, x / 7.0, rtol=0.03, atol=0.03)
+    # the output's registry is rebuilt from the calibrated channels; the
+    # sentinel travelled with the private copy
+    assert "sentinel_hx" in out.filters
+
+
+def test_calibrate_twice_on_the_same_payload_is_order_independent(tmp_path: Path):
+    """H9: two branches calibrating the same cached payload with different
+    responses must not see each other's attachment."""
+    from emptyui_mth5.calibrate import _to_runts
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    sr = 8.0
+    n = 1024
+    t = np.arange(n) / sr
+    x = 3.0 * np.sin(2 * np.pi * 1.0 * t)
+    runts = _to_runts(TimeSeries(channels={"ex": x}, sample_rate=sr))
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+
+    out2 = Calibrate().execute(
+        ctx, runts, calibration=CoefficientFilter(gain=2.0))["data"]
+    out5 = Calibrate().execute(
+        ctx, runts, calibration=CoefficientFilter(gain=5.0))["data"]
+
+    np.testing.assert_allclose(out2.ex.ts, x / 2.0, rtol=0.03, atol=0.03)
+    np.testing.assert_allclose(out5.ex.ts, x / 5.0, rtol=0.03, atol=0.03)
+    # the shared input never acquired a filter attachment
+    assert runts.dataset["ex"].attrs["filters"] == []
+    assert runts.filters == {}
+
+
+def test_calibrate_does_not_mutate_the_calibration_payload(tmp_path: Path):
+    """H9 (§7.1): the dict path stamps missing names/units on a COPY of
+    each filter, not on the caller's calibration payload."""
+    from mt_metadata.timeseries.filters import CoefficientFilter
+
+    sr = 8.0
+    n = 256
+    t = np.arange(n) / sr
+    ts = TimeSeries(channels={"ex": t.copy()}, sample_rate=sr)
+    fap = CoefficientFilter(gain=2.0)  # no name, no units
+    ctx = RunContext(workspace=tmp_path, store=DataStore())
+
+    Calibrate().execute(ctx, ts, calibration={"ex": fap})
+
+    assert fap.name == ""
+    assert fap.units_in == ""
+    assert fap.units_out == ""
