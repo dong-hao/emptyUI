@@ -3074,11 +3074,13 @@ def merge_tf_levels(per_level):
         err = per_level[lv].get("Z_err")
         if err is None:
             # a hand-built level payload may carry no errors — treat as zeros
-            err = np.zeros(len(Z))
+            # of Z's shape (M30: 1-D zeros crashed tf_from_estimates at
+            # Z_err[:, ri, ci])
+            err = np.zeros_like(Z, dtype=float)
         else:
             err = np.asarray(err, dtype=float)
             if err.ndim == 0:
-                err = np.full(len(Z), float(err))
+                err = np.full(Z.shape, float(err))
         ok = ~np.all(np.abs(Z).reshape(len(Z), -1) == 0, axis=1)
         ppo = float(per_level[lv].get("periods_per_octave", 3) or 3)
         half_w = 0.5 / ppo  # half the level's center spacing, in octaves

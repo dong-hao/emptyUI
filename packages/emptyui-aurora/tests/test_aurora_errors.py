@@ -257,8 +257,9 @@ def test_coherence_weight_bounds():
 
 
 def test_merge_tf_levels_without_z_err_merges_as_zeros():
-    """A hand-built level payload lacking Z_err merges with zero errors
-    instead of crashing on scalar indexing (2026-09-11 review fix)."""
+    """A hand-built level payload lacking Z_err merges with zero errors of
+    the SAME SHAPE as Z (M30: the old 1-D zeros crashed tf_from_estimates
+    at Z_err[:, ri, ci])."""
     from emptyui_aurora._processing import merge_tf_levels
 
     per = {
@@ -267,13 +268,15 @@ def test_merge_tf_levels_without_z_err_merges_as_zeros():
             "Z": np.array([[[1, 0], [0, 1]], [[2, 0], [0, 2]]], dtype=complex),
         },
     }
-    P, _Z, Z_err = merge_tf_levels(per)
+    P, Z, Z_err = merge_tf_levels(per)
     assert P.shape == (2,)
+    assert Z_err.shape == Z.shape
     assert np.all(Z_err == 0)
 
-    # scalar Z_err broadcasts instead of crashing
+    # scalar Z_err broadcasts to Z's shape instead of crashing
     per[0]["Z_err"] = 0.5
-    _, _, Z_err = merge_tf_levels(per)
+    _, Z, Z_err = merge_tf_levels(per)
+    assert Z_err.shape == Z.shape
     assert np.all(Z_err == 0.5)
 
 

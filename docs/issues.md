@@ -79,9 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 11** (M27–M31, L27–L32; H8
-fixed 2026-10-25, H9/H10 fixed 2026-10-26); the `[x]` entries are
-retained for continuity.
+do not cover. **Open after this review: 10** (M27–M29, M31, L27–L32;
+H8 fixed 2026-10-25, H9/H10/M30 fixed 2026-10-26); the `[x]` entries
+are retained for continuity.
 
 ---
 
@@ -434,20 +434,23 @@ retained for continuity.
   workspace path), never a write under `data_path`; assert the input
   directory is unchanged.
 
-- [ ] **M30 — `merge_tf_levels` builds a 1-D `Z_err` when a level omits
-  it, crashing TF assembly with an opaque `IndexError`.** (Found
-  2026-10-25.) `_processing.py:3074-3077`: `err = np.zeros(len(Z))` is
-  1-D, so each `e` is a scalar and `Z_err = np.stack(...)` (`:3106`) has
-  shape `(n_periods,)` instead of `(n_periods, n_out, n_in)`.
-  `tf_from_estimates` then indexes `Z_err[:, ri, ci]` (`:2899`) →
-  `IndexError: too many indices`. The comment says "treat as zeros", so
-  the intent is a zero-filled array of `Z`'s shape.
-  **Impact:** Medium — a hand-built/external level payload without errors
-  crashes Merge TF Levels instead of producing zero errors; loud, but the
-  message points at the wrong place.
-  **Effort:** XS (minutes) — `np.zeros_like(Z, dtype=float)`.
-  **Test:** a level dict with `Z` but no `Z_err` merges and returns
-  `Z_err.shape == Z.shape`, all zeros; red today (IndexError).
+- [x] **M30 — `merge_tf_levels` built a 1-D `Z_err` when a level omitted
+  it, crashing TF assembly with an opaque `IndexError`. FIXED
+  (2026-10-26).** (Found 2026-10-25.) `_processing.py:3074-3077`:
+  `err = np.zeros(len(Z))` was 1-D, so each `e` was a scalar and
+  `Z_err = np.stack(...)` (`:3106`) had shape `(n_periods,)` instead of
+  `(n_periods, n_out, n_in)`. `tf_from_estimates` then indexes
+  `Z_err[:, ri, ci]` (`:2899`) → `IndexError: too many indices`. The
+  comment says "treat as zeros", so the intent is a zero-filled array of
+  `Z`'s shape.
+  **Remedy (done 2026-10-26):** `np.zeros_like(Z, dtype=float)` for the
+  missing-error branch and `np.full(Z.shape, float(err))` for the scalar
+  branch (`_processing.py:3079,3083`), so both broadcast to `Z`'s shape.
+  **Tests:** `test_merge_tf_levels_without_z_err_merges_as_zeros`
+  (`test_aurora_errors.py`) now asserts `Z_err.shape == Z.shape` for the
+  missing and scalar cases (it previously checked values only, so the 1-D
+  output slipped through). Red first: `(2,) != (2, 2, 2)`.
+  **Verification:** pytest **808 passed** (~71 s), `ruff check .` 0.
 
 - [ ] **M31 — the plugin guide documents a model-integrity control that
   does not exist (`EMPTYUI_MODELS_PATH`, mandatory `sha256`).** (Found
@@ -1756,7 +1759,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 2 | ~~H9~~ | ~~`Calibrate` mutates its input~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (804 passed) |
 | 3 | ~~H10~~ | ~~`sign_convention` no-op off EDI~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (808 passed) |
 | 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
-| 5 | M30 | `merge_tf_levels` 1-D `Z_err` | Medium | XS | crash on an error-less level |
+| 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | M29 | empty `save_path` → data dir | Medium | S | data placement / overwrite |
 | 7 | M31 | models/`sha256` documented, absent | Medium | S | documented-but-absent control |
 | 8 | M28 | Phoenix full-file ingest | Medium | M | OOM on long acquisitions |
@@ -1768,9 +1771,8 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
 **Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) →
-~~H9~~, ~~H10~~ (done 2026-10-26) → M27 → M30. All five are small and
-each closes a silent-wrong-result or a test/production divergence. M30
-is a one-liner plus a test.
+~~H9~~, ~~H10~~, ~~M30~~ (done 2026-10-26) → M27. All five are small and
+each closes a silent-wrong-result or a test/production divergence.
 
 **Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
 M29 and M31 are hours each; M28 is the only multi-day item and needs a
