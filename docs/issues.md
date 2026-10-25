@@ -79,37 +79,39 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 14** (H8–H10, M27–M31,
-L27–L32); the `[x]` entries are retained for continuity.
+do not cover. **Open after this review: 13** (H9–H10, M27–M31, L27–L32; H8 fixed
+2026-10-25); the `[x]` entries are retained for continuity.
 
 ---
 
 ## High — silent wrong results, invisible failures, data loss
 
-- [ ] **H8 — the coherence map's time axis double-shifts window centres to
-  window ends (silent misregistration, worst at deep levels).** (Found
-  2026-10-25, full-codebase review; the L18 node.) `plots.py:511-526`
-  (`_coherence_map_matrix`). The FC `time` coordinate is **already** the
-  window centre — the settled L11 convention, and the function's own
-  docstring says so (`plots.py:495-497`); `process.py:288-297` proves it
-  by subtracting `half_win` to recover a start. The function then adds a
-  second half-window (`centres = t + half`, `t + dt / 2`), so the map is
-  labelled with window **ends**. The offset is half a window per level —
-  seconds at shallow levels, tens of minutes at the deepest — and
+- [x] **H8 — the coherence map's time axis double-shifted window centres
+  to window ends (silent misregistration, worst at deep levels). FIXED
+  (2026-10-25).** (Found 2026-10-25, full-codebase review; the L18 node.)
+  `plots.py:511-526` (`_coherence_map_matrix`). The FC `time` coordinate
+  is **already** the window centre — the settled L11 convention, and the
+  function's own docstring said so (`plots.py:495-497`);
+  `process.py:288-297` proves it by subtracting `half_win` to recover a
+  start. The function then added a second half-window (`centres = t +
+  half`, `t + dt / 2`), so the map was labelled with window **ends**.
+  Measured on the fixture: level 0 labels `[16, 32, 48]` s (16 s = half
+  of the 32 s window) became `[32, 48, 64]` s; level 2 shifted by 256 s.
   `pcolormesh(..., shading="auto")` treats the labels as centres, so the
-  whole map slides right relative to the data. Silent: no warning, no
+  whole map slid right relative to the data. Silent: no warning, no
   error, a plausible-looking image.
-  **Impact:** High — wrong scientific output on a shipped diagnostic
-  node; the error grows exactly where long windows matter.
-  **Effort:** S (≈0.5 day) — drop the second shift; keep the docstring.
-  **Test:** `test_coherence_map_window_centres` (`test_coherence_plot.py:218`)
-  currently **pins the bug** (`expected = starts + half`); rewrite it to
-  assert `centres == paired["time"]` and add a deep-level case where the
-  half-window is large enough that a regression cannot hide inside the
-  tolerance.
-  **Fix sketch:** return `t` unchanged (both datetime64 and float
-  branches); delete the `half`/`dt` computation. Verify the two-FC
-  `_pair_remote_fc` path keeps the same convention.
+  **Remedy (done 2026-10-25):** `_coherence_map_matrix` now returns the
+  fc's own `time` coordinate unchanged (`centres = np.asarray(local
+  ["time"].values)`); the half-window/`dt` computation is deleted. The
+  docstring states the labels are the fc's centres, not derived here.
+  **Tests:** `test_coherence_map_window_centres` rewritten — it used to
+  **pin the bug** (`expected = starts + half`); it now asserts
+  `centres == paired["time"]` on (a) the relative float-seconds fixture,
+  (b) an absolute-time (datetime64) fixture via the new
+  `_two_fc_levels(start_datetime=...)`, and (c) the deepest level
+  (half-window 256 s, so a regression cannot hide in a tolerance). Red
+  first: 63/63 mismatches, 16 s shift.
+  **Verification:** pytest **801 passed** (~71 s), `ruff check .` 0.
 
 - [ ] **H9 — `Calibrate` mutates its input payload in place (cache
   poisoning; DESIGN §7.1).** (Found 2026-10-25.) `calibrate.py:256-267` +
@@ -1719,13 +1721,14 @@ register. The plan below is organised in phases; decisions come first.
 
 ### 2026-10-25 review — open findings (ranked by impact / effort)
 
-Fourteen new entries. The rank is impact first, then effort (a one-line
-fix that removes a silent wrong result outranks a multi-day scalability
-item). Effort: XS = minutes, S = ≤1 day, M = 1–2 days, L = a feature.
+Fourteen new entries; H8 is already closed (2026-10-25). The rank is
+impact first, then effort (a one-line fix that removes a silent wrong
+result outranks a multi-day scalability item). Effort: XS = minutes,
+S = ≤1 day, M = 1–2 days, L = a feature.
 
 | Rank | ID | Finding | Impact | Effort | Why this rank |
 |---|---|---|---|---|---|
-| 1 | H8 | coherence map centres → ends | High | S | wrong science, one-line fix, test pins it |
+| 1 | ~~H8~~ | ~~coherence map centres → ends~~ | ~~High~~ | ~~S~~ | **done 2026-10-25** (801 passed) |
 | 2 | H9 | `Calibrate` mutates its input | High | S | cache poisoning; §7.1 contract |
 | 3 | H10 | `sign_convention` no-op off EDI | High | S | silent wrong polarity |
 | 4 | M27 | `MaskTS` 3.0 vs 8.0 | Medium | XS | test/production divergence |
@@ -1740,12 +1743,11 @@ item). Effort: XS = minutes, S = ≤1 day, M = 1–2 days, L = a feature.
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
-**Phase A — correctness (1–2 days).** H8 → H9 → H10 → M27 → M30. All
-five are small and each closes a silent-wrong-result or a
-test/production divergence. H8 and M30 are one-liners plus test updates;
-H9 needs the copy-on-write decision; H10 needs the four non-EDI
-fixtures. H8's test currently pins the bug — fix code and test in the
-same commit.
+**Phase A — correctness (1–2 days).** ~~H8~~ (done 2026-10-25) → H9 →
+H10 → M27 → M30. All five are small and each closes a
+silent-wrong-result or a test/production divergence. M30 is a one-liner
+plus a test; H9 needs the copy-on-write decision; H10 needs the four
+non-EDI fixtures.
 
 **Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
 M29 and M31 are hours each; M28 is the only multi-day item and needs a

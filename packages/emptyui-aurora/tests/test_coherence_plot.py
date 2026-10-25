@@ -148,12 +148,13 @@ def test_plot_coherency_two_fc_pairs_remote_grid(tmp_path):
 # --- L18: the coherence map (time x frequency view of the sort's criterion)
 
 
-def _two_fc_levels(seed=21):
+def _two_fc_levels(seed=21, start_datetime=""):
     """Local + remote fc level containers (the two-FC map's inputs)."""
     from emptyui_aurora._processing import compute_fc_levels as cfl
-    local = synthetic_runts(synthetic_source(seed), seed=seed)
+    local = synthetic_runts(synthetic_source(seed), seed=seed,
+                            start_datetime=start_datetime)
     ref = synthetic_runts(synthetic_source(seed + 100), e_noise=2.0,
-                          seed=seed + 100)
+                          seed=seed + 100, start_datetime=start_datetime)
     kw = {"num_decimations": 2, "factor": 4, "num_samples_window": 256,
           "overlap": 0.5, "window_type": "boxcar"}
     return cfl(local, ["hx", "hy"], ["ex", "ey"], **kw), \
@@ -215,28 +216,56 @@ def test_coherence_map_renders_and_selects_tiers(tmp_path):
         CoherenceMap().execute(ctx, levels, decimation_level=9)
 
 
-def test_coherence_map_window_centres(tmp_path):
-    """The time axis labels are window CENTRES (start + half the window
-    span) — the settled L11 convention."""
+def test_coherence_map_window_centres():
+    """The map's time axis is the fc's own window-centre labels, unchanged.
+
+    H8: the fc `time` coordinate is ALREADY the scipy segment centre (L11;
+    `compute_fc_levels` documents it, `_centre_to_start_s` subtracts
+    N/(2 fs) to recover a start). The map used to add a second half-window,
+    labelling window ENDS — a shift of half a window per level: 16 s at
+    level 0 and 256 s at level 2 in this fixture, tens of minutes at the
+    deepest production levels.
+    """
     from emptyui_aurora._processing import _normalize_fc_layout
     from emptyui_aurora.plots import _coherence_map_matrix
 
+    def _map(levels, ref_levels, lv):
+        d = _normalize_fc_layout(levels[lv])
+        ins = [c.strip() for c in d.attrs["input_channels"].split(",")]
+        outs = [c.strip() for c in d.attrs["output_channels"].split(",")]
+        return _coherence_map_matrix(
+            levels[lv], ref_levels[lv], ins, outs, ensemble_windows=8,
+            smooth_bins=0)
+
+    # relative float-seconds fc (the fixture's default)
     levels, ref_levels = _two_fc_levels()
-    sample = _normalize_fc_layout(levels[0])
-    ins = [c.strip() for c in sample.attrs["input_channels"].split(",")]
-    outs = [c.strip() for c in sample.attrs["output_channels"].split(",")]
-    _, centres, paired = _coherence_map_matrix(
-        levels[0], ref_levels[0], ins, outs, ensemble_windows=8,
-        smooth_bins=0)
-    starts = np.asarray(paired["time"].values)
+    _, centres, paired = _map(levels, ref_levels, 0)
+    labels = np.asarray(paired["time"].values)
+    np.testing.assert_array_equal(np.asarray(centres), labels)
+    # the labels really are centres: the fixture starts at 0 s, so the
+    # first label is half a window in, not at the record start.
     sr = float(paired.attrs["sample_rate"])
     nw = float(paired.attrs["num_samples_window"])
-    if starts.dtype.kind == "M":
-        half = np.timedelta64(round(nw / sr / 2 * 1e9), "ns")
-        expected = starts + half
-    else:
-        expected = starts + nw / sr / 2
-    np.testing.assert_allclose(np.asarray(centres), expected, rtol=1e-9)
+    assert float(labels[0]) == pytest.approx(nw / sr / 2)
+
+    # absolute-time fc (the production path) — same no-shift contract
+    dt_levels, dt_ref = _two_fc_levels(start_datetime="2024-01-01T00:00:00")
+    _, dt_centres, dt_paired = _map(dt_levels, dt_ref, 0)
+    assert np.asarray(dt_centres).dtype.kind == "M"
+    np.testing.assert_array_equal(
+        np.asarray(dt_centres), np.asarray(dt_paired["time"].values))
+
+    # deepest level: a half-window shift here is minutes, so a regression
+    # cannot hide inside a tolerance.
+    deep = max(levels)
+    _, deep_centres, deep_paired = _map(levels, ref_levels, deep)
+    np.testing.assert_array_equal(
+        np.asarray(deep_centres),
+        np.asarray(deep_paired["time"].values))
+    d = _normalize_fc_layout(levels[deep])
+    deep_half = (float(d.attrs["num_samples_window"])
+                 / float(d.attrs["sample_rate"]) / 2)
+    assert deep_half >= 60  # the regression would shift by this much
 
 
 def test_coherence_map_title_params_toggle():

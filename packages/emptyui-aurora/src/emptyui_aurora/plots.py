@@ -493,8 +493,10 @@ def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
     sort down-weights. Single-FC: the E–H signal coherence.
 
     Returns ``(coh (F, W), window_centres, paired_local)`` — the time
-    labels are the window CENTRES (start + half the window span, the
-    settled L11 convention), derived from the fc's own window geometry.
+    labels are the fc's own window CENTRES, returned unchanged (the
+    settled L11 convention: ``compute_fc_levels`` labels scipy segment
+    centres, and ``_centre_to_start_s`` subtracts ``N/(2 fs)`` to recover
+    a start). Adding a half-window here would label window ends (H8).
     """
     import numpy as np
 
@@ -508,21 +510,13 @@ def _coherence_map_matrix(local_fc, ref_fc, ins, outs,
         smooth_bins=smooth_bins)
     coh = np.minimum(coh_e, coh_x) if ref is not None else coh_e
 
-    t = np.asarray(local["time"].values)
-    sr = float(getattr(local, "attrs", {}).get("sample_rate", 0) or 0)
-    nw = float(getattr(local, "attrs", {}).get("num_samples_window", 0) or 0)
-    if t.dtype.kind == "M":
-        if nw > 0 and sr > 0:
-            half = np.timedelta64(round(nw / sr / 2 * 1e9), "ns")
-        elif t.size > 1:
-            half = (t[1] - t[0]) // 2
-        else:
-            half = np.timedelta64(0, "ns")
-        centres = t + half
-    else:
-        dt = (nw / sr) if (nw > 0 and sr > 0) else (
-            float(np.median(np.diff(t))) if t.size > 1 else 0.0)
-        centres = t + dt / 2
+    # The fc time coordinate is ALREADY the window centre (L11: scipy
+    # segment centres; compute_fc_levels documents it, and
+    # _centre_to_start_s subtracts N/(2 fs) to recover a start). Adding a
+    # half-window here would label the map with window ENDS and shift it
+    # right by half a window per level — seconds at level 0, minutes at the
+    # deepest levels (H8).
+    centres = np.asarray(local["time"].values)
     return coh, centres, local
 
 
