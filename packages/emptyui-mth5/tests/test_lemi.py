@@ -164,3 +164,62 @@ def test_load_lemi34_attaches_calibration_to_e3_e4(tmp_path, monkeypatch):
     assert attached, "attach_filters was not called"
     keys = set(attached[0])
     assert keys == {"e3", "e4", "HX"}  # e1/e2 remapped, others unchanged
+
+
+def test_load_lemi_default_output_folder(tmp_path, monkeypatch):
+    """M29: an empty save_path writes into <data_path>/emptyui_output, not
+    the data directory itself (the client's None would mean data_path)."""
+    from emptyui_mth5.lemi import LoadLemi
+    from mth5.clients import lemi424 as lemi424_mod
+
+    data_dir = tmp_path / "lemi_data"
+    data_dir.mkdir()
+    seen: dict = {}
+
+    class FakeCollection:
+        survey_id: ClassVar[str] = ""
+        station_id: ClassVar[str] = ""
+        calibration_dict: ClassVar[dict] = {}
+
+    class FakeClient:
+        def __init__(self, **kw):
+            seen["save_path"] = kw["save_path"]
+            # mirror the real client: None means "use data_path"
+            base = (Path(kw["save_path"]) if kw["save_path"] is not None
+                    else data_dir)
+            self._save_path = base / kw["mth5_filename"]
+            self.collection = FakeCollection()
+            self.h5_kwargs = {}
+            self.mth5_file_mode = "a"
+
+        @property
+        def save_path(self):
+            return self._save_path
+
+        def get_run_dict(self):
+            return {"mt001": {"sr1_0001": SimpleNamespace(
+                fn=pd.Series([data_dir / "dummy.TXT"]))}}
+
+    def fake_read_file(fn, **kwargs):
+        from mt_timeseries import ChannelTS, RunTS
+
+        ch = ChannelTS("magnetic")
+        ch.channel_metadata.units = "nT"
+        ch.sample_rate = 1.0
+        ch.ts = np.ones(16)
+        ch.component = "bx"
+        return RunTS(array_list=[ch])
+
+    monkeypatch.setattr(lemi424_mod, "LEMI424Client", FakeClient)
+    monkeypatch.setattr("mth5.read_file", fake_read_file)
+
+    ctx = RunContext(workspace=tmp_path / "ws", store=DataStore())
+    LoadLemi().execute(ctx, data_path=str(data_dir), survey_id="test",
+                       station_id="mt001", mth5_filename="from_lemi424.mth5",
+                       save_path="", channel_nomenclature="lemi12")
+
+    expected = data_dir / "emptyui_output"
+    assert seen["save_path"] == str(expected)
+    assert (expected / "from_lemi424.mth5").exists()
+    # no MTH5 beside the raw data
+    assert not list(data_dir.glob("*.mth5"))

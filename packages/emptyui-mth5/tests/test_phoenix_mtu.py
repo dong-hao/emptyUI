@@ -234,6 +234,18 @@ def test_read_phoenix_mtu_archive(tmp_path):
             "2009-12-16T08:05")
 
 
+def test_read_phoenix_mtu_default_output_folder(tmp_path):
+    """M29: an empty save_path writes into <data_path>/emptyui_output, never
+    the data directory itself (a re-run could overwrite a source archive)."""
+    _synthetic_corpus(tmp_path)
+    res = read_phoenix_mtu(tmp_path, save_path=None)
+    target = Path(res["path"])
+    assert target.parent == tmp_path / "emptyui_output"
+    assert target.exists()
+    # no MTH5 beside the raw TS/TBL files
+    assert not list(tmp_path.glob("*.mth5"))
+
+
 def test_read_phoenix_mtu_sample_rate_filter(tmp_path):
     _synthetic_corpus(tmp_path)
     res = read_phoenix_mtu(tmp_path, sample_rates=[15], save_path=tmp_path)

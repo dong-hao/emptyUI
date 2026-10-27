@@ -79,9 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 9** (M28, M29, M31, L27–L32;
-H8 fixed 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26); the `[x]`
-entries are retained for continuity.
+do not cover. **Open after this review: 8** (M28, M31, L27–L32; H8
+fixed 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed
+2026-10-27); the `[x]` entries are retained for continuity.
 
 ---
 
@@ -424,23 +424,39 @@ entries are retained for continuity.
   block-count/streaming spy; assert the writer sees blocks before the
   reader finishes.
 
-- [ ] **M29 — an empty `save_path` writes the MTH5 next to the input data
-  (`phoenix_mtu.py:775`, `lemi.py:61,71`).** (Found 2026-10-25.) Both
-  loaders do `Path(save_path) if save_path else <data dir>`; LEMI passes
-  `save_path=None` to the client and then re-derives `client.save_path`,
-  which the client resolves into the data directory. In remote mode
-  `PathPolicy._resolve_output` maps an empty `path_kind="out"` param to
-  the run workspace, so the contract holds there — but a local/headless
-  run without a workspace writes outputs into the read-only-by-intent
-  input tree, and a re-run can overwrite a source archive.
-  **Impact:** Medium — data-placement/data-loss risk outside the remote
-  path policy; contained in the shipped remote deployment.
-  **Effort:** S (hours) — resolve the destination through the node
-  context (or require `save_path` and raise an actionable error); never
-  default to `data_path`.
-  **Test:** empty `save_path` + no workspace → actionable error (or a
-  workspace path), never a write under `data_path`; assert the input
-  directory is unchanged.
+- [x] **M29 — an empty `save_path` wrote the MTH5 next to the input data
+  (`phoenix_mtu.py:775`, `lemi.py:61,71`). FIXED (2026-10-27).** (Found
+  2026-10-25.) Both loaders did `Path(save_path) if save_path else <data
+  dir>`; LEMI passed `save_path=None` to the client and then re-derived
+  `client.save_path`, which the client resolves into the data directory.
+  In remote mode `PathPolicy._resolve_output` maps an empty
+  `path_kind="out"` param to the run workspace, so the contract held
+  there — but a local/headless run without a workspace wrote outputs into
+  the read-only-by-intent input tree, and a re-run could overwrite a
+  source archive.
+  **Decision (2026-10-27, user):** option B — a dedicated subfolder, not
+  the workspace (TTL-reclaimable; the MTH5 is a persistent product) and
+  not a hard error (the casual empty-path use stays).
+  **Remedy (done 2026-10-27):**
+  1. New `_paths.resolve_output_dir(save_path, data_path)`
+     (`_paths.py:18-30`): explicit `save_path` wins; empty resolves to
+     `<data_path>/emptyui_output`, created with parents. A path that
+     exists as a file raises `FileExistsError`.
+  2. Phoenix uses it (`phoenix_mtu.py:780`) and logs the target
+     (`:783`); LEMI passes the resolved directory to `LEMI424Client`
+     (`lemi.py:66`) — never `None`, which the client would turn back
+     into `data_path` — and logs the target (`:77`).
+  3. The shipped LEMI example sets `save_path: "examples/output"` on both
+     nodes (gitignored, `.gitignore:33`), so the example stops writing
+     into the data tree.
+  **Tests:** `test_output_paths.py` (empty → subfolder, explicit wins,
+  file-path raises); `test_read_phoenix_mtu_default_output_folder`
+  (empty → `<data>/emptyui_output`, no MTH5 beside the raw files);
+  `test_load_lemi_default_output_folder` (the client receives the
+  subfolder, not `None`; no MTH5 beside the raw data). Red first: the
+  LEMI client saw `None` and wrote `lemi_data/from_lemi424.mth5`; Phoenix
+  wrote into the data root.
+  **Verification:** pytest **814 passed** (~70 s), `ruff check .` 0.
 
 - [x] **M30 — `merge_tf_levels` built a 1-D `Z_err` when a level omitted
   it, crashing TF assembly with an opaque `IndexError`. FIXED
@@ -1768,7 +1784,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 3 | ~~H10~~ | ~~`sign_convention` no-op off EDI~~ | ~~High~~ | ~~S~~ | **done 2026-10-26** (808 passed) |
 | 4 | ~~M27~~ | ~~`MaskTS` 3.0 vs 8.0~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (809 passed) |
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
-| 6 | M29 | empty `save_path` → data dir | Medium | S | data placement / overwrite |
+| 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
 | 7 | M31 | models/`sha256` documented, absent | Medium | S | documented-but-absent control |
 | 8 | M28 | Phoenix full-file ingest | Medium | M | OOM on long acquisitions |
 | 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
@@ -1783,10 +1799,10 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 were small and each closed a silent-wrong-result or a
 test/production divergence.
 
-**Phase B — robustness and contract (2–3 days).** M29 → M31 → M28.
-M29 and M31 are hours each; M28 is the only multi-day item and needs a
-before/after RSS measurement (numbers-first rule). M31 needs the M23-style
-decision: implement or mark planned.
+**Phase B — robustness and contract (2–3 days).** ~~M29~~ (done
+2026-10-27) → M31 → M28. M31 is hours (decision: implement or mark
+planned); M28 is the only multi-day item and needs a before/after RSS
+measurement (numbers-first rule).
 
 **Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
 then L32 (decision). The a11y pair and the hygiene/license items are

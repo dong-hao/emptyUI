@@ -23,6 +23,8 @@ import numpy as np
 import pandas as pd
 from emptyui import Node, Output, Param
 
+from ._paths import resolve_output_dir
+
 _log = logging.getLogger("emptyui")
 
 #: Accepted time-series extensions (upstream mt_io convention).
@@ -772,10 +774,13 @@ def read_phoenix_mtu(
         warnings.append(
             f"{n_saturated} saturated block(s) (tag byte 15 != 0)")
 
-    save = (Path(save_path).expanduser().resolve() if save_path
-            else data_path)
+    # M29: an empty save_path gets a dedicated subfolder next to the data —
+    # never the data directory itself (a re-run could overwrite a source
+    # archive). Explicit paths win; remote mode resolves them via PathPolicy.
+    save = resolve_output_dir(save_path, data_path)
     slot_schedule = _slot_schedule(seg_info, table, warnings)
     target = save / mth5_filename
+    _log.info("writing MTU-5A archive to %s", target)
     if target.exists():
         _log.warning("overwriting existing MTH5 at %s", target)
         target.unlink()

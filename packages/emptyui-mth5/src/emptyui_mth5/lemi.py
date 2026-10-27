@@ -7,6 +7,8 @@ from typing import Any
 
 from emptyui import Node, Output, Param
 
+from ._paths import resolve_output_dir
+
 
 class LoadLemi(Node):
     type = "mth5.io.lemi"
@@ -58,17 +60,21 @@ class LoadLemi(Node):
         data_path = str(Path(data_path).expanduser().resolve())
         if not Path(data_path).exists():
             raise FileNotFoundError(f"LEMI data dir not found: {data_path}")
-        save = str(Path(save_path).expanduser().resolve()) if save_path else None
+        # M29: an empty save_path gets a dedicated subfolder next to the data —
+        # never None (the client's None means "use data_path", i.e. the input
+        # tree). Explicit paths win; remote mode resolves them via PathPolicy.
+        save_dir = resolve_output_dir(save_path, data_path)
 
         client = LEMI424Client(
             data_path=data_path,
-            save_path=save,
+            save_path=str(save_dir),
             mth5_filename=mth5_filename,
         )
         # A previous run that was force-stopped mid-write can leave a corrupt /
         # locked MTH5 at the target path; open_mth5(mode="a") then fails on the
         # leftover file. Overwrite any existing file so we always start fresh.
         target = Path(client.save_path)
+        ctx.logger.info("writing LEMI-424 archive to %s", target)
         if target.exists():
             ctx.logger.warning("overwriting existing MTH5 at %s", target)
             target.unlink()
