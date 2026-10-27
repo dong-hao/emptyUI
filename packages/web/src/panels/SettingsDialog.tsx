@@ -20,15 +20,23 @@ function LiveKnobRow({
   onChange: (v: string) => void;
 }) {
   const label = name.replaceAll("_", " ");
+  // L28: the visible label must resolve its input (id/htmlFor) — the old
+  // label wrapped only the span, so the number input had no accessible name.
+  const inputId = `settings-live-${name}`;
   return (
     <tr>
       <td>
-        <label className="plugin-row" title={setting.description}>
+        <label
+          className="plugin-row"
+          title={setting.description}
+          htmlFor={inputId}
+        >
           <span className="plugin-name">{label}</span>
         </label>
       </td>
       <td className="plugin-meta">
         <input
+          id={inputId}
           type="number"
           min={0}
           step="any"

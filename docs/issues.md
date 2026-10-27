@@ -79,10 +79,10 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 5** (L28–L32; H8 fixed
+do not cover. **Open after this review: 4** (L29–L32; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27 fixed
-2026-10-27); the `[x]` entries are retained for continuity.
+M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27/L28
+fixed 2026-10-27); the `[x]` entries are retained for continuity.
 
 ---
 
@@ -1316,14 +1316,19 @@ M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27 fixed
   **Verification:** `npm run typecheck` / `npm run lint` clean;
   `npm run build` + Vitest 38 + Playwright 36 passed.
 
-- [ ] **L28 — the settings live-knob label does not wrap its input.**
-  (Found 2026-10-25.) `SettingsDialog.tsx:24-40`: `LiveKnobRow` renders
+- [x] **L28 — the settings live-knob label did not wrap its input. FIXED
+  (2026-10-27).** (Found 2026-10-25.) `SettingsDialog.tsx:24-40`:
+  `LiveKnobRow` rendered
   `<label className="plugin-row"><span>{label}</span></label>` and a
-  separate `<input type="number">` with no `id`; the label names nothing.
-  **Impact:** Low — accessibility.
-  **Effort:** XS (minutes) — `id` on the input plus `htmlFor` on the
-  label (or wrap the input inside the label).
-  **Test:** `getByLabel` for a live knob in the settings dialog.
+  separate `<input type="number">` with no `id`; the label named nothing.
+  **Remedy (done 2026-10-27):** `LiveKnobRow` derives
+  `inputId = settings-live-<name>`, sets it on the number input, and the
+  visible label carries `htmlFor={inputId}`.
+  **Tests:** `settings.spec.ts` asserts
+  `dialog.getByLabel("cache max entries")` resolves the knob. Red first:
+  the label matched no control.
+  **Verification:** `npm run build` + lint clean; Vitest 38 + Playwright
+  36 passed.
 
 - [ ] **L29 — documentation drift after the 2026-10-15/18 deliveries.**
   (Found 2026-10-25.) Mechanical, but it misleads contributors:
@@ -1844,7 +1849,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
 | 8 | ~~M28~~ | ~~Phoenix ingest: list + batch buffers~~ | ~~Medium~~ | ~~M~~ | **closed 2026-10-27** (A+B; C parked for 84 h) |
 | 9 | ~~L27~~ | ~~combobox a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (inherit.spec green) |
-| 10 | L28 | settings label a11y | Low | XS | cheap |
+| 10 | ~~L28~~ | ~~settings label a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (settings.spec green) |
 | 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
 | 12 | L31 | template license MIT vs Apache-2.0 | Low | XS | propagates by design |
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
@@ -1860,9 +1865,9 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day).** ~~L27~~ (done 2026-10-27) →
-L28 → L30 → L31 → L29 → L32 (decision). The a11y pair and the
-hygiene/license items are minutes each; the docs sweep is one commit.
+**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ (done
+2026-10-27) → L30 → L31 → L29 → L32 (decision). The hygiene/license
+items are minutes each; the docs sweep is one commit.
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`

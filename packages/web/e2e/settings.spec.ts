@@ -74,6 +74,9 @@ test("settings dialog: live knobs editable, deployment rows read-only", async ({
   const cacheRow = dialog.locator("tr", { hasText: "cache max entries" });
   const input = cacheRow.locator("input[type=number]");
   await expect(input).toBeEnabled();
+  // L28: the visible label resolves its input (id/htmlFor); previously the
+  // label wrapped only the span, so the knob had no accessible name.
+  await expect(dialog.getByLabel("cache max entries")).toBeVisible();
   const current = await input.inputValue();
   await input.fill(String((parseInt(current, 10) || 0) + 1));
   await dialog.locator("button", { hasText: "Save" }).click();
