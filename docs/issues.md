@@ -436,22 +436,25 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
   the 24 kHz batch can reach ~3.8 GB for a 1,012-block file. Both are
   crashes, not silent, but they arrive after a long read.
   **Plan (2026-10-27, user):**
-  1. **A — byte-bounded batch decode.** Cap the batch by a byte budget
-     (e.g. 64 MB) instead of a fixed 16,384 blocks. Measure the decode
-     time on the real 2400 Hz/15 Hz files and the synthetic 24 kHz file;
-     keep it only if the slowdown is acceptable.
+  1. **A — byte-bounded batch decode. DONE 2026-10-27.** A 64 MiB
+     transient budget (`_DECODE_BATCH_BYTES`) caps the batch by bytes as
+     well as the 16,384-block count (`_decode_batch_blocks`): 29 blocks
+     at 24 kHz, 294 at 2400 Hz, 4,698 at 150 Hz, 16,384 at 15 Hz (block
+     cap). Decode time is unchanged within noise (TS3 -0.6%, 24 kHz
+     -4.2%, TS5 -4.1% with the batch unchanged); peak RSS TS3 399→243 MB,
+     24 kHz 973→359 MB at 256 blocks (extrapolates to ~1.0-1.1 GB at
+     1,012 blocks), TS5 unchanged (~454 MB, list-dominated). Test:
+     `test_decode_batch_is_byte_bounded`.
   2. **B — single-pass streaming.** Merge the quality aggregation and
      `_group_segments` into one pass and apply the ingest window before
      grouping, so the `blocks` list and the pre-filter materialization
-     disappear. Do this only after A's efficiency check.
+     disappear. A is fine, so this is next.
   3. **C — stream the MTH5 write per run** (only if the full-corpus
      `runs` accumulation still matters after A+B).
-  **Effort:** A is XS (hours) + measurement; B is M (1-2 days); C is M.
-  **Test:** A: a batch-size unit test (the byte cap yields the expected
-  block count for a 24 kHz stride) plus a decode-time/RSS measurement on
-  the real corpus; B: a streaming spy (the writer sees blocks before the
-  reader finishes) and a 12 h-window peak-RSS check; both keep the
-  existing corpus round-trip green.
+  **Effort:** A was XS (done); B is M (1-2 days); C is M.
+  **Test:** B: a streaming spy (the writer sees blocks before the reader
+  finishes) and a 12 h-window peak-RSS check; keep the existing corpus
+  round-trip green.
 
 - [x] **M29 — an empty `save_path` wrote the MTH5 next to the input data
   (`phoenix_mtu.py:775`, `lemi.py:61,71`). FIXED (2026-10-27).** (Found

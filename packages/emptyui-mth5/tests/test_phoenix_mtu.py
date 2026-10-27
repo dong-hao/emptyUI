@@ -150,6 +150,23 @@ def test_block_tag_decode(tmp_path):
     assert not tag.saturated
 
 
+def test_decode_batch_is_byte_bounded():
+    """M28-A: the decode batch is capped by bytes, not just block count.
+
+    A 24 kHz 1-s block carries ~2.28 MB of transient (buf + lo/mid/hi/v),
+    so the 64 MiB budget allows 29 blocks; a 15 Hz block is tiny, so the
+    16,384-block cap wins; a pathological block still yields one.
+    """
+    from emptyui_mth5.phoenix_mtu import (
+        _DECODE_BATCH_BLOCKS,
+        _decode_batch_blocks,
+    )
+
+    assert _decode_batch_blocks(32 + 24000 * 5 * 3, 24000, 5) == 29
+    assert _decode_batch_blocks(32 + 15 * 5 * 3, 15, 5) == _DECODE_BATCH_BLOCKS
+    assert _decode_batch_blocks(10**9, 10**6, 5) == 1
+
+
 def test_group_segments_slots_and_continuous(tmp_path):
     """Contiguous blocks regroup: slots stay separate, continuous streams
     collapse to one segment."""

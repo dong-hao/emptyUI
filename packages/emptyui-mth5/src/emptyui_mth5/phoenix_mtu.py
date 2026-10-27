@@ -78,7 +78,25 @@ def _block_tag(buf: bytes) -> _BlockTag:
 #: decode's transient (~n_ch x n_scan x batch x 12 bytes) without giving up
 #: the 20x+ gain over per-block small-array decoding (docs/issues.md L25; the
 #: matlab lineage decoded whole files in one vectorized pass)
+#: Decode batch budget: cap by bytes as well as block count (M28-A). The
+#: per-block transient is the raw stride plus the decoded lo/mid/hi/v
+#: arrays (16 B per sample-channel); 64 MiB bounds the batch buffers to a
+#: few hundred MB even for 24 kHz blocks. Small blocks keep the block cap.
 _DECODE_BATCH_BLOCKS = 16384
+_DECODE_BATCH_BYTES = 64 << 20
+
+
+def _decode_batch_blocks(stride: int, n_scan: int, n_ch: int) -> int:
+    """M28-A: decode-batch size bounded by bytes as well as block count.
+
+    The per-block transient is the raw stride (``buf``) plus the decoded
+    ``lo``/``mid``/``hi``/``v`` arrays (16 B per sample-channel). The block
+    cap keeps small blocks fast; the byte cap keeps 24 kHz batches from
+    allocating GB-scale temporaries.
+    """
+    per_block = stride + n_scan * n_ch * 16
+    return max(1, min(_DECODE_BATCH_BLOCKS,
+                      _DECODE_BATCH_BYTES // max(1, per_block)))
 
 
 def _iter_blocks(
@@ -91,8 +109,9 @@ def _iter_blocks(
 
     The 24-bit samples are decoded in vectorized batches (the whole
     matlab-lineage point): per-block small-array ``_sign24`` calls were
-    ~60% of the ingest on a 12-h corpus (303k blocks in the 2400 Hz file
-    alone — 22.8x slower than the batched decode, measured bit-identical).
+    ~60% of the ingest on the real 84.4 h corpus (303k blocks in the
+    15 Hz file alone — 22.8x slower than the batched decode, measured
+    bit-identical).
     """
     size = path.stat().st_size
     with open(path, "rb") as fid:
@@ -114,7 +133,12 @@ def _iter_blocks(
             _log.warning(msg)
             if warnings is not None:
                 warnings.append(msg)
-        batch_blocks = max(1, _DECODE_BATCH_BLOCKS)
+        # M28-A: cap the batch by BYTES as well as block count. The
+        # per-block transient is the raw stride (buf) plus the decoded
+        # lo/mid/hi/v arrays (16 B per sample-channel), so a 64 MiB budget
+        # keeps the batch buffers bounded even for 24 kHz blocks; small
+        # blocks still hit the 16,384-block cap.
+        batch_blocks = _decode_batch_blocks(stride, n_scan, n_ch)
         for b0 in range(0, n_block, batch_blocks):
             b1 = min(b0 + batch_blocks, n_block)
             nb = b1 - b0
