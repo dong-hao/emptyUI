@@ -79,10 +79,11 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 3** (L29, L31, L32; H8 fixed
+do not cover. **Open after this review: 2** (L29, L32; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27/L28/L30
-fixed 2026-10-27); the `[x]` entries are retained for continuity.
+M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked,
+L27/L28/L30/L31 fixed 2026-10-27); the `[x]` entries are retained for
+continuity.
 
 ---
 
@@ -1380,16 +1381,17 @@ fixed 2026-10-27); the `[x]` entries are retained for continuity.
   **Verification:** backend 815 passed, ruff 0; frontend build + lint
   clean, Vitest 39, Playwright 36.
 
-- [ ] **L31 — the plugin template declares MIT while the repository is
-  Apache-2.0.** (Found 2026-10-25.)
-  `examples/plugin-template/pyproject.toml:7` has
+- [x] **L31 — the plugin template declared MIT while the repository is
+  Apache-2.0. FIXED (2026-10-27).** (Found 2026-10-25.)
+  `examples/plugin-template/pyproject.toml:7` had
   `license = { text = "MIT" }`; the repo ships Apache-2.0. The template
-  is the copy-me surface, so every derived plugin inherits the wrong
+  is the copy-me surface, so every derived plugin inherited the wrong
   license.
-  **Impact:** Low (legal/metadata) — but it propagates by design.
-  **Effort:** XS (one line) — `license = { text = "Apache-2.0" }` (and
-  check the template's `LICENSE`/classifier if present).
-  **Test:** none; a packaging check if CI has one.
+  **Remedy (done 2026-10-27):** `license = { text = "Apache-2.0" }`,
+  matching the four bundled packages. The template ships no `LICENSE`
+  file and no classifiers, so the metadata line was the only surface.
+  **Test:** none — metadata only; CI has no packaging check. Verified by
+  parsing the TOML (`license == {"text": "Apache-2.0"}`).
 
 - [ ] **L32 — no undo/redo and no run history in the graph editor
   (decision to revisit, not a defect).** (Found 2026-10-25.) DESIGN §8.2
@@ -1859,7 +1861,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 9 | ~~L27~~ | ~~combobox a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (inherit.spec green) |
 | 10 | ~~L28~~ | ~~settings label a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (settings.spec green) |
 | 11 | ~~L30~~ | ~~gitignore / `__pycache__` / hidden~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (test + e2e green) |
-| 12 | L31 | template license MIT vs Apache-2.0 | Low | XS | propagates by design |
+| 12 | ~~L31~~ | ~~template license MIT vs Apache-2.0~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** |
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
 
@@ -1873,9 +1875,8 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ / ~~L30~~
-(done 2026-10-27) → L31 → L29 → L32 (decision). The license item is
-minutes; the docs sweep is one commit.
+**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ / ~~L30~~ /
+~~L31~~ (done 2026-10-27) → L29 (docs sweep) → L32 (decision).
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`

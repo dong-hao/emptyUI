@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Example emptyUI plugin — copy this package as a starting point for your own (see docs/plugin-guide.md)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 dependencies = [
     "numpy",
     # the framework itself; plugins never edit core, they register via entry points
