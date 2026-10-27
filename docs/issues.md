@@ -421,7 +421,8 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
   was wrong; the 303k-block file is the 15 Hz stream, not the 2400 Hz
   file (the `_iter_blocks` docstring at `:94` says otherwise — fix it
   with the code).
-  **Measured peak RSS (delta above a ~205 MB interpreter baseline):**
+  **Measured peak RSS (pre-fix, delta above a ~205 MB interpreter
+  baseline):**
   `list(_iter_blocks(TS5))` alone **419 MB** (182 MB data + 221 MB array
   objects + 15 MB tags + 17 MB tuples); the 2400 Hz file alone **399 MB**
   (batch buffers, not the list); 15 Hz-only ingest **823 MB**; a 12 h
@@ -445,16 +446,20 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
      24 kHz 973→359 MB at 256 blocks (extrapolates to ~1.0-1.1 GB at
      1,012 blocks), TS5 unchanged (~454 MB, list-dominated). Test:
      `test_decode_batch_is_byte_bounded`.
-  2. **B — single-pass streaming.** Merge the quality aggregation and
-     `_group_segments` into one pass and apply the ingest window before
-     grouping, so the `blocks` list and the pre-filter materialization
-     disappear. A is fine, so this is next.
-  3. **C — stream the MTH5 write per run** (only if the full-corpus
-     `runs` accumulation still matters after A+B).
-  **Effort:** A was XS (done); B is M (1-2 days); C is M.
-  **Test:** B: a streaming spy (the writer sees blocks before the reader
-  finishes) and a 12 h-window peak-RSS check; keep the existing corpus
-  round-trip green.
+  2. **B — single-pass streaming. DONE 2026-10-27.** The window filter
+     and quality aggregation now run as the blocks are decoded, and
+     `_group_segments` consumes the same stream; the segments hold only
+     the in-window chunks. Measured: 12 h window 903→377 MB (-58%),
+     15 Hz-only 823→719 MB (-13%), full corpus 1,548→1,512 MB (-2.3%);
+     ingest time 6.3→5.9 s / 5.1→4.8 s / 30.1→29.5 s. The existing
+     corpus round-trip and window-crop tests stay green.
+  3. **C — stream the MTH5 write per run. PARKED.** The full corpus is
+     still ~1.5 GB, dominated by the `runs` accumulation (all 1,013
+     runs held until the write). Do it only if 84 h corpora matter for
+     the deployment; the 12 h case is now 377 MB.
+  **Effort:** A was XS (done); B was M (done); C is M (parked).
+  **Test:** B kept the existing corpus round-trip and window-crop tests
+  green; C would need a streaming-write spy.
 
 - [x] **M29 — an empty `save_path` wrote the MTH5 next to the input data
   (`phoenix_mtu.py:775`, `lemi.py:61,71`). FIXED (2026-10-27).** (Found
@@ -1827,7 +1832,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
 | 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
-| 8 | M28 | Phoenix ingest: list + batch buffers | Medium | M | A (byte cap) → measure → B (stream) |
+| 8 | M28 | Phoenix ingest: list + batch buffers | Medium | M | A+B done; C parked (84 h only) |
 | 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
 | 10 | L28 | settings label a11y | Low | XS | cheap |
 | 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
@@ -1841,9 +1846,9 @@ were small and each closed a silent-wrong-result or a
 test/production divergence.
 
 **Phase B — robustness and contract (2–3 days).** ~~M29~~ (done
-2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28 (plan A → measure →
-B; measured 2026-10-27: 419 MB list, 1.75 GB full corpus, ~3.8 GB
-extrapolated 24 kHz).
+2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28 (A+B done 2026-10-27:
+12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks, full corpus
+1,548→1,512 MB; C parked for 84 h corpora).
 
 **Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
 then L32 (decision). The a11y pair and the hygiene/license items are

@@ -643,26 +643,35 @@ def read_phoenix_mtu(
     n_saturated = 0
 
     for path in _ts_files(data_path, sample_rates):
-        # single pass over the file: tags feed the quality aggregation,
-        # samples feed the segment grouping (re-reading 20 h of 15 Hz data
-        # per pass measurably slows ingestion)
-        blocks = list(_iter_blocks(path, warnings))
+        # M28-B: one streaming pass — the window filter and the quality
+        # aggregation run as the blocks are decoded, and _group_segments
+        # consumes the same stream. The old list(...) materialized the
+        # whole file before filtering (a 12 h window still held all 84 h
+        # of blocks); the segments now hold only the in-window chunks.
+        n0 = 0
+        n_kept = 0
+
+        def _stream(path=path):
+            nonlocal n0, n_kept, max_clock_error, n_saturated
+            for tag, samples in _iter_blocks(path, warnings):
+                n0 += 1
+                if win_start is not None and tag.start < win_start:
+                    continue
+                if win_end is not None and tag.start >= win_end:
+                    continue
+                n_kept += 1
+                statuses.add(tag.clock_status)
+                max_clock_error = max(max_clock_error,
+                                      abs(tag.clock_error_s))
+                n_saturated += tag.saturated
+                yield tag, samples
+
+        segs = _group_segments(_stream(), path)
         if win_start is not None or win_end is not None:
-            n0 = len(blocks)
-            blocks = [
-                (t, s) for (t, s) in blocks
-                if (win_start is None or t.start >= win_start)
-                and (win_end is None or t.start < win_end)
-            ]
             msg = (f"{path.name}: ingest window [{win_start}, {win_end}) "
-                   f"dropped {n0 - len(blocks)}/{n0} block(s)")
+                   f"dropped {n0 - n_kept}/{n0} block(s)")
             _log.info(msg)
             warnings.append(msg)
-        for tag, _samples in blocks:
-            statuses.add(tag.clock_status)
-            max_clock_error = max(max_clock_error, abs(tag.clock_error_s))
-            n_saturated += tag.saturated
-        segs = _group_segments(iter(blocks), path)
         # schedule cross-check (loose): slot lengths vs the TBL schedule;
         # window-cropped edge segments are exempt (they legitimately span
         # less than the slot length)
@@ -778,7 +787,10 @@ def read_phoenix_mtu(
             n_samples_by_run.append(len(array_list[0][2]))
             seg_info.append((run_id, float(seg.rate), seg.start, seg.end,
                              n_samples_by_run[-1]))
-        blocks = None  # free the sample chunks
+        # M28-B: the segments' chunks are released here; the built runs
+        # keep their concatenated arrays. (The old `blocks = None` freed
+        # only the list — the segments still held the same arrays.)
+        segs = None
 
     if not runs:
         raise ValueError(
