@@ -407,22 +407,51 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
   corpus-driven review before any criterion/threshold change. Do not read
   this fix as a quality endorsement.
 
-- [ ] **M28 — `Load Phoenix MTU-5` materializes the whole time series in
-  memory (`blocks = list(...)`).** (Found 2026-10-25.)
-  `phoenix_mtu.py:623` wraps the streaming `_iter_blocks(path, warnings)`
-  in `list(...)`, so the entire recording is resident before the MTH5
-  write starts. At 2400 Hz × 4 channels × 12 h that is ≈3.3 GB (float64)
-  plus block metadata — a scalability cliff that is nowhere documented,
-  and the iterator exists precisely to avoid it.
-  **Impact:** Medium — OOM on realistic long acquisitions; the failure is
-  a crash, not silent, but it arrives after a long read.
-  **Effort:** M (1-2 days) — feed blocks into the writer incrementally
-  (the MTH5 append loop already consumes them one at a time); keep the
-  warning/clock bookkeeping streaming. Measure peak RSS on the 12 h/2400
-  Hz shape before and after (the register's numbers-first rule).
-  **Test:** a synthetic multi-block corpus with a peak-RSS assertion or a
-  block-count/streaming spy; assert the writer sees blocks before the
-  reader finishes.
+- [ ] **M28 — `Load Phoenix MTU-5` holds the whole recording in memory
+  (`blocks = list(...)`) and the batch decoder is unbounded in bytes.**
+  (Found 2026-10-25; re-measured 2026-10-27 on the real 1690618B corpus.)
+  `phoenix_mtu.py:625` wraps the streaming `_iter_blocks(path, warnings)`
+  in `list(...)`, so the entire file is resident before the MTH5 write
+  starts; `_DECODE_BATCH_BLOCKS = 16384` (`:81`) bounds the decode batch
+  by block COUNT, not bytes.
+  **Measured geometry (real corpus, 84.4 h):** TS3 2400 Hz = 1,012 blocks
+  (506 slots × 2 s, 17 min of data); TS4 150 Hz = 8,096 blocks (506 × 16
+  s); TS5 15 Hz = 303,742 blocks (one 84.4 h continuous run). The 2400 Hz
+  data is slot-mode, so the original "12 h at 2400 Hz ≈ 3.3 GB" premise
+  was wrong; the 303k-block file is the 15 Hz stream, not the 2400 Hz
+  file (the `_iter_blocks` docstring at `:94` says otherwise — fix it
+  with the code).
+  **Measured peak RSS (delta above a ~205 MB interpreter baseline):**
+  `list(_iter_blocks(TS5))` alone **419 MB** (182 MB data + 221 MB array
+  objects + 15 MB tags + 17 MB tuples); the 2400 Hz file alone **399 MB**
+  (batch buffers, not the list); 15 Hz-only ingest **823 MB**; a 12 h
+  window **903 MB** (the full 84 h files are materialized before the
+  window filter, so cropping does not bound the peak); full corpus
+  (1,013 runs) **1,548 MB**. A synthetic 24 kHz file with 256 blocks
+  peaks at **973 MB** and extrapolates linearly to **~3.8 GB** at 1,012
+  blocks — the GB-scale case is the 24 kHz AMT batch decoder, not the
+  `list`.
+  **Impact:** Medium — the 15 Hz continuous stream scales linearly with
+  duration (419 MB per 84 h for the list, plus the `runs` accumulation);
+  the 24 kHz batch can reach ~3.8 GB for a 1,012-block file. Both are
+  crashes, not silent, but they arrive after a long read.
+  **Plan (2026-10-27, user):**
+  1. **A — byte-bounded batch decode.** Cap the batch by a byte budget
+     (e.g. 64 MB) instead of a fixed 16,384 blocks. Measure the decode
+     time on the real 2400 Hz/15 Hz files and the synthetic 24 kHz file;
+     keep it only if the slowdown is acceptable.
+  2. **B — single-pass streaming.** Merge the quality aggregation and
+     `_group_segments` into one pass and apply the ingest window before
+     grouping, so the `blocks` list and the pre-filter materialization
+     disappear. Do this only after A's efficiency check.
+  3. **C — stream the MTH5 write per run** (only if the full-corpus
+     `runs` accumulation still matters after A+B).
+  **Effort:** A is XS (hours) + measurement; B is M (1-2 days); C is M.
+  **Test:** A: a batch-size unit test (the byte cap yields the expected
+  block count for a 24 kHz stride) plus a decode-time/RSS measurement on
+  the real corpus; B: a streaming spy (the writer sees blocks before the
+  reader finishes) and a 12 h-window peak-RSS check; both keep the
+  existing corpus round-trip green.
 
 - [x] **M29 — an empty `save_path` wrote the MTH5 next to the input data
   (`phoenix_mtu.py:775`, `lemi.py:61,71`). FIXED (2026-10-27).** (Found
@@ -1795,7 +1824,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
 | 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
-| 8 | M28 | Phoenix full-file ingest | Medium | M | OOM on long acquisitions |
+| 8 | M28 | Phoenix ingest: list + batch buffers | Medium | M | A (byte cap) → measure → B (stream) |
 | 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
 | 10 | L28 | settings label a11y | Low | XS | cheap |
 | 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
@@ -1809,9 +1838,9 @@ were small and each closed a silent-wrong-result or a
 test/production divergence.
 
 **Phase B — robustness and contract (2–3 days).** ~~M29~~ (done
-2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28. M28 is the only
-multi-day item and needs a before/after RSS measurement (numbers-first
-rule).
+2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28 (plan A → measure →
+B; measured 2026-10-27: 419 MB list, 1.75 GB full corpus, ~3.8 GB
+extrapolated 24 kHz).
 
 **Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
 then L32 (decision). The a11y pair and the hygiene/license items are
