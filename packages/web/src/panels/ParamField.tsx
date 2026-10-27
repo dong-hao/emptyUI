@@ -222,6 +222,8 @@ export function ParamField({ param, value, onChange, compact, disabled, instance
           disabled={disabled}
           placeholder={param.placeholder}
           list={listId}
+          id={fieldId}
+          ariaLabel={param.label ?? param.name}
         />
         <datalist id={listId}>
           {opts.map((o) => (

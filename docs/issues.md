@@ -79,10 +79,10 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 6** (L27–L32; H8 fixed
+do not cover. **Open after this review: 5** (L28–L32; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked); the
-`[x]` entries are retained for continuity.
+M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27 fixed
+2026-10-27); the `[x]` entries are retained for continuity.
 
 ---
 
@@ -1299,18 +1299,22 @@ M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked); the
 
 ## Low — polish, hygiene, dormant surfaces
 
-- [ ] **L27 — the inherited/suggested combobox is unlabelled (L1
-  regression).** (Found 2026-10-25.) `ParamField.tsx:203-232`: the
-  `selectOptions` branch renders `CommitInput` without `id={fieldId}` or
-  `ariaLabel`, although `CommitInput` accepts both (`:29-60`, `:114`). The
-  visible `<label htmlFor={fieldId}>` (`:387`) therefore points at no
-  element, and the control has no accessible name — on the most common
-  param type once inheritance/suggestions are active.
-  **Impact:** Low — accessibility regression; no data effect.
-  **Effort:** XS (minutes) — pass `id={fieldId}` and
-  `ariaLabel={param.label ?? param.name}`.
-  **Test:** a Vitest/Playwright assertion that `getByLabel(param.label)`
-  resolves the combobox input.
+- [x] **L27 — the inherited/suggested combobox was unlabelled (L1
+  regression). FIXED (2026-10-27).** (Found 2026-10-25.)
+  `ParamField.tsx:203-232`: the `selectOptions` branch rendered
+  `CommitInput` without `id={fieldId}` or `ariaLabel`, although
+  `CommitInput` accepts both (`:29-60`, `:114`). The visible
+  `<label htmlFor={fieldId}>` (`:387`) therefore pointed at no element,
+  and the control had no accessible name — on the most common param type
+  once inheritance/suggestions are active.
+  **Remedy (done 2026-10-27):** the combobox branch passes
+  `id={fieldId}` and `ariaLabel={param.label ?? param.name}`
+  (`ParamField.tsx:218-232`), so the visible label resolves the input.
+  **Tests:** `inherit.spec.ts` now asserts `getByLabel("Survey id" /
+  "Station id" / "Run id")` resolves the inherited comboboxes. Red
+  first: `getByLabel("Survey id")` found no control.
+  **Verification:** `npm run typecheck` / `npm run lint` clean;
+  `npm run build` + Vitest 38 + Playwright 36 passed.
 
 - [ ] **L28 — the settings live-knob label does not wrap its input.**
   (Found 2026-10-25.) `SettingsDialog.tsx:24-40`: `LiveKnobRow` renders
@@ -1839,7 +1843,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
 | 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
 | 8 | ~~M28~~ | ~~Phoenix ingest: list + batch buffers~~ | ~~Medium~~ | ~~M~~ | **closed 2026-10-27** (A+B; C parked for 84 h) |
-| 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
+| 9 | ~~L27~~ | ~~combobox a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (inherit.spec green) |
 | 10 | L28 | settings label a11y | Low | XS | cheap |
 | 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
 | 12 | L31 | template license MIT vs Apache-2.0 | Low | XS | propagates by design |
@@ -1856,9 +1860,9 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
-then L32 (decision). The a11y pair and the hygiene/license items are
-minutes each; the docs sweep is one commit.
+**Phase C — polish and hygiene (≈1 day).** ~~L27~~ (done 2026-10-27) →
+L28 → L30 → L31 → L29 → L32 (decision). The a11y pair and the
+hygiene/license items are minutes each; the docs sweep is one commit.
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`

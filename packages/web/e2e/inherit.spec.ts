@@ -97,4 +97,10 @@ test("identities auto-fill and render as comboboxes through a pass-through filte
       .evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
     expect(opts).toContain(value);
   }
+
+  // L27: the combobox input is labelled by its visible label (id/htmlFor),
+  // not only by the datalist — getByLabel resolves the same input.
+  await expect(fc.getByLabel("Survey id")).toHaveValue("survey");
+  await expect(fc.getByLabel("Station id")).toHaveValue("B0940330");
+  await expect(fc.getByLabel("Run id")).toHaveValue("sr150_0001");
 });
