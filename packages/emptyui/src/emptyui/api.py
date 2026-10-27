@@ -233,6 +233,8 @@ class Node:
     #: directory, never inside the plugin wheel. Each entry:
     #: ``{"id": "denoiser-cnn", "filename": "denoiser_v2.onnx", "sha256":
     #: "<…>", "url": "https://…", "license": "CC-BY-4.0"}``.
+    #: Resolution/verification is **planned** (DESIGN §11.4): the fields are
+    #: forward-compatible metadata until the resolver lands.
     models: ClassVar[list[dict[str, str]]] = []
 
     #: Whether structural cache hits may skip this node's execution

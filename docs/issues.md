@@ -79,9 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 8** (M28, M31, L27–L32; H8
-fixed 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed
-2026-10-27); the `[x]` entries are retained for continuity.
+do not cover. **Open after this review: 7** (M28, L27–L32; H8 fixed
+2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
+M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
 
 ---
 
@@ -476,25 +476,34 @@ fixed 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed
   output slipped through). Red first: `(2,) != (2, 2, 2)`.
   **Verification:** pytest **808 passed** (~71 s), `ruff check .` 0.
 
-- [ ] **M31 — the plugin guide documents a model-integrity control that
-  does not exist (`EMPTYUI_MODELS_PATH`, mandatory `sha256`).** (Found
-  2026-10-25.) `docs/plugin-guide.md:185-215` says weights live in a
-  configured `EMPTYUI_MODELS_PATH` and that `sha256` is **mandatory** —
-  "results must be reproducible and tamper-evident" — and the checklist
-  (`:262`) repeats it. Nothing reads `EMPTYUI_MODELS_PATH`; `models` is a
+- [x] **M31 — the plugin guide documented a model-integrity control that
+  does not exist (`EMPTYUI_MODELS_PATH`, mandatory `sha256`). CLOSED
+  (2026-10-27): marked planned.** (Found 2026-10-25.)
+  `docs/plugin-guide.md:185-215` said weights live in a configured
+  `EMPTYUI_MODELS_PATH` and that `sha256` is **mandatory** — "results
+  must be reproducible and tamper-evident" — and the checklist (`:262`)
+  repeated it. Nothing reads `EMPTYUI_MODELS_PATH`; `models` is a
   declared `ClassVar` with a docstring (`api.py:232-236`) and no
   resolution or hash verification anywhere in `packages/`. A plugin
-  author following the guide ships a manifest that is silently
+  author following the guide shipped a manifest that was silently
   unenforced.
-  **Impact:** Medium — a documented security/reproducibility control that
-  is absent is worse than an undocumented gap: it invites reliance.
-  **Effort:** S (hours) — per the M23 precedent, either implement
-  (resolve `models` against the env dir, verify sha256 at load, fail
-  actionably) or mark it **planned** in DESIGN §11 and rewrite the guide
-  as a contract-not-yet-enforced. Decide before the next plugin release.
-  **Test:** if implemented, a wrong-hash fixture must fail loudly and a
-  missing model must name the setting + filename; if marked planned, a
-  docs/checklist assertion keeps the wording honest.
+  **Decision (2026-10-27, user):** mark it **planned**, not implement —
+  there is no ML plugin consumer yet, and a resolver with no user would
+  be speculative (the M23 precedent for `X-Forwarded-*`).
+  **Remedy (done 2026-10-27):**
+  1. `docs/plugin-guide.md` §8 now states the resolver is **planned, not
+     enforced** (no `EMPTYUI_MODELS_PATH` read, no `models` resolution,
+     no `sha256` verification); the fields are the forward-compatible
+     contract, and `execute` owns the missing-model error until the core
+     resolver lands. The checklist item carries the same note.
+  2. `docs/DESIGN.md` §11.4 records the planned contract (env dir + hash
+     verification) as **not implemented**.
+  3. `api.py`'s `models` docstring says resolution/verification is
+     planned.
+  **Tests:** none needed — docs/contract wording only; the code path is
+  unchanged (there is no resolver to test).
+  **Verification:** `ruff check .` 0 (docs + docstring only); full pytest
+  **814 passed** unchanged.
 
 - [x] **M24 — Align Runs cannot be wired to Extract Run's collection
   output (burst-mode RR route blocked in the UI). FIXED (2026-10-13).**
@@ -1785,7 +1794,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 4 | ~~M27~~ | ~~`MaskTS` 3.0 vs 8.0~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (809 passed) |
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
-| 7 | M31 | models/`sha256` documented, absent | Medium | S | documented-but-absent control |
+| 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
 | 8 | M28 | Phoenix full-file ingest | Medium | M | OOM on long acquisitions |
 | 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
 | 10 | L28 | settings label a11y | Low | XS | cheap |
@@ -1800,9 +1809,9 @@ were small and each closed a silent-wrong-result or a
 test/production divergence.
 
 **Phase B — robustness and contract (2–3 days).** ~~M29~~ (done
-2026-10-27) → M31 → M28. M31 is hours (decision: implement or mark
-planned); M28 is the only multi-day item and needs a before/after RSS
-measurement (numbers-first rule).
+2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28. M28 is the only
+multi-day item and needs a before/after RSS measurement (numbers-first
+rule).
 
 **Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
 then L32 (decision). The a11y pair and the hygiene/license items are

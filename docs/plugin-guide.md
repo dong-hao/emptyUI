@@ -187,9 +187,13 @@ be published.
 
 Model weights (e.g. CNN noise-suppression networks) are **never bundled**
 inside the plugin wheel — the same rule ComfyUI's ecosystem converged on.
-Declare the requirement in the manifest; binaries live in a configured model
-directory (`EMPTYUI_MODELS_PATH`), platform-provisioned in embedded remote
-mode (docs/DESIGN.md §11's read-only data root):
+Declare the requirement in the manifest:
+
+**Status (2026-10-27): the resolver is planned, not enforced.** emptyUI
+does not yet read `EMPTYUI_MODELS_PATH`, resolve `models`, or verify
+`sha256` (docs/DESIGN.md §11.4). Declare the fields now — they are the
+forward-compatible contract — but do not rely on the core to fetch,
+locate or hash-check the file yet.
 
 ```python
 class Denoiser(Node):
@@ -205,10 +209,11 @@ class Denoiser(Node):
 ```
 
 Rules:
-- `sha256` is mandatory — results must be reproducible and tamper-evident.
-- `execute` fails with an actionable error when a declared model is missing
-  at its expected path (name the setting and the expected filename); never
-  download silently at run time.
+- `sha256` is required by the contract (enforcement planned) — results
+  must be reproducible and tamper-evident.
+- Until the core resolver lands, `execute` is responsible for locating the
+  model and failing with an actionable error when it is missing (name the
+  setting and the expected filename); never download silently at run time.
 - Small lookup tables/config files that are part of your source code may
   ship in the wheel; anything with trained weights does not.
 
@@ -260,6 +265,7 @@ Rules:
       sensible `category`, `hidden` on test nodes
 - [ ] `execute` copies inputs; raises actionable errors; declares progress
 - [ ] models declared (id/filename/sha256/license), not bundled
+      (resolution/verification planned — DESIGN §11.4)
 - [ ] `pip install -e ".[dev]" && pytest` green
 - [ ] `ruff check` clean
 - [ ] version bumped if replacing an existing published release

@@ -1830,6 +1830,12 @@ normalize + validate identically — `../` escapes are rejected).
   `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`,
   `EMPTYUI_DISABLED_PLUGINS`, `EMPTYUI_SETTINGS_PATH`) mirrored as
   `create_app(...)` keyword arguments for module embedding (kwargs win).
+- **Model weights (planned, M31)**: plugins declare external weights via
+  the `models` ClassVar (`id`/`filename`/`sha256`/`url`/`license`). The
+  planned contract resolves them against `EMPTYUI_MODELS_PATH` and
+  verifies `sha256` before load; **not implemented** — the manifest fields
+  are forward-compatible metadata only, and the plugin guide documents the
+  planned contract (docs/issues.md M31).
 
 ### 11.5 Explicit non-goals
 - Authentication/user management inside emptyUI (the gateway's job).
