@@ -75,6 +75,14 @@ def test_manifest_protocol(registry):
     assert catalog["port_types"]["example.signal"]["color"] == "#16a085"
 
 
+def test_demo_nodes_are_palette_hidden(registry):
+    """L30: template demo nodes are hidden from the palette (plugin guide
+    §12 checklist) — the plugin stays installed so the settings toggle and
+    these self-tests still exercise it."""
+    for node in ("example.ts.gain", "example.demo.rms"):
+        assert registry.get(node).manifest()["hidden"] is True
+
+
 def test_gain_scales_all_channels_without_mutating_input():
     data = _series()
     original_ex = data.channels["ex"].copy()

@@ -35,6 +35,10 @@ class Gain(Node):
     )
     category = "Example"
     version = "0.1.0"
+    # L30: template demo nodes stay out of the palette (plugin guide §12
+    # checklist: `hidden` on test nodes); the plugin remains installed so
+    # the settings toggle and registry self-tests still exercise it.
+    hidden = True
     inputs = (Input("data", "ts.run"),)
     outputs = (Output("scaled", "ts.run"),)
     params = (Param("gain", "number", default=2.0),)
@@ -63,6 +67,8 @@ class RmsMeter(Node):
     )
     category = "Example"
     version = "0.1.0"
+    # L30: demo node hidden from the palette (plugin guide §12 checklist).
+    hidden = True
     inputs = (Input("data", "ts.run"),)
     outputs = (Output("signal", "example.signal"),)
     params = ()

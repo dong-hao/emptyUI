@@ -8,12 +8,21 @@ import { expect, test } from "@playwright/test";
  * enabled) and always leaves the plugin enabled for the rest of the suite.
  * The example plugin is installed in the dev/CI backend (README setup).
  */
-test("settings dialog toggles third-party plugins live", async ({ page }) => {
+test("settings dialog toggles third-party plugins live", async ({
+  page,
+  request,
+}) => {
   await page.goto("/");
 
-  // Palette nodes provided by the third-party example plugin (installed in
-  // the dev/CI backend) — used as the visible/not-visible probe.
-  const rms = page.getByRole("button", { name: "RMS Meter", exact: true });
+  // L30: the example plugin's demo nodes are hidden from the palette, so
+  // the observable is the catalog itself — the toggle hot-reloads the
+  // backend registry and the frontend refetches GET /api/nodes.
+  const exampleTypes = ["example.ts.gain", "example.demo.rms"];
+  const catalogTypes = async (): Promise<string[]> => {
+    const res = await request.get("/api/nodes");
+    const body = (await res.json()) as { nodes: { type: string }[] };
+    return body.nodes.map((n) => n.type);
+  };
 
   await page.getByRole("button", { name: "⚙ Settings" }).click();
   const dialog = page.locator(".settings-dialog");
@@ -37,19 +46,20 @@ test("settings dialog toggles third-party plugins live", async ({ page }) => {
     await exampleToggle.click();
     await expect(exampleToggle).toBeChecked();
   }
-  await expect(rms).toBeVisible();
+  expect(await catalogTypes()).toEqual(expect.arrayContaining(exampleTypes));
 
-  // Disable: the catalog refetches and the palette hides the plugin's nodes.
+  // Disable: the registry hot-reloads and the catalog drops the nodes.
   await exampleToggle.click();
   await expect(exampleToggle).not.toBeChecked();
-  await expect(rms).toBeHidden();
+  const disabledTypes = await catalogTypes();
+  for (const t of exampleTypes) expect(disabledTypes).not.toContain(t);
   // The row stays listed (re-enableable) and reports disabled.
   await expect(example).toContainText("disabled");
 
   // Enable: the nodes return.
   await exampleToggle.click();
   await expect(exampleToggle).toBeChecked();
-  await expect(rms).toBeVisible();
+  expect(await catalogTypes()).toEqual(expect.arrayContaining(exampleTypes));
   await expect(example).not.toContainText("disabled");
 
   await page

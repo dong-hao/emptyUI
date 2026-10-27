@@ -79,9 +79,9 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 4** (L29–L32; H8 fixed
+do not cover. **Open after this review: 3** (L29, L31, L32; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27/L28
+M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked, L27/L28/L30
 fixed 2026-10-27); the `[x]` entries are retained for continuity.
 
 ---
@@ -1353,24 +1353,32 @@ fixed 2026-10-27); the `[x]` entries are retained for continuity.
   **Test:** none (docs); optionally a grep-based CI check for the
   removed `selection` token and the env-var list.
 
-- [ ] **L30 — repository hygiene: an untracked 385 MB corpus file is not
-  ignored, and the template ships build clutter.** (Found 2026-10-25.)
-  - `test/test_mtu.mth5` (385 MB, untracked) is **not** covered by
-    `.gitignore` — only `test/verification/*.mth5` is (`:62`); one
-    `git add -A` commits it.
-  - `examples/plugin-template/{src,tests}/__pycache__/` are present.
+- [x] **L30 — repository hygiene: an untracked 385 MB corpus file was
+  not ignored, and the template shipped build clutter. FIXED
+  (2026-10-27).** (Found 2026-10-25.)
+  - `test/test_mtu.mth5` (385 MB, untracked) was **not** covered by
+    `.gitignore` — only `test/verification/*.mth5` was; one `git add -A`
+    would commit it.
+  - `examples/plugin-template/{src,tests}/__pycache__/` were present.
   - The `example` plugin is installed by `scripts/install.sh:62,70` and
-    CI and appears in the palette under "Example"; its nodes
-    (`example.ts.gain`, `example.demo.rms`) are not `hidden`, although
+    CI and appeared in the palette under "Example"; its nodes
+    (`example.ts.gain`, `example.demo.rms`) were not `hidden`, although
     the plugin-guide checklist (`:259-260`) asks for `hidden` on test
     nodes.
-  **Impact:** Low — repo size and palette clutter; the gitignore gap is
-  one command away from a 385 MB history entry.
-  **Effort:** XS (minutes) — add `test/*.mth5` (or the exact file) to
-  `.gitignore`, delete `__pycache__`, set `hidden = True` on the demo
-  nodes (or gate the template install behind a dev extra).
-  **Test:** `git check-ignore -v test/test_mtu.mth5`; a registry test
-  asserting the example nodes are hidden.
+  **Remedy (done 2026-10-27):**
+  - `.gitignore` now ignores `test/**/*.mth5` (covers both the ad-hoc
+    `test/test_mtu.mth5` and `test/verification/*.mth5`).
+  - deleted the template `__pycache__` trees.
+  - both demo nodes set `hidden = True`; the plugin stays installed so
+    the settings toggle and the template self-tests still exercise it.
+  - the settings e2e now observes the catalog (`GET /api/nodes`) instead
+    of a palette button, since hidden nodes never render; a new Vitest
+    pins the frontend catalog refetch after a toggle.
+  **Tests:** `git check-ignore -v test/test_mtu.mth5` resolves to the new
+  rule; `test_demo_nodes_are_palette_hidden` (red first: `hidden` was
+  False); `plugins.test.ts` refetch test; settings e2e green.
+  **Verification:** backend 815 passed, ruff 0; frontend build + lint
+  clean, Vitest 39, Playwright 36.
 
 - [ ] **L31 — the plugin template declares MIT while the repository is
   Apache-2.0.** (Found 2026-10-25.)
@@ -1850,7 +1858,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 8 | ~~M28~~ | ~~Phoenix ingest: list + batch buffers~~ | ~~Medium~~ | ~~M~~ | **closed 2026-10-27** (A+B; C parked for 84 h) |
 | 9 | ~~L27~~ | ~~combobox a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (inherit.spec green) |
 | 10 | ~~L28~~ | ~~settings label a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (settings.spec green) |
-| 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
+| 11 | ~~L30~~ | ~~gitignore / `__pycache__` / hidden~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (test + e2e green) |
 | 12 | L31 | template license MIT vs Apache-2.0 | Low | XS | propagates by design |
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
 | 14 | L32 | undo / run history | Low-Med | L / M | decision first |
@@ -1865,9 +1873,9 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ (done
-2026-10-27) → L30 → L31 → L29 → L32 (decision). The hygiene/license
-items are minutes each; the docs sweep is one commit.
+**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ / ~~L30~~
+(done 2026-10-27) → L31 → L29 → L32 (decision). The license item is
+minutes; the docs sweep is one commit.
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`
