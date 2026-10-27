@@ -79,9 +79,10 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 7** (M28, L27–L32; H8 fixed
+do not cover. **Open after this review: 6** (L27–L32; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
+M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked); the
+`[x]` entries are retained for continuity.
 
 ---
 
@@ -407,9 +408,10 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
   corpus-driven review before any criterion/threshold change. Do not read
   this fix as a quality endorsement.
 
-- [ ] **M28 — `Load Phoenix MTU-5` holds the whole recording in memory
-  (`blocks = list(...)`) and the batch decoder is unbounded in bytes.**
-  (Found 2026-10-25; re-measured 2026-10-27 on the real 1690618B corpus.)
+- [x] **M28 — `Load Phoenix MTU-5` held the whole recording in memory
+  (`blocks = list(...)`) and the batch decoder was unbounded in bytes.
+  CLOSED (2026-10-27): A+B done; C parked.** (Found 2026-10-25;
+  re-measured 2026-10-27 on the real 1690618B corpus.)
   `phoenix_mtu.py:625` wraps the streaming `_iter_blocks(path, warnings)`
   in `list(...)`, so the entire file is resident before the MTH5 write
   starts; `_DECODE_BATCH_BLOCKS = 16384` (`:81`) bounds the decode batch
@@ -460,6 +462,10 @@ M31 planned 2026-10-27); the `[x]` entries are retained for continuity.
   **Effort:** A was XS (done); B was M (done); C is M (parked).
   **Test:** B kept the existing corpus round-trip and window-crop tests
   green; C would need a streaming-write spy.
+  **Close note (2026-10-27, user):** close for now; revisit C when large
+  corpora are actually in play. The 12 h case is 377 MB and the 24 kHz
+  worst case is bounded by A, so the remaining 84 h ~1.5 GB is a known,
+  documented ceiling rather than an open defect.
 
 - [x] **M29 — an empty `save_path` wrote the MTH5 next to the input data
   (`phoenix_mtu.py:775`, `lemi.py:61,71`). FIXED (2026-10-27).** (Found
@@ -1832,7 +1838,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 5 | ~~M30~~ | ~~`merge_tf_levels` 1-D `Z_err`~~ | ~~Medium~~ | ~~XS~~ | **done 2026-10-26** (808 passed) |
 | 6 | ~~M29~~ | ~~empty `save_path` → data dir~~ | ~~Medium~~ | ~~S~~ | **done 2026-10-27** (814 passed) |
 | 7 | ~~M31~~ | ~~models/`sha256` documented, absent~~ | ~~Medium~~ | ~~S~~ | **planned 2026-10-27** (no consumer yet) |
-| 8 | M28 | Phoenix ingest: list + batch buffers | Medium | M | A+B done; C parked (84 h only) |
+| 8 | ~~M28~~ | ~~Phoenix ingest: list + batch buffers~~ | ~~Medium~~ | ~~M~~ | **closed 2026-10-27** (A+B; C parked for 84 h) |
 | 9 | L27 | combobox a11y | Low | XS | cheap, L1 regression |
 | 10 | L28 | settings label a11y | Low | XS | cheap |
 | 11 | L30 | gitignore / `__pycache__` / hidden | Low | XS | accident prevention |
@@ -1845,10 +1851,10 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 were small and each closed a silent-wrong-result or a
 test/production divergence.
 
-**Phase B — robustness and contract (2–3 days).** ~~M29~~ (done
-2026-10-27) → ~~M31~~ (planned 2026-10-27) → M28 (A+B done 2026-10-27:
-12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks, full corpus
-1,548→1,512 MB; C parked for 84 h corpora).
+**Phase B — robustness and contract (2–3 days). COMPLETE (2026-10-27).**
+~~M29~~ (2026-10-27); ~~M31~~ (planned 2026-10-27); ~~M28~~ (A+B
+2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
+full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
 **Phase C — polish and hygiene (≈1 day).** L27, L28, L30, L31, L29,
 then L32 (decision). The a11y pair and the hygiene/license items are
