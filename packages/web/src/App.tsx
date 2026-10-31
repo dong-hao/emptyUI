@@ -18,6 +18,7 @@ import { nodeTypes } from "./graph/MTNode";
 import { NodePalette } from "./panels/NodePalette";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
 import { SettingsDialog } from "./panels/SettingsDialog";
+import { HistoryDialog } from "./panels/HistoryDialog";
 import {
   DEFAULT_NODE_SIZE,
   deserializeWorkflow,
@@ -28,7 +29,7 @@ import {
   type MTNodeData,
   type SaveAnchors,
 } from "./stores/workflow";
-import type { NodeManifest } from "./api/client";
+import type { HistoryDetail, NodeManifest } from "./api/client";
 import { useRun } from "./stores/run";
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
   const pollGenerationRef = useRef(0);
@@ -519,6 +521,39 @@ export default function App() {
     setMessage(null);
   };
 
+  /** L32: open a history entry — replace the canvas with its snapshot and
+   *  hydrate the run view from the stored results. App owns the transition
+   *  so the poll timer and the run store cannot keep streaming the old run. */
+  const handleHistoryOpen = (detail: HistoryDetail) => {
+    if (
+      nodes.length > 0 &&
+      !window.confirm("Open this run? The current workflow will be replaced.")
+    ) {
+      return;
+    }
+    try {
+      // API-seeded runs may omit the document envelope (POST /api/runs
+      // accepts a bare workflow); fill the defaults so the same snapshot
+      // opens through the editor's strict deserializer.
+      const raw = (detail.workflow ?? {}) as Record<string, unknown>;
+      const doc = { format: "emptyui/workflow", version: 1, ...raw };
+      const { nodes: loaded, edges: loadedEdges, name, created } =
+        deserializeWorkflow(
+          doc as Parameters<typeof deserializeWorkflow>[0],
+        );
+      stopPolling();
+      useRun.getState().loadHistory(detail);
+      useWorkflow.getState().loadDocument(loaded, loadedEdges, name, created);
+      if (!catalog?.nodes?.length) loadedBeforeCatalog.current = true;
+      setMessage(null);
+      setShowHistory(false);
+    } catch (e) {
+      setMessage(
+        `History open failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
+
   return (
     <div className="app">
       <header className="toolbar">
@@ -583,6 +618,12 @@ export default function App() {
             e.target.value = "";
           }}
         />
+        <button
+          onClick={() => setShowHistory(true)}
+          title="Previous runs (session-only)"
+        >
+          🕘 History
+        </button>
         <button onClick={() => setShowSettings(true)} title="Enable/disable plugins">
           ⚙ Settings
         </button>
@@ -657,6 +698,12 @@ export default function App() {
         <PropertiesPanel onRunToHere={(nodeId) => startRun([nodeId])} />
       </div>
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showHistory && (
+        <HistoryDialog
+          onClose={() => setShowHistory(false)}
+          onOpen={handleHistoryOpen}
+        />
+      )}
     </div>
   );
 }

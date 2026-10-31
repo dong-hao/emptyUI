@@ -860,6 +860,10 @@ explain itself.
 | GET  | `/api/nodes` | Catalog of node manifests (drives sidebar + panels) |
 | POST | `/api/runs` | Validate + start a workflow run (`targets` restricts to "execute to here") |
 | GET  | `/api/runs/{id}` | Run status/outputs |
+| GET  | `/api/history` | Session-only run history: finished runs, newest first (L32) |
+| GET  | `/api/history/{id}` | History entry: submitted snapshot + compact results (L32) |
+| DELETE | `/api/history/{id}` | Delete one finished entry, its artifacts and workspace (L32) |
+| DELETE | `/api/history` | Clear all finished entries; active runs are left alone (L32) |
 | GET  | `/api/artifacts/{id}/preview` | Inline preview (PNG/JSON table) |
 | GET  | `/api/artifacts/{id}` | Full artifact download (`Content-Disposition: attachment`) |
 | POST | `/api/runs/{id}/cancel` | Request cancellation; executor checks the token between nodes |
@@ -871,8 +875,10 @@ explain itself.
 | WS   | `/api/ws` | Run events stream |
 
 A run-level artifact gallery is not implemented — viewers on nodes are the
-per-figure/table display, each with its own download link. MVP keeps state on
-the file-based workspace (§3); a DB is added only if run history demands it.
+per-figure/table display, each with its own download link. Run history is
+session-only (in-memory, cleared on restart, L32); MVP keeps state on the
+file-based workspace (§3), and a DB is added only if persistent history
+demands it.
 
 ### 7.4 Runtime settings
 
@@ -944,7 +950,9 @@ Stack: **Vite · React · TypeScript · @xyflow/react · Zustand · TanStack Que
 - **Preview Plot / View Table nodes** — render an incoming `plot`/`table` inside
   the node body (drag-resizable), each with a **⤓ download** link for the full
   artifact.
-- **Toolbar** — run, cancel (✕), new/open/save workflow. One `.error-msg`
+- **Toolbar** — run, cancel (✕), new/open/save workflow, session-only run
+  history (L32: list/open/export/delete/clear; the in-memory table is
+  cleared on restart). One `.error-msg`
   slot carries the current failure reason — the failed action, the failed
   run (§7.2 `run_finished.error`) or the catalog fetch — so a red state is
   never unexplained (notice/`notice-msg` is its amber twin for
@@ -987,6 +995,10 @@ re-checked in `onConnect`, then re-validated server-side before every run.
   **Delete selected** button delete the full selection — the highlighted
   nodes/edges and nothing else. The properties panel's focused node is
   display state, never a second selection source (no undo anywhere, §8.1).
+- **No undo/redo**: intentional (ComfyUI parity); save/load is the recovery
+  path. Run history is session-only (L32): the toolbar History dialog lists
+  finished runs, opens a snapshot with its results, exports it, and deletes
+  entries; the in-memory table is cleared on restart.
 - **Initial view**: `fitView` capped at `maxZoom: 1` with generous padding
   (fraction-based, v12-compatible).
 - **Node sizing**: standard node width 280 px (widened for the time bar; §8.3).

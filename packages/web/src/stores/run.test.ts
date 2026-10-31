@@ -128,3 +128,86 @@ test("a re-run keeps artifacts and payload extents visible (M12)", () => {
   expect(useRun.getState().payloads).toEqual({});
   expect(useRun.getState().nodeStates).toEqual({});
 });
+
+test("opening a history entry hydrates the run view (L32)", () => {
+  useRun.getState().loadHistory({
+    run_id: "r7",
+    label: "1690618B.TS5",
+    created_at: 1,
+    finished_at: 2,
+    status: "completed",
+    duration_s: 1,
+    node_count: 1,
+    artifact_count: 1,
+    workflow: {},
+    targets: [],
+    summary: {},
+    results: {
+      nodes: { n1: { status: "done", warnings: ["w"] } },
+      artifacts: [
+        {
+          id: "a1",
+          node: "n1",
+          kind: "plot",
+          handle: "data",
+          url: "/api/artifacts/a1/preview",
+        },
+      ],
+      payloads: {
+        n1: {
+          data: {
+            kind: "ts",
+            start: "2024-01-01",
+            end: "2024-01-02",
+            absolute: false,
+            sample_rate: 1,
+            channels: [],
+          },
+        },
+      },
+      status: "completed",
+      error: null,
+    },
+  });
+  const s = useRun.getState();
+  expect(s.runId).toBe("r7");
+  expect(s.runStatus).toBe("completed");
+  expect(s.runError).toBeNull();
+  expect(s.nodeStates["n1"]).toEqual({ status: "done", warnings: ["w"] });
+  expect(s.artifacts).toEqual([
+    {
+      id: "a1",
+      url: "/api/artifacts/a1/preview",
+      nodeId: "n1",
+      kind: "plot",
+      handle: "data",
+    },
+  ]);
+  expect(s.payloads["n1"]?.data).toBeDefined();
+});
+
+test("a failed history entry keeps its error (L32)", () => {
+  useRun.getState().loadHistory({
+    run_id: "r8",
+    label: "data.csv",
+    created_at: 1,
+    finished_at: 2,
+    status: "failed",
+    duration_s: 1,
+    node_count: 1,
+    artifact_count: 0,
+    workflow: {},
+    targets: [],
+    summary: { error: "boom" },
+    results: {
+      nodes: { n1: { status: "error", error: "boom" } },
+      artifacts: [],
+      payloads: {},
+      status: "failed",
+      error: "boom",
+    },
+  });
+  expect(useRun.getState().runStatus).toBe("failed");
+  expect(useRun.getState().runError).toBe("boom");
+  expect(useRun.getState().nodeStates["n1"]?.status).toBe("error");
+});

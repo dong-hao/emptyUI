@@ -877,6 +877,95 @@ button.primary {
   margin-top: 0;
 }
 
+/* ---- run history dialog (docs/issues.md L32) ---- */
+
+.history-dialog {
+  width: 760px;
+}
+
+.history-dialog .spacer {
+  flex: 1;
+}
+
+.history-list {
+  padding: 0.5rem 0.75rem;
+}
+
+.history-filter {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.history-row {
+  border: 1px solid #8884;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.history-row-main {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.history-status {
+  flex: none;
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 8px;
+  background: #eee;
+}
+
+.history-status.completed {
+  background: #d5f5e3;
+  color: #145a32;
+}
+
+.history-status.failed,
+.history-status.timeout {
+  background: #fadbd8;
+  color: #7f1d1d;
+}
+
+.history-status.cancelled {
+  background: #fdebd0;
+  color: #7e5109;
+}
+
+.history-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-row-meta {
+  font-size: 0.8em;
+  opacity: 0.75;
+  margin-top: 0.2rem;
+}
+
+.history-row-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.history-row-actions button {
+  font-size: 0.8em;
+  padding: 0.2rem 0.5rem;
+}
+
+.history-foot {
+  align-items: center;
+}
+
 /* ---- crash card (top-level error boundary, DESIGN §8.1 / docs/issues.md H6) --
  * The boundary replaces the whole tree, so this is a full-viewport card:
  * the point is that the app never leaves a blank page behind. */

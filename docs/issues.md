@@ -79,11 +79,11 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 2** (L29, L32; H8 fixed
+do not cover. **Open after this review: 1** (L29; H8 fixed
 2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
 M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked,
-L27/L28/L30/L31 fixed 2026-10-27); the `[x]` entries are retained for
-continuity.
+L27/L28/L30/L31 fixed 2026-10-27, L32 fixed 2026-11-01); the `[x]`
+entries are retained for continuity.
 
 ---
 
@@ -1393,22 +1393,38 @@ continuity.
   **Test:** none — metadata only; CI has no packaging check. Verified by
   parsing the TOML (`license == {"text": "Apache-2.0"}`).
 
-- [ ] **L32 — no undo/redo and no run history in the graph editor
-  (decision to revisit, not a defect).** (Found 2026-10-25.) DESIGN §8.2
-  documents the omission; the practical effect is that a mis-drag or a
-  delete is unrecoverable, and there is no gallery of previous runs to
-  compare against. Batch/queue, disk cache and auth are already tracked
-  in DESIGN §12.2 (#3, #5) and are not duplicated here.
-  **Impact:** Low-Medium (usability) — the highest-friction gap for new
-  users after the correctness items.
-  **Effort:** L for undo (graph history + store integration), M for a
-  run-history list (the run records already exist server-side).
-  **Decision needed:** whether undo is in scope before the GitHub
-  migration, or the editor stays append-only with save/load as the
-  recovery path.
-  **Test:** if implemented, undo/redo round-trips a node add, move,
-  delete and edge change; history lists completed runs with their
-  artifacts.
+- [x] **L32 — no undo/redo and no run history in the graph editor.
+  FIXED (2026-11-01) for run history; undo/redo is OUT OF SCOPE.**
+  (Found 2026-10-25.) DESIGN §8.2 documents the omission; the practical
+  effect was that a mis-drag or a delete is unrecoverable, and there was
+  no gallery of previous runs to compare against. Batch/queue, disk cache
+  and auth are already tracked in DESIGN §12.2 (#3, #5) and are not
+  duplicated here.
+  **Decision (2026-11-01, user):** undo/redo is out of scope (ComfyUI
+  parity; save/load is the recovery path). Run history is session-only,
+  matching ComfyUI: the in-memory table is cleared on restart.
+  **Remedy (done 2026-11-01):**
+  - server stores the submitted workflow snapshot, targets and a
+    data-derived label on the run record; `GET /api/history`,
+    `GET /api/history/{id}`, `DELETE /api/history/{id}` and
+    `DELETE /api/history` list/inspect/delete/clear finished runs.
+    Active runs are excluded; delete/clear reclaim the workspace and
+    artifacts.
+  - label = basename of each `path_kind="in"` data path (calibration
+    inputs and outputs excluded), joined/capped at two plus `+N`;
+    fallback to the document name, then "Untitled". Station is not used
+    (often auto/placeholder, so it does not disambiguate).
+  - a compact result snapshot (final node states, artifacts, payload
+    summaries) is folded in as events arrive, so the capped event stream
+    is never replayed for history.
+  - frontend: toolbar 🕘 History dialog (filter, Open/Export/Delete/
+    Clear all, session-only note). Open restores the snapshot and
+    hydrates the run view; Export downloads the snapshot.
+  **Tests:** `test_history.py` (10 tests: label rules, list/detail/
+  delete/clear, active-run guards, failed status, session-only);
+  `run.test.ts` loadHistory hydration; `history.spec.ts` (list/open/
+  export/delete, failed + clear all). Full gates: pytest 825, ruff 0;
+  build/lint clean, Vitest 41, Playwright 38.
 
 - [x] **L1 — accessibility gaps (systemic). FIXED (2026-10-14).**
   Remedy, all four clauses: (1) every param control is labeled — the
@@ -1863,7 +1879,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 11 | ~~L30~~ | ~~gitignore / `__pycache__` / hidden~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (test + e2e green) |
 | 12 | ~~L31~~ | ~~template license MIT vs Apache-2.0~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** |
 | 13 | L29 | docs drift sweep | Low | S | onboarding cost |
-| 14 | L32 | undo / run history | Low-Med | L / M | decision first |
+| 14 | ~~L32~~ | ~~undo / run history~~ | ~~Low-Med~~ | ~~L / M~~ | **done 2026-11-01** (history only; undo out) |
 
 **Phase A — correctness (1–2 days). COMPLETE (2026-10-26).** ~~H8~~
 (2026-10-25); ~~H9~~, ~~H10~~, ~~M27~~, ~~M30~~ (2026-10-26). All five
@@ -1876,7 +1892,7 @@ test/production divergence.
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
 **Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ / ~~L30~~ /
-~~L31~~ (done 2026-10-27) → L29 (docs sweep) → L32 (decision).
+~~L31~~ (done 2026-10-27) / ~~L32~~ (done 2026-11-01) → L29 (docs sweep).
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`

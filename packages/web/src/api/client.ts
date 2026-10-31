@@ -161,6 +161,53 @@ export interface PluginInfo {
   error?: string;
 }
 
+/** One session-history row (docs/issues.md L32): the server's in-memory run
+ *  table, cleared on restart. The label is the input-data identity derived
+ *  server-side (never node titles). */
+export interface HistoryEntry {
+  run_id: string;
+  label: string;
+  created_at: number | null;
+  finished_at: number | null;
+  status: string;
+  duration_s: number | null;
+  node_count: number;
+  artifact_count: number;
+}
+
+export interface HistoryArtifact {
+  id: string;
+  node: string;
+  kind: string;
+  handle?: string | null;
+  url: string;
+}
+
+export interface HistoryNodeResult {
+  status?: string;
+  error?: string;
+  warnings?: string[];
+}
+
+/** Compact result snapshot stored with a history entry (not the progress
+ *  event stream): final node states, artifacts and payload summaries. */
+export interface HistoryResults {
+  nodes: Record<string, HistoryNodeResult>;
+  artifacts: HistoryArtifact[];
+  payloads: Record<string, Record<string, PayloadSummary>>;
+  status?: string;
+  error?: string | null;
+}
+
+export interface HistoryDetail extends HistoryEntry {
+  /** the submitted workflow document; the editor fills a missing envelope
+   *  on Open/Export (API-seeded runs may post a bare workflow) */
+  workflow: unknown;
+  targets: string[];
+  summary: Record<string, unknown>;
+  results: HistoryResults;
+}
+
 /** API base, derived at runtime (docs/DESIGN.md §11.3 single-origin convention):
  *  the API always lives one segment below the document root — so this works
  *  at "/", under a sub-path mount (e.g. /tools/emptyui/), and in dev (Vite
@@ -236,6 +283,29 @@ export const api = {
       );
     }
     return (await res.json()).plugins as PluginInfo[];
+  },
+  // session-only run history (docs/issues.md L32): finished runs, newest
+  // first; the server clears the table on restart
+  history: () => getJson<HistoryEntry[]>("/history"),
+  historyEntry: (runId: string) =>
+    getJson<HistoryDetail>(`/history/${encodeURIComponent(runId)}`),
+  deleteHistory: async (runId: string): Promise<{ deleted: boolean }> => {
+    const res = await fetch(`${BASE}/history/${encodeURIComponent(runId)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail ?? `DELETE /history/${runId}: ${res.status}`);
+    }
+    return res.json();
+  },
+  clearHistory: async (): Promise<{ deleted: number }> => {
+    const res = await fetch(`${BASE}/history`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail ?? `DELETE /history: ${res.status}`);
+    }
+    return res.json();
   },
 };
 

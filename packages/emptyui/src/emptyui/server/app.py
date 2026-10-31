@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import logging
 import shutil
 import tempfile
@@ -121,6 +122,50 @@ def _merge_summary(current: dict, incoming: dict) -> dict:
             continue
         merged[k] = v
     return merged
+
+
+def _history_label(workflow: dict, registry: Registry) -> str:
+    """L32: session-history label — the input data identity, never node titles.
+
+    The source nodes are the common prefix of nearly every workflow, so they
+    do not disambiguate runs. The useful key is the data the run consumed:
+    the basename of each ``path_kind="in"`` data path. Calibration inputs
+    (``calibration_path`` / ``calibration_folder`` / Load Calibration) are
+    excluded — they are not the dataset. Multiple sources are joined, capped
+    at two plus ``+N``; the document name is the fallback, then "Untitled".
+    """
+    labels: list[str] = []
+    for raw in workflow.get("nodes", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        node_type = str(raw.get("type", ""))
+        node = registry.get(node_type)
+        if node is None:
+            continue
+        # Load Calibration's `path` is a calibration input, not the dataset
+        if "calibration" in node_type.lower():
+            continue
+        params = raw.get("params") or {}
+        for spec in node.params:
+            if getattr(spec, "path_kind", "") != "in":
+                continue
+            if "calibration" in spec.name.lower():
+                continue
+            value = params.get(spec.name)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            base = Path(value.rstrip("/\\")).name
+            if base and base not in labels:
+                labels.append(base)
+    if labels:
+        label = " + ".join(labels[:2])
+        if len(labels) > 2:
+            label += f" +{len(labels) - 2}"
+        return label[:120]
+    name = (workflow.get("meta") or {}).get("name")
+    if isinstance(name, str) and name.strip() and name.strip() != "untitled":
+        return name.strip()[:120]
+    return "Untitled"
 
 
 def create_app(
@@ -271,6 +316,28 @@ def create_app(
     state = {"run_counter": 0, "active_runs": 0}
     lock = threading.Lock()
 
+    def _reclaim_workspace(workspace: str) -> None:
+        """Invalidate cached payloads backed by ``workspace``, then remove it.
+
+        M-C8: cached payloads holding open files inside the doomed workspace
+        are invalidated FIRST (the rmtree would otherwise leave a cache hit
+        restoring a payload whose backing file is gone — reads/writes on
+        unlinked inodes). Handles stay open (a concurrent run may share them);
+        the dropped entries force fresh re-execution on the next run.
+        """
+        try:
+            Executor.invalidate_workspace_cache(node_cache, workspace, logger)
+        except Exception:  # GC hygiene must never mask the reclaim
+            logger.exception(
+                "workspace cache invalidation failed for %s", workspace)
+        try:
+            shutil.rmtree(workspace)
+        except OSError:
+            # M17: ignore_errors=True leaked failed deletions silently — the
+            # directory is lost either way, so surface it (best effort: later
+            # workspaces are still reclaimed)
+            logger.exception("workspace reclaim failed for %s", workspace)
+
     def cleanup_expired_runs(now: float | None = None) -> int:
         """Remove completed run state and workspaces older than the TTL."""
         ttl = runtime.workspace_ttl_seconds
@@ -294,24 +361,7 @@ def create_app(
                         if artifact.get("run_id") == run_id:
                             artifacts.pop(artifact_id, None)
         for _run_id, workspace in expired:
-            # M-C8: cached payloads holding open files inside the doomed
-            # workspace are invalidated FIRST (the rmtree would otherwise
-            # leave a cache hit restoring a payload whose backing file is
-            # gone — reads/writes on unlinked inodes). Handles stay open
-            # (a concurrent run may share them); the dropped entries force
-            # fresh re-execution on the next run.
-            try:
-                Executor.invalidate_workspace_cache(node_cache, workspace, logger)
-            except Exception:  # GC hygiene must never mask the reclaim
-                logger.exception(
-                    "workspace cache invalidation failed for %s", workspace)
-            try:
-                shutil.rmtree(workspace)
-            except OSError:
-                # M17: ignore_errors=True leaked failed deletions silently —
-                # the directory is lost either way, so surface it (best
-                # effort: later workspaces are still reclaimed)
-                logger.exception("workspace reclaim failed for %s", workspace)
+            _reclaim_workspace(workspace)
         return len(expired)
 
     async def cleanup_loop() -> None:
@@ -603,6 +653,20 @@ def create_app(
                 "worker_done": False,
                 "finished_at": None,
                 "active_slot": True,
+                # L32: session-only run history — the exact submitted document,
+                # the derived data label and a compact result snapshot. The
+                # table is in-memory, so a restart clears the history with it.
+                "workflow": copy.deepcopy(req.workflow),
+                "targets": list(req.targets or []),
+                "label": _history_label(req.workflow, registry),
+                "created_at": time.time(),
+                "results": {
+                    "nodes": {},
+                    "artifacts": [],
+                    "payloads": {},
+                    "status": "queued",
+                    "error": None,
+                },
             }
 
         def emit(event: dict) -> None:
@@ -631,6 +695,47 @@ def create_app(
                 if len(info["events"]) > _MAX_EVENTS_PER_RUN:
                     excess = len(info["events"]) - _MAX_EVENTS_PER_RUN
                     del info["events"][1:1 + excess]
+                # L32: compact result snapshot for the history detail. The
+                # event list is capped (L-C7), so node states/artifacts/
+                # payloads are folded here as they arrive instead of being
+                # re-derived from a possibly-trimmed replay.
+                results = info.get("results")
+                if results is not None:
+                    kind = event.get("event")
+                    if kind == "node_status":
+                        node = event.get("node")
+                        if node:
+                            entry = results["nodes"].setdefault(node, {})
+                            entry["status"] = event.get("status")
+                            if event.get("error"):
+                                entry["error"] = event["error"]
+                    elif kind == "node_warning":
+                        node = event.get("node")
+                        msg = event.get("msg")
+                        if node and msg:
+                            entry = results["nodes"].setdefault(node, {})
+                            warnings = entry.setdefault("warnings", [])
+                            if msg not in warnings:
+                                warnings.append(msg)
+                    elif kind == "artifact":
+                        results["artifacts"].append({
+                            "id": event.get("id"),
+                            "node": event.get("node"),
+                            "kind": event.get("kind"),
+                            "handle": event.get("handle"),
+                            "url": event.get("url"),
+                        })
+                    elif kind == "payload":
+                        node = event.get("node")
+                        port = event.get("port")
+                        if node and port:
+                            results["payloads"].setdefault(node, {})[port] = (
+                                event.get("summary"))
+                    elif kind == "run_started":
+                        results["status"] = "running"
+                    elif kind == "run_finished":
+                        results["status"] = event.get("status")
+                        results["error"] = event.get("error")
                 if event["event"] == "run_started":
                     if info["summary"].get("status") == "queued":
                         info["summary"]["status"] = "running"
@@ -708,6 +813,102 @@ def create_app(
                 **info["summary"],
                 "events": list(info["events"]),
             }
+
+    def _history_entry(run_id: str, info: dict) -> dict:
+        summary = info.get("summary") or {}
+        workflow = info.get("workflow") or {}
+        created = info.get("created_at")
+        finished = info.get("finished_at")
+        artifact_count = sum(
+            1 for a in artifacts.values() if a.get("run_id") == run_id)
+        return {
+            "run_id": run_id,
+            "label": info.get("label") or "Untitled",
+            "created_at": created,
+            "finished_at": finished,
+            "status": summary.get("status"),
+            "duration_s": (
+                finished - created
+                if isinstance(created, (int, float))
+                and isinstance(finished, (int, float)) else None),
+            "node_count": len(workflow.get("nodes", []) or []),
+            "artifact_count": artifact_count,
+        }
+
+    @app.get("/api/history")
+    def history() -> list[dict]:
+        """Session-only run history (L32): finished runs, newest first.
+
+        The table is in-memory; a server restart clears it (ComfyUI parity).
+        Active runs are excluded until their worker finishes.
+        """
+        with lock:
+            entries = [
+                _history_entry(run_id, info)
+                for run_id, info in runs.items()
+                if info.get("finished_at") is not None
+                and (info.get("summary") or {}).get("status") in _TERMINAL
+            ]
+        entries.sort(key=lambda e: e.get("created_at") or 0, reverse=True)
+        return entries
+
+    @app.get("/api/history/{run_id}")
+    def history_entry(run_id: str) -> dict:
+        """One history entry: the submitted snapshot + compact results."""
+        with lock:
+            info = runs.get(run_id)
+            if info is None:
+                raise HTTPException(status_code=404, detail="unknown run")
+            if info.get("finished_at") is None:
+                raise HTTPException(
+                    status_code=409, detail="run is still active")
+            entry = _history_entry(run_id, info)
+            entry.update({
+                "workflow": copy.deepcopy(info.get("workflow") or {}),
+                "targets": list(info.get("targets") or []),
+                "summary": dict(info.get("summary") or {}),
+                "results": copy.deepcopy(info.get("results") or {}),
+            })
+            return entry
+
+    @app.delete("/api/history/{run_id}")
+    def delete_history_entry(run_id: str) -> dict:
+        """Delete one finished history entry, its artifacts and workspace."""
+        with lock:
+            info = runs.get(run_id)
+            if info is None:
+                raise HTTPException(status_code=404, detail="unknown run")
+            if info.get("finished_at") is None:
+                raise HTTPException(
+                    status_code=409, detail="run is still active")
+            runs.pop(run_id, None)
+            for artifact_id, artifact in list(artifacts.items()):
+                if artifact.get("run_id") == run_id:
+                    artifacts.pop(artifact_id, None)
+            workspace = info.get("workspace")
+        if workspace:
+            _reclaim_workspace(workspace)
+        return {"deleted": True, "run_id": run_id}
+
+    @app.delete("/api/history")
+    def clear_history() -> dict:
+        """Delete every finished history entry; active runs are left alone."""
+        with lock:
+            expired = [
+                (run_id, info.get("workspace"))
+                for run_id, info in runs.items()
+                if info.get("finished_at") is not None
+                and (info.get("summary") or {}).get("status") in _TERMINAL
+            ]
+            for run_id, _workspace in expired:
+                runs.pop(run_id, None)
+                for artifact_id, artifact in list(artifacts.items()):
+                    if artifact.get("run_id") == run_id:
+                        artifacts.pop(artifact_id, None)
+        for _run_id, workspace in expired:
+            if workspace:
+                _reclaim_workspace(workspace)
+        return {"deleted": len(expired)}
 
     @app.post("/api/runs/{run_id}/cancel")
     def cancel_run(run_id: str) -> dict:

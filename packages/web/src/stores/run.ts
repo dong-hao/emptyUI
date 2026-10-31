@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PayloadSummary } from "../api/client";
+import type { HistoryDetail, PayloadSummary } from "../api/client";
 
 export interface ArtifactInfo {
   id: string;
@@ -55,6 +55,10 @@ interface RunState {
   endStart: () => void;
   setRunId: (id: string | null) => void;
   handleEvent: (event: Record<string, unknown>) => void;
+  /** L32: hydrate the run view from a history entry's compact result
+   *  snapshot — opening a past run shows its final node states, artifacts
+   *  and payload extents without replaying the progress event stream. */
+  loadHistory: (detail: HistoryDetail) => void;
   reset: () => void;
 }
 
@@ -210,6 +214,52 @@ export const useRun = create<RunState>((set) => ({
   },
   // startingCount survives: it tracks in-flight POSTs, not run identity —
   // zeroing it here would un-gate the buttons while a POST is still pending
+  loadHistory: (detail) => {
+    const rawStatus = detail.results?.status ?? detail.status;
+    const allowed = [
+      "idle", "queued", "running", "completed", "failed", "cancelled", "timeout",
+    ] as const;
+    const runStatus = (allowed as readonly string[]).includes(rawStatus)
+      ? (rawStatus as RunState["runStatus"])
+      : "completed";
+    const nodeStates: Record<string, NodeRunState> = {};
+    for (const [nodeId, result] of Object.entries(detail.results?.nodes ?? {})) {
+      const status = result.status;
+      if (
+        status === "queued" || status === "running" ||
+        status === "done" || status === "error"
+      ) {
+        nodeStates[nodeId] = {
+          status,
+          error: result.error,
+          warnings: result.warnings,
+        };
+      } else if (result.warnings?.length) {
+        // a warning-only entry (no node_status survived) still surfaces
+        nodeStates[nodeId] = { status: "done", warnings: result.warnings };
+      }
+    }
+    const runError =
+      runStatus === "failed" || runStatus === "timeout"
+        ? ((detail.results?.error ??
+            (detail.summary?.error as string | undefined)) ?? null)
+        : null;
+    set({
+      runId: detail.run_id,
+      runStatus,
+      runError,
+      nodeStates,
+      artifacts: (detail.results?.artifacts ?? []).map((a) => ({
+        id: a.id,
+        url: a.url,
+        nodeId: a.node,
+        kind: a.kind,
+        handle: a.handle ?? null,
+      })),
+      payloads: detail.results?.payloads ?? {},
+      pending: [],
+    });
+  },
   reset: () =>
     set({
       runId: null,
