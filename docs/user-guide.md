@@ -3,10 +3,13 @@
 Recipes for the common processing chains. Load any workflow with the
 toolbar **Load** button; ready-to-run examples live in
 `examples/workflow/`. Node parameters edit inline on the node body —
-hover a parameter for its one-sentence tooltip.
+hover a parameter for its one-sentence tooltip. The toolbar also has
+**🕘 History** — a session-only list of finished runs (Open/Export/Delete/
+Clear all); it is cleared on restart and there is no undo/redo.
 
-> **Data availability**: only the `phoenix-mtu5a-smoke*` examples ship
-> with data (the tracked 3-hour smoke archive). The remote-reference
+> **Data availability**: only the `phoenix-mtu5a-smoke` and
+> `phoenix-mtu5a-session-qc` examples ship with data (both use the tracked
+> 3-hour smoke archive). The remote-reference
 > recipe below can be exercised on a fresh clone by first regenerating
 > the NIMS archives with
 > `python examples/data/nims-usarray-test/build_mth5.py` (an EarthScope
@@ -21,6 +24,9 @@ The bundled demo (`phoenix-mtu5a-smoke.emptyui.json`) is exactly this:
 ```
 Load MTH5 → Extract Run → Compute FC → Coherence Sort → Estimate TF → plots
 ```
+
+Expected: three Preview Plot artifacts — time series, AppRes/phase, and
+spectrogram.
 
 - **Load MTH5** — point at an `.mth5` archive.
 - **Extract Run** — pick survey/station/run (`auto` = the only one); a
@@ -41,6 +47,8 @@ Load MTH5 → Extract Run → Compute FC → Coherence Sort → Estimate TF → 
 Two stations, one chain:
 
 1. **Load MTH5** twice (local + remote station), **Extract Run** on each.
+   (The shipped `nims-remote-reference` example uses Merge Runs →
+   Calibrate → Detrend before Align Runs instead of Extract Run on each.)
 2. **Align Runs** — crops the remote run collection to the local time
    window; gap provenance is carried through and checked at pairing.
 3. **Compute FC** on the local extract, and a second **Compute FC** on
@@ -74,12 +82,14 @@ Load MTH5 → Extract Run → Mask TS → Compute FC → Select Runs → Estimat
 
 ## Plots and tables
 
-Plot nodes take a `plot` port: **AppRes & Phase** (impedance + optional
-tipper), **Tipper**, **Coherency**, **Phase Tensor**, **Time Series**,
-**Spectrogram** (per FC level, FC time series), and the
-**Coherence Map** (time–frequency QC view; tick `Print parameters`
-only for algorithm-comparison figures). **Preview Plot** renders any of
-them inline; **Save Plot** writes `png`/`svg`/`pdf` to `output_dir`.
+Plot nodes take a `plot` port: **Plot AppRes & Phase** (impedance +
+optional tipper), **Plot Tipper**, **Plot Coherency**, **Plot Phase
+Tensor**, **Plot Time Series**, **Plot Spectrogram** (per FC level, FC
+time series), and **Plot Coherence Map** (time–frequency QC view; tick
+`Print parameters` only for algorithm-comparison figures). **Preview
+Plot** renders any of them inline; **Save Plot** exports the incoming
+plot in its source format (bundled plot nodes emit PNG; svg/pdf require a
+matching source).
 **View Table** shows tabular outputs (run diagnostics, TF tables).
 
 ## Exporting results
@@ -95,7 +105,8 @@ them inline; **Save Plot** writes `png`/`svg`/`pdf` to `output_dir`.
 
 - **Server unreachable in the browser** — is it running? Remote browser
   → start with `--host 0.0.0.0`; port busy → `--port 8080`.
-- **"path not allowed"** — a `--data-root` server only resolves input
+- **"path is outside the data root" / "absolute output paths are not
+  allowed in remote mode"** — a `--data-root` server only resolves input
   paths inside that directory; use paths under it (saved workflows may
   carry project-relative paths).
 - **A run fails on one node** — the node shows the error copyable in

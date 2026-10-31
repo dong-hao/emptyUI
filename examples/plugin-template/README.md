@@ -1,7 +1,7 @@
 # emptyUI example plugin
 
 Copy this package as the starting point for your own emptyUI plugin — it
-demonstrates every convention from [`docs/plugin-guide.md`](../../docs/plugin-guide.md):
+demonstrates the core conventions from [`docs/plugin-guide.md`](../../docs/plugin-guide.md):
 
 - **entry-point registration** (`emptyui.nodes` group — no core edits)
 - **namespaced node types** (`example.ts.gain`, `example.demo.rms`)
@@ -16,8 +16,12 @@ demonstrates every convention from [`docs/plugin-guide.md`](../../docs/plugin-gu
 ```bash
 pip install -e ".[dev]"
 pytest                      # self-tests must pass
-# start emptyUI — "Gain" and "RMS Meter" appear under the Example category
+# start emptyUI — the plugin is installed and appears in ⚙ Settings, but
+# both demo nodes are palette-hidden (`hidden = True`, L30); use them in a
+# saved workflow or the self-tests
 ```
+
+License: Apache-2.0 (matching the template `pyproject.toml`).
 
 ## Make it yours
 

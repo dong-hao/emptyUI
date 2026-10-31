@@ -78,10 +78,11 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open now (2026-11-01): 1** (L29). Fixed since the review:
+do not cover. **Open now (2026-11-01): 0.** Fixed since the review:
 H8 2026-10-25; H9/H10/M27/M30 2026-10-26; M29 2026-10-27; M31 planned
 2026-10-27; M28 closed 2026-10-27 with C parked; L27/L28/L30/L31
-2026-10-27; L32 2026-11-01. The `[x]` entries are retained for continuity.
+2026-10-27; L32 2026-11-01; L29 2026-11-01. The `[x]` entries are
+retained for continuity.
 
 **Current baseline (2026-11-01):** pytest **825 collected/passed**
 (`-m "not errors"` **751** + `-m errors` **74**) · `ruff check .` **0** ·
@@ -89,7 +90,7 @@ H8 2026-10-25; H9/H10/M27/M30 2026-10-26; M29 2026-10-27; M31 planned
 Playwright **38 tests / 12 files** · **42 registered node types** (core 9,
 mth5 22, aurora 9, example 2; 37 palette-visible — 5 hidden, including the
 example plugin's 2 per L30) · all five shipped example workflows validate.
-**Open register entries: 1** (L29). Open follow-ups recorded inside closed
+**Open register entries: 0.** Open follow-ups recorded inside closed
 entries: M6 short-record empty result, M27 field-quality review, M28 C
 (84 h streaming write), M31 model resolver (planned), L18 noisy-remote
 warning, L23 Calibrate per-member rebuild. L32 undo/redo is out of scope.
@@ -1338,30 +1339,28 @@ warning, L23 Calibrate per-member rebuild. L32 undo/redo is out of scope.
   **Verification:** `npm run build` + lint clean; Vitest 38 + Playwright
   36 passed.
 
-- [ ] **L29 — documentation drift after the 2026-10-15…11-01 deliveries.**
-  (Found 2026-10-25.) Mechanical, but it misleads contributors. The
-  2026-11-01 sweep covers:
-  - `docs/issues.md` header: replace "Open findings only" / "Solved
-    entries are removed" with the versioned-register wording; label the
-    historical baselines and add the current 825/41/38 baseline.
-  - `docs/DESIGN.md`: §12.1 "M4 — backlog in progress" and §12.2's
-    delivered rows; stale §9.3/§10.1 param names (`reject_saturated`),
-    the nonexistent §9.5, the missing `EMPTYUI_NODE_TIMEOUT`, and the
-    §12.2 #21 row.
-  - `docs/plugin-guide.md`: remove `selection` from the core port types
-    (L2), add `ts.runs`, fix the `simpeg.aurora` example, the `[full]`
-    extra claim, and document `cacheable`/`invalidates_inputs`/`timeout`
-    and `path_kind`.
-  - `docs/deployment.md`: add `EMPTYUI_NODE_TIMEOUT` and
-    `EMPTYUI_PROJECT_DIR`; mark `X-Forwarded-*` as planned (DESIGN
+- [x] **L29 — documentation drift after the 2026-10-15…11-01 deliveries.
+  FIXED (2026-11-01, batches `f5e3900`, `90db674`, this commit).**
+  (Found 2026-10-25.) Mechanical, but it misled contributors:
+  - `docs/issues.md` header: replaced "Open findings only" / "Solved
+    entries are removed" with the versioned-register wording; labeled the
+    historical baselines and added the current 825/41/38 baseline.
+  - `docs/DESIGN.md`: §12.1 M4 status and §12.2 delivered rows; stale
+    §9.3/§10.1 param names (`reject_saturated`), the nonexistent §9.5,
+    the missing `EMPTYUI_NODE_TIMEOUT`, and the §12.2 #21 row.
+  - `docs/plugin-guide.md`: removed `selection` from the core port types
+    (L2), added `ts.runs`, fixed the `simpeg.aurora` example and the
+    `[full]` extra claim, documented `cacheable`/`invalidates_inputs`/
+    `timeout` and `path_kind`.
+  - `docs/deployment.md`: added `EMPTYUI_NODE_TIMEOUT` and
+    `EMPTYUI_PROJECT_DIR`; marked `X-Forwarded-*` as planned (DESIGN
     §11.3).
   - `docs/user-guide.md` / `README.md` / template README: the History
-    dialog, the actual path error text, the session-QC data note, and
-    the hidden example nodes.
-  **Impact:** Low — no runtime effect; high onboarding cost.
-  **Effort:** S (hours) — docs only, no code.
-  **Test:** none (docs); optionally a grep-based CI check for the
-  removed `selection` token and the env-var list.
+    dialog, the actual path error text, the session-QC data note, and the
+    hidden example nodes.
+  **Verification:** grep checks for `selection`, `§9.5`,
+  `reject_saturated`, `find_plugins`, `EMPTYUI_NODE_TIMEOUT`, and
+  `EMPTYUI_PROJECT_DIR`; docs-only, no code. Open register entries: 0.
 
 - [x] **L30 — repository hygiene: an untracked 385 MB corpus file was
   not ignored, and the template shipped build clutter. FIXED
@@ -1877,8 +1876,8 @@ L4, L5, L6, L3-backend (2026-10-14); L5-regression, M12, M15, M18, M13
 L17, L18 (2026-10-16); **L19–L26 (2026-10-14…17; L26 is the
 docs/migration track)**; M14 (2026-10-18). The list is illustrative; the
 entries below carry the full dispositions. **Open in the pre-2026-10-25
-register: 0; open now: 1 (L29).** The plan below is the historical phase
-plan; all phases are complete except Phase C (L29).
+register: 0; open now: 0.** The plan below is the historical phase plan;
+all phases complete (Phase C closed 2026-11-01).
 
 ### 2026-10-25 review — findings and dispositions
 
@@ -1901,7 +1900,7 @@ S = ≤1 day, M = 1–2 days, L = a feature.
 | 10 | ~~L28~~ | ~~settings label a11y~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (settings.spec green) |
 | 11 | ~~L30~~ | ~~gitignore / `__pycache__` / hidden~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** (test + e2e green) |
 | 12 | ~~L31~~ | ~~template license MIT vs Apache-2.0~~ | ~~Low~~ | ~~XS~~ | **done 2026-10-27** |
-| 13 | L29 | docs drift sweep | Low | S | onboarding cost |
+| 13 | ~~L29~~ | ~~docs drift sweep~~ | ~~Low~~ | ~~S~~ | **done 2026-11-01** (batches 1–3) |
 | 14 | ~~L32~~ | ~~undo / run history~~ | ~~Low-Med~~ | ~~L / M~~ | **done 2026-11-01** (history only; undo out) |
 
 **Phase A — correctness (1–2 days). COMPLETE (2026-10-26).** ~~H8~~
@@ -1914,9 +1913,9 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day). OPEN — L29 remains.** ~~L27~~ /
+**Phase C — polish and hygiene (≈1 day). COMPLETE (2026-11-01).** ~~L27~~ /
 ~~L28~~ / ~~L30~~ / ~~L31~~ (done 2026-10-27) / ~~L32~~ (done 2026-11-01)
-→ L29 (docs sweep).
+/ ~~L29~~ (docs sweep).
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`

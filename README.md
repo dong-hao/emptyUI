@@ -11,6 +11,8 @@
 *The demo workflow — Load MTH5 → Extract Run → Compute FC →
 Coherence Sort → Estimate TF, with the time series, apparent
 resistivity/phase and spectrogram plots rendered on the canvas.*
+*(Captured before the L32 History button; the current toolbar also has
+🕘 History.)*
 
 ## Quick start
 
@@ -37,7 +39,8 @@ MTU-5A archive (`examples/data/phoenix-mtu-test/smoke_phoenix_mtu.mth5`,
 a 3-hour real instrument recording, logger MTU-1690), so it works with
 no data of your own. The Python-only variant — for servers without
 Node — is `./scripts/install.sh --backend-only`, then
-`./scripts/serve.sh` (build the frontend once anywhere, or see
+`./scripts/serve.sh` (build the frontend into `packages/web/dist`; for a
+prebuilt dist elsewhere, run uvicorn with `EMPTYUI_SERVE_DIST` — see
 [docs/deployment.md](docs/deployment.md)).
 
 ## How it works
@@ -62,7 +65,11 @@ Node — is `./scripts/install.sh --backend-only`, then
 - **Exact reproduction using workflows**: each DAG graph can be saved
   as a "workflow" (in json format), which can be save/loaded and
   exchanged between users to reproduce the exact workflow and parameters
-  across different platforms/machines. 
+  across different platforms/machines.
+- **Session run history**: the toolbar **🕘 History** dialog lists
+  finished runs (Open/Export/Delete/Clear all); the record is session-only
+  and is cleared on restart. Undo/redo is out of scope (save/load is the
+  recovery path).
 
 ## Underlying Open-source libraries:
 
@@ -103,7 +110,7 @@ fresh clone:
 | Workflow | Data required | Available |
 |---|---|---|
 | `phoenix-mtu5a-smoke` | `smoke_phoenix_mtu.mth5` — **tracked** | ✅ runs as-is |
-| `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is, not working very well,though |
+| `phoenix-mtu5a-session-qc` | same smoke archive | ✅ runs as-is (QC results are weak on this short archive) |
 | `nims-remote-reference` | `4P_SDG31.h5` + `4P_SDH28.h5` | 🔁 regenerate first: `python examples/data/nims-usarray-test/build_mth5.py` (downloads the two stations from EarthScope's FDSN service; needs `mth5` and network) |
 | `phoenix-mtu5a-day-12h` | `day_12h_phoenix_mtu.mth5`  | ❌  example for noisy data, ask Hao if you want to try this|
 | `lemi424-remote-reference` | BGS-converted LEMI 417/424 corpus | ❌ need to be downloaded from the BGS [website](https://www.data.gov.uk/dataset/90d6b5c1-af65-4eee-be3b-53d5bc224217/long-period-magnetotelluric-time-series-at-9-sites-in-scotland-uk) |
@@ -156,9 +163,11 @@ executor, FastAPI server), `packages/emptyui-core-nodes` (minimal
 plugin), `packages/emptyui-mth5` (archive/IO: MTH5/LEMI/Phoenix, TF
 I/O, plots), `packages/emptyui-aurora` (processing: FC/TF estimation,
 QC, sorts), `packages/web` (React + React Flow frontend),
-`examples/plugin-template` (working plugin template). New node types
-need **zero frontend changes** — manifests drive the UI; author plugins
-against [docs/plugin-guide.md](docs/plugin-guide.md).
+`examples/plugin-template` (working plugin template). The catalog has
+**42 node types** (core 9, mth5 22, aurora 9, example 2; the example
+nodes are palette-hidden). New node types need **zero frontend changes**
+— manifests drive the UI; author plugins against
+[docs/plugin-guide.md](docs/plugin-guide.md).
 
 ## Documentation
 
@@ -179,7 +188,7 @@ against [docs/plugin-guide.md](docs/plugin-guide.md).
 
 ## HOW TO GET UPDATED
 ```
-cd to_you_local_folder
+cd to_your_local_folder
 git pull
 ```
 
@@ -189,7 +198,7 @@ DONG Hao –  donghao@cugb.edu.cn
 
 China University of Geosciences, Beijing
 
-Distributed under the Apache license. See ``LICENSE`` for more information.
+Distributed under the Apache-2.0 license. See `LICENSE` for more information.
 
 [https://github.com/dong-hao/emptyUI]
 

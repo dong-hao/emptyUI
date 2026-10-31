@@ -6,8 +6,8 @@ one bundled core-nodes plugin — everything domain-specific (mth5, aurora,
 ML denoisers, …) arrives as an ordinary Python package.
 
 > Copy **`examples/plugin-template/`** as your starting point; it
-> demonstrates every convention below and its self-tests pass out of the
-> box.
+> demonstrates the core conventions below and its self-tests pass out of
+> the box.
 
 ---
 
@@ -17,9 +17,10 @@ ML denoisers, …) arrives as an ordinary Python package.
   (`importlib.metadata`): your package advertises an `emptyui.nodes` entry
   point; emptyUI imports it at startup. No config files, no core
   registration lists.
-- **Heavy deps are yours.** Each plugin declares its own dependencies as
-  pip extras (`pip install emptyui-mth5[full]`), so users install only what
-  they need. Core stays light (numpy/matplotlib-level).
+- **Heavy deps are yours.** Each plugin declares its own dependencies
+  (the bundled `emptyui-mth5`/`emptyui-aurora` pin them as mandatory
+  dependencies; third-party plugins may use extras such as `[full]`), so
+  users install only what they need. Core stays light (numpy-level).
 - **Namespaces prevent collisions.** Node types and new port types are
   namespaced by org (`<org>.<domain>.<name>`). The ComfyUI ecosystem's
   biggest quality problem is unnamespaced node names colliding across
@@ -50,11 +51,12 @@ emptyui-example-plugin/
 ```toml
 [project]
 name = "emptyui-example-plugin"
+license = { text = "Apache-2.0" }
 dependencies = ["numpy", "emptyui"]          # emptyui = framework only
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]                      # heavy domain deps go here:
-                                              # [full] = mth5==0.6.8, etc.
+dev = ["pytest", "ruff==0.16.4"]              # heavy domain deps may go in
+                                              # extras (e.g. [full] = ...)
 
 [project.entry-points."emptyui.nodes"]
 example = "emptyui_example.plugin:register"
@@ -73,8 +75,9 @@ add classes, nothing else (no file I/O, no downloads).
 ## 3. Naming and namespacing
 
 - Node types: `<org>.<domain>.<name>` — e.g. `example.ts.gain`,
-  `simpeg.aurora.compute_fc`. The bundled plugin uses the reserved `core.`
-  prefix; third-party plugins must not.
+  `aurora.process.compute_fc`. The bundled core plugin uses the reserved
+  `core.` prefix; the bundled domain plugins use `mth5.` and `aurora.`;
+  third-party plugins must not use `core.`.
 - Port types: **reuse the core types** where sensible — the ecosystem stays
   connectable only if producers and consumers share type tags. Introduce a
   new type only when the payload is genuinely different (see §5).
@@ -94,16 +97,22 @@ frontend renders:
 | `hidden` | utility/test nodes excluded from the palette (still executable) |
 | `viewer` | inline canvas-body renderer the frontend mounts in the node card: `"plot"` or `"table"` (L-F12: the frontend never switches on node types); omit for ordinary nodes |
 | `terminal` | `True` when running this node produces something the user can see (docs/issues.md M13) — the frontend's "results won't be visible" notice tests this flag and `outputs == ()`, **never the category string**; declare it on display nodes |
-| `version` | bump on behavior changes; workflows record versions for reproducibility |
+| `cacheable` | `False` for side-effect nodes (save/export): a cache hit would skip the write (DESIGN §7.1) |
+| `invalidates_inputs` | `True` when the node closes/mutates its inputs (e.g. Save MTH5); the executor evicts producer cache entries |
+| `timeout` | per-node watchdog seconds; `None` inherits the server knob, `0` opts out, `>0` is this node's budget |
+| `version` | bump on behavior changes; it is part of the cache signature (DESIGN §7.1) |
 | `deps` | human-readable dependency notes surfaced in the properties panel |
 | `inherit` | params auto-filled (as dropdowns) from the upstream chain — see DESIGN §4 |
 
-Ports: `Input(name, type, required=True, accepts=(), label="", description="")`,
+Ports: `Input(name, type, required=True, accepts=(), description="", label="")`,
 `Output(name, type, ...)`. Params: `Param(name, widget, ...)` with the widget
 vocabulary `number | integer | string | text | boolean | select | radio |
 file | directory | code | list`, plus `options`, `min/max/step`,
-`placeholder`, and `cascade` (value-driven auto-change rules, e.g. remote
-reference forcing the robust estimator).
+`placeholder`, `optional`, `enabled_when`, and `cascade` (value-driven
+auto-change rules, e.g. remote reference forcing the robust estimator).
+Path params must set `path_kind="in"` (read-only input under the data root)
+or `"out"` (writable output in the run workspace) for remote-mode
+confinement (DESIGN §11.2).
 
 ## 5. Port types
 
@@ -117,14 +126,18 @@ validated by equality, declared `accepts`, or the `any` escape hatch
 |---|---|
 | `ts.run` | multi-channel time series (duck-typed: `channels: dict[str, ndarray]`, `sample_rate`, `copy()`, metadata attrs) |
 | `ts.channel` | single-channel series |
+| `ts.runs` | run collection (list of `ts.run`; Extract Run's time-range output) |
 | `fc` | Fourier-coefficient container |
 | `tf` | transfer-function estimate |
 | `tf.level` | per-decimation-level TF |
 | `mth5` | MTH5 file/archive handle |
 | `calibration` | instrument calibration filters |
-| `selection` / `decimation` / `config` / `bands` | metadata/config payloads |
+| `decimation` / `config` / `bands` | metadata/config payloads |
 | `plot` / `table` | display artifacts |
 | `any` | escape hatch (avoid in new nodes) |
+
+`selection` is not a core type (L2); it returns with its M4-deferred
+producer, and `View Selection` stays registered but hidden.
 
 **Declaring a new type** (when your payload is genuinely different, e.g. an
 ML model handle):
@@ -220,7 +233,9 @@ Rules:
 ## 9. Versioning & reproducibility
 
 - Bump `version` whenever behavior changes; manifests surface it in the
-  properties panel and the workflow document records it.
+  properties panel. Saved workflows record the plugin distribution version
+  (`plugin_version`), not the node `version` (DESIGN §5); the executor warns
+  on a plugin-version mismatch.
 - Changing a node's semantics without a version bump silently invalidates
   reproducibility for saved workflows — treat `version` as part of the
   cache signature (it is: docs/DESIGN.md §7 keys include it).
