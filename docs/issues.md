@@ -1,46 +1,45 @@
 # emptyUI — Issue Register
 
-**Open findings only.** Two sources merged:
+**Versioned register; closed entries retained.** This file began as the merge
+of two sources:
 
 1. the **2026-09-29 full-codebase review** (docs ↔ implementation ↔ tests) —
    findings written as `H*` / `M*` / `L*`;
-2. the still-open items of the **2026-09-26 register** — re-verified today and
-   re-issued under their new severity rank; their legacy IDs are kept in the
-   entry titles for cross-reference.
+2. the still-open items of the **2026-09-26 register** — re-verified at the
+   time and re-issued under their severity rank; their legacy IDs are kept in
+   the entry titles for cross-reference.
 
-Solved entries are **removed** from this register (the fixes they recorded
-land in commits `aaca9ad` … `4e46132`, 2026-09-26…29). For continuity, the
-closed set is: A1–A5, B1–B3, C1–C5, D1–D2, E1, E2, E4, F1, G1–G2, G6, G11,
-G12 (the relative-path matrix half; its remaining UI half is M19), and the
-legacy H-series leftovers H1, H2, H6 (those are **2026-09-26** IDs — none of
-them is the live H2 fixed this session). **ID collision warning:** the old
-register also lettered its sections A…H — those IDs appear here only as
-`legacy …` inside a live entry (or in the closed list above); the live
-`H*`/`M*`/`L*` numbers below are new and rank by severity.
+Closed entries stay in place with their disposition and remedy. The
+2026-09-29 closed set was: A1–A5, B1–B3, C1–C5, D1–D2, E1, E2, E4, F1,
+G1–G2, G6, G11, G12 (the relative-path matrix half; its remaining UI half
+was M19), and the legacy H-series leftovers H1, H2, H6 (those are
+**2026-09-26** IDs — none of them is the live H1/H2 fixed in this register).
+**ID collision warning:** the old register also lettered its sections A…H —
+those IDs appear here only as `legacy …` inside a live entry (or in the
+closed list above); the live `H*`/`M*`/`L*` numbers below are new and rank
+by severity.
 
-Status legend: `[ ]` is **open**, `[x] FIXED (2026-09-30)` is closed this
-session and kept in place with its remedy note for continuity (it will be
-deleted with the rest of the register on cleanup). The session's fixes
-landed as `dd0dfed` (H2, H5) · `09b8a59` (H1) · `e6735ad` (H3, H4) ·
-`d4a2f02` (H6). Open entries are ranked
+Status legend: `[ ]` = open; `[x]` = closed/disposed, with the disposition
+and date in the title (FIXED / CLOSED / DONE / RESOLVED / OBSOLETE /
+DECIDED / CONSOLIDATED / planned). The 2026-09-30 session's fixes landed as
+`dd0dfed` (H2, H5) · `09b8a59` (H1) · `e6735ad` (H3, H4) · `d4a2f02` (H6);
+later entries record their own commits. Entries are grouped
 **High → Medium → Low by impact/severity**, not by subsystem. Section refs
 in parentheses use the living docs/DESIGN.md numbering (§1–§12); `history §N`
 resolves in `docs/history/`.
 
-> **Note (2026-10-25):** the 2026-09-28 "stays gitignored" decision is
-> **historical** — L17 is done and the file is tracked (`git ls-files
-> docs/issues.md` confirms). The register is versioned from here on; the
-> stale note is kept only as provenance. The header's "solved entries are
-> removed" sentence is likewise stale (the `[x]` entries are retained) —
-> see L29.
+> **Historical note (2026-09-28 → 2026-10-16):** the 2026-09-28 decision was
+> that `docs/issues.md` stays gitignored. L17 superseded it: the file is
+> tracked (`git ls-files docs/issues.md` confirms) and versioned from here
+> on. The register is retained permanently; nothing is deleted on cleanup.
 
-**Verification baseline (2026-09-29, this review):** pytest **630 passed** /
+**Historical baseline (2026-09-29):** pytest **630 passed** /
 0 failed (87 s) · `ruff check .` **0** (pinned `ruff==0.16.4`) ·
 `npm run build` (`tsc -b && vite build`) clean · Playwright **28 tests /
 9 spec files** collectable · CI runs both pytest marker groups, the lint job
 and the e2e suite. 42 registered node types.
 
-**Re-verified after the fixes (2026-09-30):** pytest **643 passed** (+13
+**Historical baseline (2026-09-30):** pytest **643 passed** (+13
 regression tests over the 630 baseline: 3 in `test_magnetic_units.py`, 3 in
 `test_plot_style.py`, 2 in `test_remote_reference.py`, 5 in
 `test_errors.py`) · `ruff check .` **0** · `npm run build` clean ·
@@ -50,27 +49,27 @@ were 636; H1 adds the 2 provenance tests; H3 adds the 5 failure-reason
 tests (H6 and H4 are frontend fixes — 0 pytest, +2 e2e). Marker groups now
 split `-m "not errors"` **570** / `-m errors` **73**.
 
-**Re-verified after the Build FC retirement (2026-10-15, M25):** pytest
+**Historical baseline (2026-10-15, M25):** pytest
 **748 passed** (0 failed, ~90 s) · `ruff check .` **0** · `npm run check`
 clean (vitest 38) · Playwright **34 passed**. Node types: 42 → 40
 (`aurora.fc.build`, `aurora.fc.merge` removed).
 
-**Re-verified after Mask TS (2026-10-15, M26):** pytest **774 passed**
+**Historical baseline (2026-10-15, M26):** pytest **774 passed**
 (0 failed, ~90 s) · `ruff check .` **0** · `npm run check` clean
 (vitest 38) · Playwright **34 passed**. Node types: 40 → 41
 (`mth5.qc.mask_ts` added).
 
-**Re-verified after the L20 demo (2026-10-15):** pytest **775 passed**
+**Historical baseline (2026-10-15, L20):** pytest **775 passed**
 · `ruff check .` **0** (the demo test executes the shipped document
 headless; the Hampel default retune is recorded in M26's surface).
 
-**Correction (2026-10-15, found during L21):** the "recorded JSONs
+**Historical correction (2026-10-15, L21):** the "recorded JSONs
 unchanged" claim above was wrong for the CLB coupling records — they
 were last written pre-M25 (`b1845de`, Build FC era) and the uniform
 route shifted the marginal deep-band grid (46 → 44 periods; shared
 values to 3.4e-15). Re-recorded at L21.
 
-**Re-verified at the 2026-10-25 full-codebase review** (docs ↔
+**Historical baseline (2026-10-25 full-codebase review)** (docs ↔
 implementation ↔ tests): pytest **727 passed** (`-m "not errors"`) +
 **74 passed** (`-m errors`) = **801 collected**, 0 failed (~72 s) ·
 `ruff check .` **0** · `npm run typecheck` / `npm run lint` clean ·
@@ -79,11 +78,21 @@ collectable · **42 registered node types** (core 9, mth5 22, aurora 9,
 example 2) · all five shipped example workflows validate against the
 current manifests. The gates are green: the findings below are **not**
 gate failures — they are correctness, contract and drift gaps the gates
-do not cover. **Open after this review: 1** (L29; H8 fixed
-2026-10-25, H9/H10/M27/M30 fixed 2026-10-26, M29 fixed 2026-10-27,
-M31 planned 2026-10-27, M28 closed 2026-10-27 with C parked,
-L27/L28/L30/L31 fixed 2026-10-27, L32 fixed 2026-11-01); the `[x]`
-entries are retained for continuity.
+do not cover. **Open now (2026-11-01): 1** (L29). Fixed since the review:
+H8 2026-10-25; H9/H10/M27/M30 2026-10-26; M29 2026-10-27; M31 planned
+2026-10-27; M28 closed 2026-10-27 with C parked; L27/L28/L30/L31
+2026-10-27; L32 2026-11-01. The `[x]` entries are retained for continuity.
+
+**Current baseline (2026-11-01):** pytest **825 collected/passed**
+(`-m "not errors"` **751** + `-m errors` **74**) · `ruff check .` **0** ·
+`npm run build` / `npm run lint` clean · Vitest **41 passed (7 files)** ·
+Playwright **38 tests / 12 files** · **42 registered node types** (core 9,
+mth5 22, aurora 9, example 2; 37 palette-visible — 5 hidden, including the
+example plugin's 2 per L30) · all five shipped example workflows validate.
+**Open register entries: 1** (L29). Open follow-ups recorded inside closed
+entries: M6 short-record empty result, M27 field-quality review, M28 C
+(84 h streaming write), M31 model resolver (planned), L18 noisy-remote
+warning, L23 Calibrate per-member rebuild. L32 undo/redo is out of scope.
 
 ---
 
@@ -214,9 +223,7 @@ entries are retained for continuity.
   DESIGN §7.2 documents the event.
   **Verification:** pytest **714 passed**, `ruff check .` 0, `npm run
   check` clean, Playwright **31 passed**.
-  (M15's dead `node_progress.msg` surface is a separate, still-open
-  item — this fix adds the warning channel; progress text rendering
-  remains M15's.)
+  (M15 later closed 2026-10-14 — progress text now renders; see M15.)
 
 - [x] **H1 — the M4 #2 gap-provenance warning chain is dead on the default
   route. FIXED (2026-09-30).** Extract Run's default `selection="time range"`
@@ -783,12 +790,12 @@ entries are retained for continuity.
   kept: prewhitening is validated up front in `compute_fc_levels`, and a record
   shorter than one window raises in the helper (`compute_fc_levels` returns an
   empty dict there).
-  Note (found 2026-10-11, not fixed): `compute_fc_levels` returns `{}` silently
-  when a record is shorter than one window (the level loop logs a warning and
-  `break`s, `_processing.py` near the `n_usable < nperseg` check). The retired
-  `compute_fc` raised. Production callers (`ComputeFC`, `BuildFC`) need a check,
-  since an empty result may propagate with no error. Open: raise or check at the
-  caller, with a test.
+  **Open follow-up (found 2026-10-11):** `compute_fc_levels` returns `{}`
+  silently when a record is shorter than one window (the level loop logs a
+  warning and `break`s, `_processing.py` near the `n_usable < nperseg`
+  check). The retired `compute_fc` raised. Production callers (`ComputeFC`,
+  `BuildFC`) need a check, since an empty result may propagate with no
+  error. Remedy: raise or check at the caller, with a test.
   Follow-up (2026-10-11, `cb77d6d`): the fixtures run the shipped prewhitening
   default; the no-PW baselines are pinned explicitly. Window moved to boxcar (`d98ffbe`); the two deliberate hamming lines stay.
   (the taper-override and legacy-behaviour tests keep hamming on purpose).
@@ -1005,9 +1012,9 @@ entries are retained for continuity.
   `suggest_from`; (d) an autouse fixture that clears `EMPTYUI_*` in
   `packages/emptyui/tests`; (e) `test_run_echo_workflow` waits with
   `_wait_status` (a 0.3 s node reads `running` straight after the POST). Each
-  fix has a mutant that the pre-fix test passed and the new test fails. Still
-  open, with the fixes that need them: the `xml`, `avg` and `j` exports (L8),
-  the concurrency test (M2, M4). The double-Calibrate test (M8) is done.
+  fix has a mutant that the pre-fix test passed and the new test fails. All
+  M16 residues are closed (2026-10-16): the `xml`/`avg`/`j` export tests and
+  the concurrency suite landed; see M16.
 
   **Concurrency + multi-client residue CLOSED (2026-10-16, commit
   `24f2575`)** — `test_concurrency.py` (5 tests, design approved in
@@ -1023,8 +1030,8 @@ entries are retained for continuity.
   reads it back after a yield point DOES cross under concurrent runs
   (observed run A emitting run B's value) — the executor is
   thread-per-run by design, so nodes must be stateless. The barrier
-  stress variant was rejected as CI-flaky. Remaining in M16: the
-  `xml`/`avg`/`j` export tests (L8's surface).
+  stress variant was rejected as CI-flaky. No remaining M16 residue; the
+  `xml`/`avg`/`j` export tests landed (M16 (f)).
 
 - [x] **M17 — workspace TTL cleanup runs synchronously on the event loop.
   FIXED (2026-10-13).** `cleanup_loop` awaited the plain sync
@@ -1331,26 +1338,28 @@ entries are retained for continuity.
   **Verification:** `npm run build` + lint clean; Vitest 38 + Playwright
   36 passed.
 
-- [ ] **L29 — documentation drift after the 2026-10-15/18 deliveries.**
-  (Found 2026-10-25.) Mechanical, but it misleads contributors:
-  - `docs/issues.md` header still says the file "stays gitignored"
-    (`:30-35`) although L17 is done and the file is tracked; the
-    "solved entries are removed" sentence contradicts the kept `[x]`
-    entries; the baseline blocks stop at 775/34 while the tree is at
-    801/36.
-  - `docs/DESIGN.md` §12.1 still says "M4 — backlog **in progress**"
-    though the M4 delivery rows are historical; §12.2's open rows
-    (batch runner #3, disk cache #5, DOF stats #7, Parzen taper #4,
-    FC→TS #11, thread pool #12, sub-workflows #13, plugin manager #14,
-    FDSN #20, MMT #18) are the real backlog and should say so.
-  - `docs/plugin-guide.md:125` still lists `selection` as a core port
-    type (removed by L2).
-  - `docs/deployment.md` omits `EMPTYUI_NODE_TIMEOUT` and
-    `EMPTYUI_PROJECT_DIR` (`config.py:86`, DESIGN §11) and presents
-    `X-Forwarded-*` as required (`:79-81,144`) while DESIGN §11.3 marks
-    the handling **planned** (M23 decision).
+- [ ] **L29 — documentation drift after the 2026-10-15…11-01 deliveries.**
+  (Found 2026-10-25.) Mechanical, but it misleads contributors. The
+  2026-11-01 sweep covers:
+  - `docs/issues.md` header: replace "Open findings only" / "Solved
+    entries are removed" with the versioned-register wording; label the
+    historical baselines and add the current 825/41/38 baseline.
+  - `docs/DESIGN.md`: §12.1 "M4 — backlog in progress" and §12.2's
+    delivered rows; stale §9.3/§10.1 param names (`reject_saturated`),
+    the nonexistent §9.5, the missing `EMPTYUI_NODE_TIMEOUT`, and the
+    §12.2 #21 row.
+  - `docs/plugin-guide.md`: remove `selection` from the core port types
+    (L2), add `ts.runs`, fix the `simpeg.aurora` example, the `[full]`
+    extra claim, and document `cacheable`/`invalidates_inputs`/`timeout`
+    and `path_kind`.
+  - `docs/deployment.md`: add `EMPTYUI_NODE_TIMEOUT` and
+    `EMPTYUI_PROJECT_DIR`; mark `X-Forwarded-*` as planned (DESIGN
+    §11.3).
+  - `docs/user-guide.md` / `README.md` / template README: the History
+    dialog, the actual path error text, the session-QC data note, and
+    the hidden example nodes.
   **Impact:** Low — no runtime effect; high onboarding cost.
-  **Effort:** S (hours) — one docs commit, no code.
+  **Effort:** S (hours) — docs only, no code.
   **Test:** none (docs); optionally a grep-based CI check for the
   removed `selection` token and the env-var list.
 
@@ -1482,11 +1491,15 @@ entries are retained for continuity.
 - [x] **L4 — the event cap can drop `run_started`.** `app.py:519-520`
   caps the replayed event list at 5000, so a late poller can see a truncated
   stream with no start marker (self-describing replay lost).
+  **FIXED (2026-10-14):** the cap trims from the middle, preserving
+  `run_started` and the terminal event; `test_robustness.py` pins it.
 
 - [x] **L5 — the cache is bounded by entry *count* only.** `NodeCache` clamps
   the bound to ≥1 and evicts LRU by count (`cache.py:46-47,61-63,65-73`);
   256 large xarray/MTH5 payloads can OOM the process while `cache_max_gb`
   stays a reserved-but-inert knob (`settings.py:55-58`).
+  **FIXED (2026-10-14):** `NodeCache` enforces a byte budget (`max_bytes` /
+  `cache_max_gb`); `test_cache.py` pins it.
 
 - [x] **L6 — settings durability/HTTP polish.** `save()` does not `fsync`
   before `os.replace` (`settings.py:122`) — a crash leaves a corrupt file
@@ -1494,6 +1507,8 @@ entries are retained for continuity.
   `set_disabled`/`set_settings` escapes as a bare 500 (`app.py:349`,
   `:435`); `cache_max_entries: 0` documented as "off" clamps to 1 and the
   view then reports `1` (`app.py:436-442`).
+  **FIXED (2026-10-14):** fsync before `os.replace`; OS errors mapped;
+  `cache_max_entries: 0` honored/reported.
 
 - [x] **L7 — `print_params` defaults disagree between manifest and method.**
   `PlotTipper`: `Param(..., default=False)` (`plots.py:97`) vs
@@ -1501,11 +1516,15 @@ entries are retained for continuity.
   `PlotPhaseTensor`: `plots.py:148` vs `:156`. The executor injects the
   manifest default so runs are correct, but direct `node.execute(...)` calls
   (as tests do) silently flip a documented-off switch.
+  **FIXED (2026-10-14):** manifest and method defaults both `False`;
+  `test_plot_style.py` pins agreement.
 
 - [x] **L8 — `ImportTF` always applies the EDI→SI conversion, no opt-out.**
   `EDI_TO_SI` applied unconditionally (`tf.py:25,239`, warned but not
   suppressible): a file already stored in SI units would be double-scaled
   with no way to say so. Round-trip on real EDIs is exact today.
+  **FIXED (2026-10-14):** `impedance_units` opt-out added; default unchanged;
+  `test_tf_export.py` covers it.
 
 - [x] **L9 — documentation drift. FIXED (2026-10-14).**
   §10.6 now names the shipped tick grid (20°, `np.arange(0, 91, 20)`;
@@ -1528,6 +1547,8 @@ entries are retained for continuity.
   then correct the figure or the level count.
   Test: a small test reads the default decimation count and window from the
   manifests and asserts that the DESIGN figure matches within 10%.
+  **FIXED (2026-10-14):** DESIGN §9.4 corrected to ~18.2 h (256·4⁴ s);
+  `test_design_figures.py` pins it.
 
 - [x] **L11 — window labels are documented as starts but produced as centres. DECIDED 2026-10-10: centres kept; reader audit DONE (2026-10-14).**
   DESIGN §10.1 (docs/DESIGN.md:1335) and the `compute_fc_levels` docstring say
@@ -1853,13 +1874,15 @@ docs); M16 Phase 0 part (`447c7bb`); M14 part 1 (`f666b3a`); M1
 L8, L7, L10, L11-audit (2026-10-14);
 L4, L5, L6, L3-backend (2026-10-14); L5-regression, M12, M15, M18, M13
 (2026-10-14, Phase 3); L20 (`356b151`, 2026-10-15); M16 (2026-10-16);
-L17, L18 (2026-10-17); **L19–L26 docs & migration prep (2026-10-17,
-see L26)**; M14 (2026-10-18). **Open: 0** in the pre-2026-10-25
-register. The plan below is organised in phases; decisions come first.
+L17, L18 (2026-10-16); **L19–L26 (2026-10-14…17; L26 is the
+docs/migration track)**; M14 (2026-10-18). The list is illustrative; the
+entries below carry the full dispositions. **Open in the pre-2026-10-25
+register: 0; open now: 1 (L29).** The plan below is the historical phase
+plan; all phases are complete except Phase C (L29).
 
-### 2026-10-25 review — open findings (ranked by impact / effort)
+### 2026-10-25 review — findings and dispositions
 
-Fourteen new entries; H8 is already closed (2026-10-25). The rank is
+Fourteen entries; 13 disposed (12 fixed/closed, 1 planned), 1 open (L29). The rank is
 impact first, then effort (a one-line fix that removes a silent wrong
 result outranks a multi-day scalability item). Effort: XS = minutes,
 S = ≤1 day, M = 1–2 days, L = a feature.
@@ -1891,15 +1914,16 @@ test/production divergence.
 2026-10-27: 12 h window 903→377 MB, 24 kHz 973→359 MB at 256 blocks,
 full corpus 1,548→1,512 MB; C parked for 84 h corpora).
 
-**Phase C — polish and hygiene (≈1 day).** ~~L27~~ / ~~L28~~ / ~~L30~~ /
-~~L31~~ (done 2026-10-27) / ~~L32~~ (done 2026-11-01) → L29 (docs sweep).
+**Phase C — polish and hygiene (≈1 day). OPEN — L29 remains.** ~~L27~~ /
+~~L28~~ / ~~L30~~ / ~~L31~~ (done 2026-10-27) / ~~L32~~ (done 2026-11-01)
+→ L29 (docs sweep).
 
 **Cross-cutting rules:** one issue per commit, red test first (P0.6),
 `scripts/dev/verify_index.sh` before each commit, full `pytest packages`
 plus `ruff check .` per phase, and the frontend gates (`npm run check`,
-Playwright) for L27/L28. The 2026-10-25 baseline is 801 collected
-(727 + 74) / 38 Vitest / 36 Playwright; any new count must be recorded
-in the header block.
+Playwright) for every frontend change (L27/L28/L30/L32). The current
+baseline (2026-11-01) is 825 collected (751 + 74) / 41 Vitest / 38
+Playwright; record any new count in the header block.
 
 ### Ground rules (every item)
 
@@ -1912,10 +1936,10 @@ in the header block.
 - Update the entry in the same step: mark it FIXED with the remedy and any
   measured result.
 - Per phase: full `pytest packages` and `ruff check .`. Any frontend change:
-  `npm run build`, lint, Vitest and the Playwright suite (31 tests), run
-  locally before the commit (P0.7).
+  `npm run build`, lint, Vitest and the Playwright suite (38 tests / 12
+  files), run locally before the commit (P0.7).
 
-### Open decisions (answer before the affected item starts)
+### Decisions (all resolved; kept for provenance)
 
 1. ~~**M20** — duplicate plugin type: keep failing fast and document
    it, or degrade with an error row in `GET /api/plugins`?~~
@@ -1936,19 +1960,20 @@ in the header block.
    it as a declared future surface?~~
    **Resolved 2026-10-14: hide** (see the L2 entry) — removed from
    CORE_PORT_TYPES and the frontend mirror; returns with its producer.
-5. **M2** — default run deadline, and whether it can be set per node.
+5. ~~**M2** — default run deadline, and whether it can be set per node?~~
    **Resolved 2026-10-13**: a default deadline (600 s) editable in
    Settings, enforced per node; heavy nodes declare their own budget.
-6. **M14** — resolved: ESLint and Vitest (see P0.1 and P0.2).
+6. ~~**M14** — frontend quality gates: ESLint/Vitest, the CI web job, and
+   the deferred e2e holes?~~ **Resolved 2026-10-18: all delivered** (see
+   M14; P0.1/P0.2).
 7. ~~**M6** — delete the dead `compute_fc`, or keep it as a delegate to the
    shipped path?~~
    **Resolved 2026-10-11: deleted** (see the M6 entry) — fixtures moved to
    `compute_fc_seconds`, which delegates to the shipped path.
 8. ~~**L17** — un-ignore `docs/issues.md` so the register is version-controlled,
    or keep it local?~~
-   **Resolved 2026-10-15: keep local until cleared** (user decision) — the
-   original rationale stands; the L17 entry records the caveat to handle
-   at un-ignore time.
+   **Resolved 2026-10-16: un-ignored and shipped** (see L17); the
+   2026-10-15 "keep local until cleared" was superseded.
 9. ~~**L14** — may the ~503 MB of local build outputs be deleted?~~
    **Resolved 2026-10-14: deleted** (see the L14 entry).
 
@@ -1962,15 +1987,15 @@ in the header block.
 - **P0.3 Type-check scope**: a second tsconfig covers the e2e and config
   files; `tsc -b` covers all TypeScript.
 - **P0.4 Branching**: push straight to `main` for now; switch to a branch and
-  pull request once the code base is mature. There is no remote yet
-  (`git remote -v` is empty), so nothing has been pushed.
+  pull request once the code base is mature. A remote now exists (`origin`),
+  and pushes/CI are live (M14, L26); the branch/PR switch remains future.
 - **P0.5 M16 split**: as in the Phase 0 section below.
 - **P0.6 Red tests**: committed together with the fix, one commit per issue.
   The commit message records the red result. A red commit on `main` would
   fail CI, so red tests never go in alone.
 - **P0.7 Frontend verification**: run the Playwright suite locally before each
-  frontend commit (`npx playwright install chromium` once). CI is not yet
-  running on our commits.
+  frontend commit (`npx playwright install chromium` once). CI now runs the
+  e2e/web gates (M14).
 - **P0.8 Tools**: the staging and verification tools live in `scripts/dev/`
   (`stage_block.py`, `verify_index.sh`), committed as `afe96f4`.
 
@@ -1985,8 +2010,9 @@ in the header block.
   concurrency test (shared cache entries, one shared `Node`) with M2 and M4
   (Phase 2).
 - **M14** (part 1, done in `f666b3a`): `tsc -b` covering `src`, e2e and config (P0.3); ESLint
-  (P0.1); Vitest (P0.2). Add a `web` CI job (`npm ci`, `tsc -b`, lint, Vitest,
-  `vite build`) once a remote exists (P0.4). The rest of M14 (this CI job and the e2e holes) is deferred to Phase 4 by user decision.
+  (P0.1); Vitest (P0.2). M14 is CLOSED 2026-10-18: the `web` CI job
+  (`npm ci`, `tsc -b`, lint, Vitest, `vite build`) and the e2e holes were
+  delivered with the GitHub migration (see M14).
 
 ### Phase 1 — numerical correctness (Python)
 
@@ -2077,16 +2103,15 @@ Start with the Phase 0 gates, so every later change is type-checked.
 
 ### Phase 4 — contract, docs and hygiene
 
-- **M14** (deferred from Phase 0 by user decision): add the `web` CI job once a
-  remote exists (P0.4); close the e2e coverage holes (accessibility assertions
-  go with L1 in Phase 3).
+- **M14** — CLOSED 2026-10-18: web CI job and e2e holes delivered (see M14).
 - **M23**: per decision 3, implement each item or mark it planned in DESIGN.
 - **M5**: consolidate shared constants, one duplicate group per commit; only
   once Phase 0 is in place.
 - **L9**: documentation drift, including the bare `§13+` references —
   mechanical, separate commit.
-- **L15**: a burst demo workflow against the tracked `smoke` archive.
-- **L14**, **L16**, **L17**: cleanup, per decisions 8 and 9.
+- **L15** — OBSOLETE 2026-10-15 (M25 retired Build FC); L20 delivered the
+  session-QC demo.
+- **L14** (deleted), **L16** (obsolete), **L17** (un-ignored 2026-10-16).
 
 ### Effort and risks
 
@@ -2099,10 +2124,22 @@ the largest item), Phase 2 ≈ 5 days, Phase 3 ≈ 5–6 days, Phase 4 ≈ 3 day
   without numbers.
 - M2 interacts with cancellation and the admission slot: test it carefully.
 
-## Verification commands used
+## Current verification (2026-11-01)
 
 ```bash
-.venv/bin/python -m pytest packages -q            # 643 passed after H1..H5 (630 at the 2026-09-29 review, ~87 s)
+.venv/bin/python -m pytest packages -q                     # 825 passed
+.venv/bin/python -m pytest packages -q -m "not errors"     # 751 passed
+.venv/bin/python -m pytest packages -q -m errors           # 74 passed
+.venv/bin/ruff check .                                     # 0
+cd packages/web && npm run check                           # typecheck + lint + vitest 41
+cd packages/web && npm run build                           # tsc -b && vite build
+cd packages/web && npx playwright test --list              # 38 tests in 12 files
+```
+
+## Historical verification (2026-09-30)
+
+```bash
+.venv/bin/python -m pytest packages -q            # 643 passed after the 2026-09-30 fixes (H1–H6; 630 at the 2026-09-29 review, ~87 s)
 .venv/bin/python -m pytest packages -q -m "not errors"   # 570 passed (happy path group)
 .venv/bin/python -m pytest packages -q -m errors         # 73 passed (edge-case group)
 .venv/bin/ruff check .                             # repo-wide 0 (pinned 0.16.4)
@@ -2118,7 +2155,7 @@ uv pip install --python .venv/bin/python -e "packages/emptyui[dev]" -e … \
 git check-ignore -v <file>                         # smoke/SDG31b trackable; day_12h/h5/sdg31-pngs ignored
 ```
 
-### 2026-10-25 review
+### Historical verification (2026-10-25)
 
 ```bash
 .venv/bin/python -m pytest packages -q -m "not errors"   # 727 passed, 74 deselected (~72 s)
