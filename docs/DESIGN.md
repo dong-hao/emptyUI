@@ -3,8 +3,9 @@
 A node-based, ComfyUI-inspired visual workflow interface for magnetotelluric (MT)
 data processing and visualization.
 
-Status: **M0–M3 complete (2026-09-09)**; M4 (community & advanced backlog) in
-progress — ranked by gain/effort in §12.
+Status: **M0–M3 complete (2026-09-09)**; M4 delivery complete, remaining
+backlog tracked in §12.2. Post-M3 work (L32 session history, M28/M29/M31)
+is tracked in `docs/issues.md`.
 
 **How to read this document.** Sections §1–§12 are the **living contract** —
 the current architecture and behavior, organized by subsystem (framework, backend,
@@ -103,7 +104,7 @@ emptyui/
 │       └── src/
 │           ├── graph/           # canvas, node rendering, edges
 │           ├── panels/          # palette, properties, results
-│           ├── api/             # REST/WS clients, generated types
+│           ├── api/             # REST/WS clients, handwritten types
 │           └── stores/
 ├── examples/                    # sample workflows + tiny sample datasets
 │   ├── workflow/                # ready-to-load workflow documents, kept in sync
@@ -114,13 +115,13 @@ emptyui/
 │   └── plugin-template/         # working plugin template
 ├── test/verification/           # recorded parity/metrics JSONs + the verification
 │                                #   scripts that reproduce them (history records)
-└── scripts/                     # dev up/down, codegen
+└── scripts/                     # dev up/down, install/serve/test helpers
 ```
 
 Dependency policy:
-- `emptyui` core deps: `fastapi`, `uvicorn`, `pydantic`, `numpy` only.
-- `emptyui-core-nodes`: adds `matplotlib` (+ optional `pandas`, `scipy`).
-- Everything else (mth5, aurora, mt_metadata, …): plugin extras.
+- `emptyui` core deps: `fastapi`, `uvicorn`, `websockets`, `pydantic`, `numpy` only.
+- `emptyui-core-nodes`: adds `matplotlib` + `scipy` (hard), optional `pandas`.
+- Everything else (mth5, aurora, mt_metadata, …): plugin packages.
 - Frontend pinned via lockfile; API types are **handwritten** in
   `packages/web/src/api/client.ts` — the node manifest is plugin-open
   (unknown fields are ignored downstream), so catalog types stay
@@ -192,7 +193,8 @@ so a node boundary ≈ an aurora pipeline stage:
 
 - Derived quantities (apparent resistivity, phase, impedance) are *computed*
   from `tf` by Display nodes, not separate ports — avoids type sprawl.
-  Remote-reference selection lives in `selection` (remote column).
+  Remote-reference pairing is configured on Estimate TF (`remote_reference`
+  + `ref_fc`), not via a `selection` port.
 - **Consistency rule**: every port tag maps 1:1 to a real library container; we
   avoid inventing new names where the ecosystem already has one (`fc` not
   `spectra`, `mth5` not `archive`).
@@ -205,21 +207,22 @@ so a node boundary ≈ an aurora pipeline stage:
   per level) → `ComputeFC`/`EstimateTF` keep a constant window in samples across
   levels and share estimator settings.
 - `channel_nomenclature` lives on `Processing` config, not `RunTS`.
-- These pins are plugin-level extras (`emptyui-mth5`, `emptyui-aurora`), never
-  core dependencies; workflows record plugin versions for reproducibility.
+- These pins live in the plugin packages (`emptyui-mth5`, `emptyui-aurora`),
+  never core dependencies; workflows record plugin versions for reproducibility.
 
 Rules:
 - Tags are **open strings**, namespaced (`<domain>.<name>`); the frontend
   renders unknown types with a neutral color.
 - **Port colors are decided by the backend** (UI metadata per tag via
   `GET /api/nodes`); connection lines render thick and in the source port's
-  color. The core tags ship as `CORE_PORT_TYPES` in the registry
-  (`packages/emptyui/src/emptyui/registry.py`); node-declared `port_types`
-  override per tag, and the frontend keeps a mirroring built-in table only
+  color. The shipped core tags are `CORE_PORT_TYPES` in the registry
+  (`packages/emptyui/src/emptyui/registry.py`); `selection` is intentionally
+  absent until its producer lands. Node-declared `port_types` override per
+  tag, and the frontend keeps a mirroring built-in table only
   as a fallback for older/offline backends. Fallback families: blue = time
   series, dark green = frequency domain (`fc`), red = transfer functions
-  (`tf`), purple = metadata/config, gray/yellow = generic (`any`, `table`,
-  `plot`).
+  (`tf`), purple = metadata/config, gray = `any`, yellow = `table`,
+  magenta = `plot`.
 - Connection rule: source and target tags must be equal, or the target port
   declares `accepts: [...]`. `any` matches all.
 - Subtyping is deliberately **not** implemented; explicit coercion nodes
@@ -431,7 +434,10 @@ No internal database. **MTH5 is the server-side container**:
   HDF5 walking). `persist_fc_level(m=...)` accepts the shared handle;
   `get_workspace_mth5`/`close_workspace_mth5` manage it. A persistent
   `~/.emptyui/workspace/` is a future item.
-- Nothing reaches the user's disk until they explicitly export/save-as.
+- Loader archives are written to `<data_path>/emptyui_output` by default
+  (M29; remote mode resolves empty outputs into the run workspace); other
+  intermediates stay in the per-run workspace until explicitly
+  exported/saved.
 - Benefits: interoperability with the existing CLI ecosystem (any mth5/aurora
   script can read what emptyUI produced) and remote deployments are just "a
   directory on the server".
@@ -458,9 +464,16 @@ and sidebar are generated entirely from it.
     { "name": "order", "label": "Order", "widget": "integer",
       "default": 4, "min": 1, "max": 10 }
   ],
-  "deps": ["scipy>=1.11"]                   // informational; enforced by plugin extras
+  "deps": ["scipy>=1.11"]                   // informational; enforced by the plugin package
 }
 ```
+
+Additional manifest fields (emitted by `Node.manifest()`): `hidden`,
+`viewer` (`plot`/`table`), `terminal`, `cacheable`, `invalidates_inputs`,
+`timeout`, `models`, `plugin_version` (registry-stamped),
+`inputs[].collection_ok`, `inputs[].populated_when`, and
+`params[].path_kind`/`split_inherited`/`enabled_when`. See §7.1 for the
+cache/watchdog semantics and §11.2 for `path_kind`.
 
 Widget vocabulary (`number`, `integer`, `string`, `text`, `boolean`, `select`,
 `radio`, `file`, `directory`, `code`, `list`) is fixed in core; the frontend has
@@ -497,7 +510,7 @@ Two manifest-driven UI conveniences keep the frontend schema-agnostic:
   ```python
   Param("channel_nomenclature", "select", default="auto",
         options=("auto", "lemi12", "lemi34", "phoenix123", "musgraves", "default"),
-        cascade={"lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2")), ...}),
+        cascade={"lemi12": (("input_channels", "bx,by"), ("output_channels", "e1,e2,bz")), ...}),
   Param("remote_reference", "boolean", default=False,
         cascade={True: (("estimator_engine", "Robust"),)}),
   ```
@@ -538,7 +551,7 @@ Both serialize into the manifest; the frontend applies them generically.
 #### Chain-walking inheritance (guideline)
 
 Inheritance is resolved by a **single recursive, frontend-only resolver**
-(`resolve(nodeId, paramName)`), walking the workflow document — never the
+(`resolveInherited(...)`), walking the workflow document — never the
 backend (the backend derives the same identity at run time from payload
 metadata, so correctness never depends on it). Rules:
 
@@ -594,7 +607,8 @@ my_nodes = "emptyui_mth5.plugin:register"
 Rules that keep the ecosystem healthy:
 - Core ships with **only** the framework + one `emptyui-core-nodes` plugin
   (numpy/matplotlib-level deps).
-- Each plugin declares its heavy deps as pip extras.
+- Each plugin package declares its heavy deps as regular dependencies (the
+  core stays minimal); `dev` is the only extra.
 - Node types are namespaced by convention: `core.<domain>.<name>` for the
   bundled plugin, `<org>.<domain>.<name>` for external plugins. The registry
   does not enforce the namespace today — it is a review-time gate; installing
@@ -623,9 +637,9 @@ Rules that keep the ecosystem healthy:
 - **Models declared, not bundled**: `models` in the manifest
   (id/filename/sha256/url/license); binaries live in a configured model
   directory (platform-provisioned in remote mode, §11) — never inside the wheel.
-  **Planned (M23 decision 2026-10-15)**: no knob or sha256 verification is
-  implemented — no plugin ships model weights yet; the surface returns when
-  one does.
+  **Planned (M31, 2026-10-27; M23 decision 2026-10-15)**: no knob or sha256
+  verification is implemented — no plugin ships model weights yet; the
+  surface returns when one does.
 - **Plugin versions are recorded (M23, 2026-10-15)**: every catalog manifest
   carries its plugin's distribution version (`plugin_version`); the frontend
   stamps it per node when saving a workflow. The record is informational —
@@ -671,7 +685,7 @@ and shown read-only.
 - `create_app(disabled_plugins=[...])` mirrors the env for module embedding.
 
 **Robustness**
-- `find_plugins` records which node types each entry point contributed; the
+- `discover_plugins` records which node types each entry point contributed; the
   registry exposes `status_of(type)` → `active | disabled | unknown`, so
   validation distinguishes *"plugin 'mth5' is disabled — enable it in Settings"*
   from *"plugin not installed?"*.
@@ -1001,7 +1015,7 @@ re-checked in `onConnect`, then re-validated server-side before every run.
   entries; the in-memory table is cleared on restart.
 - **Initial view**: `fitView` capped at `maxZoom: 1` with generous padding
   (fraction-based, v12-compatible).
-- **Node sizing**: standard node width 280 px (widened for the time bar; §8.3).
+- **Node sizing**: standard node width 280 px; viewer nodes 340×260 px.
 
 ### 8.3 Time selector (time bar)
 
@@ -1166,7 +1180,7 @@ header carries the true UTC timestamp/rate/clock status/saturation flags).
   **one mth5 run per maximal segment**, id `sr{rate}_{NNNN:04d}`; continuous
   rates collapse naturally.
 - Params: `survey_id`/`station_id` (defaults from TBL), `sample_rates`
-  (comma list; empty = every TS file), `calibration_folder` (§9.2 ASC
+  (comma list; empty = every TS file), `calibration_folder` (§9.3 ASC
   matching), `start`/`end` (UTC ISO or epoch; empty = full recording —
   filtered at ingest, per-second granularity, partial slots become short
   runs), `stream_session_hours` (0 = off; runs longer than the target are cut
@@ -1329,12 +1343,12 @@ group paths — the `station.metadata`/`survey.metadata` properties are the
 same pydantic storm) and the resolved filter registry, so Calibrate/Split/
 Merge Channels and Compute FC behave identically downstream (parity-
 checked: identical channel data, FC levels, and calibrated output).
-Conversely, the singular-semantics ts tooling (Split/Merge Channels, Align
-Runs, Calibrate, Detrend/Bandpass, ts plots) **rejects collections loudly**
-with node-appropriate remedies — collection mapping and per-family viewing
-are M4 backlog #21.
+Conversely, the remaining singular-semantics ts tooling (Split Channels,
+the legacy ts spectrogram, remaining ts plots) **rejects collections
+loudly** with node-appropriate remedies; Align Runs, Calibrate, Detrend and
+Bandpass map collections member-wise (backlog #21 Tier 2, delivered).
 
-#### Mask TS — time-domain quality gating (§9.5, M26)
+#### Mask TS — time-domain quality gating (M26)
 
 `mth5.qc.mask_ts` writes a **per-sample binary `quality_mask` auxiliary
 channel** (1 = bad) onto a `ts.run`/collection — it MARKS, never touches.
@@ -1342,7 +1356,7 @@ Compute FC's window-fraction rule (§10.1) turns the mask into FC-window
 rejection; session scoring stays in Select Runs. The mask is DATA (it
 rides the payload, survives the mth5 round trip, and passes the core
 filter nodes untouched) — the interface a learned-despiker plugin would
-write (M4 #16/#19).
+write (M4 #16; the mask convention is #19, delivered).
 
 - **Criteria are pooled and OR-composed** (v1): explicit UTC interval
   exclusion (`start/end` pairs, clamped, out-of-record warned), Hampel
@@ -1362,8 +1376,9 @@ write (M4 #16/#19).
   Compute FC unions every present mask channel into the fraction rule and
   records `mask_channels` on the fc attrs; the decimation max-pool, the
   span concat and Merge Runs' padding all treat the pair uniformly. The
-  `reject_saturated`/`saturated_max` param names predate the
-  generalization and are kept (saved-workflow compat).
+  `reject_masks`/`saturated_max` params generalize the former
+  `reject_saturated` boolean; `saturated_max` keeps its name for
+  saved-workflow compat.
 - **Aux-channel passthrough**: `TimeSeries.aux_channels` (coerced from
   the payload's `type: "auxiliary"` attrs + the mask names) — Detrend/
   Bandpass pass these through untouched. This fixes a latent bug: the
@@ -1484,12 +1499,14 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   ratio-based products (Z, tipper, coherence, OLS σ) are scale-equivariant
   and unaffected; persisted FC amplitudes and spectrogram dB are in
   emptyUI's own convention (history §14.1, item A5).
-- **Saturation rejection (`reject_saturated`, default on)**: every FC window
-  whose flagged-sample FRACTION exceeds `saturated_max` (default 0.01) is
+- **Saturation/mask rejection (`reject_masks`, default `all masks`)**: every
+  FC window whose flagged-sample FRACTION exceeds `saturated_max` (default
+  0.01) is
   NaN'd in all in/out FCs; the mask max-pools through decimation;
   the count is recorded in attrs. A no-op for payloads without the mask.
-  M26: the rule consumes EVERY quality-mask channel present (`saturated`,
-  `quality_mask` — §9.5), unioned; the contributors are recorded in the
+  M26: the default `all masks` mode unions every present quality-mask
+  channel (`saturated`, `quality_mask` — §9.3); the `only` modes scope
+  rejection to one producer. The contributors are recorded in the
   fc attrs (`mask_channels`). Verified: surgical — medians barely move,
   daytime garbage windows vanish; official-EDI parity preserved
   (history §24.12).
@@ -1840,7 +1857,8 @@ normalize + validate identically — `../` escapes are rejected).
 - **Config surface**: env-first knobs (`EMPTYUI_DATA_ROOT`,
   `EMPTYUI_PROJECT_DIR`, `EMPTYUI_SERVE_DIST`, `EMPTYUI_CORS_ORIGINS`,
   `EMPTYUI_BASE_PATH`, `EMPTYUI_WORKSPACE_TTL`, `EMPTYUI_MAX_CONCURRENT_RUNS`,
-  `EMPTYUI_DISABLED_PLUGINS`, `EMPTYUI_SETTINGS_PATH`) mirrored as
+  `EMPTYUI_NODE_TIMEOUT`, `EMPTYUI_DISABLED_PLUGINS`,
+  `EMPTYUI_SETTINGS_PATH`) mirrored as
   `create_app(...)` keyword arguments for module embedding (kwargs win).
 - **Model weights (planned, M31)**: plugins declare external weights via
   the `models` ClassVar (`id`/`filename`/`sha256`/`url`/`license`). The
@@ -1871,7 +1889,7 @@ normalize + validate identically — `../` escapes are rejected).
 | M2 — MT ecosystem integration | ✅ (2026-09-06) | mth5 plugin (Load/Save, ExtractRun, channels, TF I/O, Merge Runs, FC read/write), aurora plugin (ComputeFC/EstimateTF/MergeTFLevels; OLS/RME/RME_RR), plot standardization (§10.6) |
 | M3 — Power features | ✅ (2026-09-09) | nomenclature-aware auto channel configuration; remote reference end-to-end; run cancellation + artifact download; headless Playwright suite; robustness batches; caching + partial execution; calibration framework + LEMI; coherence sort; plugin guide + template; plugin enable/disable; remote-server contract |
 | Post-M3 | ✅ | l2u automatic frequency grid (default), TF rotation node, per-bin coherence sort (default), MTU-5A burst ingestion + Build FC, Phoenix ASC calibration, saturation QC, run-level QC (Select Runs / Residual Sort), settings, time selector, plot nodes |
-| M4 — backlog | **in progress** | ranked table below |
+| M4 — backlog | **ongoing** | remaining rows only (delivered rows struck); active fixes tracked in docs/issues.md |
 
 Retirement note (2026-10-15): the `Build FC Database` / `Merge FC` nodes
 were retired into Compute FC's collection route (uniform TS→FC); the
@@ -1903,16 +1921,16 @@ data-driven full-band recipe reaching 416.6 s parity without any clock rule
 | 10 | **Paradigm B: cross-decimation FC pooling** | High | High | pool raw FCs across levels per band for statistically stronger long-period estimates; novel, unproven, highest scientific upside |
 | 11 | **FC→TS inverse node** | Low | Low-Med | inverse STFT/overlap-add for frequency-domain denoising demos |
 | 12 | **Executor thread-pool concurrency** | Low | Medium | `cpu_bound` hints; MT pipelines are 5–10 mostly-linear nodes |
-| 13 | **Sub-workflows (nested DAGs)** | Medium | High | **deferred**: typical MT pipelines are 5–10 mostly-linear nodes; copy/paste + example templates + the batch runner cover the repetition patterns; revisit only if workflows outgrow them |
+| 13 | **Sub-workflows (nested DAGs)** | Medium | High | **deferred**: typical MT pipelines are 5–10 mostly-linear nodes; copy/paste + example templates cover the repetition patterns; the batch runner (#3) will extend this; revisit only if workflows outgrow them |
 | 14 | **Plugin manager (ComfyUI-Manager style)** | Low-Med | High | browse/install/enable-disable plugin packages from within the UI (pip-style installs via the manager, as ComfyUI-Manager does for custom nodes); core ComfyUI itself ships no CLI entry — it runs script-style (`python main.py`), the deployment shape emptyUI follows |
-| 14 | **Docs site** | Low-Med | Med-High | plugin guide + deployment guide exist; a hosted site is onboarding, not functionality |
+| 14b | **Docs site** | Low-Med | Med-High | plugin guide + deployment guide exist; a hosted site is onboarding, not functionality |
 | 15 | **Plugin index/publish flow** | Low | High | PyPI + the plugin-guide checklist already cover distribution |
 | 16 | **ML plugin GPU querying** (`ctx.resources.gpu_count`) | Low | Trivial | only matters once ML noise-suppression plugins exist |
 | 17 | ~~Improved auto frequency grid~~ | — | — | **delivered** (§10.2 l2u) |
 | 18 | **MMT (multi-station MT) estimator** | Low-Med | Med-High | **long-term** (Kelbert et al. 2026): Egbert/Smirnov–Egbert extension of RR using multiple sites; aurora 0.6.2 has only single-remote estimators; do after the basic chain + frequency grid are pinned |
-| 19 | ~~Universal saturation/QC mask channel convention~~ | — | — | **delivered** (M26, §9.5): `MASK_CHANNELS` + the Mask TS node; any producer may write a per-sample mask and Compute FC consumes it generically |
+| 19 | ~~Universal saturation/QC mask channel convention~~ | — | — | **delivered** (M26, §9.3): `MASK_CHANNELS` + the Mask TS node; any producer may write a per-sample mask and Compute FC consumes it generically |
 | 20 | **Load from FDSN (IRIS) node** | Medium | Low-Med | wrap `mth5.clients.FDSN.make_mth5_from_fdsn_client` — USArray NIMS recordings are auto-uploaded to IRIS as miniSEED (§9.3 note); a web-loading node replaces the never-delivered native NIMS loader |
-| 21 | **Run-collection (`ts.runs`) semantics across the graph** | Medium | Medium | burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered with the feature): singular-semantics nodes (Split/Merge Channels, Align Runs, Calibrate, Detrend/Bandpass, remaining ts plots) reject collections loudly. Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§10.6). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
+| 21 | ~~Run-collection (`ts.runs`) semantics across the graph~~ | — | — | **delivered** (Tiers 1–3; §9.3/§10.6). burst-mode corpora make collections the norm (Extract Run `time range`, §9.3). Tier 3 (delivered): the remaining singular-semantics nodes (Split Channels, the legacy ts spectrogram, remaining ts plots) reject collections loudly; Align Runs, Calibrate, Detrend and Bandpass map collections member-wise (Tier 2). Tier 1 (delivered): Plot Time Series accepts collections — a **sample-rate selection** (default `auto` = the lowest rate present, e.g. 15 Hz Phoenix / 1 Hz LEMI/NIMS) picks the family to view, and all runs of that family plot as segments on the shared absolute time axis (gaps stay visible; the time bar crops each run — clamped — and runs entirely outside are skipped). The fc plot nodes carry the same tier selection (§10.6). Tier 2 (delivered): **element-wise maps** — Detrend/Bandpass/Calibrate
 accept collections, the recipe applied to every member and the collection
 shape preserved (extents rows unchanged — identity is not the recipe's
 business; `mapped_by`/`filter` provenance rides each member's dataset
@@ -1921,7 +1939,7 @@ support the cutoffs** (e.g. a 50–100 Hz bandpass on 1 Hz data) — skipped
 loudly, the whole node rejecting only when NO member is in scope (a
 silently empty map would lie downstream); Calibrate maps through each
 member's own archived responses (explicit-filter collection mapping is
-M4 backlog). The maps' one-port outputs ride the §4 runtime shape hints.
+M4 backlog). The maps' one-port outputs ride the §4 `collection_ok` runtime-shape hint.
 
 ### 12.3 Planned — portable local disk cache (designed, not yet implemented)
 
@@ -1949,16 +1967,19 @@ the ephemeral per-run workspaces — a third storage realm (§11.2).
   (tables/arrays). Codec registry; kinds not in the registry skip disk caching
   with a log note (plugin-extensible later). Atomic writes; deserialize
   failures → invalidate + re-execute (never half-serve).
-- **Opt-in per node**: `disk_cache: ClassVar[bool] = False` on `Node`; `True`
-  for ComputeFC and EstimateTF (the real recomputation cost). Plots/tables
+- **Opt-in per node (planned)**: `disk_cache: ClassVar[bool] = False` will be
+  added to `Node`; `True` for ComputeFC and EstimateTF (the real
+  recomputation cost). Plots/tables
   stay memory-only. The manifest records the flag.
 - **Executor integration**: `mem.get` → `disk.get` (materialize a CacheEntry,
   touch atime) → the same restore path as memory hits; `execute → mem.put`,
   and `disk.put` when manifest.disk_cache. Disk I/O failures log and continue —
   **the cache must never break a run**. Stale disk entries age out (keys embed
   the manifest version).
-- **Eviction**: `EMPTYUI_CACHE_MAX_GB` (default 10) — LRU by atime until under
-  budget; `EMPTYUI_CACHE_TTL_DAYS` (default 30). Cleanup on server start +
+- **Eviction (planned)**: the disk tier will introduce `EMPTYUI_CACHE_MAX_GB`
+  (default 10) — LRU by atime until under budget; `EMPTYUI_CACHE_TTL_DAYS`
+  (default 30), distinct from the live memory `cache_max_gb` (default off).
+  Cleanup on server start +
   piggybacked on the workspace-TTL loop; `DELETE /api/cache?tier=disk|memory|all`.
 - **Tests (planned)**: round-trip per codec; restart persistence; relocation
   (move project dir + data root → still hits); eviction; corruption →
