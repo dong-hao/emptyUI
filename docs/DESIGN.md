@@ -1511,7 +1511,7 @@ emptyUI implements **taper → FFT only** (boxcar default, 50% overlap,
   daytime garbage windows vanish; official-EDI parity preserved
   (history §24.12).
 - **Calibration application**: §9.2 (frequency-domain, applied-flag-aware,
-  DC column NaN when the response vanishes there).
+  DC bin NaN when the response vanishes there).
 
 ### 10.2 Frequency grid (band styles)
 

@@ -951,7 +951,7 @@ def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
     data; a prior time-domain Calibrate flips the flags to ``False``, so the
     two paths compose without double application). A DC response of exactly
     zero is treated aurora-style: the divisor becomes 1 there and the DC
-    column is set to NaN (undefined calibration at 0 Hz).
+    bin (frequency row 0) is set to NaN (undefined calibration at 0 Hz).
     """
     note: list[str] = []
     for comp, pairs in calibration.items():
@@ -976,7 +976,7 @@ def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
                 f"calibration response for '{comp}' is all zero — the "
                 "filter table is broken (check the calibration file/chain)")
         # Aurora treats a DC calibration response of exactly 0 as "undefined
-        # at DC" (divisor 1, DC column NaN). Induction-coil tables padded
+        # at DC" (divisor 1, DC bin NaN). Induction-coil tables padded
         # with the linear-in-f low-frequency extension extrapolate to ~0 at
         # DC within float error (not exactly 0), so a near-zero check is
         # needed too — otherwise the DC bin would carry ~1e15 garbage.
@@ -988,7 +988,9 @@ def _calibrate_stft_vars(fc_vars, f, calibration, where: str) -> str:
         dims, zi = fc_vars[comp]
         zi = zi / resp[:, None]
         if dc_zero:
-            zi[:, 0] = np.nan + 1j * np.nan
+            # zi is (frequency, time): the DC bin is ROW 0. Indexing [:, 0]
+            # blanked the first time window at every frequency instead.
+            zi[0, :] = np.nan + 1j * np.nan
         fc_vars[comp] = (dims, zi)
         note.append(f"{comp}={'+'.join(names)}")
         _log.debug("%s: channel '%s' calibrated by %s", where, comp,

@@ -132,7 +132,8 @@ def test_compute_fc_chains_two_filters():
 
 def test_compute_fc_zero_dc_response_sets_nan():
     """A response that vanishes at DC (induction-coil linear extension):
-    the DC divisor becomes 1 (aurora) and the DC column is NaN."""
+    the DC divisor becomes 1 (aurora) and the DC bin is NaN — only the DC
+    bin: the fc is (frequency, time), and every time window must survive."""
     from emptyui_aurora._processing import compute_fc_levels
 
     rng = np.random.default_rng(14)
@@ -155,10 +156,15 @@ def test_compute_fc_zero_dc_response_sets_nan():
         units_in="nanoTesla", units_out="nanoTesla", gain=1.0)
     coil.name = "coil_lin"
     runts2 = _attach(_runts(*_field(rng)), {"hy": [(coil, True)]})
+    # prewhitening='' again: the NaN DC bin must come from the calibration
     fc2 = compute_fc_levels(runts2, "hx,hy", "ex,ey", num_decimations=0,
                             num_samples_window=256, overlap=0.5,
-                            window_type="boxcar")
-    assert np.all(np.isnan(fc2[0]["hy"].values[:, 0]))
+                            window_type="boxcar", prewhitening="")
+    hy = fc2[0]["hy"]
+    assert hy.dims == ("frequency", "time")
+    assert hy["frequency"].values[0] == 0.0
+    assert np.all(np.isnan(hy.values[0, :]))
+    assert not np.any(np.isnan(hy.values[1:, :]))
     assert not np.any(np.isnan(fc[0]["hy"].values))
 
 
