@@ -601,7 +601,7 @@ def read_phoenix_mtu(
     data_path = Path(data_path).expanduser().resolve()
     if not data_path.is_dir():
         raise FileNotFoundError(f"MTU-5A data dir not found: {data_path}")
-    tbls = sorted(data_path.glob("*.TBL")) + sorted(data_path.glob("*.tbl"))
+    tbls = sorted(p for p in data_path.iterdir() if p.suffix.lower() == ".tbl" and p.is_file())
     if len(tbls) != 1:
         raise ValueError(
             f"expected exactly one TBL in {data_path}, found "
