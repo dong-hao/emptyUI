@@ -601,7 +601,7 @@ def read_phoenix_mtu(
     data_path = Path(data_path).expanduser().resolve()
     if not data_path.is_dir():
         raise FileNotFoundError(f"MTU-5A data dir not found: {data_path}")
-    tbls = sorted(data_path.glob("*.TBL")) + sorted(data_path.glob("*.tbl"))
+    tbls = sorted(p for p in data_path.iterdir() if p.suffix.lower() == ".tbl" and p.is_file())
     if len(tbls) != 1:
         raise ValueError(
             f"expected exactly one TBL in {data_path}, found "
@@ -618,7 +618,10 @@ def read_phoenix_mtu(
                  or "survey")
     channel_keys = table.channel_keys
     warnings: list[str] = []
-    chains = _prepare_asc_calibration(data_path, calibration_folder, table,
+    directory = Path(calibration_folder or data_path)
+    binary = (directory / f"{table.tbl_dict.get('SNUM', '')}.CLB").is_file() and not any(directory.glob("*.[aA][sS][cC]"))
+    registry = {}
+    chains = {} if binary else _prepare_asc_calibration(data_path, calibration_folder, table,
                                       warnings)
 
     # session length: slot-grid sessions (session_by_slot) cut the
@@ -643,6 +646,10 @@ def read_phoenix_mtu(
     n_saturated = 0
 
     for path in _ts_files(data_path, sample_rates):
+        if binary:
+            from .phoenix_binary import binary_chains
+            chains = binary_chains(table, directory, path, _file_rate(path))
+        registry.update({(path.suffix + "_" + c if binary else c): refs for c, refs in chains.items()})
         # M28-B: one streaming pass — the window filter and the quality
         # aggregation run as the blocks are decoded, and _group_segments
         # consumes the same stream. The old list(...) materialized the
@@ -825,7 +832,7 @@ def read_phoenix_mtu(
         m.open_mth5(str(target), "w", locking=False)
         survey_group = m.add_survey(survey_id)
         registered: set[str] = set()
-        for refs in chains.values():
+        for refs in registry.values():
             for fap in refs:
                 if fap.name not in registered:
                     survey_group.filters_group.add_filter(fap)
@@ -895,7 +902,7 @@ def read_phoenix_mtu(
                  for (rid, meta, _chs), n in zip(runs, n_samples_by_run)],
         "warnings": warnings,
         "calibration": {comp: [fap.name for fap in refs]
-                        for comp, refs in chains.items()},
+                        for comp, refs in registry.items()},
     }
 
 
@@ -949,10 +956,10 @@ class LoadPhoenixMtu(Node):
               description="Ingest window end (half-open): UTC ISO datetime "
                           "or epoch seconds."),
         Param("calibration_folder", "directory",
-              label="Calibration folder (ASC)", default="", optional=True,
+              label="Calibration folder (ASC or native CLB/CLC)", default="", optional=True,
               path_kind="in",
               placeholder="empty = the data directory",
-              description="Directory with the manufacturer ASC calibration "
+              description="Native CLB/CLC supported via Phoenix SysCal V6. ASC takes precedence. Directory with the manufacturer ASC calibration "
                           "tables (*_CLB.asc box, *_CLC.asc coils). Files "
                           "are matched by the TBL serials (SNUM, HXSN/HYSN/"
                           "HZSN) and registered as FAP shape corrections — "
@@ -1029,3 +1036,4 @@ class LoadPhoenixMtu(Node):
             f"{len(res['runs'])} run(s)",
         )
         return {"mth5": archive, "slot_schedule": res["slot_schedule"]}
+
